@@ -255,6 +255,13 @@ external unless they share at least two leading package/namespace segments with 
 repository, so a common reverse-DNS root (`com`, `io`, `org`) is not mistaken for proof of
 an internal reference.
 
+JS/TS additionally resolves **all specifier styles** through the repository's own
+config files: root-relative (`/src/...`), `tsconfig.json`/`jsconfig.json` `paths`
+(including `extends` chains) and `baseUrl`, and `package.json` subpath `imports`
+(`#...`). A specifier claimed by one of these mechanisms but missing on disk is an
+`unresolved` diagnostic; pure bare packages (`react`, `lodash`) stay silent externals.
+Evidence records how each edge resolved (`path alias`, `repo root`, `package subpath`).
+
 Java, C#, and Kotlin types used in the file body are resolved against the declaring
 package/namespace even without an `import`/`using`; Rust resolves inline
 `crate::`/`self::`/`super::` paths used without a `use`. When a Java/C#/Kotlin simple name

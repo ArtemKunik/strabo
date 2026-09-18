@@ -50,7 +50,9 @@ export function scanJsTsEdges(
     }
 
     for (const match of collectReferences(content)) {
-      if (isRelative(match.specifier)) {
+      // `./` and `../` resolve against the importer; `/`-rooted specifiers are
+      // bundler root-relative and belong to the alias layer below.
+      if (isDotRelative(match.specifier)) {
         const resolved = resolveRelative(match.specifier, match.line, { from: file, files: fileSet });
         if (resolved) {
           edges.push({
@@ -125,8 +127,8 @@ function collectReferences(content: string): Reference[] {
   return references;
 }
 
-function isRelative(specifier: string): boolean {
-  return specifier.startsWith('.') || specifier.startsWith('/');
+function isDotRelative(specifier: string): boolean {
+  return specifier.startsWith('.');
 }
 
 function isRootRelative(specifier: string): boolean {
