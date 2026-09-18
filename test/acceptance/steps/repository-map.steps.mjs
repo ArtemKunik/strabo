@@ -1,0 +1,250 @@
+import assert from 'node:assert/strict';
+
+import { Given, Then, When } from '@cucumber/cucumber';
+
+const CACHE_STATUS = /cache:\s*(memory|disk|miss|refreshed)/;
+
+Given('the Strabo server is running against the fixture repository', async function () {
+  const response = await fetch(`${this.baseUrl}/api/strabo/health`);
+  assert.equal(response.ok, true, 'health endpoint should respond');
+});
+
+Given('I open the Strabo UI', async function () {
+  await this.page.goto(this.baseUrl);
+  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, {
+    timeout: 20_000,
+  });
+});
+
+When('I switch to file detail', async function () {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.page.selectOption('#detail', 'file');
+  await this.page.waitForFunction(
+    (generation) =>
+      window.straboTest?.state.mode === 'file' &&
+      window.straboTest.renderedGeneration() > generation,
+    before,
+  );
+});
+
+When('I double-click the {string} node', async function (id) {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.clickNode(id, {
+    double: true,
+    settled: (nodeId) => window.straboTest?.state.prefix === nodeId,
+  });
+  await this.page.waitForFunction(
+    (generation) => window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 15_000 },
+  );
+});
+
+When('I select the {string} node', async function (id) {
+  await this.clickNode(id, {
+    settled: (nodeId) => {
+      const inspector = document.getElementById('inspector');
+      return !inspector.hidden && inspector.textContent.includes(nodeId);
+    },
+  });
+});
+
+When('I trace to the first listed dependency', async function () {
+  const button = this.page.locator('#inspector .trace-button').first();
+  assert.ok((await button.count()) > 0, 'inspector should list a dependency to trace');
+  await button.click();
+});
+
+When('I open the diagnostics panel', async function () {
+  await this.page.click('#diagnostics-toggle');
+  await this.page.waitForFunction(
+    () => !document.getElementById('diagnostics').hidden &&
+      document.getElementById('diagnostics').textContent.includes('Diagnostics'),
+  );
+});
+
+When('I press Refresh', async function () {
+  await this.page.click('#refresh');
+});
+
+When('I open the folder dialog', async function () {
+  await this.page.click('#browse');
+  await this.page.waitForFunction(() => document.getElementById('folder-dialog')?.open === true);
+  await this.page.waitForFunction(
+    () => document.querySelectorAll('#folder-list .folder').length > 0,
+  );
+});
+
+When('I go up one folder', async function () {
+  const before = (await this.page.textContent('#folder-path')) ?? '';
+  await this.page.click('#folder-up');
+  await this.page.waitForFunction(
+    (previous) => (document.getElementById('folder-path')?.textContent ?? '') !== previous,
+    before,
+  );
+});
+
+When('I choose the {string} folder', async function (name) {
+  await this.page.locator('#folder-list .folder').filter({ hasText: name }).first().click();
+  await this.page.waitForFunction(
+    (folder) => (document.getElementById('folder-path')?.textContent ?? '').endsWith(folder),
+    name,
+  );
+});
+
+When('I use the selected folder', async function () {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.page.click('#folder-use');
+  await this.page.waitForFunction(
+    (generation) => window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the repository is {string}', async function (name) {
+  const repository = await this.page.evaluate(() => window.straboTest.state.repository);
+  assert.equal(repository.split(/[\\/]/).filter(Boolean).pop(), name);
+});
+
+When('I select the review overlay {string}', async function (kind) {
+  await this.page.selectOption('#overlay', kind);
+  await this.page.waitForFunction(
+    (expected) =>
+      window.straboTest?.state.overlay === expected &&
+      !document.getElementById('overlay-panel').hidden,
+    kind,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the overlay panel reports at least one cycle', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  const match = /(\d+) cycle/.exec(text);
+  assert.ok(match, `overlay panel "${text}" should report cycles`);
+  assert.ok(Number(match[1]) > 0, `expected at least one cycle, got ${match[1]}`);
+});
+
+Then('the overlay panel reports unreached modules', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  const match = /(\d+) unreached/.exec(text);
+  assert.ok(match, `overlay panel "${text}" should report unreached modules`);
+  assert.ok(Number(match[1]) > 0, `expected unreached modules, got ${match[1]}`);
+});
+
+Then('the overlay panel reports a health score', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.match(text, /score \d+\/100/);
+});
+
+Then('the overlay panel lists health axes', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.match(text, /Cohesion/);
+  assert.match(text, /Low coupling/);
+  assert.match(text, /Coverage/);
+});
+
+When('I open the timeline', async function () {
+  await this.page.click('#tb-timeline');
+  await this.page.waitForFunction(
+    () =>
+      !document.getElementById('timeline-panel').hidden &&
+      document.querySelectorAll('#timeline-panel .commit').length > 0,
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the timeline lists recorded changes', async function () {
+  const text = (await this.page.textContent('#timeline-panel')) ?? '';
+  assert.match(text, /initial import/);
+});
+
+When('I select the most recent change', async function () {
+  await this.page.locator('#timeline-panel .commit').first().click();
+  await this.page.waitForFunction(
+    () => {
+      const panel = document.getElementById('overlay-panel');
+      return !panel.hidden && /changed/.test(panel.textContent);
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the overlay panel reports changed files', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  const match = /(\d+) changed/.exec(text);
+  assert.ok(match, `overlay panel "${text}" should report changed files`);
+  assert.ok(Number(match[1]) > 0, `expected at least one changed file, got ${match[1]}`);
+});
+
+Then('the status line reports nodes and a cache status', async function () {
+  const status = (await this.page.textContent('#status')) ?? '';
+  assert.match(status, /\d+ nodes . \d+ edges/);
+  assert.match(status, CACHE_STATUS);
+});
+
+Then('the graph contains the directory block {string}', async function (id) {
+  await this.page.waitForFunction(
+    (nodeId) => window.straboTest?.model()?.nodes.some((node) => node.id === nodeId),
+    id,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the breadcrumb shows {string}', async function (label) {
+  const text = (await this.page.textContent('#breadcrumb')) ?? '';
+  assert.ok(text.includes(label), `breadcrumb "${text}" should include "${label}"`);
+});
+
+Then('the breadcrumb includes {string}', async function (label) {
+  const text = (await this.page.textContent('#breadcrumb')) ?? '';
+  assert.ok(text.includes(label), `breadcrumb "${text}" should include "${label}"`);
+});
+
+Then('the inspector is shown for {string}', async function (id) {
+  const visible = await this.page.evaluate(() => !document.getElementById('inspector').hidden);
+  assert.equal(visible, true);
+  const text = (await this.page.textContent('#inspector')) ?? '';
+  assert.ok(text.includes(id), `inspector should describe "${id}"`);
+});
+
+Then('the inspector lists dependencies and dependents', async function () {
+  const text = (await this.page.textContent('#inspector')) ?? '';
+  assert.match(text, /Dependencies \(\d+\)/);
+  assert.match(text, /Dependents \(\d+\)/);
+});
+
+Then('the trace reports a step count or an explicit no-path', async function () {
+  const text = (await this.page.textContent('#inspector [data-role="trace"]')) ?? '';
+  assert.match(text, /(\d+ step\(s\))|(No directed path)/);
+});
+
+Then('the diagnostics panel reports counts', async function () {
+  const text = (await this.page.textContent('#diagnostics')) ?? '';
+  assert.match(text, /Diagnostics · \d+/);
+  assert.match(text, /excluded: \d+/);
+});
+
+Then('the status line reports cache status {string}', async function (status) {
+  await this.page.waitForFunction(
+    (expected) => (document.getElementById('status')?.textContent ?? '').includes(`cache: ${expected}`),
+    status,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the vulnerabilities endpoint reports available false', async function () {
+  const response = await fetch(`${this.baseUrl}/api/strabo/vulnerabilities`);
+  assert.equal(response.ok, true);
+  const body = await response.json();
+  assert.equal(body.available, false);
+});
+
+Then('the graph endpoint still responds', async function () {
+  const response = await fetch(`${this.baseUrl}/api/strabo/graph`);
+  assert.equal(response.ok, true);
+  const body = await response.json();
+  assert.ok(body.nodes.length > 0);
+});

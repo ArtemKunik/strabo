@@ -1,0 +1,31 @@
+@acceptance @member-map
+Feature: Member map
+  As an engineer inspecting a class
+  I want its members and the field wiring the scan recorded
+  So that I can see which behaviour touches which state
+
+  Background:
+    Given the Strabo server is running against the fixture repository
+    And I open the Strabo UI
+
+  @recorded
+  Scenario: Member map reports fields, methods, and data flow
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    Then the member map lists fields with declared types
+    And the member map lists methods as behaviour
+    And the data flow panels report sources, resources, transforms, and sinks
+
+  @unrecorded
+  Scenario: Unrecorded wiring is reported as unavailable
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Plain.kt" node
+    Then the data flow reports wiring is not recorded

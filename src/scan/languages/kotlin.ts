@@ -1,0 +1,517 @@
+import type { Node } from 'web-tree-sitter';
+
+import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { addNamespacePrefixes, looksInternal } from './namespace.ts';
+import type { GrammarLanguage } from './parser-runtime.ts';
+import { withParser } from './parser-runtime.ts';
+import {
+  type AccessRules,
+  type CodeSymbol,
+  type MemberAccess,
+  type SymbolExtraction,
+  collectDeclaredIdentifiers,
+  collectMemberAccesses,
+} from './symbols.ts';
+
+export const KOTLIN_LANGUAGE: GrammarLanguage = 'kotlin';
+
+export interface KotlinImport {
+  /** Fully-qualified type, or package for a wildcard import. */
+  name: string;
+  wildcard: boolean;
+  alias?: string;
+  line: number;
+}
+
+export interface KotlinTypeDeclaration {
+  name: string;
+  line: number;
+}
+
+/** A type used in the file body, whether or not it was imported. */
+export interface KotlinTypeReference {
+  name: string;
+  line: number;
+}
+
+export interface KotlinFileFacts {
+  file: string;
+  package: string;
+  imports: KotlinImport[];
+  types: KotlinTypeDeclaration[];
+  typeReferences: KotlinTypeReference[];
+}
+
+export interface KotlinExtraction {
+  facts: KotlinFileFacts;
+  diagnostics: Diagnostic[];
+}
+
+const PACKAGE_PATTERN = /^package\s+([\w.]+)/;
+
+const KOTLIN_TYPE_DECLARATIONS = new Set([
+  'class_declaration',
+  'interface_declaration',
+  'object_declaration',
+]);
+
+/** Parse one Kotlin file into its package, imports, declared types, and type references. */
+export async function extractKotlinFacts(file: string, content: string): Promise<KotlinExtraction> {
+  return withParser(KOTLIN_LANGUAGE, (parser) => {
+    const facts: KotlinFileFacts = { file, package: '', imports: [], types: [], typeReferences: [] };
+    const diagnostics: Diagnostic[] = [];
+
+    const tree = parser.parse(content);
+    if (!tree) {
+      diagnostics.push({
+        file,
+        line: 1,
+        severity: 'error',
+        kind: 'parse-failure',
+        message: 'Kotlin parser returned no tree for this file.',
+      });
+      return { facts, diagnostics };
+    }
+
+    for (const node of tree.rootNode.namedChildren) {
+      if (node.type === 'package_header') {
+        facts.package = PACKAGE_PATTERN.exec(node.text)?.[1] ?? '';
+      } else if (node.type === 'import_list') {
+        for (const header of node.namedChildren) {
+          if (header.type === 'import_header') {
+            const reference = parseImport(header);
+            if (reference) {
+              facts.imports.push(reference);
+            }
+          }
+        }
+      }
+    }
+
+    collectTypes(tree.rootNode, '', facts.types);
+    const references: KotlinTypeReference[] = [];
+    collectTypeReferences(tree.rootNode, references);
+    facts.typeReferences = dedupeReferences(references);
+
+    if (tree.rootNode.hasError) {
+      diagnostics.push({
+        file,
+        line: 1,
+        severity: 'warning',
+        kind: 'parse-failure',
+        message: 'Kotlin source contains syntax errors; extracted facts may be incomplete.',
+      });
+    }
+
+    return { facts, diagnostics };
+  });
+}
+
+function parseImport(header: Node): KotlinImport | null {
+  const identifier = header.namedChildren.find((child) => child.type === 'identifier');
+  if (!identifier) {
+    return null;
+  }
+  const wildcard = header.namedChildren.some((child) => child.type === 'wildcard_import');
+  const aliasNode = header.namedChildren.find((child) => child.type === 'import_alias');
+  const alias = aliasNode?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  return {
+    name: identifier.text,
+    wildcard,
+    alias,
+    line: header.startPosition.row + 1,
+  };
+}
+
+/** Collect a type and its nested types with dotted names (`Outer.Inner`). */
+function collectTypes(node: Node, prefix: string, out: KotlinTypeDeclaration[]): void {
+  let nextPrefix = prefix;
+  if (KOTLIN_TYPE_DECLARATIONS.has(node.type)) {
+    const name = node.namedChildren.find((child) => child.type === 'type_identifier');
+    if (name) {
+      const full = prefix ? `${prefix}.${name.text}` : name.text;
+      out.push({ name: full, line: name.startPosition.row + 1 });
+      nextPrefix = full;
+    }
+  }
+  for (const child of node.namedChildren) {
+    collectTypes(child, nextPrefix, out);
+  }
+}
+
+/**
+ * Collect simple type names used in the file body.
+ *
+ * Every `type_identifier` counts except a declaration's own name and an import alias, so
+ * generic arguments (`List<Helper>`) contribute both `List` and `Helper`.
+ */
+function collectTypeReferences(node: Node, out: KotlinTypeReference[]): void {
+  if (node.type === 'type_identifier' && !isDeclarationName(node)) {
+    out.push({ name: node.text, line: node.startPosition.row + 1 });
+    return;
+  }
+  for (const child of node.namedChildren) {
+    collectTypeReferences(child, out);
+  }
+}
+
+function isDeclarationName(node: Node): boolean {
+  const parent = node.parent;
+  if (!parent) {
+    return false;
+  }
+  return KOTLIN_TYPE_DECLARATIONS.has(parent.type) || parent.type === 'import_alias';
+}
+
+function dedupeReferences(references: KotlinTypeReference[]): KotlinTypeReference[] {
+  const byName = new Map<string, KotlinTypeReference>();
+  for (const reference of references) {
+    if (!byName.has(reference.name)) {
+      byName.set(reference.name, reference);
+    }
+  }
+  return [...byName.values()];
+}
+
+interface KotlinIndex {
+  qualifiedTypes: Map<string, string>;
+  packages: Map<string, Set<string>>;
+  namespaces: Set<string>;
+  simpleTypesByPackage: Map<string, Map<string, Set<string>>>;
+}
+
+function buildIndex(facts: KotlinFileFacts[]): KotlinIndex {
+  const qualifiedTypes = new Map<string, string>();
+  const packages = new Map<string, Set<string>>();
+  const namespaces = new Set<string>();
+  const simpleTypesByPackage = new Map<string, Map<string, Set<string>>>();
+
+  for (const fileFacts of facts) {
+    if (!fileFacts.package) {
+      continue;
+    }
+    addNamespacePrefixes(namespaces, fileFacts.package);
+    const members = packages.get(fileFacts.package) ?? new Set<string>();
+    packages.set(fileFacts.package, members);
+    members.add(fileFacts.file);
+
+    const simpleTypes =
+      simpleTypesByPackage.get(fileFacts.package) ?? new Map<string, Set<string>>();
+    simpleTypesByPackage.set(fileFacts.package, simpleTypes);
+
+    for (const type of fileFacts.types) {
+      qualifiedTypes.set(`${fileFacts.package}.${type.name}`, fileFacts.file);
+      if (!type.name.includes('.')) {
+        const files = simpleTypes.get(type.name) ?? new Set<string>();
+        simpleTypes.set(type.name, files);
+        files.add(fileFacts.file);
+      }
+    }
+  }
+
+  return { qualifiedTypes, packages, namespaces, simpleTypesByPackage };
+}
+
+export interface KotlinResolution {
+  edges: GraphEdge[];
+  diagnostics: Diagnostic[];
+}
+
+/**
+ * Resolve Kotlin imports and same-package type references to repository files.
+ *
+ * An import only becomes an edge when it resolves inside the repository. Imports are
+ * treated as external unless they share at least two leading package segments with the
+ * repository, so a common root such as `com`, `io`, or `org` is not mistaken for proof of
+ * an internal reference.
+ */
+export function resolveKotlin(facts: KotlinFileFacts[]): KotlinResolution {
+  const index = buildIndex(facts);
+  const edges: GraphEdge[] = [];
+  const diagnostics: Diagnostic[] = [];
+  const seen = new Set<string>();
+  const pairs = new Set<string>();
+  const importedSimpleNames = new Map<string, Set<string>>();
+
+  const push = (
+    source: string,
+    target: string,
+    line: number,
+    specifier: string,
+    resolution: 'exact' | 'index-of-package',
+  ): void => {
+    if (source === target) {
+      return;
+    }
+    const key = `${source}\u0000${target}\u0000${line}\u0000${resolution}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    pairs.add(`${source}\u0000${target}`);
+    edges.push({ source, target, kind: 'package', evidence: { line, specifier, resolution } });
+  };
+
+  for (const fileFacts of facts) {
+    const imported = importedSimpleNames.get(fileFacts.file) ?? new Set<string>();
+    importedSimpleNames.set(fileFacts.file, imported);
+
+    for (const reference of fileFacts.imports) {
+      if (reference.wildcard) {
+        const members = index.packages.get(reference.name);
+        if (members && members.size > 0) {
+          for (const target of [...members].sort()) {
+            push(fileFacts.file, target, reference.line, `${reference.name}.*`, 'index-of-package');
+          }
+        } else if (looksInternal(reference.name, index.namespaces)) {
+          diagnostics.push(unresolved(fileFacts.file, reference.line, reference.name));
+        }
+        continue;
+      }
+
+      imported.add(reference.name.slice(reference.name.lastIndexOf('.') + 1));
+      const candidates = [
+        reference.name,
+        reference.name.slice(0, reference.name.lastIndexOf('.')),
+      ].filter(Boolean);
+      const target = candidates.map((candidate) => index.qualifiedTypes.get(candidate)).find(Boolean);
+      if (target) {
+        push(fileFacts.file, target, reference.line, reference.name, 'exact');
+        continue;
+      }
+      if (looksInternal(reference.name, index.namespaces)) {
+        diagnostics.push(unresolved(fileFacts.file, reference.line, reference.name));
+      }
+    }
+  }
+
+  for (const fileFacts of facts) {
+    if (!fileFacts.package) {
+      continue;
+    }
+    const simpleTypes = index.simpleTypesByPackage.get(fileFacts.package);
+    if (!simpleTypes) {
+      continue;
+    }
+    const imported = importedSimpleNames.get(fileFacts.file) ?? new Set<string>();
+    const ownTypes = new Set(fileFacts.types.map((type) => type.name.split('.').pop() as string));
+    const ambiguous = new Set<string>();
+
+    for (const reference of fileFacts.typeReferences) {
+      if (imported.has(reference.name) || ownTypes.has(reference.name)) {
+        continue;
+      }
+      const files = simpleTypes.get(reference.name);
+      if (!files || files.size === 0) {
+        continue;
+      }
+      if (files.size > 1) {
+        if (!ambiguous.has(reference.name)) {
+          ambiguous.add(reference.name);
+          diagnostics.push({
+            file: fileFacts.file,
+            line: reference.line,
+            severity: 'warning',
+            kind: 'ambiguous',
+            specifier: reference.name,
+            message: `Type "${reference.name}" is declared by more than one file in package "${fileFacts.package}".`,
+          });
+        }
+        continue;
+      }
+      const target = [...files][0] as string;
+      if (target === fileFacts.file || pairs.has(`${fileFacts.file}\u0000${target}`)) {
+        continue;
+      }
+      push(fileFacts.file, target, reference.line, reference.name, 'index-of-package');
+    }
+  }
+
+  return { edges, diagnostics };
+}
+
+function unresolved(file: string, line: number, specifier: string): Diagnostic {
+  return {
+    file,
+    line,
+    severity: 'warning',
+    kind: 'unresolved',
+    specifier,
+    message: `Kotlin import "${specifier}" does not resolve to a file inside the repository.`,
+  };
+}
+
+/**
+ * Extract declared members (fields and methods) with visibility and owner.
+ *
+ * Symbols are extracted on demand rather than during every scan; edges do not need them.
+ */
+export async function extractKotlinSymbols(
+  file: string,
+  content: string,
+): Promise<SymbolExtraction> {
+  return withParser(KOTLIN_LANGUAGE, (parser) => {
+    const diagnostics: Diagnostic[] = [];
+    const symbols: CodeSymbol[] = [];
+    const fieldsByOwner = new Map<string, Set<string>>();
+    const methodBodies: Array<{ owner: string; method: string; body: Node; scope: Node }> = [];
+
+    const tree = parser.parse(content);
+    if (!tree) {
+      diagnostics.push({
+        file,
+        line: 1,
+        severity: 'error',
+        kind: 'parse-failure',
+        message: 'Kotlin parser returned no tree for this file.',
+      });
+      return { symbols, diagnostics };
+    }
+
+    const visit = (node: Node, owner: string): void => {
+      if (
+        node.type === 'class_declaration' ||
+        node.type === 'interface_declaration' ||
+        node.type === 'object_declaration'
+      ) {
+        const name = node.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+        const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
+        for (const child of node.namedChildren) {
+          visit(child, nextOwner);
+        }
+        return;
+      }
+      // Members of a companion object belong to the enclosing type.
+      if (node.type === 'companion_object') {
+        for (const child of node.namedChildren) {
+          visit(child, owner);
+        }
+        return;
+      }
+      if (node.type === 'property_declaration') {
+        const field = fieldOf(node, owner);
+        if (field) {
+          symbols.push(field);
+          const ownerFields = fieldsByOwner.get(owner) ?? new Set<string>();
+          fieldsByOwner.set(owner, ownerFields);
+          ownerFields.add(field.name);
+          return;
+        }
+      }
+      if (node.type === 'function_declaration') {
+        const method = methodOf(node, owner);
+        if (method) {
+          symbols.push(method);
+          const body = node.namedChildren.find((child) => child.type === 'function_body');
+          if (body && owner) {
+            methodBodies.push({ owner, method: method.name, body, scope: node });
+          }
+          return;
+        }
+      }
+      for (const child of node.namedChildren) {
+        visit(child, owner);
+      }
+    };
+
+    visit(tree.rootNode, '');
+
+    const accesses: MemberAccess[] = [];
+    for (const entry of methodBodies) {
+      const fields = fieldsByOwner.get(entry.owner);
+      if (fields) {
+        accesses.push(
+          ...collectMemberAccesses(
+            entry.body,
+            fields,
+            entry.owner,
+            entry.method,
+            KOTLIN_ACCESS,
+            entry.scope,
+          ),
+        );
+      }
+    }
+
+    symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+    return { symbols, diagnostics, accesses };
+  });
+}
+
+const KOTLIN_ACCESS: AccessRules = {
+  identifierTypes: new Set(['simple_identifier']),
+  assignmentTypes: new Set(['assignment', 'assignment_expression', 'update_expression']),
+  selfAccess: (node) => {
+    if (node.type !== 'navigation_expression') {
+      return null;
+    }
+    const receiver = node.namedChildren[0];
+    if (!receiver || (receiver.type !== 'this_expression' && receiver.text !== 'this')) {
+      return null;
+    }
+    const suffix = node.namedChildren.find((child) => child.type === 'navigation_suffix');
+    const field = suffix?.namedChildren.find((child) => child.type === 'simple_identifier');
+    return field ? { field: field.text, fieldNode: field } : null;
+  },
+  declaredNames: (body) =>
+    collectDeclaredIdentifiers(body, (node) => {
+      if (node.type === 'parameter' || node.type === 'variable_declaration') {
+        return node.namedChildren.find((child) => child.type === 'simple_identifier')?.text ?? null;
+      }
+      if (node.type === 'lambda_parameters') {
+        return node.namedChildren.find((child) => child.type === 'variable_declaration')
+          ?.namedChildren.find((child) => child.type === 'simple_identifier')?.text ?? null;
+      }
+      return null;
+    }),
+};
+
+function visibilityOf(node: Node): string {
+  const modifiers = node.namedChildren.find((child) => child.type === 'modifiers');
+  const visibility = modifiers?.namedChildren.find((child) => child.type === 'visibility_modifier');
+  return visibility?.text ?? 'public';
+}
+
+function fieldOf(node: Node, owner: string): CodeSymbol | null {
+  const declaration = node.namedChildren.find((child) => child.type === 'variable_declaration');
+  const name = declaration?.namedChildren.find((child) => child.type === 'simple_identifier')?.text;
+  if (!name) {
+    return null;
+  }
+  const binding = node.namedChildren.find((child) => child.type === 'binding_pattern_kind')?.text;
+  const type = declaration?.namedChildren
+    .find((child) => child.type === 'user_type')
+    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  return {
+    name,
+    kind: 'field',
+    visibility: visibilityOf(node),
+    owner,
+    type,
+    mutable: binding === 'var',
+    line: node.startPosition.row + 1,
+  };
+}
+
+function methodOf(node: Node, owner: string): CodeSymbol | null {
+  const name = node.namedChildren.find((child) => child.type === 'simple_identifier')?.text;
+  if (!name) {
+    return null;
+  }
+  const parameters = node.namedChildren.find(
+    (child) => child.type === 'function_value_parameters',
+  );
+  const returnType = node.namedChildren
+    .filter((child) => child.type === 'user_type')
+    .at(-1)
+    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  return {
+    name,
+    kind: 'method',
+    visibility: visibilityOf(node),
+    owner,
+    type: returnType,
+    parameters: parameters?.namedChildren.filter((child) => child.type === 'parameter').length ?? 0,
+    line: node.startPosition.row + 1,
+  };
+}

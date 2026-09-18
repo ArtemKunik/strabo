@@ -1,0 +1,1 @@
+CREATE TABLE orders (id INT PRIMARY KEY, total DECIMAL(10, 2));

@@ -1,0 +1,69 @@
+{
+  "name": "strabo",
+  "version": "0.0.0",
+  "description": "Turn a local source repository into an interactive map of its files, dependencies, and change impact.",
+  "keywords": [
+    "repository",
+    "dependency-graph",
+    "impact-analysis",
+    "code-visualization",
+    "static-analysis"
+  ],
+  "author": "Artem Kunyk",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "bun@1.2.0",
+  "bin": {
+    "strabo": "bin/strabo.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "public",
+    "parsers",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "vendor:parsers": "node scripts/vendor-parsers.mjs",
+    "prepare": "npm run build && npm run vendor:parsers",
+    "start": "node bin/strabo.js",
+    "dev": "node --watch src/cli.ts",
+    "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:bun": "bun test test/unit",
+    "test:pack": "node scripts/verify-package.mjs",
+    "acceptance": "npm run build && node scripts/prepare-acceptance.mjs && cucumber-js --config test/acceptance/cucumber.mjs",
+    "acceptance:install": "playwright install chromium",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cytoscape": "^3.30.4",
+    "express": "^5.1.0",
+    "web-tree-sitter": "^0.27.0"
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^11.2.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "playwright": "^1.50.0",
+    "tree-sitter-wasm": "1.1.3",
+    "typescript": "^5.7.2"
+  }
+}

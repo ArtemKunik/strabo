@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# The scanner test needs a real node_modules directory inside this fixture
+!test/fixtures/sample-repo/node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage output
+coverage/
+test/acceptance/reports/
+
+# Vendored parser grammars are generated from tree-sitter-wasm by `npm run vendor:parsers`
+parsers/vendor/
+
+# Acceptance creates a throwaway Git repository here
+test/fixtures/timeline-repo/
+
+# Logs and local env
+*.log
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Temporary scratch
+tmp/
+*.tmp
+
+# Concept source material is intentionally not committed
+Strabo_Standalone_App_Concept.pdf

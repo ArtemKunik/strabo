@@ -1,0 +1,32 @@
+@acceptance @passport
+Feature: Module Passport
+  As an engineer reviewing a file
+  I want its dependency metrics and evidence in one place
+  So that I can judge the blast radius of a change
+
+  Background:
+    Given the Strabo server is running against the fixture repository
+    And I open the Strabo UI
+
+  @metrics
+  Scenario: The passport reports metrics for a selected file
+    When I switch to file detail
+    And I select the "main.ts" node
+    Then the inspector shows the passport metrics for "main.ts"
+    And the inspector lists dependencies and dependents
+
+  @unavailable
+  Scenario: Unrecorded detail is reported as unavailable
+    When I switch to file detail
+    And I select the "main.ts" node
+    Then the inspector reports members as not recorded
+
+  @members
+  Scenario: Members are listed for a supported language
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "kotlin-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Main.kt" node
+    Then the inspector lists members including "helper"

@@ -1,0 +1,49 @@
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+
+export const ACCEPTANCE_PORT = 3131;
+export const ACCEPTANCE_URL = `http://127.0.0.1:${ACCEPTANCE_PORT}`;
+
+let child = null;
+
+/** Start the standalone server against the acceptance fixture on a dedicated port. */
+export async function startServer() {
+  const fixtures = path.resolve('test/fixtures');
+  const root = path.join(fixtures, 'block-repo');
+  const cacheDir = path.resolve('test/acceptance/reports/cache');
+  child = spawn(process.execPath, ['bin/strabo.js'], {
+    env: {
+      ...process.env,
+      STRABO_ROOT: root,
+      // The folder dialog browses within the scan ceiling; widen it to the fixtures dir.
+      STRABO_SCAN_CEILING: fixtures,
+      PORT: String(ACCEPTANCE_PORT),
+      STRABO_CACHE_DIR: cacheDir,
+    },
+    stdio: 'ignore',
+  });
+
+  await waitForHealth();
+}
+
+export async function stopServer() {
+  if (child) {
+    child.kill();
+    child = null;
+  }
+}
+
+async function waitForHealth() {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    try {
+      const response = await fetch(`${ACCEPTANCE_URL}/api/strabo/health`);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // server not up yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Strabo acceptance server did not become healthy in time.');
+}

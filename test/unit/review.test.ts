@@ -1,0 +1,129 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, test } from 'node:test';
+
+import { computeCoverage } from '../../src/analysis/coverage.ts';
+import { analyzeModuleDepth } from '../../src/analysis/depth.ts';
+import { computeImpact } from '../../src/analysis/impact.ts';
+import { computeOwnership, getFileAuthorHistory } from '../../src/analysis/ownership.ts';
+import { scanRepository } from '../../src/scan/scan.ts';
+import type { Graph } from '../../src/types.ts';
+
+const created: string[] = [];
+
+after(() => {
+  for (const directory of created) {
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+});
+
+function tempDir(): string {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-review-'));
+  created.push(directory);
+  return directory;
+}
+
+function git(root: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd: root, stdio: 'pipe' }).toString();
+}
+
+function initRepo(root: string, author = 'One'): void {
+  git(root, 'init', '-q');
+  git(root, 'config', 'user.email', `${author.toLowerCase()}@example.com`);
+  git(root, 'config', 'user.name', author);
+}
+
+test('computeCoverage reports used-but-untested modules, not orphans', () => {
+  const graph: Graph = {
+    nodes: ['test.ts', 'a.ts', 'b.ts', 'c.ts', 'd.ts', 'orphan.ts'].map((id) => ({
+      id,
+      kind: id === 'test.ts' ? ('test' as const) : ('module' as const),
+      directory: '.',
+    })),
+    edges: [
+      { source: 'test.ts', target: 'a.ts', kind: 'import', evidence: { line: 1, specifier: 'a', resolution: 'exact' } },
+      { source: 'a.ts', target: 'b.ts', kind: 'import', evidence: { line: 1, specifier: 'b', resolution: 'exact' } },
+      // c depends on d, and neither is reachable from a test.
+      { source: 'c.ts', target: 'd.ts', kind: 'import', evidence: { line: 1, specifier: 'd', resolution: 'exact' } },
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+
+  const result = computeCoverage(graph);
+
+  assert.deepEqual(result.testFiles, ['test.ts']);
+  assert.deepEqual(result.reached, ['a.ts', 'b.ts']);
+  // d is used by c but unreached; orphan is unreached with nothing depending on it.
+  assert.deepEqual(result.unreachedWithDependents, ['d.ts']);
+});
+
+test('computeImpact walks reverse edges and reports distance from the change', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");
+  fs.writeFileSync(path.join(root, 'b.ts'), "import { c } from './c.ts';\nexport const b = c;\n");
+  fs.writeFileSync(path.join(root, 'c.ts'), 'export const c = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  fs.appendFileSync(path.join(root, 'c.ts'), '// changed\n');
+  const report = await scanRepository(root);
+  const impact = await computeImpact(root, report.graph);
+
+  assert.deepEqual(impact.changed.map((change) => change.path), ['c.ts']);
+  assert.deepEqual(
+    impact.affected.map((entry) => [entry.id, entry.distance]),
+    [
+      ['c.ts', 0],
+      ['b.ts', 1],
+      ['a.ts', 2],
+    ],
+  );
+});
+
+test('analyzeModuleDepth flags wide and pass-through modules', () => {
+  const root = tempDir();
+  fs.writeFileSync(
+    path.join(root, 'wide.ts'),
+    ['export function a(x, y, z) { return x; }', 'export function b(p, q, r) { return p; }', 'export function c() { return 1; }', 'export const d = 1;'].join('\n'),
+  );
+  fs.writeFileSync(path.join(root, 'thin.ts'), 'export const value = 1;\n');
+
+  const signals = analyzeModuleDepth(root, ['wide.ts', 'thin.ts']);
+  const wide = signals.find((signal) => signal.file === 'wide.ts');
+  const thin = signals.find((signal) => signal.file === 'thin.ts');
+
+  assert.ok(wide);
+  assert.ok(thin);
+  assert.ok(wide.interfaceWidth > 0);
+  assert.equal(thin.signal, 'pass-through');
+});
+
+test('computeOwnership combines authorship with dependency reach', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");
+  fs.writeFileSync(path.join(root, 'b.ts'), 'export const b = 1;\n');
+  initRepo(root, 'One');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  // A second author edits b.ts.
+  git(root, 'config', 'user.email', 'two@example.com');
+  git(root, 'config', 'user.name', 'Two');
+  fs.appendFileSync(path.join(root, 'b.ts'), '// two\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'edit');
+
+  const report = await scanRepository(root);
+  const history = await getFileAuthorHistory(root, report.graph.nodes.map((node) => node.id));
+  const ownership = computeOwnership(history, report.graph);
+  const b = ownership.find((entry) => entry.file === 'b.ts');
+
+  assert.ok(b);
+  assert.equal(b.distinctAuthors, 2);
+  assert.equal(b.transitiveDependents, 1);
+});
