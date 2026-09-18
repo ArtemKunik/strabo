@@ -79,6 +79,11 @@ lists them, `POST` remembers a selection, and `DELETE ?root=` forgets one. Every
 still resolved through the scan ceiling, so remembering a path can never widen what Strabo
 may read.
 
+The **Choose folder** dialog browses the filesystem through `GET /api/strabo/browse`, which
+is bounded by the same ceiling. When the dialog reaches the ceiling its **Up** button is
+disabled and a note names the boundary and the `STRABO_SCAN_CEILING` variable that set it,
+so the limit is visible rather than looking like a broken control.
+
 ## Review overlays
 
 The **Review** control annotates the map with a server-computed analysis. Overlays only
@@ -106,11 +111,19 @@ Node **size** encodes transitive dependents, **colour** encodes the top-level di
 and tests are **diamonds**. The canvas toolbar offers `Focus`, `Trace impact`,
 `Start path`, `Boundaries`, and `Clear`; hovering a node reports its blast radius without
 selecting it. The strip along the bottom counts tests, modules, and directories, and
-clicking an entry filters the map.
+clicking an entry filters the map. The zoom controls on the canvas adjust the viewport, and
+the status bar reports the diagnostics and exclusion counts, the node kinds on screen, and
+the active renderer (WebGL2 or canvas).
 
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an
-`Open in Workspace` action.
+`Open in Workspace` action. Dependencies, Dependents, and Members are separate tabs so a
+large file does not push its member list off screen.
+
+Selecting an edge opens **Edge evidence**: the relationship kind, the recorded specifier and
+line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorded fields read
+`not recorded` rather than being guessed, and the panel offers actions to open either
+endpoint or trace a path between them.
 
 The **Member map** in the inspector groups declared types, fields, properties, and methods
 with their visibility and type where symbol extraction is available (Java, Kotlin, Rust,

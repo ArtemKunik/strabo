@@ -110,6 +110,40 @@ When('I use the selected folder', async function () {
   );
 });
 
+Then('the folder dialog reports it has reached the scan ceiling', async function () {
+  await this.page.waitForFunction(
+    () => {
+      const note = document.getElementById('folder-note');
+      return Boolean(note) && note.classList.contains('at-ceiling');
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  const note = (await this.page.textContent('#folder-note')) ?? '';
+  assert.match(note, /Scan ceiling reached/);
+  assert.match(note, /STRABO_SCAN_CEILING/);
+
+  const disabled = await this.page.evaluate(
+    () => document.getElementById('folder-up')?.disabled === true,
+  );
+  assert.equal(disabled, true, 'Up should be disabled at the ceiling');
+});
+
+When('I select an edge from the {string} node', async function (id) {
+  await this.clickEdge(id, () => {
+    const panel = document.getElementById('edge-panel');
+    return Boolean(panel) && !panel.hidden && panel.textContent.includes('Edge ·');
+  });
+});
+
+Then('the edge panel reports the relationship and resolution', async function () {
+  const text = (await this.page.textContent('#edge-panel')) ?? '';
+  assert.match(text, /Edge · \w+/);
+  assert.match(text, /Specifier/);
+  assert.match(text, /Line/);
+  assert.match(text, /Resolution/);
+});
+
 Then('the repository is {string}', async function (name) {
   const repository = await this.page.evaluate(() => window.straboTest.state.repository);
   assert.equal(repository.split(/[\\/]/).filter(Boolean).pop(), name);

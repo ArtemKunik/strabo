@@ -11,11 +11,13 @@ import {
   constellationPoints,
   diameter,
   drillTarget,
+  edgeEvidenceFor,
   explainClass,
   fieldCard,
   fileWebUrl,
   filterNodes,
   findPath,
+  folderLocation,
   graphSummary,
   isWiredField,
   isWiredMethod,
@@ -32,6 +34,7 @@ import {
   polygonPoints,
   radarFrame,
   radarPoints,
+  resolutionLabel,
   summarizeDiagnostics,
   topLevelDirectory,
 } from '../../public/strabo-core.js';
@@ -274,6 +277,48 @@ test('mapCounts groups by directory and kind for the strip', () => {
 test('topLevelDirectory falls back to the root marker', () => {
   assert.equal(topLevelDirectory('src/util.ts'), 'src');
   assert.equal(topLevelDirectory('main.ts'), '.');
+});
+
+test('edgeEvidenceFor explains an edge from recorded evidence', () => {
+  const evidence = edgeEvidenceFor(model, 'e0');
+  assert.equal(evidence?.source, 'src/index.ts');
+  assert.equal(evidence?.target, 'src/util.ts');
+  assert.equal(evidence?.line, 1);
+  assert.equal(evidence?.specifier, './util.ts');
+  assert.equal(evidence?.resolutionLabel, 'not recorded');
+  assert.equal(edgeEvidenceFor(model, 'e1')?.resolutionLabel, 'not recorded');
+});
+
+test('edgeEvidenceFor maps resolution codes to readable labels and hides unknowns', () => {  const withResolution = {
+    edges: [
+      { source: 'a.ts', target: 'b.ts', kind: 'import', evidence: { line: 4, specifier: './b', resolution: 'index-of-package' } },
+    ],
+  };
+  const evidence = edgeEvidenceFor(withResolution, 'e0');
+  assert.equal(evidence?.resolutionLabel, 'package member');
+  assert.equal(evidence?.line, 4);
+
+  assert.equal(edgeEvidenceFor(model, 'e99'), null);
+  assert.equal(edgeEvidenceFor({ edges: [] }, 'e0'), null);
+  assert.equal(resolutionLabel('module-tree'), 'module tree');
+  assert.equal(resolutionLabel(undefined), 'not recorded');
+});
+
+test('folderLocation explains the scan ceiling when Up is disabled', () => {
+  const atCeiling = folderLocation({ path: 'D:\\repos', parent: null, ceiling: 'D:\\repos' });
+  assert.equal(atCeiling.atCeiling, true);
+  assert.equal(atCeiling.upLabel, 'Top of scan ceiling');
+  assert.match(atCeiling.note, /Scan ceiling reached/);
+  assert.match(atCeiling.note, /STRABO_SCAN_CEILING/);
+
+  const inside = folderLocation({
+    path: 'D:\\repos\\demo',
+    parent: 'D:\\repos',
+    ceiling: 'D:\\repos',
+  });
+  assert.equal(inside.atCeiling, false);
+  assert.equal(inside.upLabel, 'Up to repos');
+  assert.equal(inside.note, 'Scan ceiling: D:\\repos');
 });
 
 const memberMap = {

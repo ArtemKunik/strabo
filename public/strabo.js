@@ -10,11 +10,12 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildGraphQuery, fileWebUrl, filterNodes, findPath, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor } from './strabo-core.js';
+import { API_PATH, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import {
   renderBreadcrumb,
   renderDiagnostics,
+  renderEdgeEvidence,
   renderFolderList,
   renderInspector,
   renderLegend,
@@ -25,7 +26,7 @@ import {
   renderTimeline,
 } from './strabo-panels.js';
 import { neighbourhood } from './strabo-selection.js';
-import { fit, focus } from './strabo-viewport.js';
+import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 
 /** Incremented on every scan; async completions check their captured generation. */
 let scanGeneration = 0;
@@ -52,9 +53,13 @@ const elements = {
   detail: document.getElementById('detail'),
   refresh: document.getElementById('refresh'),
   filter: document.getElementById('filter'),
+  filterClear: document.getElementById('filter-clear'),
+  filterCount: document.getElementById('filter-count'),
   overlay: document.getElementById('overlay'),
   overlayPanel: document.getElementById('overlay-panel'),
+  edgePanel: document.getElementById('edge-panel'),
   diagnosticsToggle: document.getElementById('diagnostics-toggle'),
+  diagnosticsBadge: document.getElementById('diagnostics-badge'),
   diagnostics: document.getElementById('diagnostics'),
   legend: document.getElementById('legend'),
   breadcrumb: document.getElementById('breadcrumb'),
@@ -62,6 +67,13 @@ const elements = {
   inspector: document.getElementById('inspector'),
   strip: document.getElementById('strip'),
   hover: document.getElementById('hover'),
+  tooltip: document.getElementById('tooltip'),
+  graphEmpty: document.getElementById('graph-empty'),
+  graphEmptyClear: document.getElementById('graph-empty-clear'),
+  graphLoading: document.getElementById('graph-loading'),
+  zoomIn: document.getElementById('zoom-in'),
+  zoomOut: document.getElementById('zoom-out'),
+  zoomFit: document.getElementById('zoom-fit'),
   tbFocus: document.getElementById('tb-focus'),
   tbImpact: document.getElementById('tb-impact'),
   tbPath: document.getElementById('tb-path'),
@@ -71,12 +83,16 @@ const elements = {
   timelinePanel: document.getElementById('timeline-panel'),
   folderDialog: document.getElementById('folder-dialog'),
   folderPath: document.getElementById('folder-path'),
+  folderNote: document.getElementById('folder-note'),
   folderList: document.getElementById('folder-list'),
   folderUp: document.getElementById('folder-up'),
   folderUse: document.getElementById('folder-use'),
   folderCancel: document.getElementById('folder-cancel'),
   forget: document.getElementById('forget'),
   memberView: document.getElementById('member-view'),
+  statusbarDiag: document.getElementById('statusbar-diag'),
+  statusbarLegend: document.getElementById('statusbar-legend'),
+  statusbarRender: document.getElementById('statusbar-render'),
 };
 
 /** Full-screen Member map UI state; `memberData` holds the last loaded payload. */
@@ -89,10 +105,11 @@ const memberUI = {
   onlyFlow: false,
   explain: false,
   stepIndex: 0,
-  night: false,
+  dim: false,
 };
 let memberData = null;
 let memberTimer = null;
+let selectedCommitHash = null;
 
 let browsedFolder = null;
 
@@ -157,6 +174,9 @@ async function rememberRepository(root) {
 async function scan({ refresh = false } = {}) {
   const generation = ++scanGeneration;
   elements.status.textContent = 'Scanning…';
+  if (elements.graphLoading) elements.graphLoading.hidden = false;
+  if (elements.graphEmpty) elements.graphEmpty.hidden = true;
+  hideTooltip();
   closeMemberMap();
 
   try {
@@ -166,28 +186,93 @@ async function scan({ refresh = false } = {}) {
     }
     current = model;
     selected = null;
+    selectedCommitHash = null;
     state.renderedGeneration = generation;
     view.render(model);
-    view.filter(filterNodes(model, state.filter));
+    applyFilterToView();
     renderLegend(elements.legend, model);
-    renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter);
-    renderDiagnostics(elements.diagnostics, model);
+    renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
+    const summary = renderDiagnostics(elements.diagnostics, model);
+    updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       state.prefix = prefix;
       scan();
     });
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
+    updateStatusbar(model);
+    if (elements.graphLoading) elements.graphLoading.hidden = true;
+    updateEmptyState();
     view.resize();
     fit(view.cy);
     if (state.overlay !== 'none') {
       await applyOverlay(generation);
+    } else {
+      renderOverlayPanel(elements.overlayPanel, '', null);
     }
   } catch (error) {
     if (generation !== scanGeneration) {
       return;
     }
+    if (elements.graphLoading) elements.graphLoading.hidden = true;
     elements.status.textContent = `Error: ${error.message}`;
+  }
+}
+
+function updateDiagnosticsBadge(summary) {
+  if (!elements.diagnosticsBadge) return;
+  const count = summary?.diagnostics ?? 0;
+  elements.diagnosticsBadge.hidden = count === 0;
+  elements.diagnosticsBadge.textContent = count > 99 ? '99+' : String(count);
+  elements.diagnosticsBadge.classList.toggle('has-errors', count > 0);
+}
+
+function updateStatusbar(model) {
+  if (elements.statusbarDiag && model) {
+    const d = (model.diagnostics ?? []).length;
+    const e = (model.excluded ?? []).length;
+    elements.statusbarDiag.textContent = `diagnostics ${d} · excluded ${e}`;
+  }
+  if (elements.statusbarLegend && model) {
+    const kinds = [...new Set((model.nodes ?? []).map((n) => n.kind))].join(' · ');
+    elements.statusbarLegend.textContent = kinds || '';
+  }
+  if (elements.statusbarRender) {
+    const webgl = view.capabilities?.webgl2 ? 'webgl2' : 'canvas';
+    elements.statusbarRender.textContent = `renderer: ${webgl} · ${view.cy.nodes().length} shown`;
+  }
+}
+
+function updateEmptyState() {
+  if (!elements.graphEmpty || !current) return;
+  const visible = view.cy.nodes().filter((n) => !n.hasClass('filtered-out')).length;
+  const filtering = state.filter.trim().length > 0;
+  elements.graphEmpty.hidden = !(filtering && visible === 0);
+}
+
+function updateFilterChrome(matchedCount, totalCount) {
+  if (elements.filterClear) elements.filterClear.hidden = state.filter.length === 0;
+  if (elements.filterCount) {
+    if (!state.filter) {
+      elements.filterCount.hidden = true;
+    } else {
+      elements.filterCount.hidden = false;
+      elements.filterCount.textContent = `${matchedCount}/${totalCount}`;
+    }
+  }
+}
+
+function applyFilterToView() {
+  if (!current) return;
+  const ids = filterNodes(current, state.filter);
+  view.filter(ids);
+  updateFilterChrome(ids.length, current.nodes.length);
+  updateEmptyState();
+  if (current) {
+    renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
+  }
+  if (elements.statusbarRender) {
+    elements.statusbarRender.textContent = `renderer: ${view.capabilities?.webgl2 ? 'webgl2' : 'canvas'} · ${ids.length}/${current.nodes.length} shown`;
   }
 }
 
@@ -217,6 +302,8 @@ function selectNode(id) {
   }
 
   selected = id;
+  view.clearEdge();
+  renderEdgeEvidence(elements.edgePanel, null);
   view.highlight(neighbourhood(current, id));
   renderInspector(elements.inspector, current, id, {
     onSelect: (target) => selectNode(target),
@@ -262,7 +349,10 @@ function clearSelection() {
   state.pathMode = false;
   elements.tbPath.classList.remove('active');
   elements.hover.textContent = '';
+  hideTooltip();
   view.highlight(null);
+  view.clearEdge();
+  renderEdgeEvidence(elements.edgePanel, null);
   elements.inspector.hidden = true;
 }
 
@@ -331,8 +421,8 @@ function renderMemberMapView() {
       renderMemberMapView();
     },
     onNight: () => {
-      memberUI.night = !memberUI.night;
-      document.body.classList.toggle('night-vision', memberUI.night);
+      memberUI.dim = !memberUI.dim;
+      renderMemberMapView();
     },
     onCompare: () => {
       toggleTimeline().catch((error) => {
@@ -353,9 +443,8 @@ function renderMemberMapView() {
         onlyFlow: false,
         explain: false,
         stepIndex: 0,
-        night: false,
+        dim: false,
       });
-      document.body.classList.remove('night-vision');
       renderMemberMapView();
     },
     onDataFlow: (value) => {
@@ -407,14 +496,38 @@ function toggleMemberPlay() {
 function closeMemberMap() {
   stopMemberPlay();
   elements.memberView.hidden = true;
-  document.body.classList.remove('night-vision');
-  memberUI.night = false;
+  memberUI.dim = false;
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !elements.memberView.hidden) {
-    closeMemberMap();
+  const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault();
+    elements.filter.focus();
+    elements.filter.select();
+    return;
   }
+  if (event.key === 'Escape') {
+    if (!elements.memberView.hidden) {
+      closeMemberMap();
+      return;
+    }
+    if (state.filter && !inField) {
+      state.filter = '';
+      elements.filter.value = '';
+      applyFilterToView();
+      return;
+    }
+    if (!inField) clearSelection();
+    return;
+  }
+  if (inField || !elements.memberView.hidden) return;
+  const key = event.key.toLowerCase();
+  if (key === 'f' && selected) focus(view.cy, selected);
+  else if (key === 'i') elements.tbImpact.click();
+  else if (key === 'p') elements.tbPath.click();
+  else if (key === 'b') elements.tbBoundaries.click();
+  else if (key === 't') elements.tbTimeline.click();
 });
 
 /** Show or hide recorded changes; selecting one compares it with the working tree. */
@@ -430,11 +543,17 @@ async function toggleTimeline() {
     selectCommit(commit).catch((error) => {
       elements.status.textContent = `Error: ${error.message}`;
     });
+  }, {
+    selectedHash: selectedCommitHash,
+    onClose: () => {
+      elements.timelinePanel.hidden = true;
+    },
   });
 }
 
 /** Compare a revision with the working tree and annotate the map with the impact. */
 async function selectCommit(commit) {
+  selectedCommitHash = commit.hash;
   const params = new URLSearchParams({ base: commit.hash });
   if (state.repository) {
     params.set('repository', state.repository);
@@ -444,30 +563,65 @@ async function selectCommit(commit) {
   state.overlay = 'impact';
   elements.overlay.value = 'impact';
   view.overlay(overlay.classes);
-  renderOverlayPanel(elements.overlayPanel, `Compare ${commit.shortHash}`, overlay);
+  renderOverlayPanel(elements.overlayPanel, `Compare ${commit.shortHash}`, overlay, {
+    kind: 'impact',
+    onClose: clearOverlay,
+    onSelect: (id) => selectNode(id),
+  });
+  // Refresh timeline selection highlight without refetching.
   view.fitNodes([...overlay.classes.keys()]);
   elements.status.textContent = `Since ${commit.shortHash}: ${overlay.summary}`;
+}
+
+function clearOverlay() {
+  state.overlay = 'none';
+  elements.overlay.value = 'none';
+  view.overlay(null);
+  renderOverlayPanel(elements.overlayPanel, '', null);
 }
 
 function applyStripFilter(filter) {
   state.filter = filter;
   elements.filter.value = filter;
-  if (current) {
-    view.filter(filterNodes(current, filter));
-  }
+  applyFilterToView();
 }
 
 function tracePath(from, to) {
   const path = findPath(current, from, to);
   const trace = elements.inspector.querySelector('[data-role="trace"]');
-  if (!trace) {
-    return;
+  if (trace) {
+    if (path) {
+      trace.textContent = `${path.length - 1} step(s): ${path.join(' → ')}`;
+    } else {
+      trace.textContent = `No directed path from ${from} to ${to}.`;
+    }
   }
   if (path) {
-    trace.textContent = `${path.length - 1} step(s): ${path.join(' → ')}`;
     view.highlight(path);
+    elements.hover.textContent = `${path.length - 1} step(s): ${path.join(' -> ')}`;
   } else {
-    trace.textContent = `No directed path from ${from} to ${to}.`;
+    elements.hover.textContent = `No directed path from ${from} to ${to}.`;
+  }
+}
+
+/** Explain the tapped edge from the evidence the scanner recorded. */
+function selectEdge(edgeId) {
+  if (!current || !edgeId) {
+    view.clearEdge();
+    renderEdgeEvidence(elements.edgePanel, null);
+    return;
+  }
+  const evidence = edgeEvidenceFor(current, edgeId);
+  renderEdgeEvidence(elements.edgePanel, evidence, {
+    onSelect: (id) => selectNode(id),
+    onTrace: (from, to) => tracePath(from, to),
+    onClear: () => {
+      view.clearEdge();
+      renderEdgeEvidence(elements.edgePanel, null);
+    },
+  });
+  if (evidence) {
+    elements.hover.textContent = `${evidence.source} → ${evidence.target} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
   }
 }
 
@@ -507,7 +661,11 @@ async function applyOverlay(generation) {
   }
   const overlay = overlayFor(kind, data);
   view.overlay(overlay.classes);
-  renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay);
+  renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
+    kind,
+    onClose: clearOverlay,
+    onSelect: (id) => selectNode(id),
+  });
 }
 
 /** Folder selection is a server-side browse bounded by the configured scan ceiling. */
@@ -515,8 +673,12 @@ async function loadFolder(path) {
   const query = path ? `?path=${encodeURIComponent(path)}` : '';
   const result = await request(`/browse${query}`);
   browsedFolder = result;
+  const location = folderLocation(result);
   elements.folderPath.textContent = result.path;
-  elements.folderUp.disabled = !result.parent;
+  elements.folderNote.textContent = location.note;
+  elements.folderNote.classList.toggle('at-ceiling', location.atCeiling);
+  elements.folderUp.disabled = location.atCeiling;
+  elements.folderUp.title = location.upLabel;
   elements.folderUp.dataset.parent = result.parent ?? '';
   renderFolderList(elements.folderList, result, (next) => {
     loadFolder(next).catch((error) => {
@@ -640,10 +802,26 @@ elements.overlay.addEventListener('change', () => {
 });
 elements.filter.addEventListener('input', () => {
   state.filter = elements.filter.value;
-  if (current) {
-    view.filter(filterNodes(current, state.filter));
-  }
+  applyFilterToView();
 });
+if (elements.filterClear) {
+  elements.filterClear.addEventListener('click', () => {
+    state.filter = '';
+    elements.filter.value = '';
+    applyFilterToView();
+    elements.filter.focus();
+  });
+}
+if (elements.graphEmptyClear) {
+  elements.graphEmptyClear.addEventListener('click', () => {
+    state.filter = '';
+    elements.filter.value = '';
+    applyFilterToView();
+  });
+}
+if (elements.zoomIn) elements.zoomIn.addEventListener('click', () => zoomIn(view.cy));
+if (elements.zoomOut) elements.zoomOut.addEventListener('click', () => zoomOut(view.cy));
+if (elements.zoomFit) elements.zoomFit.addEventListener('click', () => fit(view.cy));
 elements.diagnosticsToggle.addEventListener('click', () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
@@ -668,13 +846,44 @@ elements.folderUse.addEventListener('click', () => {
   }
 });
 
-view.onHover((id) => {
+function showTooltip(id, clientX, clientY) {
+  if (!elements.tooltip || !current) return;
+  const node = current.nodes.find((candidate) => candidate.id === id);
+  if (!node) return;
+  elements.tooltip.replaceChildren();
+  const title = document.createElement('div');
+  title.className = 'tt-title';
+  title.textContent = node.label ?? id;
+  elements.tooltip.append(title);
+  const row = document.createElement('div');
+  row.className = 'tt-row';
+  const kind = document.createElement('span');
+  kind.className = 'tt-kind';
+  kind.textContent = node.kind ?? '';
+  row.append(kind);
+  const blast = document.createElement('span');
+  blast.textContent = `blast ${node.transitiveDependents ?? 0} · id ${id}`;
+  row.append(blast);
+  elements.tooltip.append(row);
+  elements.tooltip.hidden = false;
+  const wrap = elements.tooltip.parentElement.getBoundingClientRect();
+  elements.tooltip.style.left = `${Math.min(clientX - wrap.left + 14, wrap.width - 310)}px`;
+  elements.tooltip.style.top = `${Math.max(clientY - wrap.top - 10, 8)}px`;
+}
+
+function hideTooltip() {
+  if (elements.tooltip) elements.tooltip.hidden = true;
+}
+
+view.onHover((id, event) => {
   if (!id) {
     elements.hover.textContent = '';
+    hideTooltip();
     return;
   }
   const node = current?.nodes.find((candidate) => candidate.id === id);
   elements.hover.textContent = `${id} · blast radius ${node?.transitiveDependents ?? 0} · ${node?.kind ?? ''}`;
+  if (event?.clientX !== undefined) showTooltip(id, event.clientX, event.clientY);
 });
 
 elements.tbFocus.addEventListener('click', () => {
@@ -706,6 +915,7 @@ elements.tbTimeline.addEventListener('click', () => {
 elements.tbClear.addEventListener('click', clearSelection);
 view.onSelect(onSelect);
 view.onDrill(onDrill);
+view.onEdge(selectEdge);
 
 // Gated automation hook for browser acceptance tests. It exposes measurement and the
 // same handlers the UI uses; it is inert unless the page opts in with window.STRABO_TEST.
@@ -715,6 +925,7 @@ if (window.STRABO_TEST) {
     state,
     select: selectNode,
     drill: onDrill,
+    selectEdge,
     model: () => current,
     renderedGeneration: () => state.renderedGeneration,
     openMemberMap: (id) => openMemberMap(id),

@@ -77,12 +77,14 @@ Then('the inspector shows the passport metrics for {string}', async function (id
 });
 
 Then('the inspector reports members as not recorded', async function () {
+  await this.openInspectorTab('members');
   const text = (await this.page.textContent('#inspector [data-role="members"]')) ?? '';
   assert.match(text, /Members/);
   assert.match(text, /not recorded|not implemented/i);
 });
 
 Then('the inspector lists members including {string}', async function (name) {
+  await this.openInspectorTab('members');
   await this.page.waitForFunction(
     (member) => {
       const section = document.querySelector('#inspector [data-role="members"]');
@@ -94,6 +96,7 @@ Then('the inspector lists members including {string}', async function (name) {
 });
 
 Then('the member map lists fields with declared types', async function () {
+  await this.openInspectorTab('members');
   await this.page.waitForFunction(
     () => document.querySelectorAll('#inspector .member-field').length > 0,
     undefined,
@@ -106,6 +109,7 @@ Then('the member map lists fields with declared types', async function () {
 });
 
 Then('the member map lists methods as behaviour', async function () {
+  await this.openInspectorTab('members');
   const text = (await this.page.textContent('#inspector .member-methods')) ?? '';
   assert.match(text, /fun add/);
   assert.match(text, /fun reset/);
@@ -113,6 +117,7 @@ Then('the member map lists methods as behaviour', async function () {
 });
 
 Then('the data flow panels report sources, resources, transforms, and sinks', async function () {
+  await this.openInspectorTab('members');
   await this.page.waitForFunction(
     () => document.querySelectorAll('#inspector .flow-panel').length === 4,
     undefined,
@@ -129,6 +134,7 @@ Then('the data flow panels report sources, resources, transforms, and sinks', as
 });
 
 Then('the data flow reports wiring is not recorded', async function () {
+  await this.openInspectorTab('members');
   await this.page.waitForSelector('#inspector [data-role="flow-unavailable"]', { timeout: 15_000 });
   const text = (await this.page.textContent('#inspector [data-role="flow-unavailable"]')) ?? '';
   assert.match(text, /not recorded/);

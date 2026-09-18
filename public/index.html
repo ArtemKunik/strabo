@@ -8,38 +8,51 @@
   </head>
   <body>
     <header class="toolbar">
-      <h1 class="brand">Strabo</h1>
-      <label class="control">
-        Repository
-        <select id="repository"></select>
-      </label>
-      <button id="browse" type="button">Choose folder…</button>
-      <button id="forget" type="button" disabled>Forget</button>
-      <label class="control">
-        Detail
-        <select id="detail">
-          <option value="block" selected>Directories</option>
-          <option value="file">Files</option>
-        </select>
-      </label>
-      <label class="control">
-        Filter
-        <input id="filter" type="search" placeholder="path contains…" />
-      </label>
-      <label class="control">
-        Review
-        <select id="overlay">
-          <option value="none" selected>None</option>
-          <option value="impact">Change impact</option>
-          <option value="cycles">Cycles</option>
-          <option value="test-reach">Test reach</option>
-          <option value="architecture">Architecture health</option>
-        </select>
-      </label>
-      <button id="refresh" type="button">Refresh</button>
-      <button id="diagnostics-toggle" type="button" aria-expanded="false" aria-controls="diagnostics">
-        Diagnostics
-      </button>
+      <div class="tb-group tb-brand-group">
+        <h1 class="brand"><span class="brand-mark" aria-hidden="true">◈</span> Strabo</h1>
+        <span class="brand-sub">repository map</span>
+      </div>
+      <div class="tb-group tb-repo-group" role="group" aria-label="Repository">
+        <label class="control">
+          <span class="control-label">Repository</span>
+          <select id="repository"></select>
+        </label>
+        <button id="browse" type="button" title="Browse filesystem for a repository">Choose folder…</button>
+        <button id="forget" type="button" disabled title="Forget this repository">Forget</button>
+      </div>
+      <div class="tb-group tb-view-group" role="group" aria-label="View">
+        <label class="control">
+          <span class="control-label">Detail</span>
+          <select id="detail">
+            <option value="block" selected>Directories</option>
+            <option value="file">Files</option>
+          </select>
+        </label>
+        <label class="control control-search">
+          <span class="control-label">Filter</span>
+          <span class="search-wrap">
+            <input id="filter" type="search" placeholder="path contains…  (⌘K)" autocomplete="off" />
+            <button id="filter-clear" type="button" class="search-clear" aria-label="Clear filter" hidden>×</button>
+          </span>
+          <span id="filter-count" class="filter-count" aria-live="polite" hidden></span>
+        </label>
+      </div>
+      <div class="tb-group tb-review-group" role="group" aria-label="Review">
+        <label class="control">
+          <span class="control-label">Review</span>
+          <select id="overlay">
+            <option value="none" selected>None</option>
+            <option value="impact">Change impact</option>
+            <option value="cycles">Cycles</option>
+            <option value="test-reach">Test reach</option>
+            <option value="architecture">Architecture health</option>
+          </select>
+        </label>
+        <button id="refresh" type="button" title="Rescan repository (bypass cache)">Refresh</button>
+        <button id="diagnostics-toggle" type="button" aria-expanded="false" aria-controls="diagnostics">
+          Diagnostics <span id="diagnostics-badge" class="diag-badge" hidden></span>
+        </button>
+      </div>
       <span id="status" class="status" role="status"></span>
     </header>
 
@@ -48,24 +61,48 @@
     <main class="workspace">
       <div class="graph-wrap">
         <div id="graph" class="graph" aria-label="Dependency map"></div>
+        <div id="graph-empty" class="graph-empty" hidden>
+          <p class="graph-empty-title">No nodes match</p>
+          <p class="graph-empty-sub">Try a shorter path fragment, or clear the filter.</p>
+          <button id="graph-empty-clear" type="button">Clear filter</button>
+        </div>
+        <div id="graph-loading" class="graph-loading" hidden>
+          <span class="spinner" aria-hidden="true"></span><span>Scanning repository…</span>
+        </div>
         <div class="graph-toolbar" role="toolbar" aria-label="Graph actions">
-          <button id="tb-focus" type="button">Focus</button>
-          <button id="tb-impact" type="button">Trace impact</button>
-          <button id="tb-path" type="button">Start path</button>
-          <button id="tb-boundaries" type="button">Boundaries</button>
-          <button id="tb-timeline" type="button">Timeline</button>
-          <button id="tb-clear" type="button">Clear</button>
+          <button id="tb-focus" type="button" title="Center selection (F)">Focus</button>
+          <button id="tb-impact" type="button" title="Show change impact (I)">Trace impact</button>
+          <button id="tb-path" type="button" title="Trace a path between two nodes (P)">Start path</button>
+          <button id="tb-boundaries" type="button" title="Toggle directories / files (B)">Boundaries</button>
+          <button id="tb-timeline" type="button" title="Show recorded changes (T)">Timeline</button>
+          <button id="tb-clear" type="button" title="Clear selection (Esc)">Clear</button>
           <span id="hover" class="graph-hover" role="status"></span>
+        </div>
+        <div id="tooltip" class="node-tooltip" hidden></div>
+        <div class="zoom-controls" role="group" aria-label="Zoom">
+          <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+          <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+          <button id="zoom-fit" type="button" aria-label="Fit to view">⤢</button>
         </div>
         <div id="strip" class="strip" aria-label="Tests and components"></div>
       </div>
       <aside class="side">
-        <div id="overlay-panel" class="overlay-panel" hidden></div>
-        <div id="timeline-panel" class="timeline-panel" hidden></div>
+        <div id="context-stack" class="context-stack">
+          <div id="overlay-panel" class="overlay-panel" hidden></div>
+          <div id="edge-panel" class="overlay-panel edge-panel" hidden></div>
+          <div id="timeline-panel" class="timeline-panel" hidden></div>
+        </div>
         <div id="legend" class="legend" aria-label="Legend"></div>
         <aside id="inspector" class="inspector" hidden></aside>
       </aside>
     </main>
+
+    <footer class="statusbar">
+      <span id="statusbar-diag" class="statusbar-item"></span>
+      <span id="statusbar-legend" class="statusbar-item statusbar-legend"></span>
+      <span class="statusbar-spacer"></span>
+      <span id="statusbar-render" class="statusbar-item"></span>
+    </footer>
 
     <section id="member-view" class="member-view" aria-label="Member map" hidden></section>
 
@@ -77,6 +114,7 @@
         <button id="folder-cancel" type="button" class="dialog-close" aria-label="Close">×</button>
       </header>
       <p id="folder-path" class="dialog-path"></p>
+      <p id="folder-note" class="dialog-note"></p>
       <ul id="folder-list" class="folder-list"></ul>
       <footer class="dialog-footer">
         <button id="folder-up" type="button">Up</button>

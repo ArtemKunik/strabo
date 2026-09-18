@@ -39,7 +39,11 @@ export function renderInspector(container, model, id, handlers = {}) {
   container.replaceChildren();
 
   const title = document.createElement('h2');
-  title.textContent = node?.label ?? id;
+  const chip = document.createElement('span');
+  chip.className = `kind-chip kind-${passport.kind ?? 'module'}`;
+  chip.textContent = passport.kind ?? 'module';
+  title.append(chip);
+  title.append(document.createTextNode(node?.label ?? id));
   container.append(title);
 
   const path = document.createElement('p');
@@ -47,15 +51,16 @@ export function renderInspector(container, model, id, handlers = {}) {
   path.textContent = node?.workspacePath ?? id;
   container.append(path);
 
+  const actions = document.createElement('div');
+  actions.className = 'inspector-actions';
   if (handlers.onOpenWorkspace) {
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'primary';
     open.textContent = 'Open in Workspace';
     open.addEventListener('click', () => handlers.onOpenWorkspace(id));
-    container.append(open);
+    actions.append(open);
   }
-
   if (handlers.onOpenMemberMap) {
     const memberMap = document.createElement('button');
     memberMap.type = 'button';
@@ -63,15 +68,47 @@ export function renderInspector(container, model, id, handlers = {}) {
     memberMap.id = 'open-member-map';
     memberMap.textContent = 'Member map';
     memberMap.addEventListener('click', () => handlers.onOpenMemberMap(id));
-    container.append(memberMap);
+    actions.append(memberMap);
   }
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'icon-button';
+  copy.textContent = '⧉ Copy path';
+  copy.title = 'Copy repository-relative path';
+  copy.addEventListener('click', () => {
+    const text = node?.workspacePath ?? id;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+    copy.textContent = '✓ Copied';
+    setTimeout(() => {
+      copy.textContent = '⧉ Copy path';
+    }, 1200);
+  });
+  actions.append(copy);
+  container.append(actions);
 
-  const metrics = document.createElement('dl');
-  metrics.className = 'passport-metrics';
+  const cards = document.createElement('div');
+  cards.className = 'stat-cards';
   for (const metric of passport.metrics) {
-    appendFact(metrics, metric.label, String(metric.value));
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    const value = document.createElement('div');
+    value.className = 'stat-value';
+    value.textContent = String(metric.value);
+    const label = document.createElement('div');
+    label.className = 'stat-label';
+    label.textContent = metric.label;
+    card.append(value, label);
+    cards.append(card);
   }
-  container.append(metrics);
+  container.append(cards);
+
+  const tabs = document.createElement('div');
+  tabs.className = 'inspector-tabs';
+  tabs.setAttribute('role', 'tablist');
+  const panels = document.createElement('div');
+  panels.className = 'inspector-panels';
 
   const members = document.createElement('section');
   members.dataset.role = 'members';
@@ -82,10 +119,35 @@ export function renderInspector(container, model, id, handlers = {}) {
   membersBody.className = 'unavailable';
   membersBody.textContent = 'Loading members…';
   members.append(membersBody);
-  container.append(members);
 
-  container.append(listSection('Dependencies', id, passport.imports, handlers));
-  container.append(listSection('Dependents', id, passport.usedBy, handlers));
+  const depsSection = listSection('Dependencies', id, passport.imports, handlers);
+  const dependentsSection = listSection('Dependents', id, passport.usedBy, handlers);
+
+  const tabDefs = [
+    ['deps', `Dependencies (${passport.imports.length})`, depsSection],
+    ['dependents', `Dependents (${passport.usedBy.length})`, dependentsSection],
+    ['members', 'Members', members],
+  ];
+  const tabButtons = [];
+  for (const [key, label, section] of tabDefs) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'inspector-tab';
+    tab.setAttribute('role', 'tab');
+    tab.dataset.tab = key;
+    tab.textContent = label;
+    tab.setAttribute('aria-selected', key === 'deps' ? 'true' : 'false');
+    tab.addEventListener('click', () => {
+      for (const other of tabButtons) other.setAttribute('aria-selected', other === tab ? 'true' : 'false');
+      for (const child of panels.children) child.hidden = true;
+      section.hidden = false;
+    });
+    tabs.append(tab);
+    tabButtons.push(tab);
+    section.hidden = key !== 'deps';
+    panels.append(section);
+  }
+  container.append(tabs, panels);
 
   const trace = document.createElement('p');
   trace.className = 'trace';
@@ -327,7 +389,29 @@ export function renderDiagnostics(container, model) {
     .join(', ') || 'none'}`;
   container.append(counts);
 
-  if (summary.samples.length > 0) {
+  const groups = new Map();
+  for (const diagnostic of model.diagnostics ?? []) {
+    if (!groups.has(diagnostic.kind)) groups.set(diagnostic.kind, []);
+    groups.get(diagnostic.kind).push(diagnostic);
+  }
+  if (groups.size > 0) {
+    for (const [kind, items] of groups) {
+      const details = document.createElement('details');
+      details.className = 'diag-group';
+      if (kind === [...groups.keys()][0]) details.open = true;
+      const summaryEl = document.createElement('summary');
+      summaryEl.textContent = `${kind} (${items.length})`;
+      details.append(summaryEl);
+      const list = document.createElement('ul');
+      for (const diagnostic of items.slice(0, 20)) {
+        const item = document.createElement('li');
+        item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
+        list.append(item);
+      }
+      details.append(list);
+      container.append(details);
+    }
+  } else if (summary.samples.length > 0) {
     const list = document.createElement('ul');
     for (const diagnostic of summary.samples) {
       const item = document.createElement('li');
@@ -339,6 +423,13 @@ export function renderDiagnostics(container, model) {
   return summary;
 }
 
+const LEGEND_SWATCHES = {
+  'size = dependents': 'linear-gradient(135deg,#4c9aff,#c98bf0)',
+  'colour = directory': 'linear-gradient(135deg,#56d4b1,#f2b25c)',
+  'diamond = test': 'linear-gradient(135deg,#f2b25c,#ff8f8f)',
+  'hover = blast radius': 'linear-gradient(135deg,#8da0b5,#4c9aff)',
+};
+
 export function renderLegend(container, model) {
   container.replaceChildren();
 
@@ -347,7 +438,15 @@ export function renderLegend(container, model) {
   for (const text of readingLegend()) {
     const item = document.createElement('span');
     item.className = 'legend-item';
-    item.textContent = text;
+    const swatch = document.createElement('span');
+    swatch.className = 'legend-swatch';
+    swatch.style.background = LEGEND_SWATCHES[text] ?? 'var(--accent)';
+    if (text.startsWith('diamond')) {
+      swatch.style.transform = 'rotate(45deg)';
+      swatch.style.borderRadius = '2px';
+    }
+    item.append(swatch);
+    item.append(document.createTextNode(text));
     guide.append(item);
   }
   container.append(guide);
@@ -356,13 +455,17 @@ export function renderLegend(container, model) {
   for (const kind of kinds) {
     const item = document.createElement('span');
     item.className = 'legend-item';
-    item.textContent = `${kind} (${SHAPES[kind] ?? 'round-rectangle'})`;
+    const glyph = document.createElement('span');
+    glyph.className = 'legend-shape';
+    glyph.textContent = kind === 'test' ? '◆' : kind === 'service' ? '⬡' : '▣';
+    item.append(glyph);
+    item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? 'round-rectangle'})`));
     container.append(item);
   }
 }
 
 /** Counts by directory and kind; clicking a chip filters the map. */
-export function renderTestsStrip(container, counts, onFilter) {
+export function renderTestsStrip(container, counts, onFilter, activeFilter = '') {
   container.replaceChildren();
 
   const chip = (label, filter, className = 'strip-chip') => {
@@ -371,6 +474,7 @@ export function renderTestsStrip(container, counts, onFilter) {
     button.className = className;
     button.textContent = label;
     button.dataset.filter = filter;
+    button.setAttribute('aria-pressed', activeFilter === filter ? 'true' : 'false');
     button.addEventListener('click', () => onFilter(filter));
     return button;
   };
@@ -420,10 +524,63 @@ export function renderFolderList(container, result, onNavigate) {
     container.append(empty);
   }
 }
-
 /** Render the summary for the active review overlay. */
-export function renderOverlayPanel(container, title, overlay) {
+export function renderOverlayPanel(container, title, overlay, options = {}) {
   if (!overlay || !overlay.summary) {
+    container.hidden = true;
+    container.replaceChildren();
+    container.className = 'overlay-panel';
+    return;
+  }
+  container.hidden = false;
+  container.replaceChildren();
+  const kind = options.kind ?? 'impact';
+  container.className = `overlay-panel overlay-kind-${kind}`;
+
+  const heading = document.createElement('h3');
+  const dot = document.createElement('span');
+  dot.className = 'overlay-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  heading.append(dot);
+  heading.append(document.createTextNode(`${title} · ${overlay.summary}`));
+  heading.className = 'overlay-summary';
+  container.append(heading);
+
+  if (options.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss overlay panel');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => options.onClose());
+    heading.append(dismiss);
+  }
+
+  if (overlay.items.length > 0) {
+    const list = document.createElement('ul');
+    for (const item of overlay.items.slice(0, 50)) {
+      const entry = document.createElement('li');
+      if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
+        const jump = document.createElement('button');
+        jump.type = 'button';
+        jump.textContent = item;
+        jump.addEventListener('click', () => options.onSelect(item.split(' · ')[0]));
+        entry.append(jump);
+      } else {
+        entry.textContent = item;
+      }
+      list.append(entry);
+    }
+    container.append(list);
+  }
+}
+
+/**
+ * Explain one edge: endpoints, relationship kind, and the evidence that produced it.
+ * Pass null to hide. Unrecorded fields are shown as unavailable, never guessed.
+ */
+export function renderEdgeEvidence(container, evidence, handlers = {}) {
+  if (!evidence) {
     container.hidden = true;
     container.replaceChildren();
     return;
@@ -432,28 +589,70 @@ export function renderOverlayPanel(container, title, overlay) {
   container.replaceChildren();
 
   const heading = document.createElement('h3');
-  heading.textContent = `${title} · ${overlay.summary}`;
   heading.className = 'overlay-summary';
+  heading.textContent = `Edge · ${evidence.kind}`;
   container.append(heading);
 
-  if (overlay.items.length > 0) {
-    const list = document.createElement('ul');
-    for (const item of overlay.items.slice(0, 50)) {
-      const entry = document.createElement('li');
-      entry.textContent = item;
-      list.append(entry);
-    }
-    container.append(list);
+  const route = document.createElement('p');
+  route.className = 'edge-route';
+  route.append(edgeEndpoint(evidence.source, handlers.onSelect));
+  route.append(document.createTextNode(' → '));
+  route.append(edgeEndpoint(evidence.target, handlers.onSelect));
+  container.append(route);
+
+  const facts = document.createElement('dl');
+  facts.className = 'passport-metrics';
+  appendFact(facts, 'Specifier', evidence.specifier ?? 'not recorded');
+  appendFact(facts, 'Line', evidence.line === null ? 'not recorded' : String(evidence.line));
+  appendFact(facts, 'Resolution', evidence.resolutionLabel);
+  container.append(facts);
+
+  if (handlers.onTrace) {
+    const trace = document.createElement('button');
+    trace.type = 'button';
+    trace.className = 'trace-button';
+    trace.textContent = 'Trace path';
+    trace.addEventListener('click', () => handlers.onTrace(evidence.source, evidence.target));
+    container.append(trace);
+  }
+
+  if (handlers.onClear) {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'edge-clear';
+    clear.textContent = 'Clear edge';
+    clear.addEventListener('click', () => handlers.onClear());
+    container.append(clear);
   }
 }
 
+function edgeEndpoint(id, onSelect) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'link';
+  button.textContent = id;
+  if (onSelect) {
+    button.addEventListener('click', () => onSelect(id));
+  }
+  return button;
+}
+
 /** Render recorded changes, newest first; selecting one compares it with the working tree. */
-export function renderTimeline(container, result, onSelect) {
+export function renderTimeline(container, result, onSelect, options = {}) {
   container.replaceChildren();
 
   const title = document.createElement('h3');
   title.textContent = 'Timeline';
   container.append(title);
+  if (options.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Close timeline');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => options.onClose());
+    title.append(dismiss);
+  }
 
   if (!result || result.available === false) {
     const note = document.createElement('p');
@@ -474,6 +673,9 @@ export function renderTimeline(container, result, onSelect) {
   const list = document.createElement('ul');
   for (const commit of result.commits.slice(0, 50)) {
     const item = document.createElement('li');
+    if (options.selectedHash && commit.hash === options.selectedHash) {
+      item.classList.add('selected-commit');
+    }
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'commit';
@@ -549,6 +751,7 @@ export function renderMemberMap(container, data, view, handlers = {}) {
   container.dataset.zoom = view.zoom ?? 'medium';
   container.dataset.step = steps[stepIndex]?.key ?? 'fingerprint';
   container.classList.toggle('wiring-off', view.showWiring === false);
+  container.classList.toggle('dim-unrelated', view.dim === true);
   container.replaceChildren();
 
   const header = document.createElement('header');
@@ -563,7 +766,7 @@ export function renderMemberMap(container, data, view, handlers = {}) {
   container.append(header);
 
   container.append(buildMemberToolbar(view, handlers));
-  container.append(buildStepLine(steps, stepIndex));
+  container.append(buildWalkthrough(steps, stepIndex, handlers));
   if (view.explain) {
     const explain = document.createElement('p');
     explain.className = 'member-explain';
@@ -623,20 +826,12 @@ function buildMemberToolbar(view, handlers) {
   order.addEventListener('change', () => handlers.onOrder?.(order.value));
   toolbar.append(controlRow('Order', order));
 
-  const wiring = document.createElement('input');
-  wiring.type = 'checkbox';
-  wiring.id = 'member-wiring';
-  wiring.checked = view.showWiring !== false;
-  wiring.addEventListener('change', () => handlers.onWiring?.(wiring.checked));
-  toolbar.append(controlRow('Show wiring', wiring));
+  toolbar.append(separator());
 
   const zoom = document.createElement('span');
   zoom.className = 'member-zoom';
   zoom.setAttribute('role', 'group');
   zoom.setAttribute('aria-label', 'Zoom');
-  const zoomLabel = document.createElement('span');
-  zoomLabel.textContent = 'Zoom';
-  zoom.append(zoomLabel);
   for (const [value, label] of ZOOM_LEVELS) {
     const active = (view.zoom ?? 'medium') === value;
     const zoomButton = button(`member-zoom-${value}`, label, () => handlers.onZoom?.(value), active ? 'active' : '');
@@ -645,11 +840,12 @@ function buildMemberToolbar(view, handlers) {
   }
   toolbar.append(zoom);
 
-  toolbar.append(button('member-explain', 'Explain this class', () => handlers.onExplain?.()));
-  toolbar.append(button('member-night', 'Night vision', () => handlers.onNight?.()));
-  toolbar.append(button('member-compare', 'Compare versions', () => handlers.onCompare?.()));
-  toolbar.append(button('member-only-flow', 'Show only this flow', () => handlers.onOnlyFlow?.()));
-  toolbar.append(button('member-reset', 'Reset layout', () => handlers.onReset?.()));
+  const wiring = document.createElement('input');
+  wiring.type = 'checkbox';
+  wiring.id = 'member-wiring';
+  wiring.checked = view.showWiring !== false;
+  wiring.addEventListener('change', () => handlers.onWiring?.(wiring.checked));
+  toolbar.append(controlRow('Show wiring', wiring));
 
   const dataFlow = document.createElement('input');
   dataFlow.type = 'checkbox';
@@ -658,16 +854,55 @@ function buildMemberToolbar(view, handlers) {
   dataFlow.addEventListener('change', () => handlers.onDataFlow?.(dataFlow.checked));
   toolbar.append(controlRow('Data flow', dataFlow));
 
-  const steps = document.createElement('span');
-  steps.className = 'member-steps';
-  steps.append(button('member-prev', 'Prev', () => handlers.onStep?.(-1)));
-  steps.append(button('member-play', 'Play', () => handlers.onPlay?.()));
-  steps.append(button('member-next', 'Step', () => handlers.onStep?.(1)));
-  toolbar.append(steps);
+  toolbar.append(separator());
 
-  toolbar.append(button('member-close', 'Close', () => handlers.onClose?.()));
+  toolbar.append(button('member-explain', 'Explain', () => handlers.onExplain?.()));
+  const night = button('member-night', view.dim ? 'Undim' : 'Dim unrelated', () => handlers.onNight?.());
+  night.title = 'Dim cards outside the current walkthrough step';
+  night.classList.toggle('active', Boolean(view.dim));
+  toolbar.append(night);
+  toolbar.append(button('member-compare', 'Compare', () => handlers.onCompare?.()));
+  toolbar.append(button('member-only-flow', view.onlyFlow ? 'Show all' : 'Wired only', () => handlers.onOnlyFlow?.()));
+  toolbar.append(button('member-reset', 'Reset', () => handlers.onReset?.()));
+
+  toolbar.append(button('member-close', 'Close ✕', () => handlers.onClose?.()));
 
   return toolbar;
+}
+
+function separator() {
+  const sep = document.createElement('span');
+  sep.className = 'tb-sep';
+  sep.setAttribute('aria-hidden', 'true');
+  return sep;
+}
+
+function buildWalkthrough(steps, index, handlers) {
+  const bar = document.createElement('div');
+  bar.className = 'member-walkthrough';
+
+  const dots = document.createElement('div');
+  dots.className = 'walk-dots';
+  steps.forEach((step, stepIndex) => {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'walk-dot';
+    dot.title = step.label;
+    dot.setAttribute('aria-label', `Go to step ${stepIndex + 1}: ${step.label}`);
+    if (stepIndex === index) dot.setAttribute('aria-current', 'step');
+    dot.addEventListener('click', () => handlers.onStep?.(stepIndex - index));
+    dots.append(dot);
+  });
+  bar.append(dots);
+  bar.append(buildStepLine(steps, index));
+
+  const actions = document.createElement('div');
+  actions.className = 'walk-actions';
+  actions.append(button('member-prev', '← Prev', () => handlers.onStep?.(-1)));
+  actions.append(button('member-play', '▶ Play', () => handlers.onPlay?.()));
+  actions.append(button('member-next', 'Step →', () => handlers.onStep?.(1)));
+  bar.append(actions);
+  return bar;
 }
 
 function buildStepLine(steps, index) {
@@ -756,7 +991,9 @@ function buildFieldCard(field, clusterIndex) {
   element.dataset.cluster = String(clusterIndex ?? 0);
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));
-  element.append(cardLine('card-tag', card.tag));
+  const tag = cardLine('card-tag', card.tag);
+  if (card.tag !== 'unconnected') tag.classList.add('is-wired');
+  element.append(tag);
   element.append(cardLine('card-metrics', card.metrics));
   return element;
 }
@@ -769,7 +1006,9 @@ function buildMethodCard(method, clusterIndex) {
   element.dataset.cluster = String(clusterIndex ?? 0);
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));
-  element.append(cardLine('card-tag', card.tag));
+  const tag = cardLine('card-tag', card.tag);
+  if (card.tag === 'wired') tag.classList.add('is-wired');
+  element.append(tag);
   element.append(cardLine('card-metrics', card.metrics));
   return element;
 }

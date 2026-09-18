@@ -315,6 +315,29 @@ export function fileWebUrl(repository, path) {
   return `${base}/blob/HEAD/${path}`;
 }
 
+/**
+ * Describe where the folder dialog sits relative to the scan ceiling.
+ *
+ * The ceiling is an operator boundary, so the dialog explains why "Up" stops instead of
+ * leaving the button looking broken.
+ */
+export function folderLocation(result) {
+  const atCeiling = !result.parent;
+  return {
+    atCeiling,
+    path: result.path,
+    ceiling: result.ceiling,
+    upLabel: atCeiling ? 'Top of scan ceiling' : `Up to ${parentName(result.parent)}`,
+    note: atCeiling
+      ? `Scan ceiling reached. Raise STRABO_SCAN_CEILING to browse above ${result.ceiling}.`
+      : `Scan ceiling: ${result.ceiling}`,
+  };
+}
+
+function parentName(parent) {
+  return String(parent).split(/[\\/]/).filter(Boolean).pop() ?? parent;
+}
+
 /** Summarise diagnostics and exclusions for the diagnostics panel. */
 export function summarizeDiagnostics(model) {
   const byKind = {};
@@ -341,6 +364,43 @@ export function filterNodes(model, text) {
     return model.nodes.map((node) => node.id);
   }
   return model.nodes.filter((node) => node.id.toLowerCase().includes(needle)).map((node) => node.id);
+}
+
+/**
+ * Why an edge exists, from the evidence the scanner recorded.
+ *
+ * Returns null for an unknown id so the caller can stay silent instead of inventing an
+ * explanation. `resolution` is rendered as a human label, never re-derived.
+ */
+export function edgeEvidenceFor(model, edgeId) {
+  const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
+  if (!edge) {
+    return null;
+  }
+  const evidence = edge.evidence ?? {};
+  return {
+    id: edgeId,
+    source: edge.source,
+    target: edge.target,
+    kind: edge.kind,
+    line: evidence.line ?? null,
+    specifier: evidence.specifier ?? null,
+    resolution: evidence.resolution ?? null,
+    resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? 'not recorded',
+  };
+}
+
+const RESOLUTION_LABELS = {
+  exact: 'exact match',
+  extension: 'extension added',
+  index: 'index file',
+  'index-of-package': 'package member',
+  'module-tree': 'module tree',
+  'index-packed': 'packed index',
+};
+
+export function resolutionLabel(resolution) {
+  return RESOLUTION_LABELS[resolution] ?? 'not recorded';
 }
 
 /** Counts used by the status line. */

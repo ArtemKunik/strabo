@@ -58,6 +58,19 @@ Feature: Repository dependency map
     Then the repository is "csharp-repo"
     And the status line reports nodes and a cache status
 
+  @browse
+  Scenario: The folder dialog explains the scan ceiling
+    When I open the folder dialog
+    And I go up one folder
+    Then the folder dialog reports it has reached the scan ceiling
+
+  @edge
+  Scenario: Selecting an edge shows its evidence
+    When I switch to file detail
+    And I select the "main.ts" node
+    And I select an edge from the "main.ts" node
+    Then the edge panel reports the relationship and resolution
+
   @repository
   Scenario: The repository picker remembers opened repositories
     When I open the folder dialog
