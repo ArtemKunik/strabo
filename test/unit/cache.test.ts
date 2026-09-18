@@ -22,10 +22,13 @@ process.env.STRABO_CACHE_DIR = cacheDir;
 
 const created: string[] = [];
 
-after(() => {
+after(async () => {
   clearMemoryCache();
+  // A stale entry is served while a background refresh runs; give that scan a moment to
+  // release its git child processes before deleting the temp trees it is reading.
+  await new Promise((resolve) => setTimeout(resolve, 250));
   const remove = (target: string) =>
-    fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   remove(cacheDir);
   for (const directory of created) {
     remove(directory);

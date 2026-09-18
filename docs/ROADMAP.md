@@ -16,9 +16,10 @@ record is reported as `unavailable`, never invented.
 | 1 | Map legibility and interaction | Done |
 | 2 | Module Passport | Done |
 | 3 | Symbol extraction and Member map | Done (members, data-flow panels from recorded field access) |
-| 4 | Architecture health | Done (heuristic axes with derived values) |
+| 4 | Architecture health | Done (repository and per-file axes, cohesion from member wiring) |
 | 5 | Timeline and compare versions | Done (commit list + impact against a revision) |
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
+| 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | — | Developer Product Graph, Chat, Narrate | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -52,10 +53,20 @@ Per-language symbol extraction plus the Member map built from it.
 
 - Fields and methods with visibility, static/readonly, and declared type.
 - Member map per class: members grouped by type, fields with types, methods as behaviour.
-- `SOURCE / INPUTS -> RESOURCES / HUBS -> TRANSFORMS -> SINKS / OUTPUTS` panels.
+- **Member map view**: a full-screen workspace per file with Find member, Order, Show wiring,
+  zoom levels, Explain this class, Night vision, Compare versions, Show only this flow,
+  Reset layout, and a Data flow toggle.
+- **Flow walkthrough**: a five-step narrative (fingerprint, members, wiring, data flow,
+  consumption) with Prev / Play / Step. Each caption is derived from recorded evidence and
+  says so when evidence is missing.
+- `SOURCE / INPUTS -> RESOURCES / HUBS -> TRANSFORMS -> SINKS / OUTPUTS` panels joined by a
+  `DATA FLOW` read/write divider, plus `EXTERNAL CONSUMPTION`.
+- **Insights**: an Architecture Health radar (the Phase 4 axes) and a Dependency
+  constellation of fields, methods, and repository consumers.
 - Reads/writes and field-to-behaviour wiring are recorded only where the scan can prove
   them (an explicit `this.x` / `self.x`, or an unshadowed bare name), and otherwise shown
-  as `unavailable`. Cross-file identifier resolution is still not claimed.
+  as `unavailable`. Clusters are the connected components of that recorded wiring.
+  Cross-file identifier resolution is still not claimed.
 
 Spec: `test/acceptance/features/member-map.feature`.
 
@@ -64,6 +75,14 @@ Spec: `test/acceptance/features/member-map.feature`.
 Heuristic signals derived from the graph and symbols, each labelled as a signal rather
 than a verdict: cohesion (LCOM proxy), complexity, fan-out, coupling, and coverage
 (reusing test reach). Rendered as an axis score with the contributing values.
+
+Two scopes share the same axis shape:
+
+- **Repository** (`GET /analysis/architecture-health`) — mean of the available axes.
+- **File** (`GET /analysis/file-health?file=`) — the graph axes scoped to one file, plus
+  **cohesion measured from the member wiring** recorded for that file: members are nodes,
+  a method is joined to every field it reads or writes, and fewer connected components
+  scores higher. A file with no recorded members keeps cohesion `unavailable`.
 
 Spec: `test/acceptance/features/architecture-health.feature`.
 
@@ -79,6 +98,20 @@ Spec: `test/acceptance/features/timeline.feature`.
 - `npm pack` and install the tarball in a clean fixture; run scan and acceptance there.
 - Contract tests for `createStraboServer` and `createStraboRouter` in an embedded host.
 - Verify grammar assets are present in the tarball (`parsers/vendor`).
+
+## Phase 7 - Repository picker
+
+Remember the repositories the operator has opened so the picker survives a restart and
+reopens the last one.
+
+- `GET /repositories` lists known repositories and the active one.
+- `POST /repositories` remembers a selection; `DELETE /repositories?root=` forgets one.
+- State is persisted outside the scanned tree (`STRABO_STATE_DIR`, defaulting to
+  `STRABO_CACHE_DIR`) so it never dirties the working tree or invalidates the cache.
+- Every remembered path is still resolved through the scan ceiling, so remembering a path
+  cannot widen what Strabo may read.
+
+Spec: `test/acceptance/features/repository-map.feature` (scenario `@repository`).
 
 ## Out of concept
 

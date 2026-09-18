@@ -133,3 +133,60 @@ Then('the data flow reports wiring is not recorded', async function () {
   const text = (await this.page.textContent('#inspector [data-role="flow-unavailable"]')) ?? '';
   assert.match(text, /not recorded/);
 });
+
+When('I open the member map', async function () {
+  await this.page.click('#inspector #open-member-map');
+  await this.page.waitForFunction(
+    () => {
+      const view = document.getElementById('member-view');
+      return Boolean(view) && !view.hidden &&
+        (view.querySelector('[data-role="member-step"]')?.textContent ?? '').includes('Step 1 of 5');
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the member map view shows fields, clusters, and the data flow', async function () {
+  const view = '#member-view';
+  const fields = (await this.page.textContent(`${view} [data-role="fields"]`)) ?? '';
+  assert.match(fields, /value: Int/);
+  assert.match(fields, /lastError: String/);
+  const tags = (await this.page.textContent(`${view} [data-role="clusters"]`)) ?? '';
+  assert.match(tags, /cluster 1/);
+
+  const flow = (await this.page.textContent(`${view} [data-role="data-flow"]`)) ?? '';
+  assert.match(flow, /SOURCE \/ INPUTS/);
+  assert.match(flow, /RESOURCES \/ HUBS/);
+  assert.match(flow, /DATA FLOW/);
+  assert.match(flow, /SINKS \/ OUTPUTS/);
+  assert.match(flow, /EXTERNAL CONSUMPTION/);
+});
+
+Then('the member map view shows architecture health and the dependency constellation', async function () {
+  await this.page.waitForSelector('#member-view [data-role="health"] .radar', { timeout: 15_000 });
+  const health = (await this.page.textContent('#member-view [data-role="health"]')) ?? '';
+  assert.match(health, /Architecture health/);
+  assert.match(health, /Low coupling/);
+  assert.match(health, /Cohesion \d+%/);
+  assert.match(health, /Coverage/);
+
+  const metrics = (await this.page.textContent('#member-view [data-role="health-metrics"]')) ?? '';
+  assert.match(metrics, /blast radius/);
+
+  await this.page.waitForSelector('#member-view [data-role="constellation"] .constellation', {
+    timeout: 15_000,
+  });
+  const dots = await this.page.locator('#member-view .constellation-dot').count();
+  assert.ok(dots > 0, 'constellation should plot at least one member');
+});
+
+When('I step through the flow walkthrough', async function () {
+  await this.page.click('#member-next');
+  await this.page.click('#member-next');
+});
+
+Then('the flow walkthrough reports the wiring step', async function () {
+  const text = (await this.page.textContent('#member-view [data-role="member-step"]')) ?? '';
+  assert.match(text, /Step 3 of 5 \(wiring\)/);
+});

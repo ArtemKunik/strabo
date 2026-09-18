@@ -56,6 +56,7 @@ Then open `http://localhost:3000` (default `PORT`).
 | `STRABO_CONFIG`      | Path to a Strabo config file (catalogue, integrations).        |
 | `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root.   |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
+| `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
 | `PORT`               | HTTP port for the standalone server.                           |
 
@@ -66,12 +67,17 @@ folder you pick. A browser cannot hand the server a filesystem path, so the list
 served by `GET /api/strabo/browse` and is strictly bounded by `STRABO_SCAN_CEILING`.
 By default the ceiling is the start root, so the dialog only shows that repository; set
 `STRABO_SCAN_CEILING` to a parent directory to scan siblings, for example:
-
 ```powershell
 $env:STRABO_ROOT = "D:\work\my-repo"
 $env:STRABO_SCAN_CEILING = "D:\work"
 node bin/strabo.js
 ```
+
+Opened repositories are remembered (outside the scanned tree, so they never dirty it) and
+the **Repository** selector reopens the last one on load. `GET /api/strabo/repositories`
+lists them, `POST` remembers a selection, and `DELETE ?root=` forgets one. Every path is
+still resolved through the scan ceiling, so remembering a path can never widen what Strabo
+may read.
 
 ## Review overlays
 
@@ -114,6 +120,16 @@ empty list. Where the scan recorded field references inside method bodies — an
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
 read/write wiring. When nothing was recorded, the panels say so; cross-file access is not
 claimed.
+
+**Member map** opens that file in a full-screen workspace: member cards with cluster tags
+and read/write counts, the four `DATA FLOW` panels behind a read/write divider, an
+Architecture Health radar, and a Dependency constellation of fields, methods, and
+repository consumers. Controls include Find member, Order, Show wiring, zoom levels,
+Explain this class, Night vision, Compare versions, Show only this flow, and Reset layout.
+
+**Flow walkthrough** walks the class in five steps — fingerprint, members, wiring, data
+flow, consumption — with Prev / Play / Step. Every caption comes from recorded data, so a
+step with no evidence says so instead of inventing a story.
 
 See `docs/ROADMAP.md` for the phased plan.
 

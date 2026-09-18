@@ -58,6 +58,18 @@ Feature: Repository dependency map
     Then the repository is "csharp-repo"
     And the status line reports nodes and a cache status
 
+  @repository
+  Scenario: The repository picker remembers opened repositories
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "kotlin-repo" folder
+    And I use the selected folder
+    Then the repository is "kotlin-repo"
+    And the repository picker lists "kotlin-repo"
+    When I select the remembered "block-repo" repository
+    Then the repository is "block-repo"
+    And the repository picker marks "block-repo" as active
+
   @overlay
   Scenario: Test reach overlay marks used-but-untested modules
     When I select the review overlay "test-reach"

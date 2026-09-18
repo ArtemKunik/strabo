@@ -7,18 +7,31 @@ import {
   breadcrumb,
   buildElements,
   buildGraphQuery,
+  constellationLayout,
+  constellationPoints,
   diameter,
   drillTarget,
+  explainClass,
+  fieldCard,
   fileWebUrl,
   filterNodes,
   findPath,
   graphSummary,
+  isWiredField,
+  isWiredMethod,
   mapCounts,
+  memberClusters,
+  memberMapSteps,
+  methodCard,
   neighbourhood,
   normalizeGitUrl,
+  orderMembers,
   overlayFor,
   paletteColor,
   passportFor,
+  polygonPoints,
+  radarFrame,
+  radarPoints,
   summarizeDiagnostics,
   topLevelDirectory,
 } from '../../public/strabo-core.js';
@@ -261,4 +274,132 @@ test('mapCounts groups by directory and kind for the strip', () => {
 test('topLevelDirectory falls back to the root marker', () => {
   assert.equal(topLevelDirectory('src/util.ts'), 'src');
   assert.equal(topLevelDirectory('main.ts'), '.');
+});
+
+const memberMap = {
+  available: true,
+  types: [
+    {
+      name: 'Counter',
+      visibility: 'public',
+      line: 1,
+      fields: [
+        { name: 'value', visibility: 'private', type: 'Int', mutable: true, line: 2, reads: 1, writes: 2 },
+        { name: 'label', visibility: 'private', type: 'String', mutable: false, line: 3, reads: 1, writes: 0 },
+        { name: 'lastError', visibility: 'private', type: 'String', mutable: true, line: 4, reads: 0, writes: 1 },
+      ],
+      methods: [
+        { name: 'add', visibility: 'public', parameters: 1, line: 5, reads: ['value'], writes: ['value'] },
+        { name: 'reset', visibility: 'public', parameters: 0, line: 6, reads: ['label'], writes: ['value'] },
+        { name: 'fail', visibility: 'public', parameters: 0, line: 7, reads: [], writes: ['lastError'] },
+      ],
+    },
+  ],
+  dataFlow: {
+    available: true,
+    sources: ['label'],
+    resources: ['value'],
+    transforms: ['Counter.add', 'Counter.reset'],
+    sinks: ['lastError'],
+    caveat: 'Derived from field references recorded in this file.',
+  },
+};
+
+test('memberMapSteps produces the five flow steps with derived captions', () => {
+  const steps = memberMapSteps(memberMap, { consumers: 3 });
+  assert.deepEqual(
+    steps.map((step) => step.key),
+    ['fingerprint', 'members', 'wiring', 'data-flow', 'consumption'],
+  );
+  assert.equal(steps[0].caption, 'Counter contains 3 field(s) and 3 behavior(s).');
+  assert.match(steps[2].caption, /2 transform\(s\)/);
+  assert.equal(steps[4].caption, '3 repository consumer(s) import this file.');
+});
+
+test('memberMapSteps reports missing wiring and consumers instead of inventing them', () => {
+  const steps = memberMapSteps(
+    { available: true, types: memberMap.types, dataFlow: { available: false, reason: 'no-field-access' } },
+    {},
+  );
+  assert.equal(steps[2].caption, 'No field-to-behavior wiring was recorded in the scan.');
+  assert.equal(steps[4].caption, 'Repository consumers were not recorded for this file.');
+});
+
+test('fieldCard and methodCard describe recorded signatures and wiring', () => {
+  const value = fieldCard(memberMap.types[0].fields[0]);
+  assert.equal(value.eyebrow, 'FIELD · PRIVATE · MUTABLE');
+  assert.equal(value.signature, 'value: Int');
+  assert.equal(value.tag, '1 read · 2 write');
+  assert.equal(value.metrics, 'public data · local reads 1 · local writes 2');
+
+  const label = fieldCard(memberMap.types[0].fields[1]);
+  assert.equal(label.eyebrow, 'FIELD · PRIVATE · READONLY');
+  assert.equal(label.tag, '1 read · 0 write');
+
+  const unconnected = fieldCard({ name: 'x', visibility: 'public', mutable: false, reads: 0, writes: 0 });
+  assert.equal(unconnected.tag, 'unconnected');
+
+  const add = methodCard(memberMap.types[0].methods[0]);
+  assert.equal(add.signature, 'add(1)');
+  assert.equal(add.tag, 'wired');
+  assert.equal(add.metrics, 'reads value · writes value');
+});
+
+test('memberClusters groups members connected by recorded wiring', () => {
+  const { clusters, clusterOf } = memberClusters(memberMap);
+  assert.equal(clusters.length, 2);
+  assert.equal(clusterOf.get('value'), clusterOf.get('add'));
+  assert.equal(clusterOf.get('value'), clusterOf.get('reset'));
+  assert.notEqual(clusterOf.get('value'), clusterOf.get('fail'));
+  assert.equal(clusterOf.get('fail'), clusterOf.get('lastError'));
+});
+
+test('explainClass summarises members and wiring in one sentence', () => {
+  assert.equal(
+    explainClass(memberMap),
+    'Counter declares 3 field(s) and 3 method(s). 2 method(s) read and write state across 1 shared field(s).',
+  );
+  assert.match(explainClass({ types: [], dataFlow: { available: false } }), /No type was recorded/);
+});
+
+test('radarPoints collapse an unavailable axis to the centre', () => {
+  const axes = [
+    { label: 'Cohesion', value: 100 },
+    { label: 'Coverage', value: null },
+  ];
+  const [full, missing] = radarPoints(axes, { radius: 50, center: 70 });
+  assert.equal(Math.hypot(full.x - 70, full.y - 70).toFixed(1), '50.0');
+  assert.equal(missing.x, 70);
+  assert.equal(missing.y, 70);
+
+  const frame = radarFrame(axes, { radius: 50, center: 70 });
+  assert.equal(frame.length, 2);
+  assert.match(polygonPoints(frame), /^\d+\.\d,\d+\.\d /);
+});
+
+test('constellationLayout is deterministic and includes consumers', () => {
+  const points = constellationPoints(memberMap, 2);
+  assert.equal(points.filter((point) => point.kind === 'consumer').length, 2);
+  const first = constellationLayout(points);
+  const second = constellationLayout(points);
+  assert.deepEqual(first, second);
+  assert.ok(first.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y)));
+});
+
+test('orderMembers sorts by source order, name, or visibility', () => {
+  const fields = memberMap.types[0].fields;
+  assert.deepEqual(orderMembers(fields, 'name').map((field) => field.name), [
+    'label',
+    'lastError',
+    'value',
+  ]);
+  assert.equal(orderMembers(fields, 'source')[0].name, 'value');
+  assert.equal(orderMembers(fields, 'visibility')[0].name, 'label');
+});
+
+test('isWiredField and isWiredMethod flag recorded wiring only', () => {
+  assert.equal(isWiredField(memberMap.types[0].fields[0]), true);
+  assert.equal(isWiredMethod(memberMap.types[0].methods[2]), true);
+  assert.equal(isWiredField({ reads: 0, writes: 0 }), false);
+  assert.equal(isWiredMethod({ reads: [], writes: [] }), false);
 });

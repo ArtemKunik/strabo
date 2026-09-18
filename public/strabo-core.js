@@ -434,3 +434,239 @@ function architectureOverlay(report) {
     ),
   };
 }
+
+/* ------------------------------------------------------------------ Member map */
+
+function totalMembers(memberMap, key) {
+  return (memberMap?.types ?? []).reduce((sum, type) => sum + (type[key] ?? []).length, 0);
+}
+
+/**
+ * The five-step flow walkthrough for a member map.
+ *
+ * Each caption is derived from recorded data. Steps whose evidence is missing say so
+ * rather than inventing a story, matching the "no wiring recorded" state in the design.
+ * `context.consumers` is the number of repository files that import this one, or null
+ * when the caller has no graph for the file.
+ */
+export function memberMapSteps(memberMap, context = {}) {
+  const primary = (memberMap?.types ?? [])[0] ?? null;
+  const fields = totalMembers(memberMap, 'fields');
+  const methods = totalMembers(memberMap, 'methods');
+  const flow = memberMap?.dataFlow;
+  const consumers = context.consumers ?? null;
+
+  const wiring =
+    flow?.available === false
+      ? 'No field-to-behavior wiring was recorded in the scan.'
+      : `${(flow?.transforms ?? []).length} transform(s) read and write state across ${(flow?.resources ?? []).length} shared field(s).`;
+
+  return [
+    {
+      key: 'fingerprint',
+      label: 'fingerprint',
+      caption: `${primary?.name ?? 'This file'} contains ${fields} field(s) and ${methods} behavior(s).`,
+    },
+    {
+      key: 'members',
+      label: 'members',
+      caption: `${fields} field(s) and ${methods} method(s) recorded.`,
+    },
+    { key: 'wiring', label: 'wiring', caption: wiring },
+    {
+      key: 'data-flow',
+      label: 'data flow',
+      caption: `Inputs: ${(flow?.sources ?? []).length} · resources: ${(flow?.resources ?? []).length} · transforms: ${(flow?.transforms ?? []).length} · sinks: ${(flow?.sinks ?? []).length}.`,
+    },
+    {
+      key: 'consumption',
+      label: 'consumption',
+      caption:
+        consumers === null
+          ? 'Repository consumers were not recorded for this file.'
+          : `${consumers} repository consumer(s) import this file.`,
+    },
+  ];
+}
+
+/** The eyebrow, signature, tag, and metrics line for one field card. */
+export function fieldCard(field) {
+  const connected = field.reads > 0 || field.writes > 0;
+  return {
+    eyebrow: `FIELD · ${String(field.visibility ?? 'unknown').toUpperCase()} · ${field.mutable === false ? 'READONLY' : 'MUTABLE'}`,
+    signature: `${field.name}: ${field.type ?? 'unrecorded type'}`,
+    tag: connected ? `${field.reads} read · ${field.writes} write` : 'unconnected',
+    metrics: `public data · local reads ${field.reads} · local writes ${field.writes}`,
+  };
+}
+
+/** The line under one method card. */
+export function methodCard(method) {
+  const wired = method.reads.length > 0 || method.writes.length > 0;
+  const params = method.parameters ?? 0;
+  return {
+    eyebrow: `METHOD · ${String(method.visibility ?? 'unknown').toUpperCase()}`,
+    signature: `${method.name}(${params})${method.type ? `: ${method.type}` : ''}`,
+    tag: wired ? 'wired' : 'unconnected',
+    metrics: `reads ${method.reads.join(', ') || 'none'} · writes ${method.writes.join(', ') || 'none'}`,
+  };
+}
+
+/**
+ * Cluster members by the wiring the scan recorded: a method joins every field it reads or
+ * writes, and each connected component is a cluster. Members with no wiring are singleton
+ * clusters, which is why a type with no recorded wiring shows one cluster per member.
+ */
+export function memberClusters(memberMap) {
+  const adjacency = new Map();
+  const ensure = (name) => {
+    if (!adjacency.has(name)) {
+      adjacency.set(name, new Set());
+    }
+    return adjacency.get(name);
+  };
+
+  for (const type of memberMap?.types ?? []) {
+    for (const field of type.fields) ensure(field.name);
+    for (const method of type.methods) {
+      ensure(method.name);
+      for (const field of [...method.reads, ...method.writes]) {
+        if (!adjacency.has(field)) {
+          continue;
+        }
+        adjacency.get(field).add(method.name);
+        adjacency.get(method.name).add(field);
+      }
+    }
+  }
+
+  const clusterOf = new Map();
+  const clusters = [];
+  for (const name of adjacency.keys()) {
+    if (clusterOf.has(name)) {
+      continue;
+    }
+    const index = clusters.length + 1;
+    const members = [];
+    const queue = [name];
+    clusterOf.set(name, index);
+    while (queue.length > 0) {
+      const currentMember = queue.shift();
+      members.push(currentMember);
+      for (const neighbour of adjacency.get(currentMember) ?? []) {
+        if (!clusterOf.has(neighbour)) {
+          clusterOf.set(neighbour, index);
+          queue.push(neighbour);
+        }
+      }
+    }
+    clusters.push({ index, members: members.sort() });
+  }
+
+  return { clusters, clusterOf };
+}
+
+/** A one-sentence explanation of the class, from recorded members and wiring only. */
+export function explainClass(memberMap) {
+  const type = (memberMap?.types ?? [])[0];
+  if (!type) {
+    return 'No type was recorded for this file.';
+  }
+  const flow = memberMap.dataFlow;
+  const wiring =
+    flow?.available === false
+      ? 'No field-to-behavior wiring was recorded in the scan.'
+      : `${flow.transforms.length} method(s) read and write state across ${flow.resources.length} shared field(s).`;
+  return `${type.name} declares ${type.fields.length} field(s) and ${type.methods.length} method(s). ${wiring}`;
+}
+
+/**
+ * Points for the Architecture Health radar, one per axis.
+ *
+ * A null axis (unavailable) collapses to the centre so the gap in evidence is visible
+ * instead of being drawn as a zero score.
+ */
+export function radarPoints(axes, { radius = 54, center = 72 } = {}) {
+  const count = Math.max(1, axes.length);
+  return axes.map((axis, index) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * index) / count;
+    const ratio = axis.value === null ? 0 : Math.max(0, Math.min(100, axis.value)) / 100;
+    return {
+      label: axis.label,
+      value: axis.value,
+      x: center + Math.cos(angle) * radius * ratio,
+      y: center + Math.sin(angle) * radius * ratio,
+    };
+  });
+}
+
+/** The outline of the radar frame, at full radius, for the grid rings. */
+export function radarFrame(axes, { radius = 54, center = 72 } = {}) {
+  return radarPoints(
+    axes.map(() => ({ value: 100, label: '' })),
+    { radius, center },
+  );
+}
+
+export function polygonPoints(points) {
+  return points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(' ');
+}
+
+/**
+ * Points for the Dependency constellation: fields, methods, and repository consumers.
+ * Positions are seeded from the member key so the layout is stable across renders.
+ */
+export function constellationLayout(points, { width = 280, height = 180 } = {}) {
+  return points.map((point) => {
+    const seed = hash(point.key);
+    const angle = (seed % 360) * (Math.PI / 180);
+    const ring =
+      point.kind === 'consumer' ? 0.42 : 0.3 + (((seed >> 3) % 40) / 100) * 0.7;
+    const radius = Math.min(width, height) / 2;
+    return {
+      ...point,
+      x: width / 2 + Math.cos(angle) * radius * ring,
+      y: height / 2 + Math.sin(angle) * radius * ring,
+    };
+  });
+}
+
+export function constellationPoints(memberMap, consumers) {
+  const points = [];
+  for (const type of memberMap?.types ?? []) {
+    for (const field of type.fields) {
+      points.push({ key: `field:${type.name}.${field.name}`, kind: 'field', label: field.name });
+    }
+    for (const method of type.methods) {
+      points.push({ key: `method:${type.name}.${method.name}`, kind: 'method', label: method.name });
+    }
+  }
+  const count = Math.max(0, consumers ?? 0);
+  for (let index = 0; index < count; index += 1) {
+    points.push({ key: `consumer:${index}`, kind: 'consumer', label: '' });
+  }
+  return points;
+}
+
+/** Sort a member list for the Order control. Returns a new array. */
+export function orderMembers(members, order) {
+  const copy = [...members];
+  if (order === 'name') {
+    return copy.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  if (order === 'visibility') {
+    return copy.sort(
+      (a, b) => String(a.visibility).localeCompare(String(b.visibility)) || a.name.localeCompare(b.name),
+    );
+  }
+  return copy.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
+}
+
+/** A member is "wired" when the scan recorded it touching state. */
+export function isWiredField(field) {
+  return field.reads > 0 || field.writes > 0;
+}
+
+export function isWiredMethod(method) {
+  return method.reads.length > 0 || method.writes.length > 0;
+}

@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildGraphQuery, fileWebUrl, filterNodes, findPath, graphSummary, mapCounts, overlayFor } from './strabo-core.js';
+import { API_PATH, buildGraphQuery, fileWebUrl, filterNodes, findPath, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import {
   renderBreadcrumb,
@@ -18,6 +18,7 @@ import {
   renderFolderList,
   renderInspector,
   renderLegend,
+  renderMemberMap,
   renderMembers,
   renderOverlayPanel,
   renderTestsStrip,
@@ -74,7 +75,24 @@ const elements = {
   folderUp: document.getElementById('folder-up'),
   folderUse: document.getElementById('folder-use'),
   folderCancel: document.getElementById('folder-cancel'),
+  forget: document.getElementById('forget'),
+  memberView: document.getElementById('member-view'),
 };
+
+/** Full-screen Member map UI state; `memberData` holds the last loaded payload. */
+const memberUI = {
+  order: 'source',
+  find: '',
+  showWiring: true,
+  zoom: 'medium',
+  dataFlow: true,
+  onlyFlow: false,
+  explain: false,
+  stepIndex: 0,
+  night: false,
+};
+let memberData = null;
+let memberTimer = null;
 
 let browsedFolder = null;
 
@@ -88,16 +106,47 @@ async function request(path) {
 }
 
 async function loadCatalogue() {
-  const catalogue = await request('/catalogue');
+  const catalogue = await request('/repositories');
+  renderRepositoryOptions(catalogue.repositories, catalogue.active);
+}
+
+/** Rebuild the repository selector from the known list, selecting the active one. */
+function renderRepositoryOptions(repositories, active) {
   elements.repository.replaceChildren(
-    ...catalogue.map((entry) => {
+    ...repositories.map((entry) => {
       const option = document.createElement('option');
       option.value = entry.root;
       option.textContent = entry.name;
       return option;
     }),
   );
+  if (repositories.length === 0) {
+    const option = document.createElement('option');
+    option.value = '';
+    option.textContent = 'No repositories';
+    option.disabled = true;
+    elements.repository.append(option);
+  }
+  const selected = active ?? repositories[0]?.root ?? null;
+  if (selected) {
+    elements.repository.value = selected;
+  }
   state.repository = elements.repository.value || null;
+  elements.forget.disabled = !state.repository;
+}
+
+/** Remember a repository server-side so it is offered again after a restart. */
+async function rememberRepository(root) {
+  const response = await fetch(`${API_PATH}/repositories`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ root }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error ?? `Could not remember ${root}`);
+  }
+  return response.json();
 }
 
 /**
@@ -108,6 +157,7 @@ async function loadCatalogue() {
 async function scan({ refresh = false } = {}) {
   const generation = ++scanGeneration;
   elements.status.textContent = 'Scanning…';
+  closeMemberMap();
 
   try {
     const model = await request(`/graph${buildGraphQuery(state, { refresh })}`);
@@ -172,6 +222,11 @@ function selectNode(id) {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
+    onOpenMemberMap: (target) => {
+      openMemberMap(target).catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
   });
   loadMembers(id);
 }
@@ -210,6 +265,157 @@ function clearSelection() {
   view.highlight(null);
   elements.inspector.hidden = true;
 }
+
+/** Load the member map, repository health, and consumers, then open the full view. */
+async function openMemberMap(id) {
+  const params = new URLSearchParams({ file: id });
+  if (state.repository) {
+    params.set('repository', state.repository);
+  }
+  const result = await request(`/symbols?${params.toString()}`);
+  const healthParams = new URLSearchParams({ file: id });
+  if (state.repository) {
+    healthParams.set('repository', state.repository);
+  }
+  let health = await request(`/analysis/file-health?${healthParams.toString()}`).catch(() => null);
+  if (!health) {
+    const healthQuery = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+    health = await request(`/analysis/architecture-health${healthQuery}`).catch(() => null);
+  }
+  const passport = passportFor(current, id);
+  memberData = {
+    file: id,
+    repository: state.repository,
+    memberMap: result.memberMap,
+    symbols: result.symbols,
+    health,
+    metrics: health?.metrics ?? null,
+    consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
+  };
+  memberUI.stepIndex = 0;
+  memberUI.find = '';
+  elements.memberView.hidden = false;
+  renderMemberMapView();
+}
+
+function memberStepCount() {
+  return memberMapSteps(memberData?.memberMap, {
+    consumers: memberData?.consumerIds ? memberData.consumerIds.length : null,
+  }).length;
+}
+
+function renderMemberMapView() {
+  if (!memberData) {
+    return;
+  }
+  const refocusFind = document.activeElement?.id === 'member-find';
+  renderMemberMap(elements.memberView, memberData, memberUI, {
+    onFind: (value) => {
+      memberUI.find = value;
+      renderMemberMapView();
+    },
+    onOrder: (value) => {
+      memberUI.order = value;
+      renderMemberMapView();
+    },
+    onWiring: (value) => {
+      memberUI.showWiring = value;
+      renderMemberMapView();
+    },
+    onZoom: (value) => {
+      memberUI.zoom = value;
+      renderMemberMapView();
+    },
+    onExplain: () => {
+      memberUI.explain = !memberUI.explain;
+      renderMemberMapView();
+    },
+    onNight: () => {
+      memberUI.night = !memberUI.night;
+      document.body.classList.toggle('night-vision', memberUI.night);
+    },
+    onCompare: () => {
+      toggleTimeline().catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
+    onOnlyFlow: () => {
+      memberUI.onlyFlow = !memberUI.onlyFlow;
+      renderMemberMapView();
+    },
+    onReset: () => {
+      Object.assign(memberUI, {
+        order: 'source',
+        find: '',
+        showWiring: true,
+        zoom: 'medium',
+        dataFlow: true,
+        onlyFlow: false,
+        explain: false,
+        stepIndex: 0,
+        night: false,
+      });
+      document.body.classList.remove('night-vision');
+      renderMemberMapView();
+    },
+    onDataFlow: (value) => {
+      memberUI.dataFlow = value;
+      renderMemberMapView();
+    },
+    onStep: (delta) => {
+      stopMemberPlay();
+      memberUI.stepIndex = Math.min(
+        memberStepCount() - 1,
+        Math.max(0, memberUI.stepIndex + delta),
+      );
+      renderMemberMapView();
+    },
+    onPlay: () => toggleMemberPlay(),
+    onClose: () => closeMemberMap(),
+  });
+  if (refocusFind) {
+    const input = elements.memberView.querySelector('#member-find');
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+function stopMemberPlay() {
+  if (memberTimer) {
+    clearInterval(memberTimer);
+    memberTimer = null;
+  }
+}
+
+function toggleMemberPlay() {
+  if (memberTimer) {
+    stopMemberPlay();
+    return;
+  }
+  memberTimer = setInterval(() => {
+    if (memberUI.stepIndex >= memberStepCount() - 1) {
+      memberUI.stepIndex = 0;
+      renderMemberMapView();
+      stopMemberPlay();
+      return;
+    }
+    memberUI.stepIndex += 1;
+    renderMemberMapView();
+  }, 1400);
+}
+
+function closeMemberMap() {
+  stopMemberPlay();
+  elements.memberView.hidden = true;
+  document.body.classList.remove('night-vision');
+  memberUI.night = false;
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !elements.memberView.hidden) {
+    closeMemberMap();
+  }
+});
 
 /** Show or hide recorded changes; selecting one compares it with the working tree. */
 async function toggleTimeline() {
@@ -327,22 +533,42 @@ function openFolderDialog() {
   });
 }
 
-/** Point the app at a chosen repository, adding it to the selector when it is not listed. */
-function useRepository(path) {
+/** Point the app at a chosen repository, remembering it as the active one. */
+async function useRepository(path) {
   state.repository = path;
   state.prefix = '';
   state.filter = '';
   elements.filter.value = '';
 
-  const existing = [...elements.repository.options].find((option) => option.value === path);
-  if (!existing) {
-    const option = document.createElement('option');
-    option.value = path;
-    option.textContent = path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-    elements.repository.append(option);
+  try {
+    await rememberRepository(path);
+    const catalogue = await request('/repositories');
+    renderRepositoryOptions(catalogue.repositories, path);
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+    return;
   }
-  elements.repository.value = path;
   scan();
+}
+
+/** Forget the selected repository; it stays usable until the page reloads. */
+async function forgetRepository() {
+  const root = state.repository;
+  if (!root) {
+    return;
+  }
+  const response = await fetch(`${API_PATH}/repositories?root=${encodeURIComponent(root)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    elements.status.textContent = 'Error: could not forget the repository.';
+    return;
+  }
+  const catalogue = await request('/repositories');
+  renderRepositoryOptions(catalogue.repositories, catalogue.active);
+  if (state.repository !== root) {
+    scan();
+  }
 }
 
 /** Double-click drills in block mode; in file mode it opens the file. */
@@ -372,9 +598,23 @@ function openFile(id) {
 }
 
 elements.repository.addEventListener('change', () => {
-  state.repository = elements.repository.value || null;
+  const root = elements.repository.value;
+  if (!root) {
+    return;
+  }
+  state.repository = root;
   state.prefix = '';
-  scan();
+  elements.forget.disabled = false;
+  rememberRepository(root)
+    .then(() => scan())
+    .catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+});
+elements.forget.addEventListener('click', () => {
+  forgetRepository().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
 });
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
@@ -422,7 +662,9 @@ elements.folderUp.addEventListener('click', () => {
 elements.folderUse.addEventListener('click', () => {
   if (browsedFolder) {
     elements.folderDialog.close();
-    useRepository(browsedFolder.path);
+    useRepository(browsedFolder.path).catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
   }
 });
 
@@ -475,6 +717,11 @@ if (window.STRABO_TEST) {
     drill: onDrill,
     model: () => current,
     renderedGeneration: () => state.renderedGeneration,
+    openMemberMap: (id) => openMemberMap(id),
+    closeMemberMap: () => closeMemberMap(),
+    memberUI,
+    memberData: () => memberData,
+    memberStepCount,
   };
 }
 

@@ -30,6 +30,8 @@ export type {
   MemberAccess,
   SymbolExtraction,
 } from './scan/languages/symbols.ts';
+export { SYMBOL_EXTRACTORS, symbolExtractorFor } from './scan/languages/registry.ts';
+export type { SymbolExtractor } from './scan/languages/registry.ts';
 export { addNamespacePrefixes, namespaceDepth, looksInternal } from './scan/languages/namespace.ts';
 export { classifyExclusion, looksMinified } from './scan/exclusions.ts';
 
@@ -49,6 +51,8 @@ export { computeImpact, getChangedFiles } from './analysis/impact.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';
+export { computeFileHealth } from './analysis/file-health.ts';
+export type { FileHealthReport, FileHealthMetrics } from './analysis/file-health.ts';
 export { buildMemberMap } from './analysis/member-map.ts';
 export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member-map.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
@@ -71,6 +75,13 @@ export { createStraboRouter } from './api/router.ts';
 export { createStraboServer } from './server.ts';
 
 export { loadCatalogue } from './integrations/catalogue.ts';
+export {
+  createRepositoryStore,
+  knownRepositoriesInside,
+  repositoryStorePath,
+  REPOSITORY_STORE_VERSION,
+} from './state/repository-store.ts';
+export type { KnownRepository, RepositoryStore } from './state/repository-store.ts';
 export { getVulnerabilities } from './integrations/vulnerability.ts';
 export { getLineage } from './integrations/lineage-pack.ts';
 

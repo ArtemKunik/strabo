@@ -29,3 +29,17 @@ Feature: Member map
     And I switch to file detail
     And I select the "src/main/kotlin/com/acme/app/Plain.kt" node
     Then the data flow reports wiring is not recorded
+
+  @member-view
+  Scenario: Member map view with a flow walkthrough
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    Then the member map view shows fields, clusters, and the data flow
+    And the member map view shows architecture health and the dependency constellation
+    When I step through the flow walkthrough
+    Then the flow walkthrough reports the wiring step

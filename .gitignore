@@ -11,7 +11,6 @@ dist/
 # Test / coverage output
 coverage/
 test/acceptance/reports/
-
 # Vendored parser grammars are generated from tree-sitter-wasm by `npm run vendor:parsers`
 parsers/vendor/
 

@@ -2,9 +2,11 @@ import { Router } from 'express';
 
 import { browseDirectories } from '../boundary/browse.ts';
 import { loadCatalogue } from '../integrations/catalogue.ts';
+import { createRepositoryStore, type RepositoryStore } from '../state/repository-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
 import { createGraphRouter } from './routes/graph.ts';
 import { createLineageRouter } from './routes/lineage.ts';
+import { createRepositoriesRouter } from './routes/repositories.ts';
 import { createSymbolsRouter } from './routes/symbols.ts';
 import { createVulnerabilityRouter } from './routes/vulnerabilities.ts';
 import type { StraboConfig } from '../types.ts';
@@ -14,9 +16,12 @@ import { sendError } from './http.ts';
  * Compose routes; focused routers own lineage and depth endpoints.
  *
  * The identical router is mounted by the standalone server and by an embedded host.
+ * A host may inject its own repository store so known repositories are shared rather
+ * than re-read from disk on every mount.
  */
-export function createStraboRouter(config: StraboConfig): Router {
+export function createStraboRouter(config: StraboConfig, store?: RepositoryStore): Router {
   const router = Router();
+  const repositoryStore = store ?? createRepositoryStore();
 
   router.get('/health', (_request, response) => {
     response.json({ ok: true });
@@ -47,6 +52,7 @@ export function createStraboRouter(config: StraboConfig): Router {
   router.use(createGraphRouter(config));
   router.use(createAnalysisRouter(config));
   router.use(createSymbolsRouter(config));
+  router.use(createRepositoriesRouter(config, repositoryStore));
   router.use(createVulnerabilityRouter(config));
   router.use(createLineageRouter(config));
 

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +10,7 @@ import express from 'express';
 
 import { createStraboRouter } from '../../src/api/router.ts';
 import { createStraboServer } from '../../src/server.ts';
+import { createRepositoryStore } from '../../src/state/repository-store.ts';
 import type { StraboConfig } from '../../src/types.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -77,4 +80,59 @@ test('the symbol endpoint reports not-implemented rather than an empty list', as
   const body = (await response.json()) as { available: boolean; reason?: string };
   assert.equal(body.available, false);
   assert.equal(body.reason, 'not-implemented');
+});
+
+test('the repository store seeds the configured root and remembers a selection', async () => {
+  const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}.json`);
+  const store = createRepositoryStore({ file });
+  const host = express();
+  host.use(express.json());
+  host.use('/api/strabo', createStraboRouter(config, store));
+  const base = await listen(host);
+
+  const seeded = (await (await fetch(`${base}/api/strabo/repositories`)).json()) as {
+    active: string | null;
+    repositories: Array<{ name: string }>;
+  };
+  assert.equal(seeded.repositories.length, 1);
+  assert.equal(seeded.repositories[0].name, 'block-repo');
+  assert.equal(seeded.active, path.join(fixtures, 'block-repo'));
+
+  const added = await fetch(`${base}/api/strabo/repositories`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ root: path.join(fixtures, 'polyglot-repo') }),
+  });
+  assert.equal(added.status, 201);
+
+  const after = (await (await fetch(`${base}/api/strabo/repositories`)).json()) as {
+    active: string | null;
+    repositories: Array<{ name: string }>;
+  };
+  assert.deepEqual(after.repositories.map((entry) => entry.name), ['polyglot-repo', 'block-repo']);
+  assert.equal(after.active, path.join(fixtures, 'polyglot-repo'));
+
+  const removed = await fetch(
+    `${base}/api/strabo/repositories?root=${encodeURIComponent(path.join(fixtures, 'polyglot-repo'))}`,
+    { method: 'DELETE' },
+  );
+  assert.deepEqual(await removed.json(), { removed: true });
+  fs.rmSync(file, { force: true });
+});
+
+test('the repository store refuses a path outside the scan ceiling', async () => {
+  const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}-deny.json`);
+  const store = createRepositoryStore({ file });
+  const host = express();
+  host.use(express.json());
+  host.use('/api/strabo', createStraboRouter(config, store));
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/repositories`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ root: path.dirname(fixtures) }),
+  });
+  assert.equal(response.status, 400);
+  fs.rmSync(file, { force: true });
 });

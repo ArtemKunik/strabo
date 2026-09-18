@@ -1,16 +1,22 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 export const ACCEPTANCE_PORT = 3131;
 export const ACCEPTANCE_URL = `http://127.0.0.1:${ACCEPTANCE_PORT}`;
+export const ACCEPTANCE_ROOT = path.resolve('test/fixtures/block-repo');
 
 let child = null;
 
 /** Start the standalone server against the acceptance fixture on a dedicated port. */
 export async function startServer() {
   const fixtures = path.resolve('test/fixtures');
-  const root = path.join(fixtures, 'block-repo');
+  const root = ACCEPTANCE_ROOT;
   const cacheDir = path.resolve('test/acceptance/reports/cache');
+  // A fresh state dir per run keeps the remembered-repositories list deterministic.
+  const stateDir = path.resolve('test/acceptance/reports/state');
+  fs.rmSync(stateDir, { recursive: true, force: true });
+  fs.mkdirSync(stateDir, { recursive: true });
   child = spawn(process.execPath, ['bin/strabo.js'], {
     env: {
       ...process.env,
@@ -19,6 +25,7 @@ export async function startServer() {
       STRABO_SCAN_CEILING: fixtures,
       PORT: String(ACCEPTANCE_PORT),
       STRABO_CACHE_DIR: cacheDir,
+      STRABO_STATE_DIR: stateDir,
     },
     stdio: 'ignore',
   });

@@ -2,11 +2,19 @@ import assert from 'node:assert/strict';
 
 import { Given, Then, When } from '@cucumber/cucumber';
 
+import { ACCEPTANCE_ROOT } from '../support/server.mjs';
+
 const CACHE_STATUS = /cache:\s*(memory|disk|miss|refreshed)/;
 
 Given('the Strabo server is running against the fixture repository', async function () {
   const response = await fetch(`${this.baseUrl}/api/strabo/health`);
   assert.equal(response.ok, true, 'health endpoint should respond');
+  // The repository list persists between scenarios; start each one on the fixture root.
+  await fetch(`${this.baseUrl}/api/strabo/repositories`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ root: ACCEPTANCE_ROOT }),
+  });
 });
 
 Given('I open the Strabo UI', async function () {
@@ -105,6 +113,43 @@ When('I use the selected folder', async function () {
 Then('the repository is {string}', async function (name) {
   const repository = await this.page.evaluate(() => window.straboTest.state.repository);
   assert.equal(repository.split(/[\\/]/).filter(Boolean).pop(), name);
+});
+
+Then('the repository picker lists {string}', async function (name) {
+  await this.page.waitForFunction(
+    (expected) => {
+      const options = [...document.querySelectorAll('#repository option')];
+      return options.some((option) => option.textContent === expected);
+    },
+    name,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the repository picker lists the fixture repository', async function () {
+  await this.page.waitForFunction(
+    () => document.querySelectorAll('#repository option').length > 0,
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+When('I select the remembered {string} repository', async function (name) {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.page.selectOption('#repository', { label: name });
+  await this.page.waitForFunction(
+    (generation) => window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the repository picker marks {string} as active', async function (name) {
+  const selected = await this.page.evaluate(() => {
+    const option = document.querySelector('#repository option:checked');
+    return option ? option.textContent : null;
+  });
+  assert.equal(selected, name);
 });
 
 When('I select the review overlay {string}', async function (kind) {
