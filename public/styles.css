@@ -247,15 +247,22 @@ button.primary {
 .graph-wrap {
   position: relative;
   min-height: 0;
-  background:
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.045) 1px, transparent 1.4px);
-  background-size: 26px 26px;
   background-color: var(--bg-1);
 }
 
+/*
+ * The dot grid lives on the graph container, not on .graph-wrap: when the (opt-in)
+ * WebGL renderer is active, it reads this element's inline background colour to blend
+ * arrow tips, and strabo-view.js sets one here that would otherwise hide a grid painted
+ * behind it. Cytoscape's canvases clear to transparent, so the grid still shows through
+ * either way.
+ */
 .graph {
   position: absolute;
   inset: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.045) 1px, transparent 1.4px);
+  background-size: 26px 26px;
 }
 
 .graph-toolbar {
@@ -716,6 +723,30 @@ button.primary {
 .edge-panel {
   border-left: 3px solid var(--accent);
   background: var(--bg-0);
+}
+
+.review-panel {
+  border-left: 3px solid var(--warn);
+  background: var(--bg-0);
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.review-status {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.review-panel h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
 }
 
 .edge-route {
@@ -1518,4 +1549,115 @@ button.primary {
   .member-insights {
     position: static;
   }
+}
+
+
+/* ------------------------------------------------- Agent delegation menu */
+.agent-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 250px;
+  max-width: 330px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(20, 26, 34, 0.98);
+  box-shadow: var(--shadow-2);
+}
+
+.agent-menu[hidden] {
+  display: none;
+}
+
+.agent-menu-title {
+  padding: 6px 10px 7px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 4px;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.agent-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-1);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-menu-item:hover:not(:disabled),
+.agent-menu-item:focus-visible:not(:disabled) {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.agent-menu-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.agent-menu-hint {
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.agent-menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line-soft);
+}
+
+/* ------------------------------------------------- Toast notifications */
+.toast-stack {
+  position: fixed;
+  right: 14px;
+  bottom: 40px;
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 28px));
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 9px;
+  background: rgba(20, 26, 34, 0.98);
+  box-shadow: var(--shadow-2);
+  font-size: 12.5px;
+}
+
+.toast-action {
+  flex: none;
+  padding: 3px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+}
+
+.toast-dismiss {
+  flex: none;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  font-size: 15px;
 }

@@ -47,6 +47,23 @@ Then('the legend explains size, colour, and shape', async function () {
   assert.match(text, /diamond = test/);
 });
 
+/**
+ * The map draws on the 2D canvas renderer by default and only switches to WebGL on an
+ * explicit opt-in (`?renderer=webgl`). Either is a pass here; reporting the one that is
+ * not actually drawing is not, because the status bar is how an engineer explains a slow
+ * map.
+ */
+Then('the status bar names the renderer the map is drawing with', async function () {
+  const text = (await this.page.textContent('#statusbar-render')) ?? '';
+  const claimed = /renderer: (webgl2|canvas)/.exec(text);
+  assert.ok(claimed, `status bar "${text}" should name a renderer`);
+
+  const drawing = await this.page.evaluate(() =>
+    (window.straboTest?.cy.renderer().webgl ? 'webgl2' : 'canvas'),
+  );
+  assert.equal(claimed[1], drawing, 'the status bar should name the renderer in use');
+});
+
 Then('the blast radius is reported for {string}', async function (id) {
   const text = (await this.page.textContent('#hover')) ?? '';
   assert.ok(text.includes(id), `hover "${text}" should mention "${id}"`);

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  MAX_DELEGATE_PROMPT,
   MAX_DIAMETER,
   MIN_DIAMETER,
   breadcrumb,
+  buildAgentPrompt,
   buildElements,
   buildGraphQuery,
   constellationLayout,
@@ -35,6 +37,9 @@ import {
   radarFrame,
   radarPoints,
   resolutionLabel,
+  reviewFileLabel,
+  reviewGroups,
+  reviewOverlay,
   summarizeDiagnostics,
   topLevelDirectory,
 } from '../../public/strabo-core.js';
@@ -321,6 +326,58 @@ test('folderLocation explains the scan ceiling when Up is disabled', () => {
   assert.equal(inside.note, 'Scan ceiling: D:\\repos');
 });
 
+test('reviewOverlay marks changed and affected nodes from a review result', () => {
+  const data = {
+    available: true,
+    kind: 'commit',
+    files: [
+      { path: 'b.ts', status: 'modified', group: 'commit', insertions: 2, deletions: 1, inGraph: true },
+      { path: 'notes.md', status: 'added', group: 'commit', insertions: 4, deletions: 0, inGraph: false },
+    ],
+    totals: { files: 2, insertions: 6, deletions: 1, uncounted: 0 },
+    impact: {
+      affected: [
+        { id: 'b.ts', distance: 0 },
+        { id: 'a.ts', distance: 1 },
+      ],
+      outsideGraph: ['notes.md'],
+    },
+  };
+
+  const overlay = reviewOverlay(data);
+  assert.equal(overlay.classes.get('b.ts'), 'ov-changed');
+  assert.equal(overlay.classes.get('a.ts'), 'ov-affected');
+  // A file outside the graph is never annotated as if it had impact.
+  assert.equal(overlay.classes.has('notes.md'), false);
+  assert.match(overlay.summary, /2 file\(s\) · \+6 −1 · 1 affected/);
+});
+
+test('reviewOverlay stays empty when the review is unavailable', () => {
+  const overlay = reviewOverlay({ available: false, reason: 'no-git' });
+  assert.equal(overlay.classes.size, 0);
+  assert.equal(overlay.summary, '');
+});
+
+test('reviewFileLabel reports renames and unavailable line counts honestly', () => {
+  assert.equal(
+    reviewFileLabel({ path: 'new.ts', previousPath: 'old.ts', status: 'renamed', insertions: 3, deletions: 2 }),
+    'renamed · old.ts → new.ts · +3 −2',
+  );
+  assert.equal(
+    reviewFileLabel({ path: 'logo.png', status: 'modified', insertions: null, deletions: null }),
+    'modified · logo.png · line counts unavailable',
+  );
+});
+
+test('reviewGroups orders commit, staged, unstaged, then untracked and drops empty groups', () => {
+  const groups = reviewGroups([
+    { path: 'u.ts', group: 'untracked' },
+    { path: 's.ts', group: 'staged' },
+    { path: 'c.ts', group: 'commit' },
+  ]);
+  assert.deepEqual(groups.map(([name]) => name), ['commit', 'staged', 'untracked']);
+});
+
 const memberMap = {
   available: true,
   types: [
@@ -447,4 +504,49 @@ test('isWiredField and isWiredMethod flag recorded wiring only', () => {
   assert.equal(isWiredMethod(memberMap.types[0].methods[2]), true);
   assert.equal(isWiredField({ reads: 0, writes: 0 }), false);
   assert.equal(isWiredMethod({ reads: [], writes: [] }), false);
+});
+
+test('buildAgentPrompt renders recorded evidence and a kind-aware task', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'opencode',
+    repository: { name: 'demo', root: '/demo' },
+    target: {
+      kind: 'node',
+      id: 'src/util.ts',
+      label: 'util.ts',
+      evidence: ['Direct importers: 1', 'Blast radius: 4', 'imports src/index.ts (L1 ./util.ts)'],
+    },
+  });
+  assert.match(prompt, /# Strabo task — util\.ts/);
+  assert.match(prompt, /Repository: demo \(\/demo\)/);
+  assert.match(prompt, /Target: node `src\/util\.ts`/);
+  assert.match(prompt, /Blast radius: 4/);
+  assert.match(prompt, /do not invent links/);
+  assert.match(prompt, /Assess this file/);
+});
+
+test('buildAgentPrompt degrades gracefully and rejects unknown agents', () => {
+  const bare = buildAgentPrompt({ agent: 'claude', repository: null, target: null });
+  assert.match(bare, /Target: view/);
+  assert.match(bare, /No further evidence recorded/);
+  assert.match(bare, /architectural overview/);
+
+  const unknownKind = buildAgentPrompt({
+    agent: 'claude',
+    repository: { name: 'demo', root: '/demo' },
+    target: { kind: 'nonsense', id: 'x.ts', evidence: [] },
+  });
+  assert.match(unknownKind, /Target: view/);
+
+  assert.throws(() => buildAgentPrompt({ agent: 'codex', repository: null, target: null }), /Unknown delegate agent/);
+});
+
+test('buildAgentPrompt caps runaway evidence', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'opencode',
+    repository: { name: 'demo', root: '/demo' },
+    target: { kind: 'diagnostic', id: 'a.ts:1', evidence: Array.from({ length: 40 }, (_, i) => `fact ${i}`) },
+  });
+  assert.ok(prompt.length <= MAX_DELEGATE_PROMPT + 20);
+  assert.match(prompt, /truncated/);
 });

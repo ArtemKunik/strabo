@@ -47,16 +47,33 @@ export async function computeImpact(
   baseRef?: string,
 ): Promise<ImpactResult> {
   const changed = await getChangedFiles(root, baseRef);
+  const { affected, outsideGraph } = impactFromPaths(
+    graph,
+    changed.map((change) => change.path),
+  );
+  return { changed, affected, outsideGraph };
+}
+
+/**
+ * Reverse-reachability impact for an explicit set of changed paths.
+ *
+ * Kept separate from Git so the review workflow can reuse the exact traversal the
+ * change-impact overlay uses, rather than reimplementing distance semantics.
+ */
+export function impactFromPaths(
+  graph: Graph,
+  paths: readonly string[],
+): Pick<ImpactResult, 'affected' | 'outsideGraph'> {
   const { backward } = buildAdjacency(graph);
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   const affected = new Map<string, number>();
   const outsideGraph: string[] = [];
 
-  for (const change of changed) {
-    if (nodeIds.has(change.path)) {
-      affected.set(change.path, 0);
+  for (const path of paths) {
+    if (nodeIds.has(path)) {
+      affected.set(path, 0);
     } else {
-      outsideGraph.push(change.path);
+      outsideGraph.push(path);
     }
   }
 
@@ -77,10 +94,9 @@ export async function computeImpact(
   }
 
   return {
-    changed,
     affected: [...affected.entries()]
       .map(([id, hop]) => ({ id, distance: hop }))
       .sort((a, b) => a.distance - b.distance || a.id.localeCompare(b.id)),
-    outsideGraph: outsideGraph.sort(),
+    outsideGraph: [...new Set(outsideGraph)].sort(),
   };
 }

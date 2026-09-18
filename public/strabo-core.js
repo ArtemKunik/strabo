@@ -397,6 +397,9 @@ const RESOLUTION_LABELS = {
   'index-of-package': 'package member',
   'module-tree': 'module tree',
   'index-packed': 'packed index',
+  alias: 'path alias',
+  root: 'repo root',
+  'subpath-import': 'package subpath',
 };
 
 export function resolutionLabel(resolution) {
@@ -410,6 +413,58 @@ export function graphSummary(model) {
   const cache = model.cache?.status ?? 'unknown';
   const stale = model.cache?.stale ? ' (stale)' : '';
   return `${nodes} nodes · ${edges} edges · cache: ${cache}${stale}`;
+}
+
+/**
+ * Map a review analysis result onto node classes and a panel summary.
+ *
+ * A review result is the same shape as change impact — `files` with a status, plus
+ * `impact.affected` — so it reuses the change/affected classes rather than inventing
+ * a parallel vocabulary. Returns `{ classes, summary, items }`.
+ */
+export function reviewOverlay(data) {
+  if (!data || data.available === false) {
+    return { classes: new Map(), summary: '', items: [] };
+  }
+  const classes = new Map();
+  for (const file of data.files ?? []) {
+    if (file.inGraph) {
+      classes.set(file.path, 'ov-changed');
+    }
+  }
+  for (const entry of data.impact?.affected ?? []) {
+    if (!classes.has(entry.id) && entry.distance > 0) {
+      classes.set(entry.id, 'ov-affected');
+    }
+  }
+  const totals = data.totals ?? { files: 0, insertions: 0, deletions: 0 };
+  const affected = (data.impact?.affected ?? []).filter((entry) => entry.distance > 0).length;
+  return {
+    classes,
+    summary: `${totals.files} file(s) · +${totals.insertions} −${totals.deletions} · ${affected} affected`,
+    items: (data.files ?? []).map((file) => reviewFileLabel(file)),
+  };
+}
+
+/** Human label for one reviewed file, including rename and binary/unreadable cases. */
+export function reviewFileLabel(file) {
+  const rename = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+  const counts =
+    file.insertions === null || file.deletions === null
+      ? 'line counts unavailable'
+      : `+${file.insertions} −${file.deletions}`;
+  return `${file.status} · ${rename} · ${counts}`;
+}
+
+/** Count reviewed files by group so the panel can label staged vs unstaged vs untracked. */
+export function reviewGroups(files) {
+  const order = ['commit', 'staged', 'unstaged', 'untracked'];
+  const groups = new Map(order.map((name) => [name, []]));
+  for (const file of files ?? []) {
+    const list = groups.get(file.group) ?? groups.get('unstaged');
+    list.push(file);
+  }
+  return [...groups.entries()].filter(([, list]) => list.length > 0);
 }
 
 /**
@@ -729,4 +784,66 @@ export function isWiredField(field) {
 
 export function isWiredMethod(method) {
   return method.reads.length > 0 || method.writes.length > 0;
+}
+
+/* ------------------------------------------------- Agent delegation prompts */
+
+export const DELEGATE_AGENTS = ['opencode', 'claude'];
+
+/** Upper bound so a delegated prompt stays well under HTTP and CLI arg limits. */
+export const MAX_DELEGATE_PROMPT = 20000;
+
+const DELEGATE_TASKS = {
+  node: 'Assess this file: its role in the repository, its blast radius, and the risk of changing it.',
+  edge: 'Explain this dependency: why it exists (from the evidence) and the impact of changing it.',
+  diagnostic: 'Resolve this diagnostic: explain the cause and propose the smallest safe fix.',
+  commit: 'Summarise what this change did and what it may still affect in the working tree.',
+  member: 'Explain this member: what it does and how it is wired to state.',
+  view: 'Give an architectural overview of this view: hotspots, coupling, and where to look first.',
+};
+
+/**
+ * Build an evidence-based delegation prompt for an AI coding agent.
+ *
+ * Pure function: only the recorded facts in `target` are rendered, nothing is
+ * inferred. `target` is `{ kind, id?, label?, detail?, evidence? }` where kind is
+ * one of node | edge | diagnostic | commit | member | view and `evidence` is an
+ * array of short fact strings. Returns capped markdown, or throws for an
+ * unknown agent so callers fail loudly instead of launching the wrong tool.
+ */
+export function buildAgentPrompt({ agent, repository, target }) {
+  if (!DELEGATE_AGENTS.includes(agent)) {
+    throw new Error(`Unknown delegate agent: ${agent}`);
+  }
+  const item = target ?? { kind: 'view' };
+  const kind = DELEGATE_TASKS[item.kind] ? item.kind : 'view';
+  const title = item.label ?? item.id ?? 'repository view';
+  const lines = [`# Strabo task — ${title}`, ''];
+  lines.push(`Repository: ${repository?.name ?? 'unknown'} (${repository?.root ?? 'unknown'})`);
+  lines.push(`Target: ${kind}${item.id ? ` \`${item.id}\`` : ''}`);
+  lines.push('');
+  lines.push('## Recorded evidence (from the Strabo scan — do not invent links)');
+  lines.push('');
+  const facts = Array.isArray(item.evidence) ? item.evidence.filter(Boolean) : [];
+  if (item.detail) {
+    facts.unshift(String(item.detail));
+  }
+  if (facts.length === 0) {
+    lines.push('- No further evidence recorded for this item.');
+  } else {
+    for (const fact of facts.slice(0, 20)) {
+      lines.push(`- ${String(fact).slice(0, 300)}`);
+    }
+    if (facts.length > 20) {
+      lines.push(`- …and ${facts.length - 20} more recorded fact(s) (truncated).`);
+    }
+  }
+  lines.push('');
+  lines.push('## Task');
+  lines.push('');
+  lines.push(DELEGATE_TASKS[kind]);
+  lines.push('');
+  lines.push(`Work inside \`${repository?.root ?? '.'}\`. Quote file paths and line numbers for every claim.`);
+  const prompt = lines.join('\n');
+  return prompt.length > MAX_DELEGATE_PROMPT ? `${prompt.slice(0, MAX_DELEGATE_PROMPT)}\n\n…(truncated)` : prompt;
 }

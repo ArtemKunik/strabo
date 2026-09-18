@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "~utils/*": ["src/shared/utils/*"],
+      "@app": ["src/app/index.ts"]
+    }
+  }
+}

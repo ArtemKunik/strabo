@@ -74,7 +74,7 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   }));
 
   const [jsScan, polyglot] = await Promise.all([
-    Promise.resolve(scanJsTsEdges(files, contentByFile)),
+    Promise.resolve(scanJsTsEdges(files, contentByFile, { root })),
     scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
   ]);
 

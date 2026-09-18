@@ -10,18 +10,18 @@ import { SHAPES, buildElements } from './strabo-core.js';
 
 const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached'];
 
+/** Zoom level at which ordinary nodes earn a label. */
+const LABEL_DETAIL_ZOOM = 0.65;
+
 export function createView(container) {
-  const cy = window.cytoscape({
-    container,
-    style: stylesheet(),
-    layout: { name: 'preset' },
-    wheelSensitivity: 0.2,
-  });
+  const cy = createCytoscape(container);
+  const gpu = Boolean(cy.renderer()?.webgl);
 
   const selectHandlers = [];
   const drillHandlers = [];
   const hoverHandlers = [];
   const edgeHandlers = [];
+  const contextHandlers = [];
   let selectedEdge = null;
 
   // Cytoscape does not observe container size itself. The breadcrumb, diagnostics panel,
@@ -32,7 +32,7 @@ export function createView(container) {
 
   cy.on('tap', 'node', (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
-    applyLabelBudget(cy);
+    applyLabelBudget(cy, true);
   });
   cy.on('dbltap', 'node', (event) => {
     for (const handler of drillHandlers) handler(event.target.id());
@@ -48,6 +48,23 @@ export function createView(container) {
     }
   });
   cy.on('zoom', () => applyLabelBudget(cy));
+  cy.on('cxttap', 'node', (event) => {
+    for (const handler of contextHandlers) {
+      handler({ kind: 'node', id: event.target.id() }, event.originalEvent);
+    }
+  });
+  cy.on('cxttap', 'edge', (event) => {
+    for (const handler of contextHandlers) {
+      handler({ kind: 'edge', id: event.target.id() }, event.originalEvent);
+    }
+  });
+  cy.on('cxttap', (event) => {
+    if (event.target === cy) {
+      for (const handler of contextHandlers) {
+        handler({ kind: 'view' }, event.originalEvent);
+      }
+    }
+  });
   cy.on('mouseover', 'node', (event) => {
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
@@ -75,7 +92,7 @@ export function createView(container) {
 
   return {
     cy,
-    capabilities: { webgl2: probeWebGL2() },
+    capabilities: { webgl2: gpu, renderer: gpu ? 'webgl2' : 'canvas' },
     resize() {
       cy.resize();
     },
@@ -87,37 +104,39 @@ export function createView(container) {
         cy.add(elements.nodes);
         cy.add(elements.edges);
       });
-      applyLabelBudget(cy);
+      applyLabelBudget(cy, true);
     },
     highlight(ids) {
       const keep = ids ? new Set(ids) : null;
-      cy.elements().removeClass('dimmed');
-      if (!keep) {
-        return;
-      }
-      cy.nodes().forEach((node) => {
-        if (!keep.has(node.id())) node.addClass('dimmed');
+      cy.batch(() => {
+        cy.elements().removeClass('dimmed');
+        if (keep) {
+          cy.nodes().forEach((node) => {
+            if (!keep.has(node.id())) node.addClass('dimmed');
+          });
+        }
       });
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
-      cy.nodes().removeClass(OVERLAY_CLASSES.join(' '));
-      if (!classesByNode) {
-        return;
-      }
-      for (const [id, className] of classesByNode) {
-        const node = cy.getElementById(id);
-        if (node.nonempty()) node.addClass(className);
-      }
+      cy.batch(() => {
+        cy.nodes().removeClass(OVERLAY_CLASSES.join(' '));
+        for (const [id, className] of classesByNode ?? []) {
+          const node = cy.getElementById(id);
+          if (node.nonempty()) node.addClass(className);
+        }
+      });
     },
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {
       const keep = ids ? new Set(ids) : null;
-      cy.nodes().forEach((node) => {
-        const visible = !keep || keep.has(node.id());
-        node.toggleClass('filtered-out', !visible);
+      cy.batch(() => {
+        cy.nodes().forEach((node) => {
+          const visible = !keep || keep.has(node.id());
+          node.toggleClass('filtered-out', !visible);
+        });
       });
-      applyLabelBudget(cy);
+      applyLabelBudget(cy, true);
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
@@ -140,17 +159,147 @@ export function createView(container) {
     onEdge(handler) {
       edgeHandlers.push(handler);
     },
+    /** Right-click (or long-press) on a node, edge, or empty canvas. */
+    onContext(handler) {
+      contextHandlers.push(handler);
+    },
     clearEdge() {
       selectEdge(null);
     },
   };
 }
 
-/** Probe a real WebGL2 context so the UI can report which renderer is usable. */
+/**
+ * Build the Cytoscape instance. 2D canvas by default; WebGL only if asked for.
+ *
+ * Measured on real hardware (an AMD Radeon 780M via ANGLE/D3D11, not a software
+ * rasteriser) across Strabo's actual size range, panning and zooming a graph styled
+ * like this one: Cytoscape's WebGL renderer was slower than the 2D canvas renderer at
+ * every size tried, from 200 nodes (~8x slower) up to 15,000 (~1.6x slower). The gap
+ * narrows as the graph grows but never closes in that range. The reason is architectural,
+ * not a tuning knob: WebGL still walks every element in JS every frame — resolving
+ * styles, computing bounding boxes, writing instance buffers — before the GPU sees
+ * anything, and that per-element bookkeeping outweighs what batched draw calls save at
+ * the sizes a single Strabo view actually reaches (one directory's drill-down, typically
+ * a few hundred to a few thousand nodes). So 2D canvas is the default.
+ *
+ * WebGL is left in as an opt-in, not deleted, because the gap was still narrowing at
+ * 15,000 nodes — a monorepo pushing a view past that might see it pay off. Turn it on
+ * with `?renderer=webgl` (remembered after that; `?renderer=canvas` clears it) or by
+ * setting `localStorage['strabo:renderer-preference'] = 'webgl'` directly.
+ *
+ * Cytoscape does not degrade on its own: with `webgl: true` and no WebGL2 context it
+ * throws while initialising. Probe first, and still catch, so a driver that advertises
+ * WebGL2 but fails to compile the shaders leaves a working map instead of a blank one.
+ */
+function createCytoscape(container) {
+  const options = {
+    container,
+    style: stylesheet(),
+    layout: { name: 'preset' },
+    wheelSensitivity: 0.2,
+  };
+
+  if (webglRequested() && !webglRefused() && probeWebGL2()) {
+    // Cytoscape's WebGL renderer blends arrow tips against the container's *inline*
+    // background colour and never consults the stylesheet. Unset, it blends against
+    // white, fringing every arrowhead on this dark theme. Set it before the renderer
+    // reads it; the 2D path never looks at this, so it stays unset by default.
+    container.style.backgroundColor = surfaceColour(container);
+    try {
+      return window.cytoscape({ ...options, renderer: { name: 'canvas', webgl: true } });
+    } catch (error) {
+      return reloadWithoutWebGL(error);
+    }
+  }
+  return window.cytoscape(options);
+}
+
+/** Where the WebGL opt-in is remembered once granted via `?renderer=webgl`. */
+const RENDERER_PREFERENCE_KEY = 'strabo:renderer-preference';
+
+/** Read and, on an explicit `?renderer=` visit, update the WebGL opt-in. */
+function webglRequested() {
+  try {
+    const param = new URL(window.location.href).searchParams.get('renderer');
+    if (param === 'webgl') {
+      window.localStorage.setItem(RENDERER_PREFERENCE_KEY, 'webgl');
+      return true;
+    }
+    if (param === 'canvas') {
+      window.localStorage.removeItem(RENDERER_PREFERENCE_KEY);
+      return false;
+    }
+    return window.localStorage.getItem(RENDERER_PREFERENCE_KEY) === 'webgl';
+  } catch {
+    return false;
+  }
+}
+
+/** Session flag recording that the GPU renderer already failed in this tab. */
+const WEBGL_REFUSED = 'strabo:webgl-refused';
+
+function webglRefused() {
+  try {
+    return window.sessionStorage.getItem(WEBGL_REFUSED) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Recover from a WebGL renderer that threw while initialising.
+ *
+ * Cytoscape counts its canvas layers on a module-private object rather than on the
+ * instance, and enabling WebGL raises that count for the whole document. A failed
+ * attempt therefore poisons every renderer built afterwards — including a plain 2D one,
+ * which would ask for a `webgl2` layer it was never meant to have and throw the same
+ * way. Nothing in the public API can put that count back, so the only honest recovery is
+ * to reload into the 2D path. The flag is session-scoped and checked before the next
+ * attempt, so the reload happens once rather than looping.
+ *
+ * Without session storage there is nowhere to record the refusal, and reloading would
+ * loop forever; rethrow instead and let the error surface.
+ */
+function reloadWithoutWebGL(error) {
+  console.warn('Strabo: WebGL rendering failed to start; reloading on the 2D canvas renderer.', error);
+  try {
+    window.sessionStorage.setItem(WEBGL_REFUSED, '1');
+  } catch {
+    throw error;
+  }
+  window.location.reload();
+  throw error;
+}
+
+/**
+ * The colour the WebGL renderer should blend against.
+ *
+ * `.graph` is transparent over the dotted `.graph-wrap`, so fall back to the surface
+ * token rather than letting Cytoscape assume white.
+ */
+function surfaceColour(container) {
+  const own = getComputedStyle(container).backgroundColor;
+  if (own && !own.startsWith('rgba(0, 0, 0, 0)') && own !== 'transparent') {
+    return own;
+  }
+  const token = getComputedStyle(document.documentElement).getPropertyValue('--bg-1').trim();
+  return token || '#10141a';
+}
+
+/** Probe a real WebGL2 context, then release it so it does not count against the
+ * browser's live-context limit. */
 function probeWebGL2() {
   try {
-    const canvas = document.createElement('canvas');
-    return Boolean(window.WebGL2RenderingContext && canvas.getContext('webgl2'));
+    if (!window.WebGL2RenderingContext) {
+      return false;
+    }
+    const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) {
+      return false;
+    }
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return true;
   } catch {
     return false;
   }
@@ -159,12 +308,23 @@ function probeWebGL2() {
 /**
  * Semantic zoom: hubs keep labels when zoomed out, ordinary nodes gain labels as the
  * user zooms in. Selected nodes always keep labels. Runs after render/filter/select.
+ *
+ * A wheel gesture fires `zoom` once per frame, so walking every node each time is the
+ * one piece of per-frame work the GPU renderer cannot absorb. The label set only changes
+ * when the zoom crosses the threshold, so remember which side we are on and skip the
+ * walk otherwise; callers that change the nodes themselves pass `force`.
  */
-function applyLabelBudget(cy) {
-  const detailed = cy.zoom() > 0.65;
-  cy.nodes().forEach((node) => {
-    const show = detailed || node.data('hub') || node.selected();
-    node.toggleClass('label-hidden', !show);
+function applyLabelBudget(cy, force = false) {
+  const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
+  if (!force && detailed === cy.scratch('_straboLabelDetail')) {
+    return;
+  }
+  cy.scratch('_straboLabelDetail', detailed);
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      const show = detailed || node.data('hub') || node.selected();
+      node.toggleClass('label-hidden', !show);
+    });
   });
 }
 
@@ -199,11 +359,11 @@ function stylesheet() {
       },
     },
     ...kindRules,
-    { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff', 'background-opacity': 1, 'shadow-blur': 18, 'shadow-color': '#4c9aff', 'shadow-opacity': 0.9 } },
-    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': '#4c9aff', 'font-size': 12, 'font-weight': 700, 'shadow-blur': 10, 'shadow-color': '#4c9aff', 'shadow-opacity': 0.55 } },
-    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': '#ff5c5c', 'background-opacity': 1, 'shadow-blur': 14, 'shadow-color': '#ff5c5c', 'shadow-opacity': 0.7 } },
-    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': '#f2b25c', 'background-opacity': 1, 'shadow-blur': 10, 'shadow-color': '#f2b25c', 'shadow-opacity': 0.6 } },
-    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': '#c98bf0', 'background-opacity': 1, 'shadow-blur': 14, 'shadow-color': '#c98bf0', 'shadow-opacity': 0.7 } },
+    { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff', 'background-opacity': 1 } },
+    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': '#4c9aff', 'font-size': 12, 'font-weight': 700 } },
+    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': '#ff5c5c', 'background-opacity': 1 } },
+    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': '#f2b25c', 'background-opacity': 1 } },
+    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': '#c98bf0', 'background-opacity': 1 } },
     { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': '#8da0b5', 'background-opacity': 0.55 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
@@ -230,9 +390,6 @@ function stylesheet() {
         'target-arrow-color': '#4c9aff',
         'arrow-scale': 1.1,
         'z-index': 10,
-        'shadow-blur': 8,
-        'shadow-color': '#4c9aff',
-        'shadow-opacity': 0.6,
       },
     },
     {

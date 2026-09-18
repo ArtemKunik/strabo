@@ -39,22 +39,41 @@ export function resolveRelative(
   if (!specifier.startsWith('.') && !specifier.startsWith('/')) {
     return null;
   }
-  const base = normalize(fromDir(context.from), specifier);
+  // A leading `/` is repo-root-relative in bundler conventions (e.g. Vite/React
+  // apps importing `/src/...`); relative to the importer it never resolves, so
+  // the alias layer owns it. Guard here to keep this function purely relative.
+  if (specifier.startsWith('/')) {
+    return null;
+  }
+  return tryCandidates(normalize(fromDir(context.from), specifier), specifier, line, context.files, 'exact');
+}
 
+/**
+ * Probe exact path, then supported extensions, then index candidates against
+ * the retained file set. Shared by relative and alias resolution so both
+ * report the same evidence shape.
+ */
+export function tryCandidates(
+  base: string,
+  specifier: string,
+  line: number,
+  files: ReadonlySet<string>,
+  via: EdgeEvidence['resolution'],
+): ResolvedReference | null {
   const candidates: Array<{ path: string; resolution: EdgeEvidence['resolution'] }> = [
-    { path: base, resolution: 'exact' },
+    { path: base, resolution: via === 'exact' ? 'exact' : via },
     ...SUPPORTED_EXTENSIONS.map((extension) => ({
       path: `${base}${extension}`,
-      resolution: 'extension' as const,
+      resolution: (via === 'exact' ? 'extension' : via) as EdgeEvidence['resolution'],
     })),
     ...SUPPORTED_EXTENSIONS.map((extension) => ({
       path: `${base}/index${extension}`,
-      resolution: 'index' as const,
+      resolution: (via === 'exact' ? 'index' : via) as EdgeEvidence['resolution'],
     })),
   ];
 
   for (const candidate of candidates) {
-    if (context.files.has(candidate.path)) {
+    if (files.has(candidate.path)) {
       return {
         target: candidate.path,
         evidence: { line, specifier, resolution: candidate.resolution },

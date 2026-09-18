@@ -1,0 +1,7 @@
+{
+  "name": "alias-repo",
+  "private": true,
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  }
+}

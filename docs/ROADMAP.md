@@ -93,6 +93,33 @@ already accepts a base ref, so impact between revisions is the first slice.
 
 Spec: `test/acceptance/features/timeline.feature`.
 
+## Phase 8 - Git review
+
+Review a commit's own changes, or the pending working tree, with per-file stats and the
+dependency impact of the change set.
+
+- `GET /analysis/review` (working tree) and `GET /analysis/review?base=<ref>` (one commit)
+  return files with status and line counts, plus reverse-reachability impact.
+- Commit review uses `git show --first-parent`: a bare `<ref>` diff would fold in
+  uncommitted edits, and `<ref>^..<ref>` fails on a root commit.
+- Working-tree review splits **staged**, **unstaged**, and **untracked**; untracked files
+  are counted directly and reported as uncounted when unreadable, never as zero lines.
+- `Timeline` selects a commit into the same review panel; `Review changes` (`R`) opens the
+  working tree. Changed paths outside the scanned graph are listed, not annotated.
+
+Spec: `test/acceptance/features/timeline.feature` (scenarios `@review`).
+
+## Phase 9 - Agent delegation
+
+Right-click any item to hand it to `opencode` or `claude` in a new terminal.
+
+- `POST /delegate` allow-lists the agent, writes the prompt to a temp file, and launches a
+  generated `.cmd`; `GET /delegate` and `GET /delegate/:id` expose recent launches.
+- The repository is resolved through the scan ceiling, and prompt text never reaches a
+  shell, so a delegated item cannot become command injection.
+- Windows-only (`501` elsewhere); the terminal outlives the server, so the run list is a
+  log rather than supervision.
+
 ## Phase 6 - Release readiness
 
 - `npm pack` and install the tarball in a clean fixture; run scan and acceptance there.

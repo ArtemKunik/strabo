@@ -8,6 +8,7 @@ import { computeFileHealth } from '../../analysis/file-health.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
+import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
@@ -129,6 +130,28 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const limit = Number.parseInt(String(request.query.limit ?? ''), 10);
       response.json(await getTimeline(repository.root, Number.isFinite(limit) && limit > 0 ? limit : 30));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Review a commit's own changes, or the working tree.
+   *
+   * `base` reviews that revision against its first parent; omitting it reviews the working
+   * tree, split into staged, unstaged, and untracked. Either way the result carries the
+   * same reverse-dependency impact the change-impact overlay computes.
+   */
+  router.get('/analysis/review', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      response.json(
+        base
+          ? await reviewCommit(repository.root, cached.report.graph, base)
+          : await reviewWorkingTree(repository.root, cached.report.graph),
+      );
     } catch (error) {
       sendError(response, error);
     }

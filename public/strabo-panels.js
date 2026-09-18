@@ -24,6 +24,7 @@ import {
   radarFrame,
   radarPoints,
   readingLegend,
+  reviewGroups,
   summarizeDiagnostics,
 } from './strabo-core.js';
 
@@ -165,6 +166,7 @@ function listSection(heading, from, entries, handlers) {
   const list = document.createElement('ul');
   for (const entry of entries.slice(0, 100)) {
     const item = document.createElement('li');
+    item.dataset.delegateNode = entry.id;
 
     const open = document.createElement('button');
     open.type = 'button';
@@ -405,6 +407,7 @@ export function renderDiagnostics(container, model) {
       const list = document.createElement('ul');
       for (const diagnostic of items.slice(0, 20)) {
         const item = document.createElement('li');
+        item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
         item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
         list.append(item);
       }
@@ -415,6 +418,7 @@ export function renderDiagnostics(container, model) {
     const list = document.createElement('ul');
     for (const diagnostic of summary.samples) {
       const item = document.createElement('li');
+      item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
       item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
       list.append(item);
     }
@@ -560,6 +564,9 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     const list = document.createElement('ul');
     for (const item of overlay.items.slice(0, 50)) {
       const entry = document.createElement('li');
+      if (typeof item === 'string') {
+        entry.dataset.delegateOverlayItem = item;
+      }
       if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
         const jump = document.createElement('button');
         jump.type = 'button';
@@ -583,10 +590,12 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (!evidence) {
     container.hidden = true;
     container.replaceChildren();
+    delete container.dataset.delegateEdge;
     return;
   }
   container.hidden = false;
   container.replaceChildren();
+  container.dataset.delegateEdge = evidence.id;
 
   const heading = document.createElement('h3');
   heading.className = 'overlay-summary';
@@ -638,8 +647,7 @@ function edgeEndpoint(id, onSelect) {
 }
 
 /** Render recorded changes, newest first; selecting one compares it with the working tree. */
-export function renderTimeline(container, result, onSelect, options = {}) {
-  container.replaceChildren();
+export function renderTimeline(container, result, onSelect, options = {}) {  container.replaceChildren();
 
   const title = document.createElement('h3');
   title.textContent = 'Timeline';
@@ -691,6 +699,151 @@ export function renderTimeline(container, result, onSelect, options = {}) {
   }
   container.append(list);
 }
+
+/**
+ * Render a Git review: what changed, by how much, and what the change can reach.
+ *
+ * A commit review names its revision; a working-tree review groups staged, unstaged, and
+ * untracked files. Files outside the scanned graph are called out because no dependency
+ * impact can be computed for them, and uncounted files are reported rather than shown
+ * as zero lines.
+ */
+export function renderReview(container, result, handlers = {}) {
+  container.replaceChildren();
+
+  const title = document.createElement('h3');
+  title.textContent = result?.kind === 'commit' ? 'Commit review' : 'Working tree review';
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Close review');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => handlers.onClose());
+    title.append(dismiss);
+  }
+
+  if (!result || result.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'review-unavailable';
+    note.textContent = result?.detail
+      ? `Review unavailable: ${result.detail}`
+      : 'Review unavailable: no Git metadata.';
+    container.append(note);
+    return;
+  }
+
+  if (result.commit) {
+    const meta = document.createElement('p');
+    meta.className = 'evidence';
+    meta.dataset.role = 'review-commit';
+    meta.textContent = `${result.commit.shortHash} · ${result.commit.author} · ${result.commit.date.slice(0, 10)} · ${result.commit.subject}`;
+    container.append(meta);
+  }
+
+  const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
+  const summary = document.createElement('p');
+  summary.className = 'overlay-summary';
+  summary.dataset.role = 'review-summary';
+  summary.textContent = `${totals.files} file(s) · +${totals.insertions} −${totals.deletions}${
+    totals.uncounted > 0 ? ` · ${totals.uncounted} uncounted` : ''
+  }`;
+  container.append(summary);
+
+  if ((result.files ?? []).length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent =
+      result.kind === 'commit' ? 'This commit recorded no file changes.' : 'No pending changes.';
+    container.append(note);
+  }
+
+  for (const [group, files] of reviewGroups(result.files)) {
+    const heading = document.createElement('h4');
+    heading.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
+    container.append(heading);
+
+    const list = document.createElement('ul');
+    list.dataset.role = `review-group-${group}`;
+    for (const file of files) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'link';
+      button.dataset.path = file.path;
+      button.textContent = file.path;
+      if (handlers.onSelect && file.inGraph) {
+        button.addEventListener('click', () => handlers.onSelect(file.path));
+      } else {
+        button.disabled = true;
+        button.title = 'Not a node in the scanned graph';
+      }
+      item.append(button);
+      const status = document.createElement('span');
+      status.className = 'review-status';
+      status.textContent = file.status;
+      item.append(status);
+      const counts = document.createElement('span');
+      counts.className = 'evidence';
+      counts.textContent =
+        file.insertions === null || file.deletions === null
+          ? 'line counts unavailable'
+          : `+${file.insertions} −${file.deletions}`;
+      item.append(counts);
+      list.append(item);
+    }
+    container.append(list);
+  }
+
+  const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+  const impactHeading = document.createElement('h4');
+  impactHeading.textContent = `Potentially affected (${affected.length})`;
+  container.append(impactHeading);
+  if (affected.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'review-impact-empty';
+    note.textContent = 'Nothing depends on the changed files.';
+    container.append(note);
+  } else {
+    const list = document.createElement('ul');
+    list.dataset.role = 'review-impact';
+    for (const entry of affected.slice(0, 100)) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'link';
+      button.textContent = entry.id;
+      if (handlers.onSelect) {
+        button.addEventListener('click', () => handlers.onSelect(entry.id));
+      }
+      item.append(button);
+      const distance = document.createElement('span');
+      distance.className = 'evidence';
+      distance.textContent = `distance ${entry.distance}`;
+      item.append(distance);
+      list.append(item);
+    }
+    container.append(list);
+  }
+
+  if ((result.impact?.outsideGraph ?? []).length > 0) {
+    const outside = document.createElement('p');
+    outside.className = 'unavailable';
+    outside.dataset.role = 'review-outside';
+    outside.textContent = `${result.impact.outsideGraph.length} changed path(s) are outside the scanned graph.`;
+    container.append(outside);
+  }
+}
+
+const REVIEW_GROUP_LABELS = {
+  commit: 'Changed',
+  staged: 'Staged',
+  unstaged: 'Unstaged',
+  untracked: 'Untracked',
+};
 
 export { graphSummary };
 

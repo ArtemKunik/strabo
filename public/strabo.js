@@ -10,8 +10,9 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay } from './strabo-core.js';
 import { createView } from './strabo-view.js';
+import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import {
   renderBreadcrumb,
   renderDiagnostics,
@@ -22,6 +23,7 @@ import {
   renderMemberMap,
   renderMembers,
   renderOverlayPanel,
+  renderReview,
   renderTestsStrip,
   renderTimeline,
 } from './strabo-panels.js';
@@ -32,6 +34,8 @@ import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 let scanGeneration = 0;
 let current = null;
 let selected = null;
+/** Edge id (`e<N>`) with an open evidence panel, or null. */
+let selectedEdgeId = null;
 
 const state = {
   repository: null,
@@ -58,6 +62,7 @@ const elements = {
   overlay: document.getElementById('overlay'),
   overlayPanel: document.getElementById('overlay-panel'),
   edgePanel: document.getElementById('edge-panel'),
+  reviewPanel: document.getElementById('review-panel'),
   diagnosticsToggle: document.getElementById('diagnostics-toggle'),
   diagnosticsBadge: document.getElementById('diagnostics-badge'),
   diagnostics: document.getElementById('diagnostics'),
@@ -79,6 +84,7 @@ const elements = {
   tbPath: document.getElementById('tb-path'),
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbTimeline: document.getElementById('tb-timeline'),
+  tbReview: document.getElementById('tb-review'),
   tbClear: document.getElementById('tb-clear'),
   timelinePanel: document.getElementById('timeline-panel'),
   folderDialog: document.getElementById('folder-dialog'),
@@ -186,6 +192,7 @@ async function scan({ refresh = false } = {}) {
     }
     current = model;
     selected = null;
+    selectedEdgeId = null;
     selectedCommitHash = null;
     state.renderedGeneration = generation;
     view.render(model);
@@ -227,6 +234,11 @@ function updateDiagnosticsBadge(summary) {
   elements.diagnosticsBadge.classList.toggle('has-errors', count > 0);
 }
 
+/** The renderer actually in use, not merely the one the browser could support. */
+function rendererName() {
+  return view.capabilities?.renderer ?? 'canvas';
+}
+
 function updateStatusbar(model) {
   if (elements.statusbarDiag && model) {
     const d = (model.diagnostics ?? []).length;
@@ -238,8 +250,7 @@ function updateStatusbar(model) {
     elements.statusbarLegend.textContent = kinds || '';
   }
   if (elements.statusbarRender) {
-    const webgl = view.capabilities?.webgl2 ? 'webgl2' : 'canvas';
-    elements.statusbarRender.textContent = `renderer: ${webgl} · ${view.cy.nodes().length} shown`;
+    elements.statusbarRender.textContent = `renderer: ${rendererName()} · ${view.cy.nodes().length} shown`;
   }
 }
 
@@ -272,7 +283,7 @@ function applyFilterToView() {
     renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
   }
   if (elements.statusbarRender) {
-    elements.statusbarRender.textContent = `renderer: ${view.capabilities?.webgl2 ? 'webgl2' : 'canvas'} · ${ids.length}/${current.nodes.length} shown`;
+    elements.statusbarRender.textContent = `renderer: ${rendererName()} · ${ids.length}/${current.nodes.length} shown`;
   }
 }
 
@@ -303,6 +314,7 @@ function selectNode(id) {
 
   selected = id;
   view.clearEdge();
+  selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   view.highlight(neighbourhood(current, id));
   renderInspector(elements.inspector, current, id, {
@@ -352,7 +364,9 @@ function clearSelection() {
   hideTooltip();
   view.highlight(null);
   view.clearEdge();
+  selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
+  closeReview();
   elements.inspector.hidden = true;
 }
 
@@ -528,6 +542,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 't') elements.tbTimeline.click();
+  else if (key === 'r') elements.tbReview.click();
 });
 
 /** Show or hide recorded changes; selecting one compares it with the working tree. */
@@ -554,23 +569,55 @@ async function toggleTimeline() {
 /** Compare a revision with the working tree and annotate the map with the impact. */
 async function selectCommit(commit) {
   selectedCommitHash = commit.hash;
-  const params = new URLSearchParams({ base: commit.hash });
-  if (state.repository) {
-    params.set('repository', state.repository);
+  await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
+}
+
+/**
+ * Load a Git review and annotate the map with its change and impact classes.
+ *
+ * `query` is either empty (working tree) or `?base=<ref>` (that commit's own changes).
+ * The review result is rendered verbatim; a file outside the graph is reported as such
+ * instead of being drawn as if it had impact.
+ */
+async function showReview(query, commit = null) {
+  const separator = query ? '&' : '?';
+  const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
+  const data = await request(`/analysis/review${query}${repository}`);
+
+  if (data.available === false) {
+    elements.reviewPanel.hidden = false;
+    renderReview(elements.reviewPanel, data, { onClose: closeReview });
+    return;
   }
-  const data = await request(`/analysis/impact?${params.toString()}`);
-  const overlay = overlayFor('impact', data);
-  state.overlay = 'impact';
-  elements.overlay.value = 'impact';
+
+  const overlay = reviewOverlay(data);
   view.overlay(overlay.classes);
-  renderOverlayPanel(elements.overlayPanel, `Compare ${commit.shortHash}`, overlay, {
-    kind: 'impact',
-    onClose: clearOverlay,
+  elements.reviewPanel.hidden = false;
+  renderReview(elements.reviewPanel, data, {
+    onClose: closeReview,
     onSelect: (id) => selectNode(id),
   });
-  // Refresh timeline selection highlight without refetching.
-  view.fitNodes([...overlay.classes.keys()]);
-  elements.status.textContent = `Since ${commit.shortHash}: ${overlay.summary}`;
+  const label = commit ? commit.shortHash : 'working tree';
+  elements.status.textContent = `Review ${label}: ${overlay.summary}`;
+}
+
+function closeReview() {
+  elements.reviewPanel.hidden = true;
+  renderReview(elements.reviewPanel, null, {});
+}
+
+/** Review pending working-tree changes: staged, unstaged, and untracked. */
+async function toggleReview() {
+  if (!elements.reviewPanel.hidden) {
+    closeReview();
+    view.overlay(null);
+    return;
+  }
+  try {
+    await showReview('');
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  }
 }
 
 function clearOverlay() {
@@ -608,15 +655,18 @@ function tracePath(from, to) {
 function selectEdge(edgeId) {
   if (!current || !edgeId) {
     view.clearEdge();
+    selectedEdgeId = null;
     renderEdgeEvidence(elements.edgePanel, null);
     return;
   }
+  selectedEdgeId = edgeId;
   const evidence = edgeEvidenceFor(current, edgeId);
   renderEdgeEvidence(elements.edgePanel, evidence, {
     onSelect: (id) => selectNode(id),
     onTrace: (from, to) => tracePath(from, to),
     onClear: () => {
       view.clearEdge();
+      selectedEdgeId = null;
       renderEdgeEvidence(elements.edgePanel, null);
     },
   });
@@ -912,7 +962,257 @@ elements.tbTimeline.addEventListener('click', () => {
     elements.status.textContent = `Error: ${error.message}`;
   });
 });
+elements.tbReview.addEventListener('click', () => {
+  toggleReview().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
 elements.tbClear.addEventListener('click', clearSelection);
+
+/* ------------------------------------------- Agent delegation (right-click) */
+
+/** Recorded facts for a node, from the passport the scan computed. */
+function nodeDelegateTarget(id) {
+  const passport = current ? passportFor(current, id) : null;
+  const node = current?.nodes.find((candidate) => candidate.id === id);
+  const evidence = [];
+  if (passport) {
+    for (const metric of passport.metrics) {
+      evidence.push(`${metric.label}: ${metric.value}`);
+    }
+    for (const entry of passport.imports.slice(0, 8)) {
+      evidence.push(`imports ${entry.id} (L${entry.line ?? '?'} ${entry.specifier ?? ''})`.replace(' )', ')'));
+    }
+    for (const entry of passport.usedBy.slice(0, 8)) {
+      evidence.push(`imported by ${entry.id} (L${entry.line ?? '?'} ${entry.specifier ?? ''})`.replace(' )', ')'));
+    }
+  } else {
+    evidence.push('Node is not in the current graph (it may be filtered out).');
+  }
+  return { kind: 'node', id, label: node?.label ?? id, evidence };
+}
+
+/** Recorded facts for an edge, from the evidence the scanner recorded. */
+function edgeDelegateTarget(edgeId) {
+  const evidence = current ? edgeEvidenceFor(current, edgeId) : null;
+  if (!evidence) {
+    return null;
+  }
+  return {
+    kind: 'edge',
+    id: edgeId,
+    label: `${evidence.source} → ${evidence.target}`,
+    evidence: [
+      `relationship: ${evidence.kind}`,
+      `specifier: ${evidence.specifier ?? 'not recorded'}`,
+      `line: ${evidence.line ?? 'not recorded'}`,
+      `resolution: ${evidence.resolutionLabel}`,
+    ],
+  };
+}
+
+/** A diagnostic line has the controlled form `file:line message`. */
+function diagnosticDelegateTarget(text) {
+  const match = /^(.+):(\d+)\s?(.*)$/.exec(String(text ?? '').trim());
+  return {
+    kind: 'diagnostic',
+    id: match ? `${match[1]}:${match[2]}` : String(text ?? 'diagnostic'),
+    label: String(text ?? 'diagnostic').slice(0, 120),
+    detail: String(text ?? ''),
+    evidence: match
+      ? [`file: ${match[1]}`, `line: ${match[2]}`, `message: ${match[3] || '—'}`]
+      : [String(text ?? '')],
+  };
+}
+
+function commitDelegateTarget(button) {
+  const meta = button.parentElement?.querySelector('.evidence')?.textContent ?? '';
+  return {
+    kind: 'commit',
+    id: button.dataset.hash ?? button.textContent,
+    label: button.textContent.trim().slice(0, 120),
+    detail: meta ? `${button.textContent.trim()} (${meta.trim()})` : button.textContent.trim(),
+    evidence: meta ? [`commit: ${button.textContent.trim()}`, `meta: ${meta.trim()}`] : [],
+  };
+}
+
+function memberDelegateTarget(card) {
+  const name = card.dataset.member ?? 'member';
+  const file = memberData?.file ?? selected;
+  const facts = [...card.querySelectorAll('.card-signature, .card-tag, .card-metrics')]
+    .map((part) => part.textContent.trim())
+    .filter(Boolean);
+  return {
+    kind: 'member',
+    id: file ? `${file}#${name}` : name,
+    label: `${name} (${file ?? 'unknown file'})`,
+    evidence: [`member: ${name}`, `file: ${file ?? 'unknown'}`, ...facts],
+  };
+}
+
+function overlayDelegateTarget(item) {
+  const heading = document.querySelector('#overlay-panel h3')?.textContent ?? 'Review overlay';
+  return {
+    kind: 'view',
+    label: heading.trim().slice(0, 120),
+    detail: item.dataset.delegateOverlayItem ?? item.textContent.trim(),
+    evidence: [`overlay: ${heading.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`],
+  };
+}
+
+function viewDelegateTarget(detail) {
+  return {
+    kind: 'view',
+    label: detail ?? graphSummary(current ?? { nodes: [], edges: [] }),
+    detail: detail ?? undefined,
+    evidence: [
+      current ? graphSummary(current) : 'No scan loaded.',
+      state.filter ? `active filter: ${state.filter}` : 'no active filter',
+      state.overlay !== 'none' ? `active review: ${state.overlay}` : 'no active review overlay',
+      state.mode === 'block' ? `directory view${state.prefix ? ` at ${state.prefix}` : ''}` : 'file view',
+    ],
+  };
+}
+
+function fallbackDelegateTarget() {
+  return selected ? nodeDelegateTarget(selected) : viewDelegateTarget();
+}
+
+function resolveDomDelegateTarget(node) {
+  if (!node?.closest) {
+    return null;
+  }
+  const byNode = node.closest('[data-delegate-node]');
+  if (byNode?.dataset.delegateNode) {
+    return nodeDelegateTarget(byNode.dataset.delegateNode);
+  }
+  const diagnostic = node.closest('[data-delegate-diagnostic]');
+  if (diagnostic?.dataset.delegateDiagnostic) {
+    return diagnosticDelegateTarget(diagnostic.dataset.delegateDiagnostic);
+  }
+  const commit = node.closest('#timeline-panel .commit');
+  if (commit) {
+    return commitDelegateTarget(commit);
+  }
+  const overlayItem = node.closest('#overlay-panel li');
+  if (overlayItem) {
+    return overlayDelegateTarget(overlayItem);
+  }
+  const edgePanel = node.closest('#edge-panel');
+  if (edgePanel && selectedEdgeId) {
+    return edgeDelegateTarget(selectedEdgeId);
+  }
+  const card = node.closest('#member-view .member-card');
+  if (card) {
+    return memberDelegateTarget(card);
+  }
+  if (node.closest('#inspector') && selected) {
+    return nodeDelegateTarget(selected);
+  }
+  const chip = node.closest('.strip-chip');
+  if (chip) {
+    return viewDelegateTarget(`filter: ${chip.dataset.filter || 'all'}`);
+  }
+  const crumb = node.closest('#breadcrumb .crumb');
+  if (crumb) {
+    return viewDelegateTarget(`directory: ${crumb.textContent.trim()}`);
+  }
+  return null;
+}
+
+/** Open a new terminal running `agent` on the delegated item. */
+async function delegateToAgent(agent, target) {
+  const repository = current?.repository ?? null;
+  const prompt = buildAgentPrompt({ agent, repository, target });
+  const title = (target.label ?? target.id ?? 'repository view').slice(0, 80);
+  try {
+    await launchAgent(agent, {
+      repository: state.repository ?? repository?.root,
+      target: { kind: target.kind, id: target.id, label: target.label },
+      prompt,
+      title,
+    });
+    showToast(`New terminal: ${agent} on ${title}`);
+  } catch (error) {
+    showToast(`Could not open a terminal (${error.message}).`, {
+      label: 'Copy prompt',
+      onClick: async () => {
+        await copyText(prompt);
+        showToast('Prompt copied — paste it into your agent.');
+      },
+    });
+  }
+}
+
+/** Right-click menu for one delegated item: launch, or copy the prompt. */
+function openDelegateMenu(target, x, y) {
+  if (!target) {
+    return;
+  }
+  const repository = current?.repository ?? null;
+  const menuTitle = (target.label ?? target.id ?? 'repository view').slice(0, 80);
+  const promptFor = (agent) => buildAgentPrompt({ agent, repository, target });
+  showContextMenu({
+    x,
+    y,
+    title: menuTitle,
+    items: [
+      { label: '▶ Delegate to OpenCode', hint: 'new terminal', action: () => delegateToAgent('opencode', target) },
+      { label: '▶ Delegate to Claude', hint: 'new terminal', action: () => delegateToAgent('claude', target) },
+      { separator: true },
+      {
+        label: '⧉ Copy prompt',
+        action: async () => {
+          await copyText(promptFor('opencode'));
+          showToast('Prompt copied — paste it into your agent.');
+        },
+      },
+      ...(target.id
+        ? [{
+          label: '⧉ Copy path',
+          action: async () => {
+            await copyText(target.id);
+            showToast('Path copied.');
+          },
+        }]
+        : []),
+    ],
+  });
+}
+
+view.onContext((target, originalEvent) => {
+  hideTooltip();
+  const x = originalEvent?.clientX ?? window.innerWidth / 2;
+  const y = originalEvent?.clientY ?? window.innerHeight / 2;
+  if (target.kind === 'node' && target.id) {
+    openDelegateMenu(nodeDelegateTarget(target.id), x, y);
+  } else if (target.kind === 'edge' && target.id) {
+    openDelegateMenu(edgeDelegateTarget(target.id) ?? viewDelegateTarget('edge'), x, y);
+  } else {
+    openDelegateMenu(fallbackDelegateTarget(), x, y);
+  }
+});
+
+document.addEventListener('contextmenu', (event) => {
+  // Editable fields and dialogs keep the native menu (copy/paste, close).
+  if (event.target.closest?.('input, select, textarea, [contenteditable="true"], dialog')) {
+    return;
+  }
+  // The canvas menu comes from cytoscape's cxttap; just suppress the browser one.
+  if (event.target.closest?.('#graph')) {
+    event.preventDefault();
+    return;
+  }
+  // Everywhere else in the app shell, offer the delegate menu; outside it, stay native.
+  if (!event.target.closest?.('.workspace, .statusbar, #member-view, #diagnostics, #breadcrumb, .toolbar')) {
+    return;
+  }
+  event.preventDefault();
+  closeContextMenu();
+  hideTooltip();
+  openDelegateMenu(resolveDomDelegateTarget(event.target) ?? fallbackDelegateTarget(), event.clientX, event.clientY);
+});
+
 view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);
@@ -933,6 +1233,8 @@ if (window.STRABO_TEST) {
     memberUI,
     memberData: () => memberData,
     memberStepCount,
+    review: () => showReview(''),
+    reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
   };
 }
 

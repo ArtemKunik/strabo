@@ -42,7 +42,16 @@ export interface EdgeEvidence {
   /** The raw specifier or symbol as authored. */
   specifier: string;
   /** How the reference was resolved, for transparency. */
-  resolution: 'exact' | 'extension' | 'index' | 'index-of-package' | 'module-tree' | 'index-packed';
+  resolution:
+    | 'exact'
+    | 'extension'
+    | 'index'
+    | 'index-of-package'
+    | 'module-tree'
+    | 'index-packed'
+    | 'alias'
+    | 'root'
+    | 'subpath-import';
 }
 
 /**

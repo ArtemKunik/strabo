@@ -243,8 +243,8 @@ When('I select the most recent change', async function () {
   await this.page.locator('#timeline-panel .commit').first().click();
   await this.page.waitForFunction(
     () => {
-      const panel = document.getElementById('overlay-panel');
-      return !panel.hidden && /changed/.test(panel.textContent);
+      const panel = document.getElementById('review-panel');
+      return !panel.hidden && /file\(s\)/.test(panel.textContent);
     },
     undefined,
     { timeout: 15_000 },
@@ -252,10 +252,38 @@ When('I select the most recent change', async function () {
 });
 
 Then('the overlay panel reports changed files', async function () {
-  const text = (await this.page.textContent('#overlay-panel')) ?? '';
-  const match = /(\d+) changed/.exec(text);
-  assert.ok(match, `overlay panel "${text}" should report changed files`);
+  const text = (await this.page.textContent('#review-panel')) ?? '';
+  const match = /(\d+) file\(s\)/.exec(text);
+  assert.ok(match, `review panel "${text}" should report changed files`);
   assert.ok(Number(match[1]) > 0, `expected at least one changed file, got ${match[1]}`);
+});
+
+When('I open the working-tree review', async function () {
+  await this.page.click('#tb-review');
+  await this.page.waitForFunction(
+    () => {
+      const panel = document.getElementById('review-panel');
+      return !panel.hidden && /file\(s\)/.test(panel.textContent);
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the review panel reports the commit and its changed files', async function () {
+  const panel = await this.page.textContent('#review-panel');
+  const commit = await this.page.textContent('#review-panel [data-role="review-commit"]');
+  assert.match(commit ?? '', /\w+ · .+ · \d{4}-\d{2}-\d{2} · .+/);
+  assert.match(panel ?? '', /Commit review/);
+  assert.match(panel ?? '', /file\(s\)/);
+});
+
+Then('the review panel reports a working-tree review', async function () {
+  const panel = (await this.page.textContent('#review-panel')) ?? '';
+  assert.match(panel, /Working tree review/);
+  assert.match(panel, /file\(s\)/);
+  // The fixture leaves one uncommitted edit, so the group must be labelled explicitly.
+  assert.match(panel, /Unstaged \(\d+\)/);
 });
 
 Then('the status line reports nodes and a cache status', async function () {

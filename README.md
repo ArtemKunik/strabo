@@ -101,9 +101,40 @@ Also exposed but not yet surfaced in the UI: `/analysis/module-depth` and
 `/analysis/ownership`.
 
 The canvas toolbar's **Timeline** lists recorded changes (`/analysis/timeline`, newest
-first). Selecting one compares that revision with the working tree via
-`/analysis/impact?base=<hash>` and highlights the changed and potentially affected files.
-When Git metadata is unavailable the panel says so rather than showing an empty history.
+first). Selecting one reviews **that commit's own changes** via
+`/analysis/review?base=<hash>` — its files, statuses, and line counts, plus the files that
+can reach them through the dependency graph. When Git metadata is unavailable the panel says
+so rather than showing an empty history.
+
+## Git review
+
+**Review changes** on the canvas toolbar reviews the pending working tree through
+`/analysis/review`, split into **Staged**, **Unstaged**, and **Untracked** files. A commit
+selected from the timeline uses the same endpoint with `base=<ref>`.
+
+Both forms report per-file status (`added`, `modified`, `deleted`, `renamed`, …) and the
+insertions/deletions Git recorded, then the reverse-reachability impact — the same
+traversal the change-impact overlay uses. A file with no line counts (binary, or an
+untracked file that cannot be read) is reported as **uncounted** rather than as zero lines,
+and a changed path outside the scanned graph is listed as such instead of being drawn as
+if it had impact.
+
+Commit review uses `git show --first-parent` rather than a bare `<ref>` diff. A bare diff
+would fold in uncommitted working-tree edits, and `<ref>^..<ref>` fails on a root commit;
+`--first-parent` reports a merge against its first parent and resolves for the root.
+
+## Delegate to an agent
+
+Right-clicking a node, edge, diagnostic, commit, overlay item, or empty canvas opens a
+**Delegate** menu that hands the selected item to a coding agent. `POST /delegate` accepts
+only `opencode` or `claude`, writes the prompt to a temp file, and opens a new terminal
+running that agent with the repository as its working directory.
+
+The repository is resolved through the scan ceiling like every other route, and delegated
+text only ever lands in the prompt file — it is never interpolated into a shell command.
+`GET /delegate` lists recent launches (a log, not supervision, since a terminal outlives
+the server); `GET /delegate/:id` returns one run. The endpoint is Windows-only and answers
+`501` elsewhere.
 
 ## Reading the map
 

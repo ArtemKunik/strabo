@@ -35,7 +35,9 @@ export type { SymbolExtractor } from './scan/languages/registry.ts';
 export { addNamespacePrefixes, namespaceDepth, looksInternal } from './scan/languages/namespace.ts';
 export { classifyExclusion, looksMinified } from './scan/exclusions.ts';
 
-export { resolveRelative, normalize as normalizePath } from './resolve/index.ts';
+export { resolveRelative, normalize as normalizePath, tryCandidates } from './resolve/index.ts';
+export { loadAliasTables, resolveAliased } from './resolve/aliases.ts';
+export type { AliasTables, AliasClaim } from './resolve/aliases.ts';
 
 export {
   buildAdjacency,
@@ -47,7 +49,16 @@ export {
 export { buildPositions } from './analysis/layout.ts';
 export { buildBlockViewModel } from './analysis/blocks.ts';
 export { analyzeModuleDepth } from './analysis/depth.ts';
-export { computeImpact, getChangedFiles } from './analysis/impact.ts';
+export { computeImpact, getChangedFiles, impactFromPaths } from './analysis/impact.ts';
+export type { ImpactResult, ChangedFile } from './analysis/impact.ts';
+export {
+  reviewCommit,
+  reviewWorkingTree,
+  getCommit,
+  parseNameStatus,
+  parseNumstat,
+} from './analysis/review.ts';
+export type { ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';

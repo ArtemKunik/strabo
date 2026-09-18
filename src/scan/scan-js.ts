@@ -1,9 +1,18 @@
 import type { Diagnostic, GraphEdge } from '../types.ts';
+import { loadAliasTables, resolveAliased, type AliasTables } from '../resolve/aliases.ts';
 import { resolveRelative } from '../resolve/index.ts';
 
 export interface JsTsScanResult {
   edges: GraphEdge[];
   diagnostics: Diagnostic[];
+}
+
+export interface JsTsScanOptions {
+  /**
+   * Repository root for `tsconfig.json`/`jsconfig.json`/`package.json` alias
+   * discovery. Omit to keep purely relative resolution (e.g. in unit tests).
+   */
+  root?: string;
 }
 
 const IMPORT_FROM =
@@ -15,17 +24,21 @@ const REQUIRE_CALL = /(?<![.\w])require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 /**
  * Extract static imports, re-exports, `require`, and dynamic imports from JS/TS.
  *
- * Only relative specifiers are considered. Bare package specifiers are external and
- * must not create internal graph edges. A relative specifier that cannot be resolved
- * becomes a diagnostic rather than a speculative edge.
+ * Relative specifiers resolve against the importer; root-relative (`/src/...`),
+ * `tsconfig`/`jsconfig` path aliases, and package subpath imports (`#...`)
+ * resolve through the repository's own config files. Bare packages are external
+ * and must not create internal graph edges. A claimed specifier that cannot be
+ * resolved becomes a diagnostic rather than a speculative edge.
  */
 export function scanJsTsEdges(
   files: readonly string[],
   contentByFile: ReadonlyMap<string, string>,
+  options: JsTsScanOptions = {},
 ): JsTsScanResult {
   const fileSet = new Set(files);
   const edges: GraphEdge[] = [];
   const diagnostics: Diagnostic[] = [];
+  const tables: AliasTables | null = options.root ? loadAliasTables(options.root) : null;
 
   for (const file of files) {
     if (!isJavaScriptLike(file)) {
@@ -37,26 +50,45 @@ export function scanJsTsEdges(
     }
 
     for (const match of collectReferences(content)) {
-      const resolved = resolveRelative(match.specifier, match.line, { from: file, files: fileSet });
-      if (resolved) {
-        edges.push({
-          source: file,
-          target: resolved.target,
-          kind: match.kind,
-          evidence: resolved.evidence,
-        });
+      if (isRelative(match.specifier)) {
+        const resolved = resolveRelative(match.specifier, match.line, { from: file, files: fileSet });
+        if (resolved) {
+          edges.push({
+            source: file,
+            target: resolved.target,
+            kind: match.kind,
+            evidence: resolved.evidence,
+          });
+          continue;
+        }
+      } else if (tables) {
+        const claim = resolveAliased(match.specifier, match.line, file, fileSet, tables);
+        if (claim.resolved) {
+          edges.push({
+            source: file,
+            target: claim.resolved.target,
+            kind: match.kind,
+            evidence: claim.resolved.evidence,
+          });
+          continue;
+        }
+        if (!claim.claimed || isAssetSpecifier(match.specifier)) {
+          continue;
+        }
+      } else if (!isRootRelative(match.specifier)) {
         continue;
       }
-      if (isRelative(match.specifier) && !isAssetSpecifier(match.specifier)) {
-        diagnostics.push({
-          file,
-          line: match.line,
-          severity: 'warning',
-          kind: 'unresolved',
-          specifier: match.specifier,
-          message: `Reference "${match.specifier}" does not resolve to a file inside the repository.`,
-        });
+      if (isAssetSpecifier(match.specifier)) {
+        continue;
       }
+      diagnostics.push({
+        file,
+        line: match.line,
+        severity: 'warning',
+        kind: 'unresolved',
+        specifier: match.specifier,
+        message: `Reference "${match.specifier}" does not resolve to a file inside the repository.`,
+      });
     }
   }
 
@@ -95,6 +127,10 @@ function collectReferences(content: string): Reference[] {
 
 function isRelative(specifier: string): boolean {
   return specifier.startsWith('.') || specifier.startsWith('/');
+}
+
+function isRootRelative(specifier: string): boolean {
+  return specifier.startsWith('/');
 }
 
 /** Module extensions Strabo models. Anything else (`.css`, `.json`, images) is an asset. */

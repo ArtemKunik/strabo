@@ -30,6 +30,10 @@ Feature: Map legibility
     When I toggle boundaries
     Then the detail level is "block"
 
+  @renderer
+  Scenario: The status bar names the renderer that is actually drawing
+    Then the status bar names the renderer the map is drawing with
+
   @strip
   Scenario: The tests strip filters the map
     When I switch to file detail

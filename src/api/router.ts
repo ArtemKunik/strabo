@@ -4,6 +4,7 @@ import { browseDirectories } from '../boundary/browse.ts';
 import { loadCatalogue } from '../integrations/catalogue.ts';
 import { createRepositoryStore, type RepositoryStore } from '../state/repository-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
+import { createDelegateRouter } from './routes/delegate.ts';
 import { createGraphRouter } from './routes/graph.ts';
 import { createLineageRouter } from './routes/lineage.ts';
 import { createRepositoriesRouter } from './routes/repositories.ts';
@@ -51,6 +52,7 @@ export function createStraboRouter(config: StraboConfig, store?: RepositoryStore
 
   router.use(createGraphRouter(config));
   router.use(createAnalysisRouter(config));
+  router.use(createDelegateRouter(config));
   router.use(createSymbolsRouter(config));
   router.use(createRepositoriesRouter(config, repositoryStore));
   router.use(createVulnerabilityRouter(config));

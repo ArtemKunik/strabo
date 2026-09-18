@@ -18,3 +18,22 @@ Feature: Timeline and compare versions
     Then the timeline lists recorded changes
     When I select the most recent change
     Then the overlay panel reports changed files
+
+  @review
+  Scenario: Reviewing a commit's own changes
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    And I open the timeline
+    When I select the most recent change
+    Then the review panel reports the commit and its changed files
+
+  @review
+  Scenario: Reviewing pending working-tree changes
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    When I open the working-tree review
+    Then the review panel reports a working-tree review
