@@ -22,6 +22,7 @@ export function createView(container) {
   const hoverHandlers = [];
   const edgeHandlers = [];
   const contextHandlers = [];
+  const groupHandlers = [];
   let selectedEdge = null;
 
   // Cytoscape does not observe container size itself. The breadcrumb, diagnostics panel,
@@ -77,6 +78,17 @@ export function createView(container) {
   cy.on('mouseout', 'edge', (event) => {
     event.target.removeClass('hover');
   });
+  // Cytoscape's own selection state (ctrl/⌘-click toggles a node; shift-drag box-selects
+  // a region) is the group: a plain tap already goes through this same state — it just
+  // replaces the set with one node — so "group" here means whatever's currently selected,
+  // read fresh rather than tracked, since select/unselect can fire once per element in a
+  // box-select and per-event bookkeeping would just have to re-derive the same set anyway.
+  cy.on('select unselect', 'node', () => notifyGroup());
+
+  function notifyGroup() {
+    const ids = cy.nodes(':selected').map((node) => node.id());
+    for (const handler of groupHandlers) handler(ids);
+  }
 
   /** Highlight one edge, or clear when null. The selected edge is always classed. */
   function selectEdge(edgeId) {
@@ -105,6 +117,9 @@ export function createView(container) {
         cy.add(elements.edges);
       });
       applyLabelBudget(cy, true);
+      // Removal doesn't fire unselect events, so the old node ids would otherwise linger
+      // in whatever last read the group — tell listeners the slate is clean.
+      notifyGroup();
     },
     highlight(ids) {
       const keep = ids ? new Set(ids) : null;
@@ -165,6 +180,18 @@ export function createView(container) {
     },
     clearEdge() {
       selectEdge(null);
+    },
+    /** Ids of the natively-selected nodes: ⌘/ctrl-click toggles one, shift-drag a region. */
+    selectedNodeIds() {
+      return cy.nodes(':selected').map((node) => node.id());
+    },
+    /** Fires with the current id list whenever the native selection changes, including
+     * to `[]` after a render replaces the elements out from under it. */
+    onGroupChange(handler) {
+      groupHandlers.push(handler);
+    },
+    clearGroupSelection() {
+      cy.nodes(':selected').unselect();
     },
   };
 }

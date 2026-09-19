@@ -136,6 +136,15 @@ text only ever lands in the prompt file — it is never interpolated into a shel
 the server); `GET /delegate/:id` returns one run. The endpoint is Windows-only and answers
 `501` elsewhere.
 
+⌘/ctrl-click toggles a node into a group, and shift-drag box-selects a region — Cytoscape's
+own selection, so it costs nothing to build. Once two or more are selected, a **Delegate
+selection…** button and a count appear on the canvas toolbar (`G`), and right-clicking any
+selected node opens the same Delegate menu scoped to the whole group instead of just that
+one node; right-clicking a node outside the group targets only that node, leaving the group
+untouched underneath. The generated prompt renders one evidence subsection per file rather
+than merging every file's facts into a single list, so it stays clear which claim belongs
+to which file.
+
 ## Reading the map
 
 Node **size** encodes transitive dependents, **colour** encodes the top-level directory,

@@ -36,6 +36,8 @@ let current = null;
 let selected = null;
 /** Edge id (`e<N>`) with an open evidence panel, or null. */
 let selectedEdgeId = null;
+/** Node ids currently held in cytoscape's own selection: ⌘/ctrl-click or shift-drag. */
+let groupSelection = [];
 
 const state = {
   repository: null,
@@ -86,6 +88,8 @@ const elements = {
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbClear: document.getElementById('tb-clear'),
+  groupCount: document.getElementById('group-count'),
+  tbDelegateGroup: document.getElementById('tb-delegate-group'),
   timelinePanel: document.getElementById('timeline-panel'),
   folderDialog: document.getElementById('folder-dialog'),
   folderPath: document.getElementById('folder-path'),
@@ -368,6 +372,7 @@ function clearSelection() {
   renderEdgeEvidence(elements.edgePanel, null);
   closeReview();
   elements.inspector.hidden = true;
+  view.clearGroupSelection();
 }
 
 /** Load the member map, repository health, and consumers, then open the full view. */
@@ -543,6 +548,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
+  else if (key === 'g' && groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 
 /** Show or hide recorded changes; selecting one compares it with the working tree. */
@@ -992,6 +998,35 @@ function nodeDelegateTarget(id) {
   return { kind: 'node', id, label: node?.label ?? id, evidence };
 }
 
+/* ------------------------------------------- Group selection (⌘/ctrl-click, shift-drag) */
+
+/** Combine every selected node's passport into one delegation target. */
+function groupDelegateTarget() {
+  const items = groupSelection.map((id) => nodeDelegateTarget(id));
+  return { kind: 'group', label: `${items.length} file(s)`, items };
+}
+
+/** Reflect cytoscape's native selection in the toolbar chip and delegate button. */
+function updateGroupUI(ids) {
+  groupSelection = ids ?? [];
+  const count = groupSelection.length;
+  // A plain click already selects its one node in cytoscape's terms — that's not a
+  // "group" a person meant to build, so the toolbar stays quiet until there are two.
+  const active = count >= 2;
+  elements.groupCount.hidden = !active;
+  elements.groupCount.textContent = active ? `${count} selected` : '';
+  elements.tbDelegateGroup.hidden = !active;
+}
+
+view.onGroupChange(updateGroupUI);
+
+elements.tbDelegateGroup.addEventListener('click', () => {
+  // Anchor to the button itself rather than the event's coordinates: the keyboard
+  // shortcut (G) dispatches a synthetic click with no real pointer position.
+  const rect = elements.tbDelegateGroup.getBoundingClientRect();
+  openDelegateMenu(groupDelegateTarget(), rect.left, rect.bottom + 4);
+});
+
 /** Recorded facts for an edge, from the evidence the scanner recorded. */
 function edgeDelegateTarget(edgeId) {
   const evidence = current ? edgeEvidenceFor(current, edgeId) : null;
@@ -1176,6 +1211,15 @@ function openDelegateMenu(target, x, y) {
           },
         }]
         : []),
+      ...(Array.isArray(target.items) && target.items.length > 0
+        ? [{
+          label: '⧉ Copy paths',
+          action: async () => {
+            await copyText(target.items.map((entry) => entry.id ?? entry.label).join('\n'));
+            showToast(`${target.items.length} path(s) copied.`);
+          },
+        }]
+        : []),
     ],
   });
 }
@@ -1184,7 +1228,12 @@ view.onContext((target, originalEvent) => {
   hideTooltip();
   const x = originalEvent?.clientX ?? window.innerWidth / 2;
   const y = originalEvent?.clientY ?? window.innerHeight / 2;
-  if (target.kind === 'node' && target.id) {
+  // Right-clicking a node that's part of the current multi-selection acts on the whole
+  // group, same as most desktop apps; right-clicking outside it targets just that node,
+  // leaving the group selection as-is underneath.
+  if (target.kind === 'node' && target.id && groupSelection.length >= 2 && groupSelection.includes(target.id)) {
+    openDelegateMenu(groupDelegateTarget(), x, y);
+  } else if (target.kind === 'node' && target.id) {
     openDelegateMenu(nodeDelegateTarget(target.id), x, y);
   } else if (target.kind === 'edge' && target.id) {
     openDelegateMenu(edgeDelegateTarget(target.id) ?? viewDelegateTarget('edge'), x, y);
@@ -1235,6 +1284,7 @@ if (window.STRABO_TEST) {
     memberStepCount,
     review: () => showReview(''),
     reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
+    groupSelection: () => groupSelection,
   };
 }
 

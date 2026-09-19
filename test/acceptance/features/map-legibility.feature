@@ -39,3 +39,13 @@ Feature: Map legibility
     When I switch to file detail
     And I click the tests strip entry for "tests"
     Then the filter contains "tests"
+
+  @group-select
+  Scenario: Selecting a group of nodes offers a group delegate action
+    When I switch to file detail
+    And I select the "lib/index.ts" and "lib/math.ts" nodes as a group
+    Then the group toolbar reports 2 selected
+    When I open the group delegate menu
+    Then the delegate menu title is "2 file(s)"
+    When I clear the selection
+    Then the group toolbar reports no selection

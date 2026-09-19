@@ -40,6 +40,48 @@ When('I click the tests strip entry for {string}', async function (name) {
   );
 });
 
+/**
+ * Builds the group through cytoscape's own selection API rather than a pixel-perfect
+ * shift-drag: it exercises the same select/unselect events the UI listens for, without a
+ * test depending on where a fixture happens to lay nodes out relative to the floating
+ * toolbar. Ids can contain `/`, so this looks nodes up by id rather than as a CSS
+ * selector, where an unescaped `/` would be invalid.
+ */
+When('I select the {string} and {string} nodes as a group', async function (a, b) {
+  await this.page.evaluate(
+    ({ a, b }) => {
+      const cy = window.straboTest.cy;
+      cy.collection([cy.getElementById(a), cy.getElementById(b)]).select();
+    },
+    { a, b },
+  );
+  await this.page.waitForFunction(() => window.straboTest.groupSelection().length === 2);
+});
+
+When('I open the group delegate menu', async function () {
+  await this.page.click('#tb-delegate-group');
+  await this.page.waitForFunction(() => document.querySelector('.agent-menu:not([hidden])') != null);
+});
+
+Then('the group toolbar reports {int} selected', async function (count) {
+  const text = (await this.page.textContent('#group-count')) ?? '';
+  assert.equal(text, `${count} selected`);
+  const hidden = await this.page.evaluate(() => document.getElementById('tb-delegate-group').hidden);
+  assert.equal(hidden, false, 'the delegate-group button should be visible once a group exists');
+});
+
+Then('the group toolbar reports no selection', async function () {
+  const hidden = await this.page.evaluate(() => document.getElementById('group-count').hidden);
+  assert.equal(hidden, true);
+  const groupSelection = await this.page.evaluate(() => window.straboTest.groupSelection());
+  assert.deepEqual(groupSelection, []);
+});
+
+Then('the delegate menu title is {string}', async function (title) {
+  const text = await this.page.textContent('.agent-menu:not([hidden]) .agent-menu-title');
+  assert.equal(text, title);
+});
+
 Then('the legend explains size, colour, and shape', async function () {
   const text = (await this.page.textContent('#legend')) ?? '';
   assert.match(text, /size = dependents/);

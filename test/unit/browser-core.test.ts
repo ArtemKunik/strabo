@@ -550,3 +550,44 @@ test('buildAgentPrompt caps runaway evidence', () => {
   assert.ok(prompt.length <= MAX_DELEGATE_PROMPT + 20);
   assert.match(prompt, /truncated/);
 });
+
+test('buildAgentPrompt renders a group target as one subsection per file', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'opencode',
+    repository: { name: 'demo', root: '/demo' },
+    target: {
+      kind: 'group',
+      items: [
+        { id: 'src/a.ts', label: 'a.ts', evidence: ['Blast radius: 2'] },
+        { id: 'src/b.ts', label: 'b.ts', evidence: ['Blast radius: 5'] },
+      ],
+    },
+  });
+  assert.match(prompt, /# Strabo task — 2 file\(s\)/);
+  assert.match(prompt, /Target: group \(2 file\(s\)\)/);
+  assert.match(prompt, /### a\.ts \(`src\/a\.ts`\)/);
+  assert.match(prompt, /Blast radius: 2/);
+  assert.match(prompt, /### b\.ts \(`src\/b\.ts`\)/);
+  assert.match(prompt, /Blast radius: 5/);
+  assert.match(prompt, /Assess this set of files together/);
+});
+
+test('buildAgentPrompt degrades an empty group and truncates a huge one', () => {
+  const empty = buildAgentPrompt({
+    agent: 'claude',
+    repository: null,
+    target: { kind: 'group', items: [] },
+  });
+  assert.match(empty, /No files recorded in this selection/);
+
+  const many = buildAgentPrompt({
+    agent: 'claude',
+    repository: { name: 'demo', root: '/demo' },
+    target: {
+      kind: 'group',
+      items: Array.from({ length: 45 }, (_, i) => ({ id: `src/f${i}.ts`, evidence: [`fact ${i}`] })),
+    },
+  });
+  assert.match(many, /### …and 15 more file\(s\) \(not detailed\)/);
+  assert.match(many, /src\/f44\.ts/);
+});
