@@ -120,6 +120,25 @@ Right-click any item to hand it to `opencode` or `claude` in a new terminal.
 - Windows-only (`501` elsewhere); the terminal outlives the server, so the run list is a
   log rather than supervision.
 
+## Phase 10 - Dependency risk
+
+CVE, license, and supply-chain risk for a repository, with findings joined to the files
+that import the affected package.
+
+- `GET /analysis/risk` returns inventory, advisories, licenses, and the import index.
+- Inventory parses npm (`package-lock.json`/`package.json`), Cargo (`Cargo.lock`/
+  `Cargo.toml`), and Maven (`pom.xml`). A manifest-only dependency keeps `version: null`
+  because only a lockfile names an exact version.
+- The scan records external specifiers per file in `graph.externalImports`; they are not
+  edges, because their target is outside the repository. That is the join a finding needs
+  to name the importing files and their blast radius.
+- Advisories come from OSV.dev (batched query, then detail per id) and licenses from
+  deps.dev, classified against an SPDX policy where `OR` is least risky and `AND` most.
+- Online calls are opt-in (`STRABO_RISK=online`), off by default, and cached. `POST
+  /vulnerabilities` stays a host-injectable seam.
+
+Spec: `test/acceptance/features/dependency-risk.feature`.
+
 ## Phase 6 - Release readiness
 
 - `npm pack` and install the tarball in a clean fixture; run scan and acceptance there.

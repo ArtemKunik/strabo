@@ -35,6 +35,18 @@ When('I switch to file detail', async function () {
   );
 });
 
+When('I reload the Strabo UI', async function () {
+  await this.page.reload();
+  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, {
+    timeout: 20_000,
+  });
+});
+
+Then('the detail selector shows {string}', async function (value) {
+  const selected = await this.page.inputValue('#detail');
+  assert.equal(selected, value);
+});
+
 When('I double-click the {string} node', async function (id) {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
   await this.clickNode(id, {

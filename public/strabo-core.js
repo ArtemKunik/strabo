@@ -468,6 +468,47 @@ export function reviewGroups(files) {
   return [...groups.entries()].filter(([, list]) => list.length > 0);
 }
 
+const SEVERITY_ORDER = ['unknown', 'low', 'moderate', 'high', 'critical'];
+
+/**
+ * Order advisories worst-first.
+ *
+ * Severity is the advisory's own recorded label; Strabo does not compute or downgrade it.
+ * The id breaks ties so the ordering is stable between renders.
+ */
+export function orderAdvisories(advisories) {
+  return [...(advisories ?? [])].sort(
+    (a, b) =>
+      SEVERITY_ORDER.indexOf(b.severity) - SEVERITY_ORDER.indexOf(a.severity) ||
+      String(a.id).localeCompare(String(b.id)),
+  );
+}
+
+/** One line summarising a risk report for the status bar. */
+export function riskSummary(report) {
+  if (!report || report.available === false) {
+    return 'Risk unavailable';
+  }
+  const { summary, inventory } = report;
+  const severity = ['critical', 'high', 'moderate', 'low']
+    .map((level) => `${summary[level]} ${level}`)
+    .join(' · ');
+  const denied = summary.deniedLicenses > 0 ? ` · ${summary.deniedLicenses} denied license(s)` : '';
+  const offline = report.online ? '' : ' · online lookup off';
+  return `${inventory.total} dependencies · ${severity}${denied}${offline}`;
+}
+
+/** The worst severity present in a set of advisories, for the panel's accent. */
+export function worstSeverity(advisories) {
+  let worst = 'none';
+  for (const advisory of advisories ?? []) {
+    if (SEVERITY_ORDER.indexOf(advisory.severity) > SEVERITY_ORDER.indexOf(worst)) {
+      worst = advisory.severity;
+    }
+  }
+  return worst;
+}
+
 /**
  * Map a review analysis result onto node classes and a panel summary.
  *

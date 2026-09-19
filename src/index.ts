@@ -69,6 +69,15 @@ export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 
+export { findManifestFiles, readDependencies, parseNpmLock, parseNpmManifest, parseCargoLock, parseMavenPom } from './risk/inventory.ts';
+export { createOsvClient, normalizeSeverity, fixedVersions, createResponseCache, riskCacheDir } from './risk/osv.ts';
+export type { OsvClient, OsvQuery, OsvVulnerability, ResponseCache, FetchLike } from './risk/osv.ts';
+export { createLicenseClient, classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses } from './risk/licenses.ts';
+export type { LicenseClient, DepsDevVersion } from './risk/licenses.ts';
+export { computeRiskReport } from './risk/report.ts';
+export type { RiskOptions } from './risk/report.ts';
+export { collectPolyglotExternalImports, mavenCoordinateMatches } from './scan/external-polyglot.ts';
+
 export { buildViewModel } from './view/view-model.ts';
 
 export {

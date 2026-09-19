@@ -58,6 +58,8 @@ Then open `http://localhost:3000` (default `PORT`).
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
+| `STRABO_RISK`        | `1` or `online` enables CVE/license lookup via OSV.dev and deps.dev. Off by default. |
+| `STRABO_RISK_DENY`   | Comma-separated SPDX ids the license policy denies. Defaults to strong copyleft. |
 | `PORT`               | HTTP port for the standalone server.                           |
 
 ### Choosing a repository
@@ -135,6 +137,36 @@ text only ever lands in the prompt file — it is never interpolated into a shel
 `GET /delegate` lists recent launches (a log, not supervision, since a terminal outlives
 the server); `GET /delegate/:id` returns one run. The endpoint is Windows-only and answers
 `501` elsewhere.
+
+## Dependency risk
+
+`GET /analysis/risk` reports supply-chain risk for one repository. **Inventory and file
+mapping are always available; advisories and licenses require the opt-in online lookup.**
+
+- **Inventory** parses `package-lock.json` / `package.json` (npm), `Cargo.lock` /
+  `Cargo.toml` (Cargo), and `pom.xml` (Maven). Only a lockfile names an exact version, so a
+  manifest-only dependency is listed with `version: null` rather than guessed from a range.
+- **Imports** are recorded per file during the scan. A bare specifier is an external
+  reference, not a graph edge — its target is outside the repository — so the scan stores it
+  separately in `graph.externalImports`. That is what lets a finding name the file that
+  imports the package (npm, Cargo, and conservative Maven `groupId` prefix matches).
+- **Advisories** come from [OSV.dev](https://osv.dev): one batched query per package set,
+  then the full record per advisory id. Severity is the advisory's own label; Strabo never
+  computes or downgrades it.
+- **Licenses** come from [deps.dev](https://deps.dev), classified against an SPDX policy.
+  `OR` takes the least risky branch (either license may be chosen) and `AND` the most risky
+  (all must be satisfied); an unrecognised identifier is `unknown`, never treated as
+  permissive.
+- **Impact** joins a finding to the files that import the package and then walks reverse
+  dependencies, so a vulnerable dependency shows the files that can reach it by distance.
+
+A dependency whose version cannot be resolved is listed but not queried, because both APIs
+answer for exact versions. When the online lookup is off the report says so rather than
+returning an empty advisory list that would read as a clean bill of health.
+
+Online lookup is the only feature that contacts a third party, and it is off unless
+`STRABO_RISK=online` is set; responses are cached under `STRABO_CACHE_DIR` to avoid repeat
+calls. `POST /vulnerabilities` remains a host-injectable seam for an external provider.
 
 ⌘/ctrl-click toggles a node into a group, and shift-drag box-selects a region — Cytoscape's
 own selection, so it costs nothing to build. Once two or more are selected, a **Delegate
@@ -266,9 +298,12 @@ an internal reference.
 
 JS/TS additionally resolves **all specifier styles** through the repository's own
 config files: root-relative (`/src/...`), `tsconfig.json`/`jsconfig.json` `paths`
-(including `extends` chains) and `baseUrl`, and `package.json` subpath `imports`
-(`#...`). A specifier claimed by one of these mechanisms but missing on disk is an
-`unresolved` diagnostic; pure bare packages (`react`, `lodash`) stay silent externals.
+(including `extends` chains) and `baseUrl`, `vite.config` / `webpack.config` `alias`
+tables (object and `{ find, replacement }` forms, incl. `path.resolve(__dirname, …)`
+and `fileURLToPath(new URL(…))` replacements — executed never, only read), and
+`package.json` subpath `imports` (`#...`). A specifier claimed by one of these
+mechanisms but missing on disk is an `unresolved` diagnostic; pure bare packages
+(`react`, `lodash`) stay silent externals.
 Evidence records how each edge resolved (`path alias`, `repo root`, `package subpath`).
 
 Java, C#, and Kotlin types used in the file body are resolved against the declaring

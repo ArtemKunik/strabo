@@ -88,7 +88,99 @@ export interface Graph {
   edges: GraphEdge[];
   diagnostics: Diagnostic[];
   excluded: Exclusion[];
+  /**
+   * Bare imports of external packages, recorded per file.
+   *
+   * These are deliberately not edges: their target is outside the repository, so an edge
+   * would violate the graph contract. They exist so a dependency-level finding can name
+   * the files that actually import the affected package.
+   */
+  externalImports?: ExternalImport[];
 }
+
+/** The package ecosystem a dependency belongs to. */
+export type DependencyEcosystem = 'npm' | 'maven' | 'cargo';
+
+/** One external package reference, as authored in a source file. */
+export interface ExternalImport {
+  file: string;
+  line: number;
+  /** The specifier as written, e.g. `lodash/fp` or `serde::Deserialize`. */
+  specifier: string;
+  /** The package or crate the specifier belongs to, e.g. `lodash` or `serde`. */
+  package: string;
+  ecosystem: DependencyEcosystem;
+  kind: EdgeKind | 'use' | 'extern-crate';
+}
+
+/** A dependency recorded by a manifest or lockfile. */
+export interface Dependency {
+  ecosystem: DependencyEcosystem;
+  /** npm `name`, Maven `groupId:artifactId`, Cargo crate name. */
+  name: string;
+  /** Resolved version, or null when only an unresolved range was available. */
+  version: string | null;
+  /** Where it was found, repository-relative. */
+  source: string;
+  direct: boolean;
+  dev?: boolean;
+}
+
+export type AdvisorySeverity = 'low' | 'moderate' | 'high' | 'critical' | 'unknown';
+
+/** A known vulnerability affecting one resolved dependency. */
+export interface DependencyAdvisory {
+  id: string;
+  aliases: string[];
+  summary: string;
+  severity: AdvisorySeverity;
+  /** Versions the advisory records as fixed, when any. */
+  fixed: string[];
+  url: string;
+  dependency: { ecosystem: DependencyEcosystem; name: string; version: string | null };
+  /** Files in the scanned graph that import the affected package. */
+  importedBy: string[];
+  /** Reverse-reachability from the importing files, by distance. */
+  impactedFiles: Array<{ id: string; distance: number }>;
+}
+
+/** How an SPDX license is classified for policy purposes. */
+export type LicenseRisk = 'permissive' | 'weak-copyleft' | 'strong-copyleft' | 'unknown' | 'unavailable';
+
+/** The license of one resolved dependency, and whether policy denies it. */
+export interface DependencyLicense {
+  dependency: { ecosystem: DependencyEcosystem; name: string; version: string | null };
+  licenses: string[];
+  risk: LicenseRisk;
+  denied: boolean;
+}
+
+/** A complete dependency-risk report for one repository. */
+export interface RiskReport {
+  available: true;
+  /** False when the opt-in online lookup is disabled; inventory still works. */
+  online: boolean;
+  inventory: {
+    total: number;
+    byEcosystem: Record<string, number>;
+    /** Names cited by source imports but absent from every manifest. */
+    undeclared: string[];
+  };
+  advisories: DependencyAdvisory[];
+  licenses: DependencyLicense[];
+  /** External packages cited by source imports, with the files that cite them. */
+  imports: Array<{
+    ecosystem: DependencyEcosystem;
+    package: string;
+    files: string[];
+    /** True when a manifest also declares the package. */
+    declared: boolean;
+  }>;
+  summary: Record<AdvisorySeverity, number> & { deniedLicenses: number };
+  /** Set when a manifest was present but could not be parsed completely. */
+  caveats: string[];
+}
+
 
 /** Extra scan metadata returned alongside the graph. */
 export interface ScanReport {
@@ -213,7 +305,19 @@ export interface StraboConfig {
   configPath?: string;
   scanCeiling?: string;
   integrations?: StraboIntegrations;
+  /**
+   * Dependency-risk lookup. Online advisory/license calls are opt-in and off by default;
+   * inventory and file mapping work without them.
+   */
+  risk?: RiskConfig;
   serverLog?: (message: string, error?: unknown) => void;
+}
+
+export interface RiskConfig {
+  /** Allow contacting OSV.dev and deps.dev. Defaults to false. */
+  online?: boolean;
+  /** SPDX identifiers the license policy denies, replacing the default strong-copyleft set. */
+  deniedLicenses?: string[];
 }
 
 /** Options accepted by the graph endpoint. */

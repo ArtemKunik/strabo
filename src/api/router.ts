@@ -8,6 +8,7 @@ import { createDelegateRouter } from './routes/delegate.ts';
 import { createGraphRouter } from './routes/graph.ts';
 import { createLineageRouter } from './routes/lineage.ts';
 import { createRepositoriesRouter } from './routes/repositories.ts';
+import { createRiskRouter } from './routes/risk.ts';
 import { createSymbolsRouter } from './routes/symbols.ts';
 import { createVulnerabilityRouter } from './routes/vulnerabilities.ts';
 import type { StraboConfig } from '../types.ts';
@@ -52,6 +53,7 @@ export function createStraboRouter(config: StraboConfig, store?: RepositoryStore
 
   router.use(createGraphRouter(config));
   router.use(createAnalysisRouter(config));
+  router.use(createRiskRouter(config));
   router.use(createDelegateRouter(config));
   router.use(createSymbolsRouter(config));
   router.use(createRepositoriesRouter(config, repositoryStore));

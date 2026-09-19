@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import {
@@ -24,6 +24,7 @@ import {
   renderMembers,
   renderOverlayPanel,
   renderReview,
+  renderRisk,
   renderTestsStrip,
   renderTimeline,
 } from './strabo-panels.js';
@@ -51,6 +52,92 @@ const state = {
   renderedGeneration: 0,
 };
 
+/* ------------------------------------------- Persisted view preferences */
+
+/**
+ * View settings (detail mode, review overlay, filter) persist per repository
+ * in localStorage, so a reload or revisit restores the exact view. The key is
+ * the repository root; unknown values are ignored rather than applied.
+ */
+const VIEW_PREFS_PREFIX = 'strabo.view.';
+let prefsSaveTimer = null;
+
+function viewPrefsKey(repository) {
+  return `${VIEW_PREFS_PREFIX}${repository ?? 'default'}`;
+}
+
+function readViewPrefs(repository) {
+  try {
+    const raw = window.localStorage.getItem(viewPrefsKey(repository));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    const prefs = {};
+    if (parsed.mode === 'block' || parsed.mode === 'file') {
+      prefs.mode = parsed.mode;
+    }
+    if (typeof parsed.overlay === 'string' && parsed.overlay !== '') {
+      prefs.overlay = parsed.overlay;
+    }
+    if (typeof parsed.filter === 'string' && parsed.filter !== '') {
+      prefs.filter = parsed.filter.slice(0, 200);
+    }
+    return prefs;
+  } catch {
+    return null;
+  }
+}
+
+function writeViewPrefs() {
+  try {
+    window.localStorage.setItem(
+      viewPrefsKey(state.repository),
+      JSON.stringify({ mode: state.mode, overlay: state.overlay, filter: state.filter }),
+    );
+  } catch {
+    // Storage unavailable (private mode, quota): the app simply doesn't persist.
+  }
+}
+
+function schedulePrefsSave() {
+  if (prefsSaveTimer) {
+    clearTimeout(prefsSaveTimer);
+  }
+  prefsSaveTimer = setTimeout(() => {
+    prefsSaveTimer = null;
+    writeViewPrefs();
+  }, 300);
+}
+
+/** Apply saved settings for the current repository; call before the first scan. */
+function applyViewPrefs() {
+  const prefs = readViewPrefs(state.repository);
+  if (!prefs) {
+    return;
+  }
+  if (prefs.mode) {
+    state.mode = prefs.mode;
+    elements.detail.value = prefs.mode;
+  }
+  if (prefs.filter) {
+    state.filter = prefs.filter;
+    elements.filter.value = prefs.filter;
+  }
+  if (prefs.overlay && [...elements.overlay.options].some((option) => option.value === prefs.overlay)) {
+    state.overlay = prefs.overlay;
+    elements.overlay.value = prefs.overlay;
+    // File-mode overlays need file mode (same rule as the change handler).
+    if (['impact', 'cycles', 'test-reach'].includes(prefs.overlay) && state.mode !== 'file') {
+      state.mode = 'file';
+      elements.detail.value = 'file';
+    }
+  }
+}
+
 const view = createView(document.getElementById('graph'));
 
 const elements = {
@@ -65,6 +152,7 @@ const elements = {
   overlayPanel: document.getElementById('overlay-panel'),
   edgePanel: document.getElementById('edge-panel'),
   reviewPanel: document.getElementById('review-panel'),
+  riskPanel: document.getElementById('risk-panel'),
   diagnosticsToggle: document.getElementById('diagnostics-toggle'),
   diagnosticsBadge: document.getElementById('diagnostics-badge'),
   diagnostics: document.getElementById('diagnostics'),
@@ -87,6 +175,7 @@ const elements = {
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
+  tbRisk: document.getElementById('tb-risk'),
   tbClear: document.getElementById('tb-clear'),
   groupCount: document.getElementById('group-count'),
   tbDelegateGroup: document.getElementById('tb-delegate-group'),
@@ -371,6 +460,7 @@ function clearSelection() {
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   closeReview();
+  closeRisk();
   elements.inspector.hidden = true;
   view.clearGroupSelection();
 }
@@ -548,6 +638,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
+  else if (key === 'v') elements.tbRisk.click();
   else if (key === 'g' && groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 
@@ -621,6 +712,41 @@ async function toggleReview() {
   }
   try {
     await showReview('');
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  }
+}
+
+/**
+ * Load the dependency-risk report: advisories, licenses, and imported files.
+ *
+ * This is the one endpoint that may contact a third party (OSV.dev, deps.dev). It is
+ * opt-in server-side; when disabled the report still lists dependencies and imports.
+ */
+async function showRisk() {
+  const repository = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+  const report = await request(`/analysis/risk${repository}`);
+  closeReview();
+  elements.riskPanel.hidden = false;
+  renderRisk(elements.riskPanel, report, {
+    onClose: closeRisk,
+    onSelect: (id) => selectNode(id),
+  });
+  elements.status.textContent = riskSummary(report);
+}
+
+function closeRisk() {
+  elements.riskPanel.hidden = true;
+  renderRisk(elements.riskPanel, null, {});
+}
+
+async function toggleRisk() {
+  if (!elements.riskPanel.hidden) {
+    closeRisk();
+    return;
+  }
+  try {
+    await showRisk();
   } catch (error) {
     elements.status.textContent = `Error: ${error.message}`;
   }
@@ -753,6 +879,7 @@ function openFolderDialog() {
 
 /** Point the app at a chosen repository, remembering it as the active one. */
 async function useRepository(path) {
+  writeViewPrefs();
   state.repository = path;
   state.prefix = '';
   state.filter = '';
@@ -766,6 +893,7 @@ async function useRepository(path) {
     elements.status.textContent = `Error: ${error.message}`;
     return;
   }
+  applyViewPrefs();
   scan();
 }
 
@@ -820,9 +948,14 @@ elements.repository.addEventListener('change', () => {
   if (!root) {
     return;
   }
+  // Save outgoing view settings before switching, then restore the new repo's.
+  writeViewPrefs();
   state.repository = root;
   state.prefix = '';
+  state.filter = '';
+  elements.filter.value = '';
   elements.forget.disabled = false;
+  applyViewPrefs();
   rememberRepository(root)
     .then(() => scan())
     .catch((error) => {
@@ -837,12 +970,14 @@ elements.forget.addEventListener('click', () => {
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
   state.prefix = '';
+  writeViewPrefs();
   scan();
 });
 elements.refresh.addEventListener('click', () => scan({ refresh: true }));
 elements.overlay.addEventListener('change', () => {
   state.overlay = elements.overlay.value;
   if (state.overlay === 'none') {
+    writeViewPrefs();
     applyOverlay();
     return;
   }
@@ -851,20 +986,24 @@ elements.overlay.addEventListener('change', () => {
   if (needsFileMode && state.mode !== 'file') {
     state.mode = 'file';
     elements.detail.value = 'file';
+    writeViewPrefs();
     scan();
     return;
   }
+  writeViewPrefs();
   applyOverlay();
 });
 elements.filter.addEventListener('input', () => {
   state.filter = elements.filter.value;
   applyFilterToView();
+  schedulePrefsSave();
 });
 if (elements.filterClear) {
   elements.filterClear.addEventListener('click', () => {
     state.filter = '';
     elements.filter.value = '';
     applyFilterToView();
+    writeViewPrefs();
     elements.filter.focus();
   });
 }
@@ -873,6 +1012,7 @@ if (elements.graphEmptyClear) {
     state.filter = '';
     elements.filter.value = '';
     applyFilterToView();
+    writeViewPrefs();
   });
 }
 if (elements.zoomIn) elements.zoomIn.addEventListener('click', () => zoomIn(view.cy));
@@ -970,6 +1110,11 @@ elements.tbTimeline.addEventListener('click', () => {
 });
 elements.tbReview.addEventListener('click', () => {
   toggleReview().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+elements.tbRisk.addEventListener('click', () => {
+  toggleRisk().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
   });
 });
@@ -1284,12 +1429,16 @@ if (window.STRABO_TEST) {
     memberStepCount,
     review: () => showReview(''),
     reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
+    risk: () => showRisk(),
     groupSelection: () => groupSelection,
   };
 }
 
 loadCatalogue()
-  .then(() => scan())
+  .then(() => {
+    applyViewPrefs();
+    return scan();
+  })
   .catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
   });

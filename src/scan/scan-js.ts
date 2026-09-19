@@ -1,10 +1,11 @@
-import type { Diagnostic, GraphEdge } from '../types.ts';
+import type { Diagnostic, ExternalImport, GraphEdge } from '../types.ts';
 import { loadAliasTables, resolveAliased, type AliasTables } from '../resolve/aliases.ts';
 import { resolveRelative } from '../resolve/index.ts';
 
 export interface JsTsScanResult {
   edges: GraphEdge[];
   diagnostics: Diagnostic[];
+  externalImports: ExternalImport[];
 }
 
 export interface JsTsScanOptions {
@@ -38,6 +39,7 @@ export function scanJsTsEdges(
   const fileSet = new Set(files);
   const edges: GraphEdge[] = [];
   const diagnostics: Diagnostic[] = [];
+  const externalImports: ExternalImport[] = [];
   const tables: AliasTables | null = options.root ? loadAliasTables(options.root) : null;
 
   for (const file of files) {
@@ -74,10 +76,21 @@ export function scanJsTsEdges(
           });
           continue;
         }
-        if (!claim.claimed || isAssetSpecifier(match.specifier)) {
+        if (claim.claimed) {
+          // An alias matched but its target is missing; fall through to a diagnostic.
+          if (isAssetSpecifier(match.specifier)) {
+            continue;
+          }
+        } else {
+          if (!isAssetSpecifier(match.specifier)) {
+            recordExternal(file, match);
+          }
           continue;
         }
       } else if (!isRootRelative(match.specifier)) {
+        if (!isAssetSpecifier(match.specifier)) {
+          recordExternal(file, match);
+        }
         continue;
       }
       if (isAssetSpecifier(match.specifier)) {
@@ -94,7 +107,27 @@ export function scanJsTsEdges(
     }
   }
 
-  return { edges: dedupeEdges(edges), diagnostics: dedupeDiagnostics(diagnostics) };
+  /** A bare specifier names a package outside the repository; record it, never draw an edge. */
+  function recordExternal(file: string, match: Reference): void {
+    const name = npmPackageOf(match.specifier);
+    if (!name) {
+      return;
+    }
+    externalImports.push({
+      file,
+      line: match.line,
+      specifier: match.specifier,
+      package: name,
+      ecosystem: 'npm',
+      kind: match.kind,
+    });
+  }
+
+  return {
+    edges: dedupeEdges(edges),
+    diagnostics: dedupeDiagnostics(diagnostics),
+    externalImports: dedupeExternalImports(externalImports),
+  };
 }
 
 interface Reference {
@@ -114,7 +147,11 @@ function collectReferences(content: string): Reference[] {
     for (const match of content.matchAll(pattern)) {
       const specifier = match[group];
       if (specifier) {
-        references.push({ specifier, line: lineOf(content, match.index ?? 0), kind });
+        // `^|\n`-anchored patterns consume the preceding newline, so the match
+        // starts one char before the import. Step over it for a true 1-based line.
+        const start = match.index ?? 0;
+        const line = lineOf(content, start + (content[start] === '\n' ? 1 : 0));
+        references.push({ specifier, line, kind });
       }
     }
   };
@@ -133,6 +170,38 @@ function isDotRelative(specifier: string): boolean {
 
 function isRootRelative(specifier: string): boolean {
   return specifier.startsWith('/');
+}
+
+/**
+ * The npm package a bare specifier belongs to.
+ *
+ * `lodash/fp` and `@scope/pkg/sub` name `lodash` and `@scope/pkg`. Node builtins
+ * (`node:fs`), protocol URLs, and subpath imports (`#internal`) are not packages.
+ */
+export function npmPackageOf(specifier: string): string | null {
+  if (specifier === '' || specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('#')) {
+    return null;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(specifier)) {
+    return null;
+  }
+  const segments = specifier.split('/');
+  if (specifier.startsWith('@')) {
+    return segments.length >= 2 ? `${segments[0]}/${segments[1]}` : null;
+  }
+  return segments[0] || null;
+}
+
+function dedupeExternalImports(imports: ExternalImport[]): ExternalImport[] {
+  const seen = new Set<string>();
+  return imports.filter((entry) => {
+    const key = `${entry.file}\u0000${entry.line}\u0000${entry.package}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 /** Module extensions Strabo models. Anything else (`.css`, `.json`, images) is an asset. */

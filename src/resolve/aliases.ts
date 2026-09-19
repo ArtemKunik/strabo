@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { toPosix } from '../boundary/repository-root.ts';
 import { excludedDirectory } from '../scan/exclusions.ts';
 import { normalize, tryCandidates, type ResolvedReference } from './index.ts';
 
@@ -37,6 +38,15 @@ interface PackageImportsConfig {
 export interface AliasTables {
   tsconfigs: TsPathsConfig[];
   packages: PackageImportsConfig[];
+  bundler: BundlerAliasConfig[];
+}
+
+/** One `vite.config` / `webpack.config` alias table; nearest config wins. */
+export interface BundlerAliasConfig {
+  /** POSIX repo-relative directory of the config file. '' is the root. */
+  configDir: string;
+  /** Longest find-prefix first. Replacement is POSIX repo-relative ('' = root). */
+  entries: Array<{ find: string; replacement: string }>;
 }
 
 export interface AliasClaim {
@@ -171,7 +181,8 @@ function splitPattern(pattern: string): PathPattern | null {
  * `root` by construction.
  */
 export function loadAliasTables(root: string): AliasTables {
-  const tables: AliasTables = { tsconfigs: [], packages: [] };
+  const tables: AliasTables = { tsconfigs: [], packages: [], bundler: [] };
+  const rootPosix = toPosix(path.resolve(root));
 
   const configs: string[] = [];
   const queue: string[] = [''];
@@ -198,7 +209,8 @@ export function loadAliasTables(root: string): AliasTables {
       if (
         entry.name === 'tsconfig.json' ||
         entry.name === 'jsconfig.json' ||
-        entry.name === 'package.json'
+        entry.name === 'package.json' ||
+        isBundlerConfig(entry.name)
       ) {
         configs.push(relative);
       }
@@ -214,6 +226,14 @@ export function loadAliasTables(root: string): AliasTables {
       const imports = asRecord(parsed?.['imports']);
       if (imports && Object.keys(imports).length > 0) {
         tables.packages.push({ packageDir: configDir, imports });
+      }
+      continue;
+    }
+
+    if (isBundlerConfig(base)) {
+      const entries = parseBundlerAliases(readText(root, file), configDir, rootPosix);
+      if (entries.length > 0) {
+        tables.bundler.push({ configDir, entries });
       }
       continue;
     }
@@ -235,19 +255,279 @@ export function loadAliasTables(root: string): AliasTables {
   const byDepth = (a: string, b: string) => b.length - a.length;
   tables.tsconfigs.sort((a, b) => byDepth(a.configDir, b.configDir));
   tables.packages.sort((a, b) => byDepth(a.packageDir, b.packageDir));
+  tables.bundler.sort((a, b) => byDepth(a.configDir, b.configDir));
   return tables;
 }
 
-/** Nearest config whose directory contains `from` (config at the file's own dir wins). */
-function nearest<T extends { [K in Key]: string }, Key extends string>(
-  configs: T[],
-  key: Key,
-  from: string,
-): T | null {
+function isBundlerConfig(base: string): boolean {
+  return /^(vite|webpack)\.config\.[A-Za-z0-9]+$/.test(base);
+}
+
+function readText(root: string, relative: string): string | null {
+  try {
+    const absolute = path.join(root, ...relative.split('/'));
+    const stat = fs.statSync(absolute);
+    if (stat.size > MAX_CONFIG_BYTES) {
+      return null;
+    }
+    return fs.readFileSync(absolute, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/* --------------------------------------- vite/webpack alias extraction */
+
+/**
+ * Extract `alias` tables from bundler configs without executing them.
+ *
+ * Only string-literal finds and path-like replacements are honoured
+ * (plain `'@': './src'`, `path.resolve(__dirname, 'src')`,
+ * `fileURLToPath(new URL('./src', import.meta.url))`, and the
+ * `[{ find, replacement }]` array form). Anything computed is skipped rather
+ * than guessed, and every replacement is confined to the repository.
+ */
+function parseBundlerAliases(
+  text: string | null,
+  configDir: string,
+  rootPosix: string,
+): Array<{ find: string; replacement: string }> {
+  if (!text) {
+    return [];
+  }
+  const region = extractAliasRegion(text);
+  if (!region) {
+    return [];
+  }
+  const entries = new Map<string, string>();
+
+  for (const match of region.matchAll(
+    /\{\s*find\s*:\s*(['"])(.*?)\1\s*,\s*replacement\s*:\s*([^}\n]+)\}/g,
+  )) {
+    const find = match[2];
+    const raw = match[3];
+    if (!find || raw === undefined) {
+      continue;
+    }
+    const replacement = interpretReplacement(raw, configDir, rootPosix);
+    if (replacement !== null) {
+      entries.set(find, replacement);
+    }
+  }
+  for (const match of region.matchAll(/(['"])([@~#][^'"]*?)\1\s*:\s*([^,\n}]+)/g)) {
+    const find = match[2];
+    const raw = match[3];
+    if (!find || raw === undefined) {
+      continue;
+    }
+    const replacement = interpretReplacement(raw, configDir, rootPosix);
+    if (replacement !== null && !entries.has(find)) {
+      entries.set(find, replacement);
+    }
+  }
+
+  return [...entries.entries()]
+    .sort((a, b) => b[0].length - a[0].length)
+    .slice(0, 50)
+    .map(([find, replacement]) => ({ find, replacement }));
+}
+
+/** The bracket-balanced object/array following the first `alias` keyword. */
+function extractAliasRegion(text: string): string | null {
+  const keyword = /\balias\b/.exec(text);
+  if (!keyword) {
+    return null;
+  }
+  const open = /[{[]/.exec(text.slice(keyword.index + keyword[0].length));
+  if (!open) {
+    return null;
+  }
+  const start = keyword.index + keyword[0].length + open.index;
+  const closeFor: Record<string, string> = { '{': '}', '[': ']' };
+  const stack = [open[0]];
+  let quote: string | null = null;
+  for (let i = start + 1; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === quote && text[i - 1] !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '{' || ch === '[') {
+      stack.push(ch);
+    } else if (ch === '}' || ch === ']') {
+      const want = closeFor[stack.pop() as string];
+      if (ch !== want || stack.length === 0) {
+        return ch === want ? text.slice(start, i + 1) : null;
+      }
+    }
+  }
+  return null;
+}
+
+/** Split call arguments on top-level commas; null when unparseable. */
+function splitArgs(text: string): string[] | null {
+  const args: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote && text[i - 1] !== '\\') {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(') {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+    if (ch === ')') {
+      depth -= 1;
+      current += ch;
+      continue;
+    }
+    if (ch === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  args.push(current.trim());
+  const cleaned = args.filter((arg) => arg !== '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function unquote(value: string): string | null {
+  const match = /^(['"])([\s\S]*)\1$/.exec(value.trim());
+  const inner = match?.[2];
+  return inner === undefined ? null : inner;
+}
+
+function isFsAbsolute(value: string): boolean {
+  return value.startsWith('/') || /^[A-Za-z]:\//.test(value.replace(/\\/g, '/'));
+}
+
+/** Confine an absolute filesystem path to the repository; null on escape. */
+function insideRoot(absolute: string, rootPosix: string): string | null {
+  const forward = absolute.replace(/\\/g, '/');
+  const rootDrive = /^[A-Za-z]:/.exec(rootPosix)?.[0]?.toLowerCase() ?? '';
+  const valueDrive = /^[A-Za-z]:/.exec(forward)?.[0]?.toLowerCase() ?? '';
+  if (rootDrive !== valueDrive) {
+    return null;
+  }
+  const relative = path.posix.relative(rootPosix, forward);
+  if (relative === '' || relative.startsWith('..')) {
+    return null;
+  }
+  return normalize('', relative);
+}
+
+/** Interpret one replacement expression as a repo-relative POSIX path. */
+function interpretReplacement(expr: string, configDir: string, rootPosix: string): string | null {
+  const value = expr.trim().replace(/[,;]\s*$/, '');
+
+  const literal = unquote(value);
+  if (literal !== null) {
+    return interpretPath(literal, configDir, rootPosix);
+  }
+
+  const fileUrl = /fileURLToPath\s*\(\s*new\s+URL\s*\(\s*(['"])(.*?)\1/.exec(value);
+  if (fileUrl?.[2] !== undefined) {
+    return interpretPath(fileUrl[2], configDir, rootPosix);
+  }
+
+  const call = /^(?:path\s*\.\s*)?(resolve|join)\s*\(([\s\S]*)\)\s*$/.exec(value);
+  if (call) {
+    const args = splitArgs(call[2] ?? '');
+    if (!args) {
+      return null;
+    }
+    let absolute: string | null = null;
+    const parts: string[] = [];
+    for (const arg of args) {
+      if (arg === '__dirname') {
+        absolute = null;
+        parts.length = 0;
+        parts.push(configDir);
+        continue;
+      }
+      const part = unquote(arg);
+      if (part === null) {
+        return null;
+      }
+      if (isFsAbsolute(part)) {
+        absolute = part.replace(/\\/g, '/');
+        parts.length = 0;
+        continue;
+      }
+      parts.push(part);
+    }
+    if (absolute !== null) {
+      return insideRoot(absolute, rootPosix);
+    }
+    return normalize(configDir, parts.join('/'));
+  }
+
+  return null;
+}
+
+/** A path literal: repo-root-relative, config-relative, or inside-root absolute. */
+function interpretPath(literal: string, configDir: string, rootPosix: string): string | null {
+  const forward = literal.replace(/\\/g, '/');
+  if (forward === '') {
+    return null;
+  }
+  // Bundler convention: a leading `/` is relative to the served/dev root,
+  // which Strabo models as the repository root.
+  if (forward.startsWith('/')) {
+    return normalize('', forward);
+  }
+  if (isFsAbsolute(forward)) {
+    return insideRoot(forward, rootPosix);
+  }
+  // Config-relative, including bare `'src'` (the common webpack form).
+  return normalize(configDir, forward);
+}
+
+/** Remainder after a bundler `find` prefix, or null when it does not apply. */
+function matchBundlerFind(find: string, specifier: string): string | null {
+  if (specifier === find) {
+    return '';
+  }
+  if (find.endsWith('/')) {
+    return specifier.startsWith(find) ? specifier.slice(find.length) : null;
+  }
+  return specifier.startsWith(`${find}/`) ? specifier.slice(find.length + 1) : null;
+}
+
+/** True when `configDir` contains the importing file. */
+function isUnder(configDir: string, from: string): boolean {
+  if (configDir === '') {
+    return true;
+  }
   const dir = posixDirname(from);
+  return dir === configDir || dir.startsWith(`${configDir}/`);
+}
+
+/** Nearest config whose directory contains `from` (configs are pre-sorted nearest-first). */
+function nearest<T>(configs: T[], dirOf: (config: T) => string, from: string): T | null {
   for (const config of configs) {
-    const at = config[key];
-    if (at === '' || dir === at || dir.startsWith(`${at}/`)) {
+    if (isUnder(dirOf(config), from)) {
       return config;
     }
   }
@@ -311,8 +591,8 @@ export function resolveAliased(
     return { resolved, claimed: true };
   }
 
-  // 2. tsconfig/jsconfig `paths` (nearest config wins), then `baseUrl`.
-  const tsconfig = nearest(tables.tsconfigs, 'configDir', from);
+  // 2. tsconfig/jsconfig `paths` (nearest config wins).
+  const tsconfig = nearest(tables.tsconfigs, (config) => config.configDir, from);
   if (tsconfig) {
     for (const pattern of tsconfig.patterns) {
       const captured = matchPattern(pattern, specifier);
@@ -337,6 +617,38 @@ export function resolveAliased(
       }
       return { resolved: null, claimed: true };
     }
+  }
+
+  // 2b. Bundler aliases (`vite.config` / `webpack.config`). A repository
+  // routinely carries several (app + storybook + migration leftovers), so every
+  // containing table is tried nearest-first; the first textual match wins.
+  if (!specifier.startsWith('.') && !specifier.startsWith('#')) {
+    for (const config of tables.bundler) {
+      if (!isUnder(config.configDir, from)) {
+        continue;
+      }
+      let matched = false;
+      for (const entry of config.entries) {
+        const rest = matchBundlerFind(entry.find, specifier);
+        if (rest === null) {
+          continue;
+        }
+        matched = true;
+        const base = rest === '' ? entry.replacement : normalize(entry.replacement, rest);
+        const resolved = tryCandidates(base, specifier, line, files, 'alias');
+        if (resolved) {
+          return { resolved, claimed: true };
+        }
+        break;
+      }
+      if (matched) {
+        return { resolved: null, claimed: true };
+      }
+    }
+  }
+
+  // 2c. `baseUrl` fallback for otherwise-unmatched specifiers.
+  if (tsconfig) {
     if (!specifier.startsWith('.') && !specifier.startsWith('#')) {
       const resolved = tryCandidates(
         normalize(tsconfig.baseDir, specifier),
@@ -357,7 +669,7 @@ export function resolveAliased(
 
   // 3. package.json subpath `imports` (`#...`), nearest package wins.
   if (specifier.startsWith('#')) {
-    const pkg = nearest(tables.packages, 'packageDir', from);
+    const pkg = nearest(tables.packages, (config) => config.packageDir, from);
     if (pkg) {
       for (const [key, entry] of Object.entries(pkg.imports)) {
         if (!key.startsWith('#')) {

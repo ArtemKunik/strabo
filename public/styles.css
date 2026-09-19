@@ -768,6 +768,45 @@ button.primary {
   color: var(--ink-2);
 }
 
+.risk-panel {
+  border-left: 3px solid var(--danger);
+  background: var(--bg-0);
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.risk-panel h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.risk-advisory {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.risk-severity {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.risk-severity.severity-critical { border-color: var(--danger); color: var(--danger); }
+.risk-severity.severity-high { border-color: #ff8f5c; color: #ff8f5c; }
+.risk-severity.severity-moderate { border-color: var(--warn); color: var(--warn); }
+.risk-severity.severity-low { border-color: var(--ok); color: var(--ok); }
+.risk-severity.severity-unknown { border-color: var(--ink-3); color: var(--ink-3); }
+
+.risk-panel .evidence {
+  margin: 2px 0;
+}
+
 .edge-route {
   display: flex;
   flex-wrap: wrap;

@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { toPosix } from '../boundary/repository-root.ts';
-import type { Diagnostic, Exclusion, Graph, GraphNode, ScanReport } from '../types.ts';
+import type { Diagnostic, Exclusion, ExternalImport, Graph, GraphNode, ScanReport } from '../types.ts';
 import { classifyExclusion, excludedDirectory, looksMinified } from './exclusions.ts';
+import { collectPolyglotExternalImports } from './external-polyglot.ts';
 import { findGitIgnoredFiles } from './gitignore.ts';
 import { scanJsTsEdges } from './scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from './scan-polyglot.ts';
@@ -78,12 +79,18 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
   ]);
 
+  const externalImports: ExternalImport[] = [
+    ...jsScan.externalImports,
+    ...collectPolyglotExternalImports(files, contentByFile),
+  ];
+
   const diagnostics = [...parseFailures, ...jsScan.diagnostics, ...polyglot.diagnostics];
   const graph: Graph = {
     nodes,
     edges: [...jsScan.edges, ...polyglot.edges],
     diagnostics,
     excluded,
+    externalImports,
   };
 
   return {

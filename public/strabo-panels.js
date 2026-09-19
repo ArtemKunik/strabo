@@ -18,6 +18,7 @@ import {
   memberClusters,
   memberMapSteps,
   methodCard,
+  orderAdvisories,
   orderMembers,
   passportFor,
   polygonPoints,
@@ -25,6 +26,7 @@ import {
   radarPoints,
   readingLegend,
   reviewGroups,
+  riskSummary,
   summarizeDiagnostics,
 } from './strabo-core.js';
 
@@ -647,7 +649,8 @@ function edgeEndpoint(id, onSelect) {
 }
 
 /** Render recorded changes, newest first; selecting one compares it with the working tree. */
-export function renderTimeline(container, result, onSelect, options = {}) {  container.replaceChildren();
+export function renderTimeline(container, result, onSelect, options = {}) {
+  container.replaceChildren();
 
   const title = document.createElement('h3');
   title.textContent = 'Timeline';
@@ -886,6 +889,193 @@ function button(id, text, handler, className = '') {
     element.addEventListener('click', handler);
   }
   return element;
+}
+
+/**
+ * Dependency risk: advisories, license policy, and the files that import each package.
+ *
+ * A finding is shown only as far as the scan can justify it: the dependency version comes
+ * from a lockfile, the importing files come from recorded imports, and impact is reverse
+ * reachability. When online lookup is off the panel says so rather than showing an empty
+ * advisory list that would read as a clean bill of health.
+ */
+export function renderRisk(container, report, handlers = {}) {
+  container.replaceChildren();
+
+  const title = document.createElement('h3');
+  title.textContent = 'Dependency risk';
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Close risk panel');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => handlers.onClose());
+    title.append(dismiss);
+  }
+
+  if (!report || report.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'risk-unavailable';
+    note.textContent = 'Risk report unavailable.';
+    container.append(note);
+    return;
+  }
+
+  const summary = document.createElement('p');
+  summary.className = 'overlay-summary';
+  summary.dataset.role = 'risk-summary';
+  summary.textContent = riskSummary(report);
+  container.append(summary);
+
+  const online = document.createElement('p');
+  online.className = report.online ? 'evidence' : 'unavailable';
+  online.dataset.role = 'risk-mode';
+  online.textContent = report.online
+    ? 'Advisory and license data from OSV.dev and deps.dev.'
+    : 'Online advisory and license lookup is off; showing inventory and imports only.';
+  container.append(online);
+
+  if (report.inventory.undeclared.length > 0) {
+    const undeclared = document.createElement('p');
+    undeclared.className = 'unavailable';
+    undeclared.dataset.role = 'risk-undeclared';
+    undeclared.textContent = `${report.inventory.undeclared.length} imported package(s) are not declared in any manifest: ${report.inventory.undeclared.slice(0, 8).join(', ')}`;
+    container.append(undeclared);
+  }
+
+  const advisories = orderAdvisories(report.advisories);
+  const heading = document.createElement('h4');
+  heading.textContent = `Advisories (${advisories.length})`;
+  container.append(heading);
+
+  if (advisories.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'risk-advisories-empty';
+    note.textContent = report.online
+      ? 'No known advisories for the resolved dependencies.'
+      : 'Advisories were not looked up.';
+    container.append(note);
+  } else {
+    const list = document.createElement('ul');
+    list.dataset.role = 'risk-advisories';
+    for (const advisory of advisories) {
+      const item = document.createElement('li');
+      item.className = `risk-advisory severity-${advisory.severity}`;
+      item.dataset.role = 'risk-advisory';
+
+      const line = document.createElement('div');
+      const severity = document.createElement('span');
+      severity.className = `risk-severity severity-${advisory.severity}`;
+      severity.textContent = advisory.severity;
+      line.append(severity);
+
+      const link = document.createElement('a');
+      link.className = 'link';
+      link.href = advisory.url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.textContent = advisory.id;
+      line.append(link);
+      if (advisory.aliases.length > 0) {
+        const aliases = document.createElement('span');
+        aliases.className = 'evidence';
+        aliases.textContent = advisory.aliases.join(', ');
+        line.append(aliases);
+      }
+      item.append(line);
+
+      const subject = document.createElement('p');
+      subject.className = 'evidence';
+      subject.textContent = `${advisory.dependency.name}@${advisory.dependency.version ?? 'unresolved'} · ${advisory.summary}`;
+      item.append(subject);
+
+      if (advisory.fixed.length > 0) {
+        const fixed = document.createElement('p');
+        fixed.className = 'evidence';
+        fixed.textContent = `Fixed in: ${advisory.fixed.join(', ')}`;
+        item.append(fixed);
+      }
+
+      if (advisory.importedBy.length > 0) {
+        const files = document.createElement('p');
+        files.className = 'evidence';
+        files.textContent = `Imported by: ${advisory.importedBy.join(', ')}`;
+        item.append(files);
+      } else {
+        const files = document.createElement('p');
+        files.className = 'unavailable';
+        files.textContent = 'No source file imports this package directly.';
+        item.append(files);
+      }
+
+      const impacted = advisory.impactedFiles.filter((entry) => entry.distance > 0);
+      if (impacted.length > 0) {
+        const list = document.createElement('ul');
+        list.dataset.role = 'risk-impact';
+        for (const entry of impacted.slice(0, 20)) {
+          const entryItem = document.createElement('li');
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'link';
+          button.textContent = entry.id;
+          if (handlers.onSelect) {
+            button.addEventListener('click', () => handlers.onSelect(entry.id));
+          }
+          entryItem.append(button);
+          const distance = document.createElement('span');
+          distance.className = 'evidence';
+          distance.textContent = `distance ${entry.distance}`;
+          entryItem.append(distance);
+          list.append(entryItem);
+        }
+        item.append(list);
+      }
+      list.append(item);
+    }
+    container.append(list);
+  }
+
+  const flagged = report.licenses.filter((entry) => entry.denied || entry.risk !== 'permissive');
+  const licenseHeading = document.createElement('h4');
+  licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
+  container.append(licenseHeading);
+  if (flagged.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'risk-licenses-empty';
+    note.textContent = report.online
+      ? 'No denied or copyleft licenses were found.'
+      : 'Licenses were not looked up.';
+    container.append(note);
+  } else {
+    const list = document.createElement('ul');
+    list.dataset.role = 'risk-licenses';
+    for (const entry of flagged.slice(0, 50)) {
+      const item = document.createElement('li');
+      const label = `${entry.dependency.name}@${entry.dependency.version ?? 'unresolved'} · ${entry.licenses.join(' OR ') || 'no license recorded'}`;
+      const span = document.createElement('span');
+      span.textContent = label;
+      item.append(span);
+      const risk = document.createElement('span');
+      risk.className = entry.denied ? 'risk-severity severity-critical' : 'evidence';
+      risk.textContent = entry.denied ? 'denied' : entry.risk;
+      item.append(risk);
+      list.append(item);
+    }
+    container.append(list);
+  }
+
+  if (report.caveats.length > 0) {
+    const caveats = document.createElement('p');
+    caveats.className = 'unavailable';
+    caveats.dataset.role = 'risk-caveats';
+    caveats.textContent = report.caveats.join(' ');
+    container.append(caveats);
+  }
 }
 
 /**

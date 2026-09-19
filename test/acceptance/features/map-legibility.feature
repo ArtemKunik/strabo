@@ -30,6 +30,13 @@ Feature: Map legibility
     When I toggle boundaries
     Then the detail level is "block"
 
+  @prefs
+  Scenario: View settings survive a reload
+    When I switch to file detail
+    And I reload the Strabo UI
+    Then the detail level is "file"
+    And the detail selector shows "file"
+
   @renderer
   Scenario: The status bar names the renderer that is actually drawing
     Then the status bar names the renderer the map is drawing with

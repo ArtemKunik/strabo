@@ -77,6 +77,31 @@ test('aliases work through tsconfig extends in nested packages', async () => {
   assert.equal(nested.resolution, 'alias');
 });
 
+test('vite object-form aliases resolve, including root-absolute values', async () => {
+  const report = await scanRepository(fixture);
+  const edges = edgesTo(report);
+
+  const prefix = edgeFor(edges, 'src/main.ts', '@ui/Button');
+  assert.ok(prefix, 'expected vite prefix alias edge');
+  assert.equal(prefix.pair, 'src/main.ts->src/components/Button.tsx');
+  assert.equal(prefix.resolution, 'alias');
+
+  const exact = edgeFor(edges, 'src/main.ts', '~store');
+  assert.ok(exact, 'expected vite exact alias edge');
+  assert.equal(exact.pair, 'src/main.ts->src/lib/store.ts');
+  assert.equal(exact.resolution, 'alias');
+});
+
+test('webpack array-form aliases resolve computed path.resolve replacements', async () => {
+  const report = await scanRepository(fixture);
+  const edges = edgesTo(report);
+
+  const data = edgeFor(edges, 'src/main.ts', '@data/store');
+  assert.ok(data, 'expected webpack alias edge');
+  assert.equal(data.pair, 'src/main.ts->src/lib/store.ts');
+  assert.equal(data.resolution, 'alias');
+});
+
 test('claimed-but-missing aliases are diagnostics, bare packages stay silent', async () => {
   const report = await scanRepository(fixture);
 
