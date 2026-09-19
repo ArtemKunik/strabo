@@ -43,18 +43,31 @@ function toForwardSlashes(value: string): string {
   return value.split(path.sep).join('/');
 }
 
-/** A `.cmd` launcher keeps quoting in one controlled place; user text only ever lands in the prompt file. */
+/**
+ * A `.cmd` launcher keeps quoting in one controlled place; user text only ever lands in
+ * the prompt file.
+ *
+ * Both CLIs take the message as a variadic positional (`opencode run [message..]`;
+ * Claude's prompt argument), and both take the file/directory flag as a variadic option
+ * (`-f/--file <files...>`; `--add-dir <directories...>`). A variadic option greedily
+ * consumes every following bare token, not just the one meant for it — so
+ * `-f "<path>" "<message>"` hands the CLI a *two-element* file array (the real path, then
+ * the entire message treated as a second, nonexistent path) and an *empty* message,
+ * which is exactly the "File not found: <the whole message>" this shipped with.
+ * Confirmed against the installed opencode 1.18.30 and Claude Code CLIs. The message
+ * must come first so the variadic flag has nothing left to swallow.
+ */
 function launcherScript(agent: DelegateAgent, root: string, promptFile: string, workDir: string): string {
   const header = ['@echo off', 'chcp 65001 >nul', `cd /d "${root}"`];
   if (agent === 'opencode') {
     return [
       ...header,
-      `opencode run --dir "${root}" -f "${promptFile}" "The task is described in the attached file. Read it and carry it out in this repository (${root})."`,
+      `opencode run --dir "${root}" "The task is described in the attached file. Read it and carry it out in this repository (${root})." -f "${promptFile}"`,
     ].join('\r\n');
   }
   return [
     ...header,
-    `claude --add-dir "${toForwardSlashes(workDir)}" "The task is described in @${toForwardSlashes(promptFile)}. Read it and carry it out in this repository (${root})."`,
+    `claude "The task is described in @${toForwardSlashes(promptFile)}. Read it and carry it out in this repository (${root})." --add-dir "${toForwardSlashes(workDir)}"`,
   ].join('\r\n');
 }
 
