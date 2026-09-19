@@ -111,10 +111,13 @@ Spec: `test/acceptance/features/timeline.feature` (scenarios `@review`).
 
 ## Phase 9 - Agent delegation
 
-Right-click any item to hand it to `opencode` or `claude` in a new terminal.
+Right-click any item to hand it to `opencode` or `claude` in an interactive TUI.
 
 - `POST /delegate` allow-lists the agent, writes the prompt to a temp file, and launches a
   generated `.cmd`; `GET /delegate` and `GET /delegate/:id` expose recent launches.
+- The TUI opens **interactively** with a seed naming the task file, so the operator can add
+  their own instruction. `opencode run` (non-interactive) is not used; opencode's
+  `--prompt` prefills the editable input, since it has no auto-submit flag.
 - The repository is resolved through the scan ceiling, and prompt text never reaches a
   shell, so a delegated item cannot become command injection.
 - Windows-only (`501` elsewhere); the terminal outlives the server, so the run list is a

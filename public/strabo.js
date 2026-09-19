@@ -1300,7 +1300,7 @@ function resolveDomDelegateTarget(node) {
   return null;
 }
 
-/** Open a new terminal running `agent` on the delegated item. */
+/** Open the agent's interactive TUI on the delegated item, with the task prefilled. */
 async function delegateToAgent(agent, target) {
   const repository = current?.repository ?? null;
   const prompt = buildAgentPrompt({ agent, repository, target });
@@ -1312,7 +1312,7 @@ async function delegateToAgent(agent, target) {
       prompt,
       title,
     });
-    showToast(`New terminal: ${agent} on ${title}`);
+    showToast(`Opened ${agent} on ${title} — edit the prefilled task, then send.`);
   } catch (error) {
     showToast(`Could not open a terminal (${error.message}).`, {
       label: 'Copy prompt',
@@ -1337,8 +1337,8 @@ function openDelegateMenu(target, x, y) {
     y,
     title: menuTitle,
     items: [
-      { label: '▶ Delegate to OpenCode', hint: 'new terminal', action: () => delegateToAgent('opencode', target) },
-      { label: '▶ Delegate to Claude', hint: 'new terminal', action: () => delegateToAgent('claude', target) },
+      { label: '▶ Delegate to OpenCode', hint: 'opens TUI', action: () => delegateToAgent('opencode', target) },
+      { label: '▶ Delegate to Claude', hint: 'opens TUI', action: () => delegateToAgent('claude', target) },
       { separator: true },
       {
         label: '⧉ Copy prompt',

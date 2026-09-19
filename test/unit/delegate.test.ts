@@ -53,29 +53,29 @@ async function launch(base: string, agent: string) {
 }
 
 /**
- * opencode's `-f/--file` and Claude's `--add-dir` are both variadic: they greedily
- * consume every bare token that follows, not just the one meant for them. A launcher
- * that writes the flag before the message hands the CLI a message-shaped "file" and an
- * empty prompt — confirmed against the installed CLIs, this is exactly the
- * "File not found: <the whole message>" failure the app shipped with. The message must
- * be the last bare token before the flag, not after it.
+ * Delegation must open an interactive session, not a one-shot run, so the operator can add
+ * their own instruction. `opencode run` is non-interactive and must not be used; the TUI
+ * is started with `--prompt`, which prefills the editable input (there is no auto-submit
+ * flag). The seed names the prompt file because the task is multi-line and may exceed the
+ * cmd.exe command-line limit.
  */
-test('the opencode launcher puts the message before the variadic -f flag', async () => {
+test('the opencode launcher opens the interactive TUI, not a one-shot run', async () => {
   const base = await listen(app());
   const command = await launch(base, 'opencode');
 
-  const messageIndex = command.indexOf('"The task is described');
-  const flagIndex = command.indexOf('-f ');
-  assert.ok(messageIndex > 0, `command should carry the prompt: ${command}`);
-  assert.ok(flagIndex > messageIndex, `-f must follow the message, not precede it: ${command}`);
+  assert.match(command, /opencode --prompt "/, `expected a TUI launch: ${command}`);
+  assert.doesNotMatch(command, /opencode run\b/, `must not use the non-interactive run: ${command}`);
+  assert.doesNotMatch(command, /--dir\b/, `--dir is not a TUI flag; the launcher cds instead: ${command}`);
+  assert.match(command, /strabo-task\.md/, `the seed must name the prompt file: ${command}`);
 });
 
-test('the claude launcher puts the message before the variadic --add-dir flag', async () => {
+test('the claude launcher opens the interactive REPL with the message before --add-dir', async () => {
   const base = await listen(app());
   const command = await launch(base, 'claude');
 
-  const messageIndex = command.indexOf('"The task is described');
+  assert.match(command, /claude "/, `expected an interactive launch: ${command}`);
+  assert.doesNotMatch(command, /claude -p\b|--print\b/, `print mode is non-interactive: ${command}`);
+  const messageIndex = command.indexOf('claude "');
   const flagIndex = command.indexOf('--add-dir');
-  assert.ok(messageIndex > 0, `command should carry the prompt: ${command}`);
   assert.ok(flagIndex > messageIndex, `--add-dir must follow the message, not precede it: ${command}`);
 });

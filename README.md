@@ -129,8 +129,14 @@ would fold in uncommitted working-tree edits, and `<ref>^..<ref>` fails on a roo
 
 Right-clicking a node, edge, diagnostic, commit, overlay item, or empty canvas opens a
 **Delegate** menu that hands the selected item to a coding agent. `POST /delegate` accepts
-only `opencode` or `claude`, writes the prompt to a temp file, and opens a new terminal
-running that agent with the repository as its working directory.
+only `opencode` or `claude`, writes the prompt to a temp file, and opens the agent's
+**interactive TUI** with the repository as its working directory.
+
+The TUI is seeded with a prompt that names the task file, so the operator can add their own
+instruction before sending — the delegation does not silently run Strabo's canned task.
+`opencode --prompt` prefills the editable input (the CLI has no auto-submit flag); its
+one-shot `run` subcommand is deliberately not used. Claude's positional prompt is submitted
+immediately, so its seed asks for a summary and waits rather than editing anything.
 
 The repository is resolved through the scan ceiling like every other route, and delegated
 text only ever lands in the prompt file — it is never interpolated into a shell command.

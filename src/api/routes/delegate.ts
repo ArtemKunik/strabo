@@ -47,28 +47,29 @@ function toForwardSlashes(value: string): string {
  * A `.cmd` launcher keeps quoting in one controlled place; user text only ever lands in
  * the prompt file.
  *
- * Both CLIs take the message as a variadic positional (`opencode run [message..]`;
- * Claude's prompt argument), and both take the file/directory flag as a variadic option
- * (`-f/--file <files...>`; `--add-dir <directories...>`). A variadic option greedily
- * consumes every following bare token, not just the one meant for it — so
- * `-f "<path>" "<message>"` hands the CLI a *two-element* file array (the real path, then
- * the entire message treated as a second, nonexistent path) and an *empty* message,
- * which is exactly the "File not found: <the whole message>" this shipped with.
- * Confirmed against the installed opencode 1.18.30 and Claude Code CLIs. The message
- * must come first so the variadic flag has nothing left to swallow.
+ * Both agents open as an **interactive session**, not a one-shot run, so the operator can
+ * say what they actually want instead of only receiving Strabo's canned task:
+ *
+ * - `opencode --prompt` *prefills* the TUI input; the CLI has no auto-submit flag (that is
+ *   still an open request, opencode issue #3937), so the seed is editable before it is
+ *   sent. `opencode run` is the non-interactive path and is deliberately not used.
+ * - The prompt file is multi-line and can exceed the cmd.exe command-line limit, so the
+ *   seed names the file rather than inlining the whole task. The seed therefore uses
+ *   single quotes for the path: it is nested inside the launcher's own double quotes.
+ * - `opencode` takes the working directory as a positional, but the launcher already
+ *   `cd`s into the repository, which the TUI uses.
+ *
+ * Claude's positional prompt is submitted immediately (its REPL has no prefill), so its
+ * seed asks for a summary and explicitly waits rather than editing files.
  */
 function launcherScript(agent: DelegateAgent, root: string, promptFile: string, workDir: string): string {
   const header = ['@echo off', 'chcp 65001 >nul', `cd /d "${root}"`];
   if (agent === 'opencode') {
-    return [
-      ...header,
-      `opencode run --dir "${root}" "The task is described in the attached file. Read it and carry it out in this repository (${root})." -f "${promptFile}"`,
-    ].join('\r\n');
+    const seed = `Strabo delegated context is in '${promptFile}'. Add the instruction you want me to run here, then send:`;
+    return [...header, `opencode --prompt "${seed}"`].join('\r\n');
   }
-  return [
-    ...header,
-    `claude "The task is described in @${toForwardSlashes(promptFile)}. Read it and carry it out in this repository (${root})." --add-dir "${toForwardSlashes(workDir)}"`,
-  ].join('\r\n');
+  const seed = `Read the delegated Strabo context in @${toForwardSlashes(promptFile)} and briefly summarise the item. Do not change any files yet - wait for my instructions.`;
+  return [...header, `claude "${seed}" --add-dir "${toForwardSlashes(workDir)}"`].join('\r\n');
 }
 
 /**
