@@ -1,6 +1,0 @@
-[install]
-# Keep lockfile syntax compatible with the npm-visible baseline.
-exact = false
-
-[test]
-root = "test"

@@ -16,7 +16,6 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "bun@1.2.0",
   "bin": {
     "strabo": "bin/strabo.js"
   },
@@ -48,7 +47,6 @@
     "start": "node bin/strabo.js",
     "dev": "node --watch src/cli.ts",
     "test": "node --test \"test/unit/**/*.test.ts\"",
-    "test:bun": "bun test test/unit",
     "test:pack": "node scripts/verify-package.mjs",
     "acceptance": "npm run build && node scripts/prepare-acceptance.mjs && cucumber-js --config test/acceptance/cucumber.mjs",
     "acceptance:install": "playwright install chromium",
