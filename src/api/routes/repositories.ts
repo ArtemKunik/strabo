@@ -14,7 +14,9 @@ import { sendError } from '../http.ts';
  */
 export function createRepositoriesRouter(config: StraboConfig, store: RepositoryStore): Router {
   const router = Router();
-  const ceiling = config.scanCeiling ?? config.workspaceRoot;
+  // Read the ceiling per request: `/settings` may change it while the server runs, so a
+  // value captured at construction would keep filtering against the startup boundary.
+  const ceiling = (): string => config.scanCeiling ?? config.workspaceRoot;
 
   /** Ensure the configured root is offered even before anything has been opened. */
   const seed = (): void => {
@@ -27,13 +29,14 @@ export function createRepositoriesRouter(config: StraboConfig, store: Repository
   router.get('/repositories', (_request, response) => {
     try {
       seed();
+      const limit = ceiling();
       const repositories = store
         .list()
-        .filter((entry) => isInside(entry.root, ceiling));
+        .filter((entry) => isInside(entry.root, limit));
       const active = store.active();
       response.json({
-        active: active && isInside(active, ceiling) ? active : repositories[0]?.root ?? null,
-        ceiling,
+        active: active && isInside(active, limit) ? active : repositories[0]?.root ?? null,
+        ceiling: limit,
         repositories,
       });
     } catch (error) {
@@ -51,7 +54,7 @@ export function createRepositoriesRouter(config: StraboConfig, store: Repository
       }
       const repository = resolveRepositoryRoot({
         workspaceRoot: config.workspaceRoot,
-        scanCeiling: ceiling,
+        scanCeiling: ceiling(),
         requested,
       });
       const entry = store.remember(repository.root);

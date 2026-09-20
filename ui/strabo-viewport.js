@@ -5,6 +5,11 @@
  * user pans or zooms.
  */
 
+/** True when the reduce-motion setting (or the OS preference) is in force. */
+function reducedMotion() {
+  return document.documentElement?.dataset?.reduceMotion === '1';
+}
+
 export function fit(cy) {
   cy.fit(undefined, 40);
 }
@@ -12,6 +17,11 @@ export function fit(cy) {
 export function focus(cy, idOrPrefix) {
   const node = cy.getElementById(idOrPrefix);
   if (node && node.nonempty()) {
+    if (reducedMotion()) {
+      cy.zoom({ level: 1.4 });
+      cy.center(node);
+      return;
+    }
     cy.animate({ center: { eles: node }, zoom: 1.4 }, { duration: 200 });
     return;
   }

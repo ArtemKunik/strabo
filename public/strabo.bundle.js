@@ -619,13 +619,13 @@ function memberMapSteps(memberMap, context = {}) {
     }
   ];
 }
-function fieldCard(field) {
-  const connected = field.reads > 0 || field.writes > 0;
+function fieldCard(field2) {
+  const connected = field2.reads > 0 || field2.writes > 0;
   return {
-    eyebrow: `FIELD \xB7 ${String(field.visibility ?? "unknown").toUpperCase()} \xB7 ${field.mutable === false ? "READONLY" : "MUTABLE"}`,
-    signature: `${field.name}: ${field.type ?? "unrecorded type"}`,
-    tag: connected ? `${field.reads} read \xB7 ${field.writes} write` : "unconnected",
-    metrics: `public data \xB7 local reads ${field.reads} \xB7 local writes ${field.writes}`
+    eyebrow: `FIELD \xB7 ${String(field2.visibility ?? "unknown").toUpperCase()} \xB7 ${field2.mutable === false ? "READONLY" : "MUTABLE"}`,
+    signature: `${field2.name}: ${field2.type ?? "unrecorded type"}`,
+    tag: connected ? `${field2.reads} read \xB7 ${field2.writes} write` : "unconnected",
+    metrics: `public data \xB7 local reads ${field2.reads} \xB7 local writes ${field2.writes}`
   };
 }
 function methodCard(method) {
@@ -647,15 +647,15 @@ function memberClusters(memberMap) {
     return adjacency2.get(name);
   };
   for (const type of memberMap?.types ?? []) {
-    for (const field of type.fields) ensure(field.name);
+    for (const field2 of type.fields) ensure(field2.name);
     for (const method of type.methods) {
       ensure(method.name);
-      for (const field of [...method.reads, ...method.writes]) {
-        if (!adjacency2.has(field)) {
+      for (const field2 of [...method.reads, ...method.writes]) {
+        if (!adjacency2.has(field2)) {
           continue;
         }
-        adjacency2.get(field).add(method.name);
-        adjacency2.get(method.name).add(field);
+        adjacency2.get(field2).add(method.name);
+        adjacency2.get(method.name).add(field2);
       }
     }
   }
@@ -702,8 +702,8 @@ function flowGraph(memberMap) {
     }
   };
   for (const type of memberMap?.types ?? []) {
-    for (const field of type.fields ?? []) {
-      addNode(`field:${field.name}`, "field", field.name);
+    for (const field2 of type.fields ?? []) {
+      addNode(`field:${field2.name}`, "field", field2.name);
     }
     for (const method of type.methods ?? []) {
       const methodId = `method:${method.name}`;
@@ -750,8 +750,8 @@ function orderMembers(members, order) {
   }
   return copy.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
 }
-function isWiredField(field) {
-  return field.reads > 0 || field.writes > 0;
+function isWiredField(field2) {
+  return field2.reads > 0 || field2.writes > 0;
 }
 function isWiredMethod(method) {
   return method.reads.length > 0 || method.writes.length > 0;
@@ -796,8 +796,8 @@ function constellationLayout(points, { width = 280, height = 180 } = {}) {
 function constellationPoints(memberMap, consumers) {
   const points = [];
   for (const type of memberMap?.types ?? []) {
-    for (const field of type.fields) {
-      points.push({ key: `field:${type.name}.${field.name}`, kind: "field", label: field.name });
+    for (const field2 of type.fields) {
+      points.push({ key: `field:${type.name}.${field2.name}`, kind: "field", label: field2.name });
     }
     for (const method of type.methods) {
       points.push({ key: `method:${type.name}.${method.name}`, kind: "method", label: method.name });
@@ -890,6 +890,7 @@ function buildAgentPrompt({ agent, repository, target }) {
 
 // ui/strabo-view.js
 var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached"];
+var labelsVisible = true;
 var LABEL_DETAIL_ZOOM = 0.65;
 var MIN_ZOOM = 0.12;
 var MAX_ZOOM = 2.5;
@@ -996,6 +997,15 @@ function createView(container) {
     capabilities: { webgl2: gpu, renderer: gpu ? "webgl2" : "canvas" },
     resize() {
       cy.resize();
+    },
+    /** Re-read the CSS theme variables and restyle the canvas after a theme switch. */
+    applyTheme() {
+      cy.style().fromJson(stylesheet()).update();
+    },
+    /** Show or hide every node label. Islands draw their own layer and are unaffected. */
+    setLabelsVisible(visible) {
+      labelsVisible = Boolean(visible);
+      applyLabelBudget(cy, true);
     },
     render(model) {
       const elements2 = buildElements(model);
@@ -1241,6 +1251,18 @@ function rescaleLabels(cy) {
   cy.style().update();
 }
 function applyLabelBudget(cy, force = false) {
+  if (!labelsVisible) {
+    if (!force && cy.scratch("_straboLabelHidden") === true) {
+      return;
+    }
+    cy.scratch("_straboLabelHidden", true);
+    cy.batch(() => cy.nodes().addClass("label-hidden"));
+    return;
+  }
+  if (cy.scratch("_straboLabelHidden") === true) {
+    cy.scratch("_straboLabelHidden", false);
+    force = true;
+  }
   const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
   if (!force && detailed === cy.scratch("_straboLabelDetail")) {
     return;
@@ -1253,7 +1275,28 @@ function applyLabelBudget(cy, force = false) {
     });
   });
 }
+function graphTheme() {
+  const read = (name, fallback) => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  };
+  return {
+    ink: read("--graph-ink", "#eef3fa"),
+    inkOutline: read("--graph-ink-outline", "#0c1016"),
+    nodeBorder: read("--graph-node-border", "rgba(255,255,255,0.22)"),
+    edge: read("--graph-edge", "#4a5e78"),
+    edgeAccent: read("--graph-edge-accent", "#7fb4ff"),
+    edgeSelected: read("--graph-edge-selected", "#4c9aff"),
+    hub: read("--graph-hub", "#4c9aff"),
+    selected: read("--graph-selected", "#ffffff"),
+    changed: read("--graph-changed", "#ff5c5c"),
+    affected: read("--graph-affected", "#f2b25c"),
+    cycle: read("--graph-cycle", "#c98bf0"),
+    unreached: read("--graph-unreached", "#8da0b5")
+  };
+}
 function stylesheet() {
+  const theme = graphTheme();
   const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
     selector: `node.kind-${kind}`,
     style: { shape }
@@ -1272,25 +1315,25 @@ function stylesheet() {
         // which the zoom handler calls. See `LABEL_DEVICE_PX`.
         "font-size": (ele) => labelFontSize(ele.cy().zoom()),
         "font-weight": 500,
-        color: "#eef3fa",
+        color: theme.ink,
         "text-valign": "bottom",
         "text-margin-y": (ele) => 4 / Math.max(1e-4, ele.cy().zoom()),
         "text-opacity": 1,
-        "text-outline-color": "#0c1016",
+        "text-outline-color": theme.inkOutline,
         "text-outline-width": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
         "text-outline-opacity": 0.9,
         "border-width": 1.5,
-        "border-color": "rgba(255,255,255,0.22)",
+        "border-color": theme.nodeBorder,
         "border-opacity": 1
       }
     },
     ...kindRules,
-    { selector: "node:selected", style: { "border-width": 3, "border-color": "#ffffff", "background-opacity": 1 } },
-    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": "#4c9aff", "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
-    { selector: "node.ov-changed", style: { "border-width": 4, "border-color": "#ff5c5c", "background-opacity": 1 } },
-    { selector: "node.ov-affected", style: { "border-width": 3, "border-color": "#f2b25c", "background-opacity": 1 } },
-    { selector: "node.ov-cycle", style: { "border-width": 4, "border-color": "#c98bf0", "background-opacity": 1 } },
-    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": "#8da0b5", "background-opacity": 0.55 } },
+    { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
+    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
+    { selector: "node.ov-changed", style: { "border-width": 4, "border-color": theme.changed, "background-opacity": 1 } },
+    { selector: "node.ov-affected", style: { "border-width": 3, "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-cycle", style: { "border-width": 4, "border-color": theme.cycle, "background-opacity": 1 } },
+    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.55 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
@@ -1303,8 +1346,8 @@ function stylesheet() {
         // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
         // repository is fitted at 0.38 zoom.
         opacity: 0.72,
-        "line-color": "#4a5e78",
-        "target-arrow-color": "#4a5e78",
+        "line-color": theme.edge,
+        "target-arrow-color": theme.edge,
         "arrow-scale": 0.9
       }
     },
@@ -1315,8 +1358,8 @@ function stylesheet() {
       style: {
         width: 2.75,
         opacity: 1,
-        "line-color": "#4c9aff",
-        "target-arrow-color": "#4c9aff",
+        "line-color": theme.edgeSelected,
+        "target-arrow-color": theme.edgeSelected,
         "arrow-scale": 1.1,
         "z-index": 10
       }
@@ -1326,8 +1369,8 @@ function stylesheet() {
       style: {
         width: 2,
         opacity: 0.9,
-        "line-color": "#7fb4ff",
-        "target-arrow-color": "#7fb4ff"
+        "line-color": theme.edgeAccent,
+        "target-arrow-color": theme.edgeAccent
       }
     }
   ];
@@ -2193,7 +2236,7 @@ function renderInspector(container, model, id, handlers = {}) {
     ["members", "Members", members]
   ];
   const tabButtons = [];
-  for (const [key, label, section] of tabDefs) {
+  for (const [key, label, section2] of tabDefs) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "inspector-tab";
@@ -2204,12 +2247,12 @@ function renderInspector(container, model, id, handlers = {}) {
     tab.addEventListener("click", () => {
       for (const other of tabButtons) other.setAttribute("aria-selected", other === tab ? "true" : "false");
       for (const child of panels.children) child.hidden = true;
-      section.hidden = false;
+      section2.hidden = false;
     });
     tabs.append(tab);
     tabButtons.push(tab);
-    section.hidden = key !== "deps";
-    panels.append(section);
+    section2.hidden = key !== "deps";
+    panels.append(section2);
   }
   container.append(tabs, panels);
   const trace = document.createElement("p");
@@ -2219,10 +2262,10 @@ function renderInspector(container, model, id, handlers = {}) {
   container.append(trace);
 }
 function listSection(heading, from, entries, handlers) {
-  const section = document.createElement("section");
+  const section2 = document.createElement("section");
   const title = document.createElement("h3");
   title.textContent = `${heading} (${entries.length})`;
-  section.append(title);
+  section2.append(title);
   const list = document.createElement("ul");
   for (const entry of entries.slice(0, 100)) {
     const item = document.createElement("li");
@@ -2249,8 +2292,8 @@ function listSection(heading, from, entries, handlers) {
     }
     list.append(item);
   }
-  section.append(list);
-  return section;
+  section2.append(list);
+  return section2;
 }
 function appendFact(list, term, value) {
   const dt = document.createElement("dt");
@@ -2266,17 +2309,17 @@ function renderMembers(container, result) {
   title.textContent = `Members (${symbols.length})`;
   container.append(title);
   if (!result || result.available === false) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = result?.detail ?? "Not recorded by the scan.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = result?.detail ?? "Not recorded by the scan.";
+    container.append(note2);
     return;
   }
   if (symbols.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = "No members declared.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "No members declared.";
+    container.append(note2);
     return;
   }
   const memberMap = result.memberMap;
@@ -2299,32 +2342,32 @@ function renderMembers(container, result) {
   container.append(renderDataFlow(memberMap?.dataFlow));
 }
 function renderMemberType(type) {
-  const section = document.createElement("section");
-  section.className = "member-type";
+  const section2 = document.createElement("section");
+  section2.className = "member-type";
   const title = document.createElement("h4");
   title.className = "member-type-name";
   title.textContent = type.name;
-  section.append(title);
+  section2.append(title);
   if (type.fields.length > 0) {
     const heading = document.createElement("h5");
     heading.textContent = `Fields (${type.fields.length})`;
-    section.append(heading);
+    section2.append(heading);
     const list = document.createElement("ul");
     list.className = "member-fields";
-    for (const field of type.fields) {
+    for (const field2 of type.fields) {
       const item = document.createElement("li");
       item.className = "member-field";
-      const kind = field.mutable === false ? "val" : "var";
-      item.textContent = `${field.visibility} ${kind} ${field.name}: ${field.type ?? "unrecorded type"}`;
-      item.append(wiring(`reads ${field.reads} \xB7 writes ${field.writes}`));
+      const kind = field2.mutable === false ? "val" : "var";
+      item.textContent = `${field2.visibility} ${kind} ${field2.name}: ${field2.type ?? "unrecorded type"}`;
+      item.append(wiring(`reads ${field2.reads} \xB7 writes ${field2.writes}`));
       list.append(item);
     }
-    section.append(list);
+    section2.append(list);
   }
   if (type.methods.length > 0) {
     const heading = document.createElement("h5");
     heading.textContent = `Methods (${type.methods.length})`;
-    section.append(heading);
+    section2.append(heading);
     const list = document.createElement("ul");
     list.className = "member-methods";
     for (const method of type.methods) {
@@ -2339,15 +2382,15 @@ function renderMemberType(type) {
       }
       list.append(item);
     }
-    section.append(list);
+    section2.append(list);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = "No members declared.";
-    section.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "No members declared.";
+    section2.append(note2);
   }
-  return section;
+  return section2;
 }
 function wiring(text) {
   const span = document.createElement("span");
@@ -2362,18 +2405,18 @@ var DATA_FLOW_PANELS = [
   ["sinks", "Sinks / outputs"]
 ];
 function renderDataFlow(dataFlow) {
-  const section = document.createElement("section");
-  section.className = "data-flow";
+  const section2 = document.createElement("section");
+  section2.className = "data-flow";
   const title = document.createElement("h4");
   title.textContent = "Data flow";
-  section.append(title);
+  section2.append(title);
   if (!dataFlow || dataFlow.available === false) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "flow-unavailable";
-    note.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
-    section.append(note);
-    return section;
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "flow-unavailable";
+    note2.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
+    section2.append(note2);
+    return section2;
   }
   for (const [key, label] of DATA_FLOW_PANELS) {
     const panel = document.createElement("div");
@@ -2397,13 +2440,13 @@ function renderDataFlow(dataFlow) {
       }
     }
     panel.append(list);
-    section.append(panel);
+    section2.append(panel);
   }
   const caveat = document.createElement("p");
   caveat.className = "caveat";
   caveat.textContent = dataFlow.caveat ?? "";
-  section.append(caveat);
-  return section;
+  section2.append(caveat);
+  return section2;
 }
 function renderDiagnostics(container, model, runtime = {}) {
   const summary = summarizeDiagnostics(model);
@@ -2623,10 +2666,10 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     container.append(counts);
   }
   if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
-    const note = document.createElement("p");
-    note.className = "overlay-empty";
-    note.textContent = overlay.emptyNote;
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "overlay-empty";
+    note2.textContent = overlay.emptyNote;
+    container.append(note2);
     return;
   }
   if (overlay.items.length > 0) {
@@ -2766,17 +2809,17 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
+    container.append(note2);
     return;
   }
   if (result.commits.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = "No commits recorded.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "No commits recorded.";
+    container.append(note2);
     return;
   }
   const list = document.createElement("ul");
@@ -2815,11 +2858,11 @@ function renderReview(container, result, handlers = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "review-unavailable";
-    note.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "review-unavailable";
+    note2.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
+    container.append(note2);
     return;
   }
   if (result.commit) {
@@ -2836,10 +2879,10 @@ function renderReview(container, result, handlers = {}) {
   summary.textContent = `${totals.files} file(s) \xB7 +${totals.insertions} \u2212${totals.deletions}${totals.uncounted > 0 ? ` \xB7 ${totals.uncounted} uncounted` : ""}`;
   container.append(summary);
   if ((result.files ?? []).length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = result.kind === "commit" ? "This commit recorded no file changes." : "No pending changes.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = result.kind === "commit" ? "This commit recorded no file changes." : "No pending changes.";
+    container.append(note2);
   }
   for (const [group, files] of reviewGroups(result.files)) {
     const heading = document.createElement("h4");
@@ -2879,11 +2922,11 @@ function renderReview(container, result, handlers = {}) {
   impactHeading.textContent = `Potentially affected (${affected.length})`;
   container.append(impactHeading);
   if (affected.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "review-impact-empty";
-    note.textContent = "Nothing depends on the changed files.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "review-impact-empty";
+    note2.textContent = "Nothing depends on the changed files.";
+    container.append(note2);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "review-impact";
@@ -2950,10 +2993,10 @@ function renderChangePassport(container, passport) {
   }
   container.append(list);
   if (passport.capped) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.textContent = "Only the first files in the change set were measured.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "Only the first files in the change set were measured.";
+    container.append(note2);
   }
 }
 var MEMBER_ORDER_OPTIONS = [
@@ -2967,10 +3010,10 @@ var ZOOM_LEVELS = [
   ["detail", "Detail"]
 ];
 function unavailableNote(text) {
-  const note = document.createElement("p");
-  note.className = "unavailable";
-  note.textContent = text;
-  return note;
+  const note2 = document.createElement("p");
+  note2.className = "unavailable";
+  note2.textContent = text;
+  return note2;
 }
 function renderRisk(container, report, handlers = {}) {
   container.replaceChildren();
@@ -2987,11 +3030,11 @@ function renderRisk(container, report, handlers = {}) {
     title.append(dismiss);
   }
   if (!report || report.available === false) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "risk-unavailable";
-    note.textContent = "Risk report unavailable.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "risk-unavailable";
+    note2.textContent = "Risk report unavailable.";
+    container.append(note2);
     return;
   }
   const summary = document.createElement("p");
@@ -3016,11 +3059,11 @@ function renderRisk(container, report, handlers = {}) {
   heading.textContent = `Advisories (${advisories.length})`;
   container.append(heading);
   if (advisories.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "risk-advisories-empty";
-    note.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "risk-advisories-empty";
+    note2.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
+    container.append(note2);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-advisories";
@@ -3099,11 +3142,11 @@ function renderRisk(container, report, handlers = {}) {
   licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
   container.append(licenseHeading);
   if (flagged.length === 0) {
-    const note = document.createElement("p");
-    note.className = "unavailable";
-    note.dataset.role = "risk-licenses-empty";
-    note.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
-    container.append(note);
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "risk-licenses-empty";
+    note2.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
+    container.append(note2);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-licenses";
@@ -3333,8 +3376,8 @@ function memberButton(id, text, handler, className = "") {
   return h("button", { key: id, type: "button", id, className: className || void 0, onClick: handler }, text);
 }
 function buildTypeSection(type, view2, clusters, handlers) {
-  const section = document.createElement("section");
-  section.className = "member-type";
+  const section2 = document.createElement("section");
+  section2.className = "member-type";
   const heading = document.createElement("h3");
   heading.className = "member-type-name";
   heading.textContent = type.name;
@@ -3342,7 +3385,7 @@ function buildTypeSection(type, view2, clusters, handlers) {
   count.className = "member-count";
   count.textContent = `${type.fields.length + type.methods.length} members`;
   heading.append(count);
-  section.append(heading);
+  section2.append(heading);
   const legend = document.createElement("div");
   legend.className = "member-clusters";
   legend.dataset.role = "clusters";
@@ -3352,10 +3395,10 @@ function buildTypeSection(type, view2, clusters, handlers) {
     chip.textContent = `cluster ${cluster.index}`;
     legend.append(chip);
   }
-  section.append(legend);
+  section2.append(legend);
   const find = (view2.find ?? "").trim().toLowerCase();
   let fields = orderMembers(
-    type.fields.filter((field) => matches(field.name, find) && (!view2.onlyFlow || isWiredField(field))),
+    type.fields.filter((field2) => matches(field2.name, find) && (!view2.onlyFlow || isWiredField(field2))),
     view2.order
   );
   let methods = orderMembers(
@@ -3363,33 +3406,33 @@ function buildTypeSection(type, view2, clusters, handlers) {
     view2.order
   );
   const relations = memberRelations(type);
-  section.addEventListener("pointerover", (event) => {
+  section2.addEventListener("pointerover", (event) => {
     const card = event.target.closest?.(".member-card");
-    if (card) traceMember(section, card);
+    if (card) traceMember(section2, card);
   });
-  section.addEventListener("pointerout", (event) => {
+  section2.addEventListener("pointerout", (event) => {
     const card = event.target.closest?.(".member-card");
     if (!card) return;
     const next = event.relatedTarget?.closest?.(".member-card");
-    if (next && section.contains(next)) return;
-    clearTrace(section);
+    if (next && section2.contains(next)) return;
+    clearTrace(section2);
   });
   const fieldHeading = document.createElement("h4");
   fieldHeading.textContent = `Fields / data (${fields.length})`;
-  section.append(fieldHeading);
+  section2.append(fieldHeading);
   const fieldList = document.createElement("div");
   fieldList.className = "member-cards";
   fieldList.dataset.role = "fields";
-  for (const field of fields) {
-    fieldList.append(buildFieldCard(field, clusters.clusterOf.get(field.name), relations.get(field.name)));
+  for (const field2 of fields) {
+    fieldList.append(buildFieldCard(field2, clusters.clusterOf.get(field2.name), relations.get(field2.name)));
   }
   if (fields.length === 0) {
     fieldList.append(unavailableNote("No fields recorded."));
   }
-  section.append(fieldList);
+  section2.append(fieldList);
   const methodHeading = document.createElement("h4");
   methodHeading.textContent = `Methods (${methods.length})`;
-  section.append(methodHeading);
+  section2.append(methodHeading);
   const methodList = document.createElement("div");
   methodList.className = "member-cards";
   methodList.dataset.role = "methods";
@@ -3399,8 +3442,8 @@ function buildTypeSection(type, view2, clusters, handlers) {
   if (methods.length === 0) {
     methodList.append(unavailableNote("No methods recorded."));
   }
-  section.append(methodList);
-  return section;
+  section2.append(methodList);
+  return section2;
 }
 function memberRelations(type) {
   const relations = /* @__PURE__ */ new Map();
@@ -3416,11 +3459,11 @@ function memberRelations(type) {
   }
   return relations;
 }
-function traceMember(section, card) {
+function traceMember(section2, card) {
   const name = card.dataset.member;
   const related = new Set((card.dataset.related ?? "").split(" ").filter(Boolean));
   related.add(name);
-  for (const other of section.querySelectorAll(".member-card")) {
+  for (const other of section2.querySelectorAll(".member-card")) {
     const member = other.dataset.member;
     other.classList.toggle("trace-unrelated", !related.has(member));
     other.classList.toggle("trace-hit", related.has(member) && member !== name);
@@ -3428,8 +3471,8 @@ function traceMember(section, card) {
   card.classList.remove("trace-unrelated");
   card.classList.add("trace-source");
 }
-function clearTrace(section) {
-  for (const card of section.querySelectorAll(".member-card")) {
+function clearTrace(section2) {
+  for (const card of section2.querySelectorAll(".member-card")) {
     card.classList.remove("trace-unrelated", "trace-hit", "trace-source");
   }
 }
@@ -3439,11 +3482,11 @@ function staggerFor(clusterIndex) {
 function matches(name, needle) {
   return !needle || name.toLowerCase().includes(needle);
 }
-function buildFieldCard(field, clusterIndex, related) {
-  const card = fieldCard(field);
+function buildFieldCard(field2, clusterIndex, related) {
+  const card = fieldCard(field2);
   const element = document.createElement("article");
   element.className = "member-card field-card";
-  element.dataset.member = field.name;
+  element.dataset.member = field2.name;
   element.dataset.cluster = String(clusterIndex ?? 0);
   element.dataset.related = related ? [...related].join(" ") : "";
   element.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
@@ -3680,22 +3723,22 @@ function truncateLabel(label, max) {
   return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
 }
 function buildDataFlow(memberMap, consumerIds) {
-  const section = document.createElement("section");
-  section.className = "member-dataflow";
-  section.dataset.role = "data-flow";
+  const section2 = document.createElement("section");
+  section2.className = "member-dataflow";
+  section2.dataset.role = "data-flow";
   const title = document.createElement("h4");
   title.textContent = "Data flow";
-  section.append(title);
+  section2.append(title);
   const flow = memberMap?.dataFlow;
   if (!flow || flow.available === false) {
-    const note = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
-    note.dataset.role = "flow-unavailable";
-    section.append(note);
-    return section;
+    const note2 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
+    note2.dataset.role = "flow-unavailable";
+    section2.append(note2);
+    return section2;
   }
   const diagram = buildFlowDiagram(memberMap);
   if (diagram) {
-    section.append(diagram);
+    section2.append(diagram);
   }
   const row = document.createElement("div");
   row.className = "flow-row";
@@ -3743,17 +3786,17 @@ function buildDataFlow(memberMap, consumerIds) {
   }
   right.append(external);
   row.append(right);
-  section.append(row);
+  section2.append(row);
   const caveat = document.createElement("p");
   caveat.className = "caveat";
   caveat.textContent = flow.caveat ?? "";
-  section.append(caveat);
-  return section;
+  section2.append(caveat);
+  return section2;
 }
 function buildHealth(report, metrics) {
-  const section = document.createElement("section");
-  section.className = "member-health";
-  section.dataset.role = "health";
+  const section2 = document.createElement("section");
+  section2.className = "member-health";
+  section2.dataset.role = "health";
   const title = document.createElement("h4");
   title.textContent = "Architecture health";
   if (report?.score !== void 0 && report?.score !== null) {
@@ -3762,17 +3805,17 @@ function buildHealth(report, metrics) {
     score.textContent = `${report.score}/100`;
     title.append(score);
   }
-  section.append(title);
+  section2.append(title);
   if (metrics) {
     const line = document.createElement("p");
     line.className = "health-metrics";
     line.dataset.role = "health-metrics";
     line.textContent = `${metrics.directImporters} importer(s) \xB7 ${metrics.blastRadius} blast radius \xB7 ${metrics.directImports} direct import(s)`;
-    section.append(line);
+    section2.append(line);
   }
   if (!report || !Array.isArray(report.axes) || report.axes.length === 0) {
-    section.append(unavailableNote("Health was not computed for this repository."));
-    return section;
+    section2.append(unavailableNote("Health was not computed for this repository."));
+    return section2;
   }
   const svg = svgElement("svg", { viewBox: "0 0 144 144", class: "radar" });
   const frame = svgElement("polygon", {
@@ -3788,7 +3831,7 @@ function buildHealth(report, metrics) {
   for (const point of radarPoints(report.axes)) {
     svg.append(svgElement("circle", { cx: point.x, cy: point.y, r: "2.5", class: "radar-dot" }));
   }
-  section.append(svg);
+  section2.append(svg);
   const list = document.createElement("ul");
   list.className = "health-axes";
   for (const axis of report.axes) {
@@ -3796,16 +3839,16 @@ function buildHealth(report, metrics) {
     item.textContent = axis.value === null ? `${axis.label} unavailable` : `${axis.label} ${axis.value}%`;
     list.append(item);
   }
-  section.append(list);
-  return section;
+  section2.append(list);
+  return section2;
 }
 function buildConstellation(memberMap, consumerIds) {
-  const section = document.createElement("section");
-  section.className = "member-constellation";
-  section.dataset.role = "constellation";
+  const section2 = document.createElement("section");
+  section2.className = "member-constellation";
+  section2.dataset.role = "constellation";
   const title = document.createElement("h4");
   title.textContent = "Dependency constellation";
-  section.append(title);
+  section2.append(title);
   const placed = constellationLayout(
     constellationPoints(memberMap, consumerIds ? consumerIds.length : 0)
   );
@@ -3820,12 +3863,12 @@ function buildConstellation(memberMap, consumerIds) {
       })
     );
   }
-  section.append(svg);
+  section2.append(svg);
   const caption = document.createElement("p");
   caption.className = "caveat";
   caption.textContent = "Fields, methods, and repository consumers are shown when current scan data provides them.";
-  section.append(caption);
-  return section;
+  section2.append(caption);
+  return section2;
 }
 function svgElement(name, attributes) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -3835,13 +3878,243 @@ function svgElement(name, attributes) {
   return element;
 }
 
+// ui/strabo-settings.js
+var SETTINGS_KEY = "strabo.settings.v1";
+var THEMES = ["system", "dark", "light"];
+var DETAIL_MODES = ["block", "file"];
+function defaultSettings() {
+  return { theme: "system", defaultDetail: "block", labels: true, reduceMotion: false };
+}
+function sanitize(parsed, defaults) {
+  const settings = { ...defaults };
+  if (!parsed || typeof parsed !== "object") {
+    return settings;
+  }
+  if (THEMES.includes(parsed.theme)) settings.theme = parsed.theme;
+  if (DETAIL_MODES.includes(parsed.defaultDetail)) settings.defaultDetail = parsed.defaultDetail;
+  if (typeof parsed.labels === "boolean") settings.labels = parsed.labels;
+  if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
+  return settings;
+}
+function readSettings(storage = globalThis.localStorage) {
+  const defaults = defaultSettings();
+  try {
+    const raw = storage?.getItem(SETTINGS_KEY);
+    if (!raw) return defaults;
+    return sanitize(JSON.parse(raw), defaults);
+  } catch {
+    return defaults;
+  }
+}
+function writeSettings(settings, storage = globalThis.localStorage) {
+  try {
+    storage?.setItem(SETTINGS_KEY, JSON.stringify(sanitize(settings, defaultSettings())));
+  } catch {
+  }
+}
+function resolveTheme(theme, prefersLight = false) {
+  if (theme === "light" || theme === "dark") return theme;
+  return prefersLight ? "light" : "dark";
+}
+function effectiveReduceMotion(settings, prefersReducedMotion = false) {
+  return Boolean(settings?.reduceMotion) || Boolean(prefersReducedMotion);
+}
+function applyAppearance(settings, options = {}) {
+  const root = options.root ?? document.documentElement;
+  const matchMedia = options.matchMedia ?? globalThis.matchMedia?.bind(globalThis);
+  const prefersLight = Boolean(matchMedia?.("(prefers-color-scheme: light)")?.matches);
+  const prefersReduced = Boolean(matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const theme = resolveTheme(settings.theme, prefersLight);
+  root.dataset.theme = theme;
+  if (effectiveReduceMotion(settings, prefersReduced)) {
+    root.dataset.reduceMotion = "1";
+  } else {
+    delete root.dataset.reduceMotion;
+  }
+  return theme;
+}
+function watchSystemPreferences(settings, onChange) {
+  const matchMedia = globalThis.matchMedia?.bind(globalThis);
+  if (!matchMedia) {
+    return () => {
+    };
+  }
+  const queries = [
+    matchMedia("(prefers-color-scheme: light)"),
+    matchMedia("(prefers-reduced-motion: reduce)")
+  ];
+  const listeners = queries.map((query) => {
+    const handler = () => onChange(settings);
+    query.addEventListener?.("change", handler);
+    return () => query.removeEventListener?.("change", handler);
+  });
+  return () => {
+    for (const remove of listeners) remove();
+  };
+}
+function field(labelText, control) {
+  const wrap = document.createElement("label");
+  wrap.className = "setting-field";
+  const label = document.createElement("span");
+  label.className = "setting-label";
+  label.textContent = labelText;
+  wrap.append(label, control);
+  return wrap;
+}
+function textInput(value, { placeholder = "", readOnly = false } = {}) {
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = value ?? "";
+  input.placeholder = placeholder;
+  input.readOnly = readOnly;
+  input.spellcheck = false;
+  return input;
+}
+function selectInput(value, options, onChange) {
+  const select = document.createElement("select");
+  for (const [optionValue, text] of options) {
+    const option = document.createElement("option");
+    option.value = optionValue;
+    option.textContent = text;
+    select.append(option);
+  }
+  select.value = value;
+  select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+function checkboxInput(checked, onChange) {
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = Boolean(checked);
+  input.addEventListener("change", () => onChange(input.checked));
+  return input;
+}
+function section(title) {
+  const group = document.createElement("section");
+  group.className = "setting-section";
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  group.append(heading);
+  return group;
+}
+function note(text) {
+  const paragraph = document.createElement("p");
+  paragraph.className = "setting-note";
+  paragraph.textContent = text;
+  return paragraph;
+}
+function renderSettings(container, handlers = {}) {
+  const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
+  container.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = "Settings";
+  container.append(heading);
+  const local = section("Appearance");
+  local.append(
+    field(
+      "Theme",
+      selectInput(
+        prefs.theme,
+        [["system", "System"], ["dark", "Dark"], ["light", "Light"]],
+        (value) => handlers.onPref?.("theme", value)
+      )
+    ),
+    field("Reduce motion", checkboxInput(prefs.reduceMotion, (value) => handlers.onPref?.("reduceMotion", value))),
+    field(
+      "Default detail",
+      selectInput(
+        prefs.defaultDetail,
+        [["block", "Directories"], ["file", "Files"]],
+        (value) => handlers.onPref?.("defaultDetail", value)
+      )
+    ),
+    field("Show node labels", checkboxInput(prefs.labels, (value) => handlers.onPref?.("labels", value))),
+    note("Preferences are stored in this browser.")
+  );
+  container.append(local);
+  const remote = section("Server");
+  if (!server) {
+    remote.append(note("Loading server settings\u2026"));
+  } else {
+    remote.append(field("Start root", textInput(server.workspaceRoot, { readOnly: true })));
+    const ceilingInput = textInput(server.scanCeiling);
+    const saveButton = document.createElement("button");
+    saveButton.type = "button";
+    saveButton.textContent = "Save";
+    const resetButton = document.createElement("button");
+    resetButton.type = "button";
+    resetButton.textContent = "Reset";
+    resetButton.title = "Restore the ceiling the server started with";
+    const ceilingRow = document.createElement("div");
+    ceilingRow.className = "setting-row";
+    ceilingRow.append(ceilingInput, saveButton, resetButton);
+    remote.append(field("Scan ceiling", ceilingRow));
+    const remoteNote = note(
+      "Applies immediately and is bounded only by what this server process may read. Reset after a restart."
+    );
+    remote.append(remoteNote);
+    const statusLine = document.createElement("p");
+    statusLine.className = "setting-status";
+    statusLine.hidden = true;
+    remote.append(statusLine);
+    const report = (message, isError) => {
+      statusLine.hidden = false;
+      statusLine.textContent = message;
+      statusLine.classList.toggle("is-error", Boolean(isError));
+    };
+    saveButton.addEventListener("click", () => {
+      saveButton.disabled = true;
+      Promise.resolve(handlers.onSaveCeiling?.(ceilingInput.value.trim())).then(() => report("Scan ceiling updated.", false)).catch((error) => report(error.message ?? "Could not update the scan ceiling.", true)).finally(() => {
+        saveButton.disabled = false;
+      });
+    });
+    resetButton.addEventListener("click", () => {
+      resetButton.disabled = true;
+      Promise.resolve(handlers.onSaveCeiling?.(null)).then(() => report("Scan ceiling reset.", false)).catch((error) => report(error.message ?? "Could not reset the scan ceiling.", true)).finally(() => {
+        resetButton.disabled = false;
+      });
+    });
+    remote.append(
+      field(
+        "Online risk lookup",
+        checkboxInput(server.riskOnline, (value) => {
+          Promise.resolve(handlers.onToggleRisk?.(value)).catch(
+            (error) => report(error.message ?? "Could not change the risk lookup.", true)
+          );
+        })
+      )
+    );
+    if (server.riskDeniedLicenses && server.riskDeniedLicenses.length > 0) {
+      remote.append(note(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
+    }
+    remote.append(
+      note("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
+    );
+  }
+  container.append(remote);
+  if (status) {
+    const line = document.createElement("p");
+    line.className = `setting-status${statusError ? " is-error" : ""}`;
+    line.textContent = status;
+    container.append(line);
+  }
+}
+
 // ui/strabo-viewport.js
+function reducedMotion() {
+  return document.documentElement?.dataset?.reduceMotion === "1";
+}
 function fit(cy) {
   cy.fit(void 0, 40);
 }
 function focus(cy, idOrPrefix) {
   const node = cy.getElementById(idOrPrefix);
   if (node && node.nonempty()) {
+    if (reducedMotion()) {
+      cy.zoom({ level: 1.4 });
+      cy.center(node);
+      return;
+    }
     cy.animate({ center: { eles: node }, zoom: 1.4 }, { duration: 200 });
     return;
   }
@@ -3997,6 +4270,13 @@ function applyViewPrefs() {
   }
 }
 var view = createView(document.getElementById("graph"));
+var clientPrefs = readSettings();
+function applyClientPrefs() {
+  applyAppearance(clientPrefs);
+  view.applyTheme();
+  view.setLabelsVisible(clientPrefs.labels);
+}
+applyClientPrefs();
 var elements = {
   repository: document.getElementById("repository"),
   browse: document.getElementById("browse"),
@@ -4049,7 +4329,9 @@ var elements = {
   forget: document.getElementById("forget"),
   memberView: document.getElementById("member-view"),
   graphHint: document.getElementById("graph-hint"),
-  shortcuts: document.getElementById("shortcuts")
+  shortcuts: document.getElementById("shortcuts"),
+  settingsToggle: document.getElementById("settings-toggle"),
+  settingsPanel: document.getElementById("settings-panel")
 };
 var memberData = null;
 var memberTimer = null;
@@ -4258,8 +4540,8 @@ function selectNode(id) {
   refreshDock();
 }
 async function loadMembers(id) {
-  const section = elements.inspector.querySelector('[data-role="members"]');
-  if (!section) {
+  const section2 = elements.inspector.querySelector('[data-role="members"]');
+  if (!section2) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -4270,11 +4552,11 @@ async function loadMembers(id) {
     const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
     const result = response.ok ? await response.json() : { available: false, detail: "Symbols are unavailable for this file." };
     if (selected === id) {
-      renderMembers(section, result);
+      renderMembers(section2, result);
     }
   } catch {
     if (selected === id) {
-      renderMembers(section, { available: false, detail: "Symbols could not be loaded." });
+      renderMembers(section2, { available: false, detail: "Symbols could not be loaded." });
     }
   }
 }
@@ -4583,6 +4865,64 @@ async function toggleRisk() {
   } catch (error) {
     elements.status.textContent = `Error: ${error.message}`;
   }
+}
+var serverSettings = null;
+var settingsStatus = "";
+var settingsStatusError = false;
+function renderSettingsView() {
+  if (!elements.settingsPanel) return;
+  renderSettings(elements.settingsPanel, {
+    prefs: clientPrefs,
+    server: serverSettings,
+    status: settingsStatus || null,
+    statusError: settingsStatusError,
+    onPref: (key, value) => {
+      clientPrefs = { ...clientPrefs, [key]: value };
+      writeSettings(clientPrefs);
+      applyClientPrefs();
+      renderSettingsView();
+    },
+    onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
+    onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated.")
+  });
+}
+async function saveServerSettings(patch2, successMessage) {
+  try {
+    await putServerSettings(patch2);
+    settingsStatus = successMessage;
+    settingsStatusError = false;
+  } catch (error) {
+    settingsStatus = error.message;
+    settingsStatusError = true;
+  }
+  renderSettingsView();
+  loadCatalogue().catch(() => {
+  });
+}
+async function putServerSettings(patch2) {
+  const response = await fetch(`${API_PATH}/settings`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch2)
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not save settings (${response.status}).`);
+  }
+  serverSettings = body;
+  return body;
+}
+async function openSettings() {
+  settingsStatus = "";
+  settingsStatusError = false;
+  renderSettingsView();
+  try {
+    serverSettings = await request("/settings");
+  } catch (error) {
+    settingsStatus = error.message;
+    settingsStatusError = true;
+  }
+  renderSettingsView();
 }
 function clearOverlay() {
   state.overlay = "none";
@@ -5325,6 +5665,25 @@ var floatingWindows = initFloatingWindows({
       }
     },
     {
+      key: "settings",
+      element: elements.settingsPanel,
+      title: "Settings",
+      dockLabel: "Settings",
+      width: 420,
+      onOpen: () => {
+        if (elements.settingsPanel.hidden) {
+          openSettings().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+        elements.settingsToggle?.setAttribute("aria-expanded", "true");
+      },
+      onClose: () => {
+        elements.settingsPanel.hidden = true;
+        elements.settingsToggle?.setAttribute("aria-expanded", "false");
+      }
+    },
+    {
       key: "shortcuts",
       element: elements.shortcuts,
       title: "Keyboard shortcuts",
@@ -5359,6 +5718,10 @@ function refreshDock() {
   } catch {
   }
 }
+elements.settingsToggle?.addEventListener("click", () => {
+  floatingWindows.find((controller) => controller.key === "settings")?.toggle();
+});
+watchSystemPreferences(clientPrefs, () => applyClientPrefs());
 if (window.STRABO_TEST) {
   window.straboTest = {
     cy: view.cy,
@@ -5382,6 +5745,8 @@ if (window.STRABO_TEST) {
   };
 }
 loadCatalogue().then(() => {
+  state.mode = clientPrefs.defaultDetail;
+  elements.detail.value = clientPrefs.defaultDetail;
   applyUrl();
   if (state.repository && [...elements.repository.options].some((option) => option.value === state.repository)) {
     elements.repository.value = state.repository;
