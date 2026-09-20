@@ -71,3 +71,12 @@ Feature: Map legibility
     Then the delegate menu title is "2 file(s)"
     When I clear the selection
     Then the group toolbar reports no selection
+
+  @islands
+  Scenario: Directories are drawn as named regions
+    Then the map draws no directory islands
+    When I switch to file detail
+    Then the map draws a directory island for "src/api/v2"
+    And the map draws a directory island for "lib"
+    And every directory island has a plate on the canvas
+    And every island label names a drawn directory

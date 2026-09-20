@@ -117,15 +117,63 @@ export function mapCounts(model) {
   return { tests, modules, entries };
 }
 
-/** Text for the "Reading the map" guide. */
+/**
+ * Text for the "Reading the map" visual key.
+ *
+ * Keyboard gestures moved to the shortcut sheet (`?`), so this box states only what the
+ * drawing encodes and how to read it.
+ */
 export function readingLegend() {
+  return ['size = dependents', 'colour = directory', 'diamond = test'];
+}
+
+/** The shortcut sheet shown on `?`: gestures, not encodings. */
+export function shortcutSheet() {
   return [
-    'size = dependents',
-    'colour = directory',
-    'diamond = test',
-    'hover = blast radius',
-    '⌘/ctrl-click or shift-drag = select group',
+    { keys: 'F', action: 'Focus the selection' },
+    { keys: 'I', action: 'Trace change impact' },
+    { keys: 'P', action: 'Start a path between two nodes' },
+    { keys: 'B', action: 'Toggle directories / files' },
+    { keys: 'T', action: 'Timeline' },
+    { keys: 'R', action: 'Review working-tree changes' },
+    { keys: 'V', action: 'Dependency risk' },
+    { keys: 'G', action: 'Delegate a selected group' },
+    { keys: '⌘K / ctrl-K', action: 'Filter paths' },
+    { keys: 'Esc', action: 'Clear the selection or close a panel' },
+    { keys: '?', action: 'Show this sheet' },
+    { keys: 'hover a node', action: 'Report its blast radius' },
+    { keys: '⌘/ctrl-click, shift-drag', action: 'Select a group' },
   ];
+}
+
+/**
+ * The directory-to-colour key, from the palette indexes the server assigned.
+ *
+ * One row per palette index: the regions that share it and the colour they are drawn in.
+ * When the palette wraps, the regions are listed together rather than pretending they are
+ * distinct, so the key never claims an encoding the view does not carry.
+ */
+export function paletteKey(model) {
+  const isBlock = model?.prefixLength !== undefined;
+  const byIndex = new Map();
+  for (const node of model?.nodes ?? []) {
+    const index = Number.isInteger(node.paletteIndex) ? node.paletteIndex : 0;
+    const region = isBlock
+      ? node.id === '.'
+        ? '/'
+        : node.id.split('/')[0]
+      : topLevelDirectory(node.id);
+    const regions = byIndex.get(index) ?? new Set();
+    regions.add(region);
+    byIndex.set(index, regions);
+  }
+  return [...byIndex.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([index, regions]) => ({
+      index,
+      regions: [...regions].sort().map((region) => (region === '.' ? '/' : region)),
+      color: paletteColor(index, ''),
+    }));
 }
 
 /** Square-root transform keeps leaf nodes visible without one hub consuming the map. */
@@ -292,6 +340,9 @@ export function summarizeDiagnostics(model) {
     byKind,
     excludedByReason,
     samples: (model.diagnostics ?? []).slice(0, 50),
+    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
+    cache: model.cache?.status ?? 'unknown',
+    stale: Boolean(model.cache?.stale),
   };
 }
 
@@ -340,11 +391,14 @@ const RESOLUTION_LABELS = {
   'subpath-import': 'package subpath',
 };
 
-/** Counts used by the status line. */
+/**
+ * Counts for the header.
+ *
+ * Internal vocabulary (`cache: miss`, renderer, excluded/diagnostic counts) lives in the
+ * Diagnostics panel; the header states what the map holds and stops there.
+ */
 export function graphSummary(model) {
   const nodes = (model.nodes ?? []).length;
   const edges = (model.edges ?? []).length;
-  const cache = model.cache?.status ?? 'unknown';
-  const stale = model.cache?.stale ? ' (stale)' : '';
-  return `${nodes} nodes · ${edges} edges · cache: ${cache}${stale}`;
+  return `${nodes} nodes · ${edges} edges`;
 }

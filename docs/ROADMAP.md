@@ -22,8 +22,10 @@ record is reported as `unavailable`, never invented.
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
-| 13 | Visual design | Planned (map legibility at scale, panel placement, chrome consolidation) |
-| — | Developer Product Graph, Chat, Narrate | Out of concept |
+| 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
+| 14 | Function inventory and complexity | In progress (A1: per-function body metrics for TypeScript; other languages, intra-file calls, and UI pending) |
+| 15 | Optional LLM narrator | Planned (opt-in seam; off by default) |
+| — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
 
@@ -226,13 +228,121 @@ defect in the running app, not a preference.
   `maxZoom` / `minZoom` in `createCytoscape` and derive label `font-size` from `cy.zoom()`
   so type holds roughly 11 device pixels at any zoom. `applyLabelBudget` stays as the
   density control; this is about size, not about which labels show.
-- **M1 - Colour encodes nothing.** The legend claims `colour = directory`, but no server
-  response sets `paletteIndex`, so `paletteColor` always falls back to hashing
-  `topLevelDirectory(node.id)` (`ui/strabo-graph.js`). In block mode a node id is a bare
-  directory name with no slash, which `topLevelDirectory` maps to `.` — so every block node
-  hashes the same string and the Directories view renders in a single colour. Assign the
-  palette index server-side where directories are already grouped, and make the legend
-  state the encoding the view actually uses.
+- **M1 - Colour budget.** The diagnosis: hue is spent on the wrong job. `PALETTE`
+  (`ui/strabo-graph.js`) assigns seven hues to directory identity, five of which are the
+  exact hex of a semantic token — `#4c9aff` = `--accent`, `#56d4b1` = `--ok`, `#f2b25c` =
+  `--warn`, `#c98bf0` = `--cycle`, `#ff8f8f` ≈ `--danger` — so a directory can render in the
+  amber that elsewhere means "affected by this change". It also cycles (`PALETTE[index % 7]`),
+  so beyond seven directories colour maps unrelated directories together. Validated
+  all-pairs against the `#10141a` surface the set fails the lightness band, CVD separation
+  (`#c98bf0`↔`#4c9aff` ΔE 1.9 protan) and the normal-vision floor (`#6fb1ff`↔`#4c9aff`
+  ΔE 7.3, floor 15): it carries two near-identical blues in seven slots. A node-link view is
+  scored all-pairs because any two nodes can sit adjacent, and no seven-hue set clears that.
+
+  This supersedes the narrower reading that the Directories view is monochrome because
+  `topLevelDirectory` maps a slash-free block id to `.` so every block hashes the same
+  string. That is true, and it is why the current view shows one blue, but it is a symptom:
+  fixing the hash would restore a palette that should not be encoding identity at all.
+
+  **Requirements.** Each channel carries one job, and the job decides the encoding:
+
+  | Channel | Job | Encoding |
+  | --- | --- | --- |
+  | Position | directory identity | islands (M3, done) |
+  | Size | blast radius | existing `sqrt` scale |
+  | Shape | kind | existing (`diamond` = test) |
+  | Hue | status only | the reserved scale in R4 |
+  | Accent | selection, focus, links, hubs | `--accent`, nothing else |
+
+  - **R1 — Hue is reserved.** Outside the status scale (R4), the accent (R7) and the bounded
+    categorical set (R8), nothing on the map or in a panel carries a hue. A colour that is
+    not in one of those three sets is a defect, not a decoration.
+  - **R2 — Directory identity is not encoded by hue.** `PALETTE`, `paletteColor` and the
+    `paletteIndex` field are removed rather than repaired. Directory is a 20+ category
+    variable; position already carries it and reads at every zoom.
+  - **R3 — One neutral node fill.** `--node-fill: #6b7a8d` (4.22:1 on `--bg-1`), full
+    opacity, with `--node-line` as the hairline ring. It is near-achromatic, so any status
+    hue beside it reads as the marked one even at equal lightness. Node fill does not vary
+    by directory, language, or kind.
+  - **R4 — The status scale is fixed and reserved.** Four steps, never themed, never reused
+    for identity. Measured against `--bg-1` `#10141a` and `--bg-2` `#161c24`:
+
+    | Token | Hex | on `--bg-1` | on `--bg-2` | Carries |
+    | --- | --- | --- | --- | --- |
+    | `--status-good` | `#0ca30c` | 5.51 | 5.11 | health up, severity low |
+    | `--status-warning` | `#fab219` | 10.07 | 9.34 | affected, severity moderate |
+    | `--status-serious` | `#ec835a` | 7.00 | 6.49 | cycle member, severity high |
+    | `--status-critical` | `#d03b3b` | 3.84 | 3.57 | changed, severity critical |
+
+    All four clear 3:1. They replace `--ok`, `--warn`, `--danger`, `--cycle` and the
+    untokenized `#ff8f5c`.
+  - **R5 — At most two status hues on the map at once.** `overlayFor` switches on one overlay
+    kind, and each node takes one class, so only `ov-changed` + `ov-affected` (impact and
+    review) ever co-occur; `ov-cycle` and `ov-unreached` each render alone. The scale does
+    not have to separate four ways on canvas — `critical`↔`warning` is the only pair that
+    must, and it separates on both lightness and hue.
+  - **R6 — Status never carries meaning by hue alone.** Every status colour ships with a
+    text label, an icon, or a shape difference. `warning`↔`serious` measure ΔE 13.6
+    unsimulated, below the 15 floor, so the pairing is the mitigation, not a nicety. The risk
+    chips already satisfy this (`CRITICAL`, `HIGH`); the graph overlays do not and must gain
+    a border-style or label difference alongside the hue.
+  - **R7 — The accent is reserved for interaction.** `--accent` `#4c9aff` marks selection,
+    focus, links and hubs, and nothing else. No status, series or fill may use it.
+  - **R8 — Bounded categorical is capped at three plus "other".** The member-map clusters
+    (`.cluster-1..7`, assigned `(cluster.index % 7) + 1` in `ui/strabo-panels.js`) are the
+    only genuine categorical set. Cluster cards sit adjacent, so the set is scored all-pairs;
+    three hues clear every gate on this surface — `--series-1: #3987e5` (5.08:1),
+    `--series-2: #d95926` (4.76:1), `--series-3: #199e70` (5.42:1), worst CVD ΔE 9.4, worst
+    normal-vision ΔE 20.9. The fourth and later clusters take one neutral `--series-other`.
+    Hues are assigned in fixed order and never cycled: `% 7` is removed.
+  - **R9 — Edge contrast floor.** Edges clear 3:1 against `--bg-1`. The current `#3a4a5e` at
+    0.55 opacity measures 2.04:1 and reads as haze at 0.38 zoom; `#55697f` measures 3.27:1.
+    Non-neighbourhood edges dim on hover rather than all 454 drawing at equal weight.
+
+  **Acceptance.** A unit test asserts: `PALETTE` no longer exists; every status token clears
+  3:1 on `--bg-1` and `--bg-2`; the categorical set is three entries and is not indexed
+  modulo its length. An acceptance scenario asserts an impacted node and a changed node
+  differ by something other than hue.
+
+- **M1a - One source of truth for colour.** The diagnosis: canvas cannot read CSS custom
+  properties, so `ui/strabo-view.js` hardcodes 15 hex literals duplicating `styles.css`.
+  They have already drifted — danger is `#ff5c5c` in CSS and `#ff8f8f` on canvas, `#7fb4ff`
+  exists only in JS, `#ff8f5c` only in CSS and untokenized. The token set has the same
+  problem internally: `--bg`/`--bg-1`, `--panel`/`--bg-2` and `--muted`/`--ink-3` are each
+  one hex under two names (`--muted` 44 uses, `--ink-3` 23), while `--ink` `#e7edf5` and
+  `--ink-1` `#eef3fa` are *different* hexes both used as primary text, 9 uses each, so body
+  copy is two tones depending on which name a rule reached for. Add six near-identical
+  floating-panel backgrounds and alpha applied ad hoc as 8-digit hex (`#9ad46a55`,
+  `#4c9aff33`, `#6fb1ff14`).
+
+  **Requirements.**
+
+  - **R10 — Every colour is defined once, in `:root`.** No hex literal, `rgb()` or `rgba()`
+    appears anywhere else in `ui/styles.css` or in any `ui/*.js` module.
+  - **R11 — The canvas reads the tokens rather than copying them.** The Cytoscape stylesheet
+    is built at startup from `getComputedStyle(document.documentElement)`, so `styles.css`
+    stays the single definition and the two cannot drift again.
+  - **R12 — One name per value.** The scale is the surviving vocabulary and the ad-hoc
+    aliases are removed, so a rule cannot reach for a second name and get a second colour:
+
+    | Removed | Replaced by | Uses to migrate |
+    | --- | --- | --- |
+    | `--bg` | `--bg-1` | 1 |
+    | `--panel` | `--bg-2` | 7 |
+    | `--muted` | `--ink-3` | 44 |
+    | `--ink` (`#e7edf5`) | `--ink-1` (`#eef3fa`) | 9 |
+    | `--mono` | `--font-mono` | 3 |
+
+  - **R13 — Alpha comes from a scale, not from a literal.** Three steps — a wash, a border
+    and a veil — replace the ad-hoc 8-digit hexes and the twelve `rgba()` mixes. The six
+    floating-panel backgrounds collapse to one veiled surface token.
+  - **R14 — Text contrast is not in scope.** Every ink token already clears AA on every
+    surface (`--ink-3` 6.9:1, `--danger` 6.1:1). Nothing here changes an ink value, and no
+    time is spent re-checking them.
+
+  **Acceptance.** A unit test greps `ui/styles.css` and `ui/*.js` for colour literals outside
+  the `:root` block and fails on any hit — R10 and R12 are then enforced rather than agreed.
+
 - **M2 - Panel placement.** Floating windows open at fixed points and overlap both the
   canvas and each other: the legend's default position covers a node, the timeline covers
   the first five canvas-toolbar buttons, and selecting `Architecture health` opens the
@@ -241,11 +351,36 @@ defect in the running app, not a preference.
   rather than a fixed offset, and raise-to-front plus flash the dock chip on open.
   `ui/strabo-float.js` already owns drag, collapse, and persistence, so this is placement
   policy rather than a rewrite.
-- **M3 - Structure at scale.** `buildPositions` already packs nodes into directory islands,
-  but nothing draws them, so a 192-node view reads as a grid of unrelated dots. Render a
-  backplate and directory name per island from the positions the layout already produces.
-  Lift edge contrast (`#3a4a5e` at 0.55 opacity over `#10141a` reads as haze at 0.38 zoom)
-  and dim non-neighbourhood edges on hover instead of drawing 454 edges at equal weight.
+- **M3 - Structure at scale (islands done).** `buildPositions` already packed nodes into
+  directory islands, but nothing drew them, so a 192-node view read as a grid of unrelated
+  dots. `ui/strabo-islands.js` now derives a plate per directory as the bounding box of the
+  members the layout already grouped — no second layout, and nothing moves when plates are
+  drawn or hidden. `createIslandLayer` (`ui/strabo-view.js`) paints them on an SVG plane
+  that is the first child of the Cytoscape container, so it sits over the container
+  background and under every node and edge, and survives the opt-in WebGL renderer setting
+  an opaque inline background there. The layer is `aria-hidden` and takes no pointer
+  events: a click on "an island" is a click on the canvas, which still clears the selection.
+
+  Bounds are model coordinates recomputed only when the node set changes; pan and zoom
+  re-project them (`rendered = model * zoom + pan`). Filtering shrinks an island to its
+  surviving members and drops a directory filtered out entirely. Plates are achromatic
+  (`--island-fill`, `--island-line`) so they read as structure, not status — M1's rule
+  applied before M1 lands. Labels hold one device size at any zoom (the M0 lesson), sit in
+  the gap above their plate rather than behind the first row of nodes, and are trimmed to
+  the tail (`…/acceptance/steps`) so they never overflow onto the neighbouring island; a
+  plate too small to name drops its label rather than overflowing. Islands are file-mode
+  only — block mode already aggregates a directory into a node, so every top-level block
+  would land in one island spanning the map.
+
+  Known limit: two deep fixture paths can trim to the same tail (`…om/acme/app`). Revealing
+  the full path needs hover, which needs pointer events on the layer; not done.
+
+  Spec: `test/acceptance/features/map-legibility.feature` (`@islands`),
+  `test/unit/islands.test.ts`.
+
+  Still open in M3: lift edge contrast (`#3a4a5e` at 0.55 opacity over `#10141a` reads as
+  haze at 0.38 zoom) and dim non-neighbourhood edges on hover instead of drawing 454 edges
+  at equal weight.
 - **M4 - Chrome consolidation.** The map is ringed by eight control surfaces: toolbar,
   breadcrumb, canvas toolbar, panel dock, tests strip, status bar, zoom controls, and the
   node counter. At 1280px the toolbar wraps to two rows and the dock overlaps a node label.
@@ -266,6 +401,50 @@ defect in the running app, not a preference.
 This phase changes presentation only. No item here alters what the scan records or what
 the API reports, so `evidence over speculation` is unaffected: M1 and M5 exist precisely
 because the legend currently claims an encoding the view does not carry.
+
+## Phase 14 - Function inventory and complexity
+
+Per-function facts for the languages that have a symbol extractor (TypeScript/TSX, Java,
+Kotlin, Rust, C#), then deterministic complexity signals on top. Languages without an
+extractor keep reporting `not-implemented` rather than an empty list.
+
+- **Body metrics** are counted from the parse tree, not estimated from text: span, statement
+  count, decision points (a cyclomatic-complexity proxy starting at 1), max nesting depth,
+  and loop count. A function whose body the extractor could not read carries no `metrics`,
+  never a fabricated zero.
+- **Intra-file calls** only: a recorded call is `this.x()` / `self.x()` / `Type.x()` or a bare
+  name that resolves to a function declared in the same file. Cross-file and dynamic calls
+  stay unclaimed, matching the `MemberAccess` confidence rule.
+- **Functions tab** in the Module Passport: signature, span, parameters, decision points,
+  nesting, and recorded callees.
+- **Bad-algorithm signals** are language rule packs over the same tree: nested loops, a linear
+  scan (`includes` / `indexOf` / `find`) inside a loop, `sort` inside a loop, string
+  concatenation in a loop, and deep nesting. Each is emitted as a signal with its source line,
+  never a verdict.
+- **Hotspots** overlay: the functions with the most recorded signals across the repository.
+
+Slices: **A1 (done)** contract (`FunctionMetrics`, `FunctionCall`), shared
+`collectFunctionMetrics`, TypeScript rule pack, unit tests. **A2** the same rule packs for
+Java, Kotlin, Rust, and C#. **A3** intra-file calls. **A4** `buildFunctions` and the
+`/symbols` payload. **A5** the Functions tab. **A6** signals and the Hotspots overlay.
+
+## Phase 15 - Optional LLM narrator
+
+An opt-in narrative layer over recorded evidence. **Off by default**, modelled on the
+`RiskConfig` seam, so a local scan never contacts a third party unless the operator asks.
+
+- The operator supplies the chat/completions endpoint and model; nothing is called without
+  them.
+- Security parameters are explicit: the endpoint must be `https:` or loopback, the key comes
+  from the environment, is sent as an `Authorization` header, and is never logged or
+  persisted. Only recorded evidence is sent by default, size-bounded. Code is passed as
+  untrusted data (delimited, with instructions inside it treated as data), and the output is
+  narrative — labelled separately from recorded evidence, never executed and never written
+  back to source.
+- Responses are cached by git fingerprint + model + prompt version, rate-limited by a
+  per-session request budget, and listed in an audit log like the delegate run list.
+- When this lands, the README's "only feature that contacts a third party" wording gains
+  this second opt-in provider.
 
 ## Phase 6 - Release readiness
 
@@ -289,5 +468,6 @@ Spec: `test/acceptance/features/repository-map.feature` (scenario `@repository`)
 
 ## Out of concept
 
-`Developer Product Graph`, `Chat`, and `Narrate` are deliberately not planned here. They
-are separate products or depend on capabilities Strabo does not claim.
+`Developer Product Graph` and `Chat` are deliberately not planned here. They are separate
+products or depend on capabilities Strabo does not claim. `Narrate` was moved to Phase 15,
+where it lands strictly as an opt-in, evidence-bounded seam.

@@ -6,16 +6,63 @@
  * strabo-core so it can be unit-tested; this module only touches Cytoscape.
  */
 
-import { SHAPES, buildElements } from './strabo-core.js';
+import {
+  LABEL_INSET,
+  SHAPES,
+  buildElements,
+  fitLabel,
+  islandBounds,
+  islandLabelFits,
+  projectIsland,
+} from './strabo-core.js';
 
 const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached'];
 
 /** Zoom level at which ordinary nodes earn a label. */
 const LABEL_DETAIL_ZOOM = 0.65;
 
+/**
+ * Viewport clamp. `fit()` has no ceiling of its own, so the two extremes of graph size
+ * produced the two extremes of encoding: five directories fit at zoom 5.11 (10-unit labels
+ * rendered at 51px) while 192 files fit at 0.38 (the same labels at 3.8px). The clamp keeps
+ * `fit()` inside a range where one encoding is readable; a graph too large to fit at
+ * `minZoom` is panned rather than shrunk to a hairline.
+ */
+const MIN_ZOOM = 0.12;
+const MAX_ZOOM = 2.5;
+
+/**
+ * A node label holds one device size at every zoom.
+ *
+ * Cytoscape multiplies every style length by the current zoom, so a constant `font-size`
+ * scales with the map. The stylesheet instead returns the model-unit font that renders at
+ * the target device size, and a zoom change re-evaluates it. Kept at 11px: the size the UI
+ * type scale already uses for secondary text.
+ */
+const LABEL_DEVICE_PX = 11;
+const HUB_LABEL_DEVICE_PX = 12;
+
+/** Model-unit font that renders at `devicePx` at the given zoom. */
+export function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return devicePx / safeZoom;
+}
+
 export function createView(container) {
+  const islands = createIslandLayer(container);
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
+  // Model-coordinate bounds, recomputed only when the node set changes; pan and zoom
+  // just re-project them.
+  let islandModel = null;
+  let islandVisible = null;
+
+  function repaintIslands() {
+    islands.paint(islandBounds(islandModel, { visible: islandVisible }), {
+      pan: cy.pan(),
+      zoom: cy.zoom(),
+    });
+  }
 
   const selectHandlers = [];
   const drillHandlers = [];
@@ -28,8 +75,15 @@ export function createView(container) {
   // Cytoscape does not observe container size itself. The breadcrumb, diagnostics panel,
   // and inspector all change layout after the graph is created, so keep it in sync or
   // rendered coordinates drift from the DOM and hit-testing misses.
-  const observer = new ResizeObserver(() => cy.resize());
+  const observer = new ResizeObserver(() => {
+    cy.resize();
+    repaintIslands();
+  });
   observer.observe(container);
+
+  // Islands are drawn in the same transform as the nodes, so every viewport change has to
+  // carry them along or the plates slide off the regions they name.
+  cy.on('pan zoom resize', repaintIslands);
 
   cy.on('tap', 'node', (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
@@ -48,7 +102,10 @@ export function createView(container) {
       for (const handler of edgeHandlers) handler(null);
     }
   });
-  cy.on('zoom', () => applyLabelBudget(cy));
+  cy.on('zoom', () => {
+    rescaleLabels(cy);
+    applyLabelBudget(cy);
+  });
   cy.on('cxttap', 'node', (event) => {
     for (const handler of contextHandlers) {
       handler({ kind: 'node', id: event.target.id() }, event.originalEvent);
@@ -67,9 +124,11 @@ export function createView(container) {
     }
   });
   cy.on('mouseover', 'node', (event) => {
+    fadeEdgesAround(cy, event.target);
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
   cy.on('mouseout', 'node', () => {
+    fadeEdgesAround(cy, null);
     for (const handler of hoverHandlers) handler(null);
   });
   cy.on('mouseover', 'edge', (event) => {
@@ -116,6 +175,9 @@ export function createView(container) {
         cy.add(elements.nodes);
         cy.add(elements.edges);
       });
+      islandModel = model;
+      islandVisible = null;
+      repaintIslands();
       applyLabelBudget(cy, true);
       // Removal doesn't fire unselect events, so the old node ids would otherwise linger
       // in whatever last read the group — tell listeners the slate is clean.
@@ -128,6 +190,12 @@ export function createView(container) {
         if (keep) {
           cy.nodes().forEach((node) => {
             if (!keep.has(node.id())) node.addClass('dimmed');
+          });
+          // An edge is only part of the focus when both ends are: an edge crossing out of
+          // the neighbourhood is the boundary, not the structure being read.
+          cy.edges().forEach((edge) => {
+            const inside = keep.has(edge.source().id()) && keep.has(edge.target().id());
+            if (!inside) edge.addClass('dimmed');
           });
         }
       });
@@ -151,6 +219,8 @@ export function createView(container) {
           node.toggleClass('filtered-out', !visible);
         });
       });
+      islandVisible = keep;
+      repaintIslands();
       applyLabelBudget(cy, true);
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
@@ -193,7 +263,87 @@ export function createView(container) {
     clearGroupSelection() {
       cy.nodes(':selected').unselect();
     },
+    /** Directories currently drawn as islands, largest plate first. Empty in block mode. */
+    islandDirectories() {
+      return islandBounds(islandModel, { visible: islandVisible }).map(
+        (island) => island.directory,
+      );
+    },
   };
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Baseline offset above a plate's top edge, and the viewport margin it needs to sit there. */
+const LABEL_BASELINE_GAP = 6;
+const LABEL_MIN_TOP = 12;
+
+/**
+ * The SVG plane the directory plates are drawn on.
+ *
+ * It goes inside the Cytoscape container, ahead of the canvases Cytoscape appends, so it
+ * paints over the container's own background but under every node and edge. That order
+ * also survives the opt-in WebGL renderer, which sets an opaque inline background colour
+ * on the container: a layer outside the container would disappear behind it.
+ *
+ * Plates are decoration for a structure the nodes already carry, so the layer is
+ * `aria-hidden` and never takes pointer events — clicking "an island" means clicking the
+ * canvas beneath it, which is what clears the selection.
+ */
+function createIslandLayer(container) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.classList.add('island-layer');
+  svg.setAttribute('aria-hidden', 'true');
+  const plates = document.createElementNS(SVG_NS, 'g');
+  const labels = document.createElementNS(SVG_NS, 'g');
+  svg.append(plates, labels);
+  container.prepend(svg);
+
+  return {
+    /** Draw `islands` (model coordinates) under the given viewport transform. */
+    paint(islands, viewport) {
+      // Reuse elements across frames: a pan repaints every island, and replacing the DOM
+      // each time would churn a node per directory per frame.
+      sync(plates, 'rect', islands.length);
+      sync(labels, 'text', islands.length);
+
+      islands.forEach((island, index) => {
+        const box = projectIsland(island, viewport);
+        const rect = plates.childNodes[index];
+        rect.setAttribute('x', String(box.x));
+        rect.setAttribute('y', String(box.y));
+        rect.setAttribute('width', String(Math.max(0, box.width)));
+        rect.setAttribute('height', String(Math.max(0, box.height)));
+        rect.setAttribute('class', 'island-plate');
+
+        const label = labels.childNodes[index];
+        // The label is chrome, not part of the map, so it holds one device size at every
+        // zoom instead of growing with the plate, and is trimmed to what the plate can
+        // hold rather than overflowing into the next island.
+        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : '';
+        label.setAttribute('class', text ? 'island-label' : 'island-label is-hidden');
+        label.setAttribute('x', String(box.x + LABEL_INSET));
+        // Above the plate, in the gap the layout already leaves between islands: the
+        // layer paints under the nodes, so a label inside the plate would be half-hidden
+        // behind the first row of them. Near the top edge there is no gap, so it falls
+        // back inside, where the padding still clears the nodes.
+        const above = box.y - LABEL_BASELINE_GAP;
+        label.setAttribute('y', String(above >= LABEL_MIN_TOP ? above : box.y + 16));
+        if (label.textContent !== text) {
+          label.textContent = text;
+        }
+      });
+    },
+  };
+}
+
+/** Grow or shrink `parent` to exactly `count` children of `tag`. */function sync(parent, tag, count) {
+  while (parent.childNodes.length > count) {
+    parent.removeChild(parent.lastChild);
+  }
+  while (parent.childNodes.length < count) {
+    parent.appendChild(document.createElementNS(SVG_NS, tag));
+  }
 }
 
 /**
@@ -225,6 +375,8 @@ function createCytoscape(container) {
     style: stylesheet(),
     layout: { name: 'preset' },
     wheelSensitivity: 0.2,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
   };
 
   if (webglRequested() && !webglRefused() && probeWebGL2()) {
@@ -333,6 +485,45 @@ function probeWebGL2() {
 }
 
 /**
+ * Fade every edge that is not incident to the hovered node.
+ *
+ * At 454 edges the base layer draws every relationship at one weight, so nothing stands
+ * out under the pointer. `dimmed` (selection focus) is deliberately a step stronger than
+ * `edge-faded`, so a hover never lifts an edge the selection put back.
+ */
+function fadeEdgesAround(cy, node) {
+  cy.batch(() => {
+    cy.edges().removeClass('edge-faded');
+    if (!node || node.empty()) {
+      return;
+    }
+    cy.edges().forEach((edge) => {
+      const incident = edge.source().same(node) || edge.target().same(node);
+      if (!incident) edge.addClass('edge-faded');
+    });
+  });
+}
+
+/**
+ * Re-evaluate the zoom-compensated label sizes after a viewport change.
+ *
+ * The label stylesheet returns a function of the current zoom, so it has to be re-applied
+ * when the zoom changes — but a wheel gesture fires `zoom` once per frame and re-applying
+ * the whole stylesheet per frame is exactly the per-element walk the renderer cannot
+ * absorb. The rendered size only needs to hold to within a fraction of a pixel, so skip
+ * unless the zoom moved by ~2%, which leaves the type inside 11px +/- 0.2px.
+ */
+function rescaleLabels(cy) {
+  const zoom = cy.zoom();
+  const last = cy.scratch('_straboLabelZoom');
+  if (typeof last === 'number' && Math.abs(zoom - last) < last * 0.02) {
+    return;
+  }
+  cy.scratch('_straboLabelZoom', zoom);
+  cy.style().update();
+}
+
+/**
  * Semantic zoom: hubs keep labels when zoomed out, ordinary nodes gain labels as the
  * user zooms in. Selected nodes always keep labels. Runs after render/filter/select.
  *
@@ -371,14 +562,16 @@ function stylesheet() {
         width: 'data(diameter)',
         height: 'data(diameter)',
         label: 'data(label)',
-        'font-size': 10,
+        // Functions of the live zoom: Cytoscape re-evaluates them on `style().update()`,
+        // which the zoom handler calls. See `LABEL_DEVICE_PX`.
+        'font-size': (ele) => labelFontSize(ele.cy().zoom()),
         'font-weight': 500,
         color: '#eef3fa',
         'text-valign': 'bottom',
-        'text-margin-y': 4,
+        'text-margin-y': (ele) => 4 / Math.max(0.0001, ele.cy().zoom()),
         'text-opacity': 1,
         'text-outline-color': '#0c1016',
-        'text-outline-width': 3,
+        'text-outline-width': (ele) => 2 / Math.max(0.0001, ele.cy().zoom()),
         'text-outline-opacity': 0.9,
         'border-width': 1.5,
         'border-color': 'rgba(255,255,255,0.22)',
@@ -387,7 +580,7 @@ function stylesheet() {
     },
     ...kindRules,
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff', 'background-opacity': 1 } },
-    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': '#4c9aff', 'font-size': 12, 'font-weight': 700 } },
+    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': '#4c9aff', 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
     { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': '#ff5c5c', 'background-opacity': 1 } },
     { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': '#f2b25c', 'background-opacity': 1 } },
     { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': '#c98bf0', 'background-opacity': 1 } },
@@ -401,12 +594,15 @@ function stylesheet() {
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
         width: 1.2,
-        opacity: 0.55,
-        'line-color': '#3a4a5e',
-        'target-arrow-color': '#3a4a5e',
+        // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
+        // repository is fitted at 0.38 zoom.
+        opacity: 0.72,
+        'line-color': '#4a5e78',
+        'target-arrow-color': '#4a5e78',
         'arrow-scale': 0.9,
       },
     },
+    { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {
       selector: 'edge.edge-selected',

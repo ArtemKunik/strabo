@@ -15,6 +15,10 @@ const HEADER_HEIGHT = 34;
 const MIN_WIDTH = 240;
 const MIN_HEIGHT = 160;
 
+/** Right-hand rail defaults: windows open here unless a config positions them. */
+const RAIL_RIGHT = GAP;
+const RAIL_TOP = 96;
+
 function readStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
@@ -53,6 +57,25 @@ export function sanitizeSize(size) {
 }
 
 /**
+ * The first top at or below `startTop` where a `height`-tall box clears every occupied box.
+ *
+ * Occupied boxes are the open windows in the rail; a new window takes the highest gap that
+ * fits, so panels open beside each other instead of on the same fixed point. Boxes are
+ * half-open intervals: a box ending exactly where the next starts does not overlap.
+ */
+export function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } = {}) {
+  const sorted = [...occupied].sort((a, b) => a.top - b.top);
+  let candidate = startTop;
+  for (const rect of sorted) {
+    if (candidate + height <= rect.top) {
+      break;
+    }
+    candidate = Math.max(candidate, rect.bottom + gap);
+  }
+  return candidate;
+}
+
+/**
  * Create one floating window per config and wire a dock chip to each.
  *
  * A config names the panel `element`, a `title`, and optional `position`, `width`,
@@ -80,6 +103,16 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
   const renderDock = () => {
     if (!dock) return;
     dock.replaceChildren(...controllers.map((controller) => controller.dockButton()));
+  };
+
+  /** Draw attention to the chip that just opened its window, so the panel is found. */
+  const flashChip = (key) => {
+    const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
+    if (!chip) return;
+    chip.classList.remove('is-flash');
+    // Reflow between remove and add so re-opening restarts the animation.
+    void chip.offsetWidth;
+    chip.classList.add('is-flash');
   };
 
   for (const config of panels) {
@@ -142,47 +175,56 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     element.parentNode.insertBefore(win, element);
     body.append(element);
 
-    // Panels sharing an anchor (all default to top-left) would stack exactly on top of one
-    // another, so give each corner-docked panel its own edge; explicit positions override.
-    const anchors = config.position ?? {};
-    const hasLeft = typeof anchors.left === 'number';
-    const hasRight = typeof anchors.right === 'number';
-    if (!hasLeft && !hasRight) {
-      if (['overlay', 'edge', 'timeline', 'inspector'].includes(config.key)) {
-        anchors.right = GAP;
-        anchors.top = 96;
-      } else if (['legend', 'diagnostics'].includes(config.key)) {
-        anchors.left = GAP;
-        anchors.bottom = 56;
-      }
-    }
+    // Panels used to share one anchor and stack exactly on top of each other. A window now
+    // opens in the first free slot of a right-hand rail, unless a config positions it.
+    const fallbackHeight = config.height ?? 260;
+
+    /** Whether `win` has a position worth persisting; an unplaced window gets a rail slot. */
+    let hasPosition = false;
 
     const place = (x, y) => {
       win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
       win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+      hasPosition = true;
+    };
+
+    /** The first y in the rail where this window does not overlap an open one. */
+    const firstFreeRailTop = () => {
+      const height = win.offsetHeight || fallbackHeight;
+      const occupied = [];
+      for (const other of controllers) {
+        if (other.window === win || other.window.hidden || other.isCollapsed()) {
+          continue;
+        }
+        const rect = other.window.getBoundingClientRect();
+        if (rect.height > 0) {
+          occupied.push(rect);
+        }
+      }
+      occupied.sort((a, b) => a.top - b.top);
+      return firstFreeSlotTop(occupied, height);
+    };
+
+    const placeInRail = () => {
+      const railWidth = win.offsetWidth || width;
+      place(window.innerWidth - railWidth - RAIL_RIGHT, firstFreeRailTop());
     };
 
     const position = saved.position ?? config.position ?? {};
-    const fallbackHeight = config.height ?? 260;
-    let left = typeof position.left === 'number' ? position.left : null;
-    let top = typeof position.top === 'number' ? position.top : null;
-    if (left === null && config.center) {
-      left = (window.innerWidth - width) / 2;
+    if (config.center) {
+      place(
+        (window.innerWidth - width) / 2,
+        Math.max(56, (window.innerHeight - fallbackHeight) / 2),
+      );
+    } else if (Object.keys(position).length > 0) {
+      const left = typeof position.left === 'number'
+        ? position.left
+        : window.innerWidth - width - (typeof position.right === 'number' ? position.right : RAIL_RIGHT);
+      const top = typeof position.top === 'number'
+        ? position.top
+        : window.innerHeight - fallbackHeight - (typeof position.bottom === 'number' ? position.bottom : 0);
+      place(left, top);
     }
-    if (left === null) {
-      left = typeof position.right === 'number'
-        ? window.innerWidth - width - position.right
-        : GAP;
-    }
-    if (top === null && config.center) {
-      top = Math.max(56, (window.innerHeight - fallbackHeight) / 2);
-    }
-    if (top === null) {
-      top = typeof position.bottom === 'number'
-        ? window.innerHeight - fallbackHeight - position.bottom
-        : 96;
-    }
-    place(left, top);
 
     const isCollapsed = () => win.classList.contains('is-collapsed');
 
@@ -214,6 +256,7 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       if (hidden !== lastHidden) {
         lastHidden = hidden;
         renderDock();
+        if (!hidden) flashChip(config.key);
       }
     };
 
@@ -244,6 +287,10 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         config.onOpen?.();
         element.hidden = false;
         win.hidden = false;
+        if (!hasPosition) {
+          placeInRail();
+        }
+        sync();
         raise();
         persist();
         return true;
@@ -269,14 +316,19 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
-        return {
-          position: {
-            left: parseFloat(win.style.left) || 0,
-            top: parseFloat(win.style.top) || 0,
-          },
+        const snapshot = {
           size: { ...size },
           collapsed: isCollapsed(),
         };
+        // A window that has never opened keeps no position: it earns its rail slot at open,
+        // so persisting the 0,0 default would pin it to the corner instead.
+        if (hasPosition) {
+          snapshot.position = {
+            left: parseFloat(win.style.left) || 0,
+            top: parseFloat(win.style.top) || 0,
+          };
+        }
+        return snapshot;
       },
       dockButton() {
         const button = document.createElement('button');
@@ -384,6 +436,12 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     win.addEventListener('pointerdown', raise, true);
     win.addEventListener('contextmenu', raise, true);
 
+    // A panel that is visible on load (the legend) never goes through `open()`, so give it
+    // its rail slot here too; otherwise it sits unpositioned over the toolbar.
+    if (!hasPosition && element.hidden !== true) {
+      placeInRail();
+    }
+
     controllers.push(controller);
     sync();
   }
@@ -391,6 +449,8 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
   window.addEventListener('resize', () => {
     for (const controller of controllers) {
       const win = controller.window;
+      // A hidden window has no position yet; it takes a rail slot when it opens.
+      if (win.hidden) continue;
       const left = parseFloat(win.style.left) || 0;
       const top = parseFloat(win.style.top) || 0;
       win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - 60))}px`;

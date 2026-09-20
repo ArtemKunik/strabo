@@ -26,6 +26,7 @@ import {
   renderOverlayPanel,
   renderReview,
   renderRisk,
+  renderShortcuts,
   renderTestsStrip,
   renderTimeline,
 } from './strabo-panels.js';
@@ -202,6 +203,8 @@ const elements = {
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
   tbClear: document.getElementById('tb-clear'),
+  tbOverflow: document.getElementById('tb-overflow'),
+  tbOverflowMenu: document.getElementById('tb-overflow-menu'),
   groupCount: document.getElementById('group-count'),
   tbDelegateGroup: document.getElementById('tb-delegate-group'),
   timelinePanel: document.getElementById('timeline-panel'),
@@ -214,9 +217,8 @@ const elements = {
   folderCancel: document.getElementById('folder-cancel'),
   forget: document.getElementById('forget'),
   memberView: document.getElementById('member-view'),
-  statusbarDiag: document.getElementById('statusbar-diag'),
-  statusbarLegend: document.getElementById('statusbar-legend'),
-  statusbarRender: document.getElementById('statusbar-render'),
+  graphHint: document.getElementById('graph-hint'),
+  shortcuts: document.getElementById('shortcuts'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -307,7 +309,10 @@ async function scan({ refresh = false } = {}) {
     applyFilterToView();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
-    const summary = renderDiagnostics(elements.diagnostics, model);
+    const summary = renderDiagnostics(elements.diagnostics, model, {
+      renderer: rendererName(),
+      shown: view.cy.nodes().length,
+    });
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       state.prefix = prefix;
@@ -320,6 +325,9 @@ async function scan({ refresh = false } = {}) {
     updateEmptyState();
     view.resize();
     fit(view.cy);
+    if (shouldShowHint()) {
+      elements.graphHint.hidden = false;
+    }
     if (state.overlay !== 'none') {
       await applyOverlay(generation);
     } else {
@@ -349,17 +357,34 @@ function rendererName() {
 }
 
 function updateStatusbar(model) {
-  if (elements.statusbarDiag && model) {
-    const d = (model.diagnostics ?? []).length;
-    const e = (model.excluded ?? []).length;
-    elements.statusbarDiag.textContent = `diagnostics ${d} · excluded ${e}`;
-  }
   if (elements.statusbarLegend && model) {
     const kinds = [...new Set((model.nodes ?? []).map((n) => n.kind))].join(' · ');
     elements.statusbarLegend.textContent = kinds || '';
   }
-  if (elements.statusbarRender) {
-    elements.statusbarRender.textContent = `renderer: ${rendererName()} · ${view.cy.nodes().length} shown`;
+}
+
+/**
+ * First-run prompt. Shown once per browser, and only until the operator does something:
+ * it says what to click, then gets out of the way.
+ */
+const HINT_SEEN_KEY = 'strabo.hint.seen';
+
+function shouldShowHint() {
+  try {
+    return window.localStorage.getItem(HINT_SEEN_KEY) !== '1';
+  } catch {
+    return true;
+  }
+}
+
+function dismissHint() {
+  if (elements.graphHint) {
+    elements.graphHint.hidden = true;
+  }
+  try {
+    window.localStorage.setItem(HINT_SEEN_KEY, '1');
+  } catch {
+    // Storage is optional; the hint simply reappears next session.
   }
 }
 
@@ -391,15 +416,13 @@ function applyFilterToView() {
   if (current) {
     renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
   }
-  if (elements.statusbarRender) {
-    elements.statusbarRender.textContent = `renderer: ${rendererName()} · ${ids.length}/${current.nodes.length} shown`;
-  }
 }
 
 function selectNode(id) {
   if (!current) {
     return;
   }
+  dismissHint();
 
   // Path mode: the first selection is the start, the second traces and exits.
   if (state.pathMode) {
@@ -684,6 +707,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
+    closeOverflowMenu();
     if (!elements.memberView.hidden) {
       closeMemberMap();
       return;
@@ -695,6 +719,11 @@ document.addEventListener('keydown', (event) => {
       return;
     }
     if (!inField) clearSelection();
+    return;
+  }
+  if (event.key === '?' && !inField) {
+    event.preventDefault();
+    toggleShortcuts();
     return;
   }
   if (inField || !elements.memberView.hidden) return;
@@ -1069,6 +1098,7 @@ elements.overlay.addEventListener('change', () => {
   applyOverlay();
 });
 elements.filter.addEventListener('input', () => {
+  dismissHint();
   state.filter = elements.filter.value;
   applyFilterToView();
   schedulePrefsSave();
@@ -1099,6 +1129,7 @@ elements.diagnosticsToggle.addEventListener('click', () => {
   elements.diagnosticsToggle.setAttribute('aria-expanded', String(hidden));
 });
 elements.browse.addEventListener('click', openFolderDialog);
+document.getElementById('graph')?.addEventListener('pointerdown', dismissHint, { capture: true });
 elements.folderCancel.addEventListener('click', () => elements.folderDialog.close());
 elements.folderUp.addEventListener('click', () => {
   const parent = elements.folderUp.dataset.parent;
@@ -1194,6 +1225,35 @@ elements.tbRisk.addEventListener('click', () => {
   });
 });
 elements.tbClear.addEventListener('click', clearSelection);
+
+/* ------------------------------------------- Overflow menu + shortcuts */
+
+function closeOverflowMenu() {
+  if (!elements.tbOverflowMenu) return;
+  elements.tbOverflowMenu.hidden = true;
+  elements.tbOverflow.setAttribute('aria-expanded', 'false');
+}
+
+if (elements.tbOverflow) {
+  elements.tbOverflow.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const willOpen = elements.tbOverflowMenu.hidden;
+    elements.tbOverflowMenu.hidden = !willOpen;
+    elements.tbOverflow.setAttribute('aria-expanded', String(willOpen));
+  });
+  for (const id of ['tb-timeline', 'tb-review', 'tb-risk']) {
+    document.getElementById(id)?.addEventListener('click', closeOverflowMenu);
+  }
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest?.('.tb-overflow-wrap')) closeOverflowMenu();
+  });
+}
+
+/** Show the keyboard cheat-sheet in its own floating window. Declared with `function` so
+ * the key handler above can call it before `floatingWindows` is assigned. */
+function toggleShortcuts() {
+  floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
+}
 
 /* ------------------------------------------- Agent delegation (right-click) */
 
@@ -1531,7 +1591,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Review',
       dockLabel: 'Review',
       width: 400,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       onOpen: () => {
         if (elements.reviewPanel.hidden) toggleReview();
@@ -1547,7 +1606,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Dependency risk',
       dockLabel: 'Risk',
       width: 400,
-      position: { left: 16, top: 96 },
       onOpen: () => {
         if (elements.riskPanel.hidden) toggleRisk();
       },
@@ -1559,7 +1617,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Timeline',
       dockLabel: 'Timeline',
       width: 380,
-      position: { left: 16, top: 96 },
       onOpen: () => {
         if (elements.timelinePanel.hidden) {
           toggleTimeline().catch((error) => {
@@ -1577,7 +1634,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Overlay',
       dockLabel: 'Overlay',
       width: 360,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => (panel.querySelector('h3')?.textContent ?? '').split(' · ')[0].trim(),
       canOpen: () => state.overlay !== 'none',
       blockedTitle: 'Select an overlay (Review dropdown) to open Overlay',
@@ -1592,7 +1648,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Edge',
       dockLabel: 'Edge',
       width: 360,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       canOpen: () => Boolean(selectedEdgeId),
       blockedTitle: 'Click an edge in the graph to open Edge',
@@ -1607,7 +1662,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Legend',
       dockLabel: 'Legend',
       width: 340,
-      position: { left: 16, bottom: 56 },
     },
     {
       key: 'inspector',
@@ -1615,7 +1669,6 @@ const floatingWindows = initFloatingWindows({
       title: 'Module passport',
       dockLabel: 'Passport',
       width: 384,
-      position: { right: 16, top: 96 },
       canOpen: () => Boolean(selected),
       blockedTitle: 'Select a module in the graph to open Passport',
       onBlocked: () => {
@@ -1631,11 +1684,21 @@ const floatingWindows = initFloatingWindows({
       title: 'Diagnostics',
       dockLabel: 'Diagnostics',
       width: 420,
-      position: { right: 16, bottom: 56 },
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       onClose: () => {
         elements.diagnostics.hidden = true;
         elements.diagnosticsToggle.setAttribute('aria-expanded', 'false');
+      },
+    },
+    {
+      key: 'shortcuts',
+      element: elements.shortcuts,
+      title: 'Keyboard shortcuts',
+      dockLabel: 'Shortcuts',
+      width: 320,
+      onOpen: () => renderShortcuts(elements.shortcuts),
+      onClose: () => {
+        elements.shortcuts.hidden = true;
       },
     },
     {
@@ -1686,6 +1749,7 @@ if (window.STRABO_TEST) {
     risk: () => showRisk(),
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
+    islands: () => view.islandDirectories(),
   };
 }
 

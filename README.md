@@ -30,25 +30,58 @@ public entry points:
 The same scanner, analysis, API, and browser UI are used in standalone and embedded
 modes, so there is exactly one implementation of Strabo behaviour.
 
-## Getting started
+## Running Strabo
+
+Requires Node 22+ and npm. From the repository root:
 
 ```sh
-# install (bun preferred for local development)
-bun install
-
-# typecheck + build (tsc, then the UI bundle)
-bun run typecheck
-bun run build
-# or just the UI bundle
-bun run build:ui
-
-# run the standalone server against a repository
-STRABO_ROOT=/path/to/repo bun run start
-# or
-STRABO_ROOT=/path/to/repo node bin/strabo.js
+npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
 ```
 
-Then open `http://localhost:3000` (default `PORT`).
+Then set `STRABO_ROOT` to the repository you want to map and start the server:
+
+```sh
+# bash / zsh
+STRABO_ROOT=. npm start
+```
+
+```powershell
+# PowerShell (the `VAR=value cmd` prefix is not valid here)
+$env:STRABO_ROOT = "."
+npm start
+```
+
+```bat
+:: cmd.exe
+set STRABO_ROOT=.
+npm start
+```
+
+Open `http://localhost:3000` (the default `PORT`). The server scans `STRABO_ROOT`,
+builds the graph, and serves the interactive map. Use `STRABO_SCAN_CEILING` to allow
+scanning repositories outside the start root; see [Environment](#environment).
+
+`npm start` is `node bin/strabo.js`, so `STRABO_ROOT=/path/to/repo node bin/strabo.js`
+is equivalent.
+
+## Getting started
+
+Requires Node 22+ and npm.
+
+```sh
+# install; the `prepare` script also builds dist/ and vendors the parser .wasm files
+npm install
+
+# typecheck + build (tsc, then the UI bundle)
+npm run typecheck
+npm run build
+# or just the UI bundle
+npm run build:ui
+```
+
+The server takes its repository root from `STRABO_ROOT` — there is no positional
+argument, and it exits with an error if the variable is unset. See
+[Running Strabo](#running-strabo) to start it.
 
 ### Environment
 
