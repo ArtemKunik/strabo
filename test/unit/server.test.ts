@@ -82,6 +82,33 @@ test('the symbol endpoint reports not-implemented rather than an empty list', as
   assert.equal(body.reason, 'not-implemented');
 });
 
+test('the symbol and file-health endpoints serve SQL members and mark cohesion unavailable', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const query = `repository=${encodeURIComponent(path.join(fixtures, 'sql-repo'))}&file=db/schema/002_orders.sql`;
+
+  const symbols = (await (await fetch(`${base}/api/strabo/symbols?${query}`)).json()) as {
+    available: boolean;
+    language: string;
+    symbols: Array<{ kind: string; name: string; owner: string; type?: string }>;
+    memberMap: { types: Array<{ name: string; fields: Array<{ name: string; type?: string }> }> };
+  };
+  assert.equal(symbols.available, true);
+  assert.equal(symbols.language, 'sql');
+  assert.deepEqual(
+    symbols.memberMap.types.map((type) => [type.name, type.fields.map((field) => `${field.name}: ${field.type}`)]),
+    [['orders', ['id: INT', 'user_id: INT', 'total: DECIMAL(10, 2)']]],
+  );
+
+  const health = (await (await fetch(`${base}/api/strabo/analysis/file-health?${query}`)).json()) as {
+    axes: Array<{ key: string; value: number | null; detail: string }>;
+  };
+  const cohesion = health.axes.find((axis) => axis.key === 'cohesion');
+  assert.equal(cohesion?.value, null);
+  assert.match(cohesion?.detail ?? '', /not measured: sql members have no methods/);
+});
+
 test('the repository store seeds the configured root and remembers a selection', async () => {
   const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}.json`);
   const store = createRepositoryStore({ file });
