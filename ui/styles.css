@@ -364,8 +364,8 @@ button.primary {
 .zoom-controls {
   position: absolute;
   right: 12px;
-  /* Above the strip + dock stack so the buttons are never under the chips. */
-  bottom: 132px;
+  /* Above the strip + two-row dock stack so the buttons are never under the chips. */
+  bottom: 150px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -614,7 +614,10 @@ button.primary {
 .float-layer {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  /* Above the panel dock: inner window z-indexes are local to this stacking
+     context, so anything below the dock's z-index lets the dock swallow clicks
+     (e.g. a resize handle dragged under it). */
+  z-index: 50;
   pointer-events: none;
 }
 
@@ -784,9 +787,11 @@ button.primary {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  /* Stacked above the strip (bottom:10px + ~40px height) and the statusbar so
-     the chips never cover the tests/components row. */
-  bottom: 64px;
+  /* Stacked above the strip and the statusbar so the chips never cover the
+     tests/components row: the strip tops out ~68px above the viewport bottom
+     (bottom:10px + ~40px height + statusbar), so 76px always clears it
+     regardless of whether the dock wraps to one row or two. */
+  bottom: 76px;
   z-index: 32;
   display: flex;
   flex-wrap: wrap;
@@ -1543,7 +1548,9 @@ button.primary {
   position: fixed;
   left: 0;
   right: 0;
-  /* Above the statusbar so the step line never covers it. */
+  /* Above the statusbar so the step line never covers it. Fixed to the viewport
+     in both fullscreen and floating member modes: the floating member window can
+     sit under sibling windows, and an in-flow bar would be covered by them. */
   bottom: 26px;
   z-index: 3;
   display: flex;
@@ -1552,16 +1559,6 @@ button.primary {
   padding: 8px 20px;
   border-top: 1px solid var(--line);
   background: rgba(22, 28, 36, 0.97);
-}
-
-/* Inside a floating member window the walkthrough must stick to the window,
-   not the viewport, or it escapes the window and collides with dock/strip. */
-.float-body .member-walkthrough {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 var(--radius-l) var(--radius-l);
 }
 
 .walk-dots {

@@ -2,12 +2,19 @@ import { extractCSharpSymbols } from './csharp.ts';
 import { extractJavaSymbols } from './java.ts';
 import { extractKotlinSymbols } from './kotlin.ts';
 import { extractRustSymbols } from './rust.ts';
+import { extractSqlSymbols } from './sql.ts';
 import { extractTypeScriptSymbols } from './typescript.ts';
 import type { SymbolExtraction } from './symbols.ts';
 
 export interface SymbolExtractor {
   language: string;
   extract: (file: string, content: string) => Promise<SymbolExtraction>;
+  /**
+   * `false` when the language has members but no methods that read or write them (SQL
+   * columns), so there is no wiring to measure. Cohesion is then reported unavailable
+   * instead of scoring every unconnected member as its own cluster.
+   */
+  tracksAccess?: boolean;
 }
 
 /**
@@ -27,6 +34,7 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.tsx': { language: 'typescript', extract: extractTypeScriptSymbols },
   '.mts': { language: 'typescript', extract: extractTypeScriptSymbols },
   '.cts': { language: 'typescript', extract: extractTypeScriptSymbols },
+  '.sql': { language: 'sql', extract: extractSqlSymbols, tracksAccess: false },
 };
 
 export function symbolExtractorFor(file: string): SymbolExtractor | null {

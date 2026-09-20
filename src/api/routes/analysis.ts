@@ -120,7 +120,11 @@ export function createAnalysisRouter(config: StraboConfig): Router {
           // The file may be binary or unreadable; cohesion stays unavailable.
         }
       }
-      response.json(computeFileHealth(cached.report.graph, file, symbols, accesses));
+      const cohesionUnavailable =
+        extractor?.tracksAccess === false
+          ? `not measured: ${extractor.language} members have no methods that read or write them`
+          : undefined;
+      response.json(computeFileHealth(cached.report.graph, file, symbols, accesses, cohesionUnavailable));
     } catch (error) {
       sendError(response, error);
     }
