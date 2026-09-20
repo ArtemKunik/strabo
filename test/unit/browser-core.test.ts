@@ -54,6 +54,18 @@ import {
   functionSignature,
   functionSignals,
 } from '../../ui/strabo-functions.js';
+import {
+  buildNarratorEvidence,
+  narratorReplyLabel,
+  narratorStatusLabel,
+} from '../../ui/strabo-narrator.js';
+import {
+  contractRows,
+  driftRows,
+  flowRows,
+  repositoryRows,
+  workspaceSummary,
+} from '../../ui/strabo-workspace.js';
 
 const model = {
   repository: { name: 'demo', root: '/demo', gitUrl: 'git@github.com:owner/demo.git' },
@@ -796,4 +808,114 @@ test('functionSignals lists the recorded cost signals or says there are none', (
     }),
     'nested-loops (loop nesting 2 (threshold 2)); recursion (calls itself)',
   );
+});
+
+test('narratorStatusLabel names the unconfigured state and reports the budget', () => {
+  assert.match(narratorStatusLabel(null), /not configured/);
+  assert.match(narratorStatusLabel({ configured: false, reason: 'not-configured' }), /not configured/);
+  assert.equal(
+    narratorStatusLabel({ configured: true, model: 'gpt-x', requestBudget: 20, remaining: 18 }),
+    'Narrator ready · gpt-x · 18/20 requests left',
+  );
+});
+
+test('narratorReplyLabel renders the narrative or the reason it is unavailable', () => {
+  assert.equal(narratorReplyLabel({ available: true, text: 'Clustered in src/api.' }), 'Clustered in src/api.');
+  assert.equal(
+    narratorReplyLabel({ available: false, reason: 'not-configured' }),
+    'Narrator unavailable: not-configured',
+  );
+  assert.equal(
+    narratorReplyLabel({ available: false, reason: 'provider-error', detail: 'endpoint returned 500' }),
+    'Narrator unavailable: provider-error — endpoint returned 500',
+  );
+});
+
+test('buildNarratorEvidence lists recorded metrics, signals, and calls only', () => {
+  const evidence = buildNarratorEvidence({
+    functions: {
+      file: 'src/a.ts',
+      available: true,
+      functions: [
+        {
+          name: 'run',
+          owner: 'A',
+          line: 3,
+          metrics: { decisionPoints: 4, maxNestingDepth: 2, lines: 12 },
+          signals: [{ kind: 'nested-loops', detail: 'loop nesting 2 (threshold 2)' }],
+          calls: [{ name: 'helper', line: 5 }],
+        },
+      ],
+    },
+  });
+  assert.match(evidence, /File: src\/a\.ts/);
+  assert.match(evidence, /- A\.run \(line 3\)/);
+  assert.match(evidence, /complexity 4, nesting 2, lines 12/);
+  assert.match(evidence, /nested-loops \(loop nesting 2/);
+  assert.match(evidence, /helper \(L5\)/);
+  assert.equal(
+    buildNarratorEvidence({ functions: { available: true, functions: [] } }),
+    'No function inventory is recorded for this file.',
+  );
+});
+
+test('workspaceSummary reports the recorded counts or says it is unrecorded', () => {
+  assert.equal(workspaceSummary(null), 'Workspace not recorded.');
+  assert.equal(
+    workspaceSummary({ summary: { repositories: 2, flows: 1, contracts: 3, drifting: 1 } }),
+    '2 repositories · 1 cross-repo flows · 3 contracts · 1 drifting',
+  );
+});
+
+test('repositoryRows reports commit, dirty state, and published coordinate', () => {
+  const [first, second] = repositoryRows({
+    repositories: [
+      { name: 'api', head: 'abcdef123456', dirty: true, publishes: { ecosystem: 'npm', name: '@acme/api' } },
+      { name: 'web', head: null, dirty: false, publishes: null },
+    ],
+  });
+  assert.deepEqual(first, { name: 'api', head: 'abcdef1', dirty: true, publishes: 'npm:@acme/api' });
+  assert.deepEqual(second, { name: 'web', head: null, dirty: false, publishes: null });
+});
+
+test('flowRows, contractRows, and driftRows shape the recorded workspace', () => {
+  const [flow] = flowRows({
+    flows: [
+      {
+        from: 'web',
+        to: 'api',
+        ecosystem: 'npm',
+        package: '@acme/api',
+        files: [{ file: 'a.ts', line: 1, specifier: '@acme/api' }],
+        publishedBy: 'package.json',
+      },
+    ],
+  });
+  assert.equal(flow.label, 'web → api (npm @acme/api)');
+  assert.equal(flow.files, 1);
+  assert.equal(flow.publishedBy, 'package.json');
+
+  const [contract] = contractRows({
+    contracts: [
+      { id: 'acme.User', format: 'protobuf', repository: 'api', source: 'u.proto', fields: [{}, {}] },
+    ],
+  });
+  assert.equal(contract.label, 'acme.User (protobuf) — api');
+  assert.equal(contract.fields, 2);
+
+  const [clean, drifting] = driftRows({
+    drift: [
+      { id: 'acme.User', format: 'protobuf', repositories: ['api', 'web'], deviations: [] },
+      {
+        id: 'acme.Address',
+        format: 'json-schema',
+        repositories: ['api', 'web'],
+        deviations: [{ name: 'zip', declared: [], issue: 'missing' }],
+      },
+    ],
+  });
+  assert.equal(clean.clean, true);
+  assert.deepEqual(clean.deviations, []);
+  assert.equal(drifting.clean, false);
+  assert.deepEqual(drifting.deviations, ['zip: missing']);
 });
