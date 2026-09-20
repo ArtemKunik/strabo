@@ -1,10 +1,11 @@
 import { configFromEnv, readEnv } from './config.ts';
 import { createStraboServer } from './server.ts';
 
-/** Start the standalone Strabo server from environment configuration. */
+/** Start the standalone Strabo server from its path argument and environment. */
 export function start(): void {
-  const env = readEnv();
-  const config = configFromEnv();
+  const argv = process.argv.slice(2);
+  const env = readEnv(process.env, argv);
+  const config = configFromEnv(process.env, argv);
   const app = createStraboServer(config);
 
   app.listen(env.port, () => {

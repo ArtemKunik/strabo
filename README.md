@@ -25,7 +25,7 @@ public entry points:
 | --------------- | ---------------------------------------------------------------------------------------------- |
 | `strabo`        | scanner, view model, symbol extractors, repository artifact scanner, router factory, server factory, optional lineage pack |
 | `strabo/server` | `createStraboServer` — self-contained Express app serving `public/` and mounting the router at `/api/strabo` |
-| `strabo` CLI    | reads `STRABO_ROOT`, `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` and starts the standalone server |
+| `strabo` CLI    | `strabo [path]` — starts the standalone server; reads the root from the path argument, `STRABO_ROOT`, or the working directory, plus `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` |
 
 The same scanner, analysis, API, and browser UI are used in standalone and embedded
 modes, so there is exactly one implementation of Strabo behaviour.
@@ -36,33 +36,24 @@ Requires Node 22+ and npm. From the repository root:
 
 ```sh
 npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
+npm start            # maps the repository you are standing in
 ```
 
-Then set `STRABO_ROOT` to the repository you want to map and start the server:
+Open `http://localhost:3000` (the default `PORT`). The server scans the root, builds the
+graph, and serves the interactive map.
+
+To map a different repository, pass its path or set `STRABO_ROOT`:
 
 ```sh
-# bash / zsh
-STRABO_ROOT=. npm start
+npm start -- /path/to/repo
+# `npm start` is `node bin/strabo.js`, so this is the same thing
+node bin/strabo.js /path/to/repo
 ```
 
-```powershell
-# PowerShell (the `VAR=value cmd` prefix is not valid here)
-$env:STRABO_ROOT = "."
-npm start
-```
-
-```bat
-:: cmd.exe
-set STRABO_ROOT=.
-npm start
-```
-
-Open `http://localhost:3000` (the default `PORT`). The server scans `STRABO_ROOT`,
-builds the graph, and serves the interactive map. Use `STRABO_SCAN_CEILING` to allow
+The root is resolved from the path argument, then `STRABO_ROOT`, then the working
+directory. The resolved root and scan ceiling are printed at startup, so a run against
+the wrong directory is visible rather than silent. Use `STRABO_SCAN_CEILING` to allow
 scanning repositories outside the start root; see [Environment](#environment).
-
-`npm start` is `node bin/strabo.js`, so `STRABO_ROOT=/path/to/repo node bin/strabo.js`
-is equivalent.
 
 ## Getting started
 
@@ -79,15 +70,13 @@ npm run build
 npm run build:ui
 ```
 
-The server takes its repository root from `STRABO_ROOT` — there is no positional
-argument, and it exits with an error if the variable is unset. See
-[Running Strabo](#running-strabo) to start it.
+See [Running Strabo](#running-strabo) to start the server.
 
 ### Environment
 
 | Variable             | Meaning                                                        |
 | -------------------- | -------------------------------------------------------------- |
-| `STRABO_ROOT`        | Repository root to scan and serve.                             |
+| `STRABO_ROOT`        | Repository root to scan and serve. Overridden by a path argument; defaults to the working directory. |
 | `STRABO_CONFIG`      | Path to a Strabo config file (workspace repositories, catalogue, integrations). |
 | `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root.   |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
