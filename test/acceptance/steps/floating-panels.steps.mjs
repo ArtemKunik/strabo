@@ -64,6 +64,12 @@ Then('the {string} panel size grew by {int}, {int}', async function (key, dx, dy
   );
 });
 
+Then('the {string} panel is at least {int} pixels wide', async function (key, minimum) {
+  const rect = await panelRect(this.page, key);
+  assert.ok(rect, `panel "${key}" should be present`);
+  assert.ok(rect.width >= minimum, `panel "${key}" is ${rect.width}px wide, expected at least ${minimum}px`);
+});
+
 /** Find a dock chip by its visible label; labels are user-facing, keys are not. */
 async function dockChip(page, label) {
   return page.evaluate((text) => {
