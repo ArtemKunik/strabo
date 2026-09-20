@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { symbolExtractorFor } from '../../src/scan/languages/registry.ts';
-import { extractTypeScriptSymbols } from '../../src/scan/languages/typescript.ts';
+import { symbolExtractorFor } from '../../src/index.ts';
+import { extractTypeScriptSymbols } from '../../src/index.ts';
 
 test('symbolExtractorFor covers JavaScript module extensions', () => {
   assert.equal(symbolExtractorFor('a.js')?.language, 'javascript');

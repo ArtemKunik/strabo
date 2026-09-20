@@ -3,14 +3,14 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { symbolExtractorFor } from '../../src/scan/languages/registry.ts';
+import { symbolExtractorFor } from '../../src/index.ts';
 import {
   extractPythonFacts,
   extractPythonSymbols,
   resolvePython,
   type PythonFileFacts,
 } from '../../src/scan/languages/python.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'python-repo');

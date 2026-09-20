@@ -9,7 +9,7 @@ import {
   moduleCoordinates,
   resolveRust,
 } from '../../src/scan/languages/rust.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'rust-repo');

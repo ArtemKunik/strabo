@@ -5,13 +5,18 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { extractJavaFacts, resolveJava } from '../../src/scan/languages/java.ts';
+import { extractJavaFacts, resolveJava } from '../../src/index.ts';
 import {
   GRAMMAR_LANGUAGES,
   availableGrammarLanguages,
   grammarPath,
 } from '../../src/scan/languages/parser-runtime.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import {
+  POLYGLOT_RESOLVERS,
+  UNRESOLVED_POLYGLOT_LANGUAGES,
+  isResolvedPolyglotLanguage,
+} from '../../src/scan/languages/resolvers.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'polyglot-repo');
@@ -156,15 +161,27 @@ test('previously unresolved Java imports now resolve to internal files; external
    assert.ok(!report.graph.edges.some((edge) => edge.source.includes('java/util') || edge.target.includes('java/util')));
 });
 
-test('languages without a resolver are reported as unsupported, not dropped', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-unsupported-'));
+test('every recognised polyglot language now has a resolver', () => {
+  // The unsupported-language report is driven by this list, so an empty list is the claim
+  // that nothing recognised by extension is silently dropped.
+  assert.deepEqual(UNRESOLVED_POLYGLOT_LANGUAGES, []);
+  for (const resolver of POLYGLOT_RESOLVERS) {
+    assert.equal(isResolvedPolyglotLanguage(resolver.language), true, resolver.language);
+    assert.ok(resolver.extensions.length > 0, resolver.language);
+  }
+});
+
+test('a C++ file is resolved rather than reported as unsupported', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-cpp-'));
   try {
+    fs.writeFileSync(path.join(directory, 'engine.h'), '#pragma once\n');
     fs.writeFileSync(path.join(directory, 'engine.cpp'), '#include "engine.h"\nint main() { return 0; }\n');
     const report = await scanRepository(directory);
-    const cpp = report.graph.diagnostics.find((item) => item.file === 'engine.cpp');
 
-    assert.ok(cpp);
-    assert.equal(cpp.kind, 'unsupported');
+    assert.equal(report.graph.diagnostics.some((item) => item.kind === 'unsupported'), false);
+    assert.ok(
+      report.graph.edges.some((edge) => edge.source === 'engine.cpp' && edge.target === 'engine.h'),
+    );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

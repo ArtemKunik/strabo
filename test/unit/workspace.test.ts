@@ -6,13 +6,13 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 
 import type { ResolvedRepository } from '../../src/boundary/repository-root.ts';
-import { openWorkspaceCache, clearWorkspaceCache } from '../../src/cache/workspace-cache.ts';
-import { analyzeWorkspace } from '../../src/workspace/analyze.ts';
-import { readWorkspaceConfig, resolveWorkspaceRepositories } from '../../src/workspace/config.ts';
-import { extractContracts, computeContractDrift } from '../../src/workspace/contracts.ts';
-import { readPublishedCoordinate } from '../../src/workspace/coordinate.ts';
-import { computeCrossRepoFlows } from '../../src/workspace/flows.ts';
-import type { ContractDefinition, Graph } from '../../src/types.ts';
+import { openWorkspaceCache, clearWorkspaceCache } from '../../src/index.ts';
+import { analyzeWorkspace } from '../../src/index.ts';
+import { readWorkspaceConfig, resolveWorkspaceRepositories } from '../../src/index.ts';
+import { extractContracts, computeContractDrift } from '../../src/index.ts';
+import { readPublishedCoordinate } from '../../src/index.ts';
+import { computeCrossRepoFlows } from '../../src/index.ts';
+import type { ContractDefinition, Graph } from '../../src/index.ts';
 
 const created: string[] = [];
 

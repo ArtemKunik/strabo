@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildFunctions } from '../../src/analysis/functions.ts';
-import { extractTypeScriptSymbols } from '../../src/scan/languages/typescript.ts';
+import { buildFunctions } from '../../src/index.ts';
+import { extractTypeScriptSymbols } from '../../src/index.ts';
 
 test('buildFunctions orders by complexity and records callees and callers', async () => {
   const source = [

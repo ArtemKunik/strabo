@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildMemberMap } from '../../src/analysis/member-map.ts';
-import { symbolExtractorFor } from '../../src/scan/languages/registry.ts';
-import { extractTypeScriptSymbols } from '../../src/scan/languages/typescript.ts';
-import type { CodeSymbol } from '../../src/scan/languages/symbols.ts';
+import { buildMemberMap } from '../../src/index.ts';
+import { symbolExtractorFor } from '../../src/index.ts';
+import { extractTypeScriptSymbols } from '../../src/index.ts';
+import type { CodeSymbol } from '../../src/index.ts';
 
 function tuple(symbol: CodeSymbol): (string | number | boolean)[] {
   return [
@@ -203,5 +203,5 @@ test('symbolExtractorFor covers TypeScript module extensions', () => {
   assert.equal(symbolExtractorFor('a.tsx')?.language, 'typescript');
   assert.equal(symbolExtractorFor('a.mts')?.language, 'typescript');
   assert.equal(symbolExtractorFor('a.cts')?.language, 'typescript');
-  assert.equal(symbolExtractorFor('a.cpp'), null);
+  assert.equal(symbolExtractorFor('a.go'), null);
 });

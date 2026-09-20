@@ -6,33 +6,13 @@ import { assertReadable } from '../boundary/repository-root.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
 import { computeMemberCohesion } from './file-health.ts';
 import { isSafeRevision } from './impact.ts';
-import type { ReviewFile, ReviewStatus } from './review.ts';
+import type { ChangePassport, CohesionChange, ReviewFile, ReviewStatus } from './review-types.ts';
 
 const run = promisify(execFile);
 const MAX_FILES = 40;
 const MAX_BYTES = 4 * 1024 * 1024;
 
-/** Cohesion of one changed file on each side of the review, from recorded member wiring. */
-export interface CohesionChange {
-  path: string;
-  /** Source path for a rename or copy. Absent otherwise. */
-  previousPath?: string;
-  status: ReviewStatus;
-  /** Cohesion of the base version; null when there is no baseline or it cannot be read. */
-  before: number | null;
-  /** Cohesion of the reviewed version; null when the file was deleted or is unreadable. */
-  after: number | null;
-  /** Why a side is missing, stated rather than left to imply a zero. */
-  note: string;
-}
-
-export interface ChangePassport {
-  files: CohesionChange[];
-  /** The revision the working copy was compared against, or null when there is none. */
-  baseline: string | null;
-  /** True when there were more changed files than were measured. */
-  capped: boolean;
-}
+export type { ChangePassport, CohesionChange } from './review-types.ts';
 
 /**
  * The Change passport: cohesion before and after a change, from the member wiring the

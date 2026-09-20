@@ -372,7 +372,7 @@ endpoint or trace a path between them.
 
 The **Member map** in the inspector groups declared types, fields, properties, and methods
 with their visibility and type where symbol extraction is available (TypeScript/TSX,
-JavaScript/JSX, Python, Java, Kotlin, Rust, and C# today); other languages report that extraction is not implemented
+JavaScript/JSX, Python, Java, Kotlin, Rust, C#, and C++ today); other languages report that extraction is not implemented
 rather than an empty list. Where the scan recorded field references inside method bodies — an explicit
 `this.x` / `self.x`, or an unshadowed bare name — it also shows **Data flow** panels
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
@@ -469,7 +469,7 @@ implicit failure.
 | JavaScript, JSX | `parsers/vendor/tsx` | Member extraction, sharing the TypeScript extractor; `.js`, `.jsx`, `.mjs`, `.cjs` parse with the TSX grammar, because JavaScript has no type assertions, so a leading `<` is always JSX |
 | SQL | `parsers/vendor/sql` | Implemented: `table` edges from a file that uses a table or view (`FROM`/`JOIN`, `UPDATE`, `DELETE`, `INSERT`, `ALTER`, `CREATE INDEX ... ON`, trigger `ON`, `REFERENCES`) to the one file that defines it (`CREATE TABLE`/`VIEW`/`MATERIALIZED VIEW`); `import` edges from `\i`/`\ir`, `:r`, `source`, and `@` includes of another `.sql` file; member extraction (tables/views and their columns) |
 | Python | `parsers/vendor/python` | Implemented: `import` and `from ... import` (absolute, relative, aliased, wildcard, and deferred inside a function) -> repository modules, counted from source roots discovered through `__init__.py`; member extraction (classes, methods, class attributes, and the instance state assigned as `self.x`) |
-| C++ | not vendored | Recognised and reported as unsupported |
+| C++ | `parsers/vendor/cpp` | Implemented: `#include "..."` -> repository files, resolved beside the including file, from the repository root, then by unique path suffix (standing in for an unknown `-I` directory); `#include <...>` is a system header and never an edge. Member extraction (classes, structs, fields, methods) with positional `public:`/`private:` access, and a declaration merged with its out-of-line definition |
 
 Resolution is **import-based**, plus references that do not need an import. An import only
 becomes an edge when it resolves to a file in the repository; imports are treated as

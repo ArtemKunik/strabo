@@ -44,6 +44,7 @@
     "build:ui": "node scripts/build-ui.mjs",
     "vendor:parsers": "node scripts/vendor-parsers.mjs",
     "prepare": "npm run build && npm run vendor:parsers",
+    "prestart": "npm run build",
     "start": "node bin/strabo.js",
     "dev": "node --watch src/cli.ts",
     "test": "node --test \"test/unit/**/*.test.ts\"",

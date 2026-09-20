@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 
 import { createDelegateRouter } from '../../src/api/routes/delegate.ts';
-import type { StraboConfig } from '../../src/types.ts';
+import type { StraboConfig } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');

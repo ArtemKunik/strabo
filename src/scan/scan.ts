@@ -138,7 +138,7 @@ export function collectSourceFiles(root: string, excluded: Exclusion[], diagnost
       if (entry.isDirectory()) {
         const prune = excludedDirectory(relative);
         if (prune) {
-          excluded.push({ path: `${relative}/`, reason: 'generated', detail: `${prune}/` });
+          excluded.push({ path: `${relative}/`, reason: prune.reason, detail: prune.detail });
           continue;
         }
         walk(absolute);
@@ -165,8 +165,6 @@ export function extensionOf(file: string): string {
 /**
  * Authored source languages supported by Strabo. Everything else is a non-source file
  * and is reported as an exclusion rather than turned into a node.
- *
- * COBOL and ABL are out of scope for now, so their extensions are deliberately absent.
  */
 const SOURCE_EXTENSIONS = new Set([
   '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts',

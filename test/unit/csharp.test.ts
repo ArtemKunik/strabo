@@ -3,8 +3,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { extractCSharpFacts, resolveCSharp } from '../../src/scan/languages/csharp.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { extractCSharpFacts, resolveCSharp } from '../../src/index.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'csharp-repo');

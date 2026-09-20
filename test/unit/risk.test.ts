@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses } from '../../src/risk/licenses.ts';
+import { classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses } from '../../src/index.ts';
 import {
   findManifestFiles,
   parseCargoLock,
@@ -13,13 +13,13 @@ import {
   parseNpmManifest,
   readDependencies,
 } from '../../src/risk/inventory.ts';
-import { createOsvClient, fixedVersions, normalizeSeverity, type OsvVulnerability } from '../../src/risk/osv.ts';
-import { createLicenseClient } from '../../src/risk/licenses.ts';
-import { computeRiskReport } from '../../src/risk/report.ts';
+import { createOsvClient, fixedVersions, normalizeSeverity, type OsvVulnerability } from '../../src/index.ts';
+import { createLicenseClient } from '../../src/index.ts';
+import { computeRiskReport } from '../../src/index.ts';
 import { npmPackageOf } from '../../src/scan/scan-js.ts';
-import { collectPolyglotExternalImports, mavenCoordinateMatches } from '../../src/scan/external-polyglot.ts';
-import type { FetchLike, ResponseCache } from '../../src/risk/osv.ts';
-import type { Graph } from '../../src/types.ts';
+import { collectPolyglotExternalImports, mavenCoordinateMatches } from '../../src/index.ts';
+import type { FetchLike, ResponseCache } from '../../src/index.ts';
+import type { Graph } from '../../src/index.ts';
 
 const created: string[] = [];
 

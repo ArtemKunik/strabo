@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import type { FunctionEntry, FunctionsReport } from '../../src/analysis/functions.ts';
-import { rankHotspots } from '../../src/analysis/hotspots.ts';
-import type { FunctionSignal } from '../../src/analysis/signals.ts';
+import type { FunctionEntry, FunctionsReport } from '../../src/index.ts';
+import { rankHotspots } from '../../src/index.ts';
+import type { FunctionSignal } from '../../src/index.ts';
 
 function entry(overrides: Partial<FunctionEntry> = {}): FunctionEntry {
   return {

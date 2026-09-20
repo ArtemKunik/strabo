@@ -12,7 +12,7 @@ import {
   reviewCommit,
   reviewWorkingTree,
 } from '../../src/analysis/review.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const created: string[] = [];
 

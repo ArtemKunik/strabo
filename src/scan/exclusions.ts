@@ -38,10 +38,36 @@ export function classifyExclusion(relativePath: string): Exclusion | null {
   return null;
 }
 
-/** Decide whether a directory should be pruned during the walk, and why. */
-export function excludedDirectory(relativePath: string): string | null {
+/** Why a directory was pruned, and the marker that matched it. */
+export interface DirectoryExclusion {
+  reason: Exclusion['reason'];
+  detail: string;
+}
+
+/**
+ * Decide whether a directory should be pruned during the walk, and why.
+ *
+ * Conventional fixture corpora (`test/fixtures`, `tests/fixtures`, `__fixtures__`) are
+ * pruned as `fixture` rather than `generated`: they are authored, not built, so labelling
+ * them generated would misstate the evidence. A repository scanned with a fixture
+ * directory as its own root still maps that corpus, because the marker never matches
+ * above the root.
+ */
+export function excludedDirectory(relativePath: string): DirectoryExclusion | null {
   const segments = relativePath.split('/').filter(Boolean);
-  return segments.find((segment) => GENERATED_DIRS.has(segment)) ?? null;
+  const generated = segments.find((segment) => GENERATED_DIRS.has(segment));
+  if (generated) {
+    return { reason: 'generated', detail: `${generated}/` };
+  }
+  const last = segments.at(-1);
+  if (last === '__fixtures__') {
+    return { reason: 'fixture', detail: '__fixtures__/' };
+  }
+  const parent = segments.at(-2);
+  if (last === 'fixtures' && (parent === 'test' || parent === 'tests')) {
+    return { reason: 'fixture', detail: `${parent}/fixtures/` };
+  }
+  return null;
 }
 
 /** Heuristic for bundled/minified content that should not be mapped. */

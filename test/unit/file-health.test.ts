@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { computeFileHealth } from '../../src/analysis/file-health.ts';
-import type { CodeSymbol, MemberAccess } from '../../src/scan/languages/symbols.ts';
-import type { Graph } from '../../src/types.ts';
+import { computeFileHealth } from '../../src/index.ts';
+import type { CodeSymbol, MemberAccess } from '../../src/index.ts';
+import type { Graph } from '../../src/index.ts';
 
 const node = (id: string, kind: 'module' | 'test' = 'module') => ({
   id,

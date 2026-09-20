@@ -10,10 +10,10 @@ import {
   neighbourhood,
   rankHubs,
 } from '../../src/analysis/analysis.ts';
-import { computeCoverage } from '../../src/analysis/coverage.ts';
-import { computeCycles } from '../../src/analysis/cycles.ts';
-import { buildPositions } from '../../src/analysis/layout.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { computeCoverage } from '../../src/index.ts';
+import { computeCycles } from '../../src/index.ts';
+import { buildPositions } from '../../src/index.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'sample-repo');

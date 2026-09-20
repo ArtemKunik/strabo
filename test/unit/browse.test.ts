@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { browseDirectories } from '../../src/boundary/browse.ts';
-import { StraboScopeError } from '../../src/boundary/repository-root.ts';
+import { browseDirectories } from '../../src/index.ts';
+import { StraboScopeError } from '../../src/index.ts';
 
 const ceiling = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-browse-'));
 fs.mkdirSync(path.join(ceiling, 'alpha'));

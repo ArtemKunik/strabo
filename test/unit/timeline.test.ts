@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { computeImpact } from '../../src/analysis/impact.ts';
-import { getTimeline, parseTimeline } from '../../src/analysis/timeline.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { computeImpact } from '../../src/index.ts';
+import { getTimeline, parseTimeline } from '../../src/index.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const created: string[] = [];
 

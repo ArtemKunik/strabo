@@ -23,8 +23,7 @@ To add a language, implement its resolver, add it to `LANGUAGES` in
 `scripts/vendor-parsers.mjs` and to `GRAMMAR_LANGUAGES` in `parser-runtime.ts`, then run
 `npm run vendor:parsers`.
 
-C++ is recognised by extension and reported as unsupported until its resolver lands. COBOL and ABL are out of scope for now, and their extensions (`.cls`, `.i`, `.p`,
-`.w`) are ambiguous, so they are excluded as non-source files.
+C++ is recognised by extension and reported as unsupported until its resolver lands.
 
 `STRABO_PARSER_DIR` overrides the directory, which is useful for embedding hosts and
 tests. The runtime falls back to `node_modules/tree-sitter-wasm/out/` when the vendored
