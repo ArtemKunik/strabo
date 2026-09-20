@@ -37,3 +37,9 @@ Feature: Module Passport
     And I select the "main.ts" node
     Then the inspector lists functions including "main"
     And the inspector reports body metrics for a listed function
+
+  @narrator
+  Scenario: The narrator is offered but stays inert without configuration
+    When I switch to file detail
+    And I select the "main.ts" node
+    Then the inspector offers the narrator and reports it is not configured

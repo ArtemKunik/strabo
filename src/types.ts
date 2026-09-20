@@ -400,6 +400,11 @@ export interface StraboConfig {
    * inventory and file mapping work without them.
    */
   risk?: RiskConfig;
+  /**
+   * Optional LLM narrator. Off unless an endpoint and model are supplied; only recorded
+   * evidence is sent, and the API key is read from the environment, never the config.
+   */
+  narrator?: NarratorConfig;
   serverLog?: (message: string, error?: unknown) => void;
 }
 
@@ -408,6 +413,27 @@ export interface RiskConfig {
   online?: boolean;
   /** SPDX identifiers the license policy denies, replacing the default strong-copyleft set. */
   deniedLicenses?: string[];
+}
+
+/**
+ * Opt-in configuration for the LLM narrator.
+ *
+ * There is no default endpoint and no default model: without both, the narrator stays
+ * unconfigured and nothing contacts a third party. The endpoint must be `https:` or a
+ * loopback address, so a plaintext call off the machine is refused. The API key is never
+ * held here — only the name of the environment variable that supplies it.
+ */
+export interface NarratorConfig {
+  /** Chat-completions endpoint. Required to enable the narrator. Must be https: or loopback. */
+  endpoint?: string;
+  /** Model name to request. Required to enable the narrator. */
+  model?: string;
+  /** Environment variable holding the API key. Defaults to `STRABO_NARRATOR_API_KEY`. */
+  apiKeyEnv?: string;
+  /** Maximum narrated requests per server session. Defaults to 20. */
+  requestBudget?: number;
+  /** Send recorded source snippets as well as evidence. Defaults to false (evidence only). */
+  sendSource?: boolean;
 }
 
 /** Options accepted by the graph endpoint. */

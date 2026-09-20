@@ -84,6 +84,11 @@ See [Running Strabo](#running-strabo) to start the server.
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
 | `STRABO_RISK`        | `1` or `online` enables CVE/license lookup via OSV.dev and deps.dev. Off by default. |
 | `STRABO_RISK_DENY`   | Comma-separated SPDX ids the license policy denies. Defaults to strong copyleft. |
+| `STRABO_NARRATOR_ENDPOINT` | Chat-completions endpoint for the opt-in LLM narrator. Must be `https:` or loopback. Off unless set with a model. |
+| `STRABO_NARRATOR_MODEL` | Model name to request from the narrator endpoint. |
+| `STRABO_NARRATOR_KEY_ENV` | Environment variable holding the narrator API key. Defaults to `STRABO_NARRATOR_API_KEY`. |
+| `STRABO_NARRATOR_BUDGET` | Maximum narrator requests per server session. Defaults to 20. |
+| `STRABO_NARRATOR_SEND_SOURCE` | `1`/`true` also sends recorded source snippets, not just evidence. Off by default. |
 | `PORT`               | HTTP port for the standalone server.                           |
 
 ### Choosing a repository
@@ -223,6 +228,13 @@ the same contract id is declared by more than one repository, the fields that ar
 a side, have a different type, or disagree on required-ness. An identical shared contract is
 kept with no deviations rather than silently omitted.
 
+The **Workspace** panel (dock entry, or `window.straboTest.workspace()`) renders the recorded
+report: each repository with its commit, dirty state, and published coordinate; the
+cross-repo flows; the contracts; and the drift. A section with nothing recorded says so
+("No cross-repo flows recorded.") rather than showing an empty list, and a shared contract
+that matches field-for-field is labelled clean. The panel is read-only and a config error is
+shown in the panel, not thrown.
+
 Each repository's graph comes from the shared graph cache, and its coordinate and contracts
 are cached per git fingerprint, so an unchanged repository is never rescanned or
 re-extracted. A root that is not a git working tree is not cached under a key that cannot be
@@ -279,9 +291,35 @@ A dependency whose version cannot be resolved is listed but not queried, because
 answer for exact versions. When the online lookup is off the report says so rather than
 returning an empty advisory list that would read as a clean bill of health.
 
-Online lookup is the only feature that contacts a third party, and it is off unless
+Online lookup is one of only two features that contact a third party, and it is off unless
 `STRABO_RISK=online` is set; responses are cached under `STRABO_CACHE_DIR` to avoid repeat
 calls. `POST /vulnerabilities` remains a host-injectable seam for an external provider.
+
+## LLM narrator (opt-in)
+
+`GET /narrator`, `POST /narrator`, and `GET /narrator/runs` expose an optional narrative
+layer over recorded evidence. **It is inert by default**: without an endpoint, a model, and
+the key environment variable, `GET /narrator` reports `configured: false` and nothing is
+sent anywhere.
+
+- The endpoint must be `https:` or a loopback `http:` address; a plaintext call off the
+  machine is refused rather than attempted.
+- The key is read from the environment at call time and sent as an `Authorization: Bearer`
+  header. It is never part of the config, and never appears in a status reply, an audit
+  entry, or a log line.
+- Only recorded evidence is sent by default. Source snippets are included only when
+  `STRABO_NARRATOR_SEND_SOURCE` is set. Evidence and source are wrapped in delimited tags as
+  untrusted data, and a literal closing tag inside them is neutralised so it cannot inject
+  instructions.
+- The prompt is bounded; replies are cached by git fingerprint + model + prompt version, and
+  a per-session budget (default 20) stops runaway calls. `GET /narrator/runs` lists what was
+  requested — model, host, fingerprint, size, cache state — never the key or the body.
+- The reply is narrative text, labelled `kind: "narrative"` and kept apart from recorded
+  evidence. It is never executed and never written back to source.
+- The **Functions** tab shows the narrator status and a **Narrate** button. It sends only the
+  recorded functions (line, metrics, signals, same-file calls) from `buildNarratorEvidence`
+  and renders the reply under a "model-generated narrative" attribution — or the reason it is
+  unavailable, which is `not-configured` until the operator sets an endpoint and model.
 
 ⌘/ctrl-click toggles a node into a group, and shift-drag box-selects a region — Cytoscape's
 own selection, so it costs nothing to build. Once two or more are selected, a **Delegate
@@ -432,7 +470,6 @@ implicit failure.
 | SQL | `parsers/vendor/sql` | Implemented: `table` edges from a file that uses a table or view (`FROM`/`JOIN`, `UPDATE`, `DELETE`, `INSERT`, `ALTER`, `CREATE INDEX ... ON`, trigger `ON`, `REFERENCES`) to the one file that defines it (`CREATE TABLE`/`VIEW`/`MATERIALIZED VIEW`); `import` edges from `\i`/`\ir`, `:r`, `source`, and `@` includes of another `.sql` file; member extraction (tables/views and their columns) |
 | Python | `parsers/vendor/python` | Implemented: `import` and `from ... import` (absolute, relative, aliased, wildcard, and deferred inside a function) -> repository modules, counted from source roots discovered through `__init__.py`; member extraction (classes, methods, class attributes, and the instance state assigned as `self.x`) |
 | C++ | not vendored | Recognised and reported as unsupported |
-| COBOL, ABL | not vendored | Out of scope for now; treated as non-source files |
 
 Resolution is **import-based**, plus references that do not need an import. An import only
 becomes an edge when it resolves to a file in the repository; imports are treated as

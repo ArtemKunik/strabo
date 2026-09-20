@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
-import { createStraboRouter } from '../../src/api/router.ts';
-import { createStraboServer } from '../../src/server.ts';
-import { createRepositoryStore } from '../../src/state/repository-store.ts';
-import type { StraboConfig } from '../../src/types.ts';
+import { createStraboRouter } from '../../src/index.ts';
+import { createStraboServer } from '../../src/index.ts';
+import { createRepositoryStore } from '../../src/index.ts';
+import type { StraboConfig } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');
@@ -202,4 +202,33 @@ test('the repository store refuses a path outside the scan ceiling', async () =>
   });
   assert.equal(response.status, 400);
   fs.rmSync(file, { force: true });
+});
+
+test('the workspace endpoint reports the single configured root', async () => {
+  const host = express();
+  host.use(express.json());
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+
+  const report = (await (await fetch(`${base}/api/strabo/workspace`)).json()) as {
+    name: string;
+    repositories: Array<{ name: string; publishes: unknown }>;
+    flows: unknown[];
+    contracts: unknown[];
+    drift: unknown[];
+    summary: { repositories: number; flows: number };
+  };
+  assert.equal(report.repositories.length, 1);
+  assert.equal(report.repositories[0].name, 'block-repo');
+  assert.deepEqual(report.flows, []);
+  assert.equal(report.summary.repositories, 1);
+
+  const contracts = (await (await fetch(`${base}/api/strabo/workspace/contracts`)).json()) as {
+    repositories: string[];
+    contracts: unknown[];
+    drift: unknown[];
+  };
+  assert.deepEqual(contracts.repositories, ['block-repo']);
+  assert.ok(Array.isArray(contracts.contracts));
+  assert.ok(Array.isArray(contracts.drift));
 });

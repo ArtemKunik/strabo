@@ -1968,6 +1968,91 @@ function functionSignals(entry) {
   return signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ");
 }
 
+// ui/strabo-narrator.js
+var NARRATOR_ATTRIBUTION = "Model-generated narrative \u2014 not recorded evidence.";
+function narratorStatusLabel(status) {
+  if (!status || status.configured !== true) {
+    return "Narrator is not configured. Set an endpoint and model to enable it.";
+  }
+  const remaining = status.remaining ?? 0;
+  const budget = status.requestBudget ?? 0;
+  return `Narrator ready \xB7 ${status.model} \xB7 ${remaining}/${budget} requests left`;
+}
+function narratorReplyLabel(reply) {
+  if (reply?.available === true) {
+    return reply.text ?? "";
+  }
+  const reason = reply?.reason ?? "provider-error";
+  const detail = reply?.detail ? ` \u2014 ${reply.detail}` : "";
+  return `Narrator unavailable: ${reason}${detail}`;
+}
+function buildNarratorEvidence(result) {
+  const report = result?.functions;
+  if (!report || report.available === false || !Array.isArray(report.functions) || report.functions.length === 0) {
+    return "No function inventory is recorded for this file.";
+  }
+  const lines = [`File: ${report.file ?? "unknown"}`, `Functions: ${report.functions.length}`];
+  for (const entry of report.functions) {
+    const owner = entry.owner ? `${entry.owner}.` : "";
+    lines.push(`- ${owner}${entry.name} (line ${entry.line})`);
+    if (entry.metrics) {
+      lines.push(
+        `  metrics: complexity ${entry.metrics.decisionPoints}, nesting ${entry.metrics.maxNestingDepth}, lines ${entry.metrics.lines}`
+      );
+    }
+    if (Array.isArray(entry.signals) && entry.signals.length > 0) {
+      lines.push(`  signals: ${entry.signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ")}`);
+    }
+    if (Array.isArray(entry.calls) && entry.calls.length > 0) {
+      lines.push(`  calls: ${entry.calls.map((call) => `${call.name} (L${call.line})`).join(", ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+// ui/strabo-workspace.js
+function workspaceSummary(report) {
+  const summary = report?.summary;
+  if (!summary) {
+    return "Workspace not recorded.";
+  }
+  return `${summary.repositories} repositories \xB7 ${summary.flows} cross-repo flows \xB7 ${summary.contracts} contracts \xB7 ${summary.drifting} drifting`;
+}
+function repositoryRows(report) {
+  return (report?.repositories ?? []).map((repository) => ({
+    name: repository.name,
+    head: repository.head ? repository.head.slice(0, 7) : null,
+    dirty: repository.dirty === true,
+    publishes: repository.publishes ? `${repository.publishes.ecosystem}:${repository.publishes.name}` : null
+  }));
+}
+function flowRows(report) {
+  return (report?.flows ?? []).map((flow) => ({
+    id: `${flow.from}->${flow.to}:${flow.package}`,
+    label: `${flow.from} \u2192 ${flow.to} (${flow.ecosystem} ${flow.package})`,
+    files: Array.isArray(flow.files) ? flow.files.length : 0,
+    publishedBy: flow.publishedBy ?? null
+  }));
+}
+function contractRows(report) {
+  return (report?.contracts ?? []).map((contract) => ({
+    id: contract.id,
+    label: `${contract.id} (${contract.format}) \u2014 ${contract.repository}`,
+    fields: Array.isArray(contract.fields) ? contract.fields.length : 0
+  }));
+}
+function driftRows(report) {
+  return (report?.drift ?? []).map((entry) => {
+    const deviations = entry.deviations ?? [];
+    return {
+      id: entry.id,
+      label: `${entry.id} (${entry.format}) \u2014 ${entry.repositories.join(", ")}`,
+      clean: deviations.length === 0,
+      deviations: deviations.map((deviation) => `${deviation.name}: ${deviation.issue}`)
+    };
+  });
+}
+
 // ui/view.js
 var Fragment = /* @__PURE__ */ Symbol("fragment");
 var HOST = /* @__PURE__ */ Symbol("host");
@@ -2424,7 +2509,7 @@ function renderMembers(container, result) {
   }
   container.append(renderDataFlow(memberMap?.dataFlow));
 }
-function renderFunctions(container, result) {
+function renderFunctions(container, result, handlers = {}) {
   container.replaceChildren();
   const report = result?.functions;
   const title = document.createElement("h3");
@@ -2483,6 +2568,137 @@ function renderFunctions(container, result) {
     list.append(item);
   }
   container.append(list);
+  if (handlers.onNarrate) {
+    const block = document.createElement("div");
+    block.className = "narrator-block";
+    const note2 = document.createElement("p");
+    note2.className = "narrator-note";
+    note2.textContent = narratorStatusLabel(handlers.narratorStatus);
+    block.append(note2);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "narrate-functions";
+    button.className = "narrator-button";
+    button.textContent = "Narrate";
+    block.append(button);
+    const reply = document.createElement("div");
+    reply.className = "narrator-reply";
+    reply.dataset.role = "narrative";
+    block.append(reply);
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      reply.replaceChildren("Asking the narrator\u2026");
+      try {
+        const narrated = await handlers.onNarrate();
+        reply.replaceChildren(narratorReplyLabel(narrated));
+        if (narrated?.available === true) {
+          const attribution = document.createElement("p");
+          attribution.className = "narrator-attribution";
+          attribution.textContent = NARRATOR_ATTRIBUTION;
+          reply.append(attribution);
+        }
+      } catch (error) {
+        reply.replaceChildren(`Narrator unavailable: ${error.message}`);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    container.append(block);
+  }
+}
+function workspaceHeading(text, count) {
+  const heading = document.createElement("h4");
+  heading.textContent = `${text} (${count})`;
+  return heading;
+}
+function workspaceNote(text) {
+  const note2 = document.createElement("p");
+  note2.className = "unavailable";
+  note2.textContent = text;
+  return note2;
+}
+function workspaceList(className, rows, fill) {
+  const list = document.createElement("ul");
+  list.className = className;
+  for (const row of rows) {
+    const item = document.createElement("li");
+    item.className = "workspace-row";
+    fill(item, row);
+    list.append(item);
+  }
+  return list;
+}
+function renderWorkspace(container, report, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = `Workspace \u2014 ${report?.name ?? "unnamed"}`;
+  container.append(title);
+  const summary = document.createElement("p");
+  summary.className = "workspace-summary";
+  summary.textContent = workspaceSummary(report);
+  container.append(summary);
+  const repositories = repositoryRows(report);
+  container.append(workspaceHeading("Repositories", repositories.length));
+  container.append(
+    repositories.length === 0 ? workspaceNote("No repositories recorded.") : workspaceList("workspace-repositories", repositories, (item, repository) => {
+      const name = document.createElement("div");
+      name.className = "workspace-name";
+      name.textContent = repository.name;
+      item.append(name);
+      const facts = [
+        repository.head ? `@${repository.head}` : "no commit recorded",
+        repository.dirty ? "dirty" : "clean"
+      ];
+      if (repository.publishes) {
+        facts.push(`publishes ${repository.publishes}`);
+      }
+      const detail = document.createElement("div");
+      detail.className = "workspace-detail";
+      detail.textContent = facts.join(" \xB7 ");
+      item.append(detail);
+    })
+  );
+  const flows = flowRows(report);
+  container.append(workspaceHeading("Cross-repo flows", flows.length));
+  container.append(
+    flows.length === 0 ? workspaceNote("No cross-repo flows recorded.") : workspaceList("workspace-flows", flows, (item, flow) => {
+      item.textContent = flow.label;
+      const detail = document.createElement("div");
+      detail.className = "workspace-detail";
+      detail.textContent = `${flow.files} file${flow.files === 1 ? "" : "s"}` + (flow.publishedBy ? ` \xB7 published by ${flow.publishedBy}` : "");
+      item.append(detail);
+    })
+  );
+  const contracts = contractRows(report);
+  container.append(workspaceHeading("Contracts", contracts.length));
+  container.append(
+    contracts.length === 0 ? workspaceNote("No contracts recorded.") : workspaceList("workspace-contracts", contracts, (item, contract) => {
+      item.textContent = contract.label;
+      const detail = document.createElement("div");
+      detail.className = "workspace-detail";
+      detail.textContent = `${contract.fields} field${contract.fields === 1 ? "" : "s"}`;
+      item.append(detail);
+    })
+  );
+  const drift = driftRows(report);
+  container.append(workspaceHeading("Contract drift", drift.length));
+  container.append(
+    drift.length === 0 ? workspaceNote("No shared contracts recorded.") : workspaceList("workspace-drift", drift, (item, entry) => {
+      item.textContent = entry.label;
+      const detail = document.createElement("div");
+      detail.className = "workspace-detail";
+      detail.textContent = entry.clean ? "clean \u2014 definitions match" : entry.deviations.join("; ");
+      item.append(detail);
+    })
+  );
+  if (handlers.onClose) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.id = "close-workspace";
+    close.textContent = "Close";
+    close.addEventListener("click", () => handlers.onClose());
+    container.append(close);
+  }
 }
 function renderMemberType(type) {
   const section2 = document.createElement("section");
@@ -4315,6 +4531,7 @@ var selected = null;
 var selectedEdgeId = null;
 var groupSelection = [];
 var currentReview = null;
+var narratorStatus = null;
 var store = createStore({
   view: {
     repository: null,
@@ -4474,7 +4691,8 @@ var elements = {
   graphHint: document.getElementById("graph-hint"),
   shortcuts: document.getElementById("shortcuts"),
   settingsToggle: document.getElementById("settings-toggle"),
-  settingsPanel: document.getElementById("settings-panel")
+  settingsPanel: document.getElementById("settings-panel"),
+  workspacePanel: document.getElementById("workspace-panel")
 };
 var memberData = null;
 var memberTimer = null;
@@ -4693,19 +4911,51 @@ async function loadMembers(id) {
     params.set("repository", state.repository);
   }
   try {
+    if (narratorStatus === null) {
+      narratorStatus = await fetchNarratorStatus();
+    }
     const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
     const result = response.ok ? await response.json() : { available: false, detail: "Symbols are unavailable for this file." };
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
-      if (functionsSection) renderFunctions(functionsSection, result);
+      if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
     }
   } catch {
     if (selected === id) {
       const fallback = { available: false, detail: "Symbols could not be loaded." };
       if (membersSection) renderMembers(membersSection, fallback);
-      if (functionsSection) renderFunctions(functionsSection, fallback);
+      if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
     }
   }
+}
+function functionsHandlers(result) {
+  return {
+    narratorStatus,
+    onNarrate: () => narrateFile(result)
+  };
+}
+async function fetchNarratorStatus() {
+  try {
+    const response = await fetch(`${API_PATH}/narrator`);
+    return response.ok ? await response.json() : { configured: false, reason: "not-configured" };
+  } catch {
+    return { configured: false, reason: "not-configured" };
+  }
+}
+async function narrateFile(result) {
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      instruction: "Summarise the recorded complexity, signals, and call wiring in this file.",
+      evidence: buildNarratorEvidence(result)
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
 }
 function clearSelection() {
   selected = null;
@@ -5070,6 +5320,24 @@ async function openSettings() {
     settingsStatusError = true;
   }
   renderSettingsView();
+}
+async function showWorkspace() {
+  elements.workspacePanel.hidden = false;
+  try {
+    const report = await request("/workspace");
+    renderWorkspace(elements.workspacePanel, report, { onClose: closeWorkspace });
+  } catch (error) {
+    renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = error.message;
+    elements.workspacePanel.append(note2);
+  }
+  refreshDock();
+}
+function closeWorkspace() {
+  elements.workspacePanel.hidden = true;
+  refreshDock();
 }
 function clearOverlay() {
   state.overlay = "none";
@@ -5858,6 +6126,18 @@ var floatingWindows = initFloatingWindows({
       },
       onOpen: () => renderMemberMapView(),
       onClose: () => closeMemberMap()
+    },
+    {
+      key: "workspace",
+      element: elements.workspacePanel,
+      title: "Workspace",
+      dockLabel: "Workspace",
+      width: 460,
+      onOpen: () => {
+        showWorkspace().catch(() => {
+        });
+      },
+      onClose: () => closeWorkspace()
     }
   ]
 });
@@ -5890,7 +6170,8 @@ if (window.STRABO_TEST) {
     risk: () => showRisk(),
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
-    islands: () => view.islandDirectories()
+    islands: () => view.islandDirectories(),
+    workspace: () => showWorkspace()
   };
 }
 loadCatalogue().then(() => {

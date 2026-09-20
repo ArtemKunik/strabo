@@ -20,11 +20,11 @@ record is reported as `unavailable`, never invented.
 | 5 | Timeline and compare versions | Done (commit list + impact against a revision) |
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
-| 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
+| 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, per-fingerprint cache; A10: read-only Workspace panel) |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
 | 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
-| 15 | Optional LLM narrator | Planned (opt-in seam; off by default) |
+| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -176,7 +176,17 @@ scan recorded is drawn; nothing is inferred from names or proximity.
   checked.
 - Endpoints: `GET /workspace` and `GET /workspace/contracts`.
 
-Next: a workspace UI, HTTP/service-call flows, and language DTO contracts.
+Slices: **A10 (done)** the read-only workspace UI. `ui/strabo-workspace.js` turns the
+recorded `WorkspaceReport` into pure rows (`workspaceSummary`, `repositoryRows`, `flowRows`,
+`contractRows`, `driftRows`); `renderWorkspace` (`ui/strabo-panels.js`) renders repositories,
+cross-repo flows, contracts, and drift in a floating panel, saying so when a section has
+nothing recorded rather than showing it empty. The panel is registered in the dock
+(`ui/strabo.js`, `ui/index.html`) and opened from `window.straboTest.workspace()`. Route-level
+coverage is in `test/unit/server.test.ts`; `test/acceptance/features/workspace.feature`
+(`@workspace`) asserts the single-root report and the empty-section captions.
+
+Next: HTTP/service-call flows, language DTO contracts, and marking cross-repo flow endpoints
+on the map.
 
 ## Phase 12 - Frontend foundation
 
@@ -460,6 +470,24 @@ An opt-in narrative layer over recorded evidence. **Off by default**, modelled o
   per-session request budget, and listed in an audit log like the delegate run list.
 - When this lands, the README's "only feature that contacts a third party" wording gains
   this second opt-in provider.
+
+Slices: **A8 (done)** the opt-in config and provider client, with no UI yet.
+`NarratorConfig` (`src/types.ts`) holds only an endpoint, a model, the name of the key
+environment variable, a budget, and the source opt-in — never the key. `resolveNarratorConfig`
+(`src/narrator/config.ts`) refuses a non-URL or an insecure remote endpoint, so a plaintext
+call off the machine cannot be sent. `createNarratorClient` (`src/narrator/client.ts`) is inert
+until configured and keyed, reads the key per call, sends it only as an `Authorization: Bearer`
+header, frames evidence and source as neutralised untrusted data, bounds the prompt, caches by
+git fingerprint + model + prompt version, enforces a per-session budget, and records an audit
+entry that never contains the key or the body. `createNarratorRouter` exposes `GET /narrator`,
+`POST /narrator`, and `GET /narrator/runs`; the env vars are wired in `src/config.ts`.
+**A9 (done)** the Functions-tab affordance: `ui/strabo-narrator.js` builds the recorded
+evidence (`buildNarratorEvidence`) and the captions (`narratorStatusLabel`,
+`narratorReplyLabel`), `renderFunctions` adds a status line and a **Narrate** button, and
+`ui/strabo.js` fetches the status once and posts the evidence. The reply renders under a
+"model-generated narrative — not recorded evidence" attribution, and an unconfigured narrator
+says so instead of failing. A browser scenario (`module-passport.feature` `@narrator`) asserts
+the inert path; it needs no endpoint, so it also proves nothing is contacted when unset.
 
 ## Phase 6 - Release readiness
 

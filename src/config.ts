@@ -9,6 +9,11 @@ export interface CliEnv {
   port: number;
   riskOnline: boolean;
   deniedLicenses?: string[];
+  narratorEndpoint?: string;
+  narratorModel?: string;
+  narratorKeyEnv?: string;
+  narratorBudget?: number;
+  narratorSendSource: boolean;
 }
 
 /**
@@ -35,7 +40,18 @@ export function readEnv(
     // Online risk lookup is opt-in: it is the only feature that contacts a third party.
     riskOnline: isEnabled(env.STRABO_RISK),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
+    // The narrator is a second opt-in provider; without an endpoint and model it is inert.
+    narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
+    narratorModel: env.STRABO_NARRATOR_MODEL?.trim() || undefined,
+    narratorKeyEnv: env.STRABO_NARRATOR_KEY_ENV?.trim() || undefined,
+    narratorBudget: positiveInt(env.STRABO_NARRATOR_BUDGET),
+    narratorSendSource: isEnabled(env.STRABO_NARRATOR_SEND_SOURCE),
   };
+}
+
+function positiveInt(value: string | undefined): number | undefined {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 /** First non-flag argument, so `strabo /path/to/repo` works and `strabo --help` is ignored. */
@@ -53,7 +69,28 @@ export function configFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   argv: readonly string[] = [],
 ): StraboConfig {
-  const { root, configPath, scanCeiling, riskOnline, deniedLicenses } = readEnv(env, argv);
+  const {
+    root,
+    configPath,
+    scanCeiling,
+    riskOnline,
+    deniedLicenses,
+    narratorEndpoint,
+    narratorModel,
+    narratorKeyEnv,
+    narratorBudget,
+    narratorSendSource,
+  } = readEnv(env, argv);
+  const narrator =
+    narratorEndpoint || narratorModel
+      ? {
+          ...(narratorEndpoint ? { endpoint: narratorEndpoint } : {}),
+          ...(narratorModel ? { model: narratorModel } : {}),
+          ...(narratorKeyEnv ? { apiKeyEnv: narratorKeyEnv } : {}),
+          ...(narratorBudget ? { requestBudget: narratorBudget } : {}),
+          ...(narratorSendSource ? { sendSource: true } : {}),
+        }
+      : undefined;
   return {
     workspaceRoot: root,
     configPath,
@@ -62,6 +99,7 @@ export function configFromEnv(
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),
     },
+    ...(narrator ? { narrator } : {}),
     serverLog: (message, error) => {
       if (error) {
         console.error(`[strabo] ${message}`, error);
