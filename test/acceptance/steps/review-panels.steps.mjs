@@ -63,6 +63,11 @@ When('I open the group delegate menu', async function () {
   await this.page.waitForFunction(() => document.querySelector('.agent-menu:not([hidden])') != null);
 });
 
+When('I right-click the review panel', async function () {
+  await this.page.click('#review-panel', { button: 'right' });
+  await this.page.waitForFunction(() => document.querySelector('.agent-menu:not([hidden])') != null);
+});
+
 Then('the group toolbar reports {int} selected', async function (count) {
   const text = (await this.page.textContent('#group-count')) ?? '';
   assert.equal(text, `${count} selected`);
@@ -254,4 +259,112 @@ When('I step through the flow walkthrough', async function () {
 Then('the flow walkthrough reports the wiring step', async function () {
   const text = (await this.page.textContent('#member-view [data-role="member-step"]')) ?? '';
   assert.match(text, /Step 3 of 5 \(wiring\)/);
+});
+
+When('I step to the data flow step', async function () {
+  await this.page.click('#member-next');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.dataset.step === 'data-flow',
+    undefined,
+    { timeout: 5_000 },
+  );
+});
+
+/**
+ * Play is the only control that adds `is-playing`; the pulse and the divider dot are CSS, so
+ * this asserts the resolved animations rather than a class alone.
+ */
+Then('playing the walkthrough animates the data flow panels', async function () {
+  await this.page.click('#member-play');
+  await this.page.waitForFunction(
+    () => {
+      const view = document.getElementById('member-view');
+      const panel = view?.querySelector('.flow-panel[data-flow="sources"]');
+      const marker = view?.querySelector('.flow-marker');
+      return (
+        view?.classList.contains('is-playing') === true &&
+        panel != null &&
+        getComputedStyle(panel).animationName === 'dataflow-pulse' &&
+        marker != null &&
+        getComputedStyle(marker).animationName === 'read-write-flow'
+      );
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+  await this.page.click('#member-play');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.classList.contains('is-playing') === false,
+    undefined,
+    { timeout: 5_000 },
+  );
+});
+
+const memberNames = (page, selector) =>
+  page.$$eval(selector, (cards) => cards.map((card) => card.dataset.member));
+
+When('I hover the {string} field card', async function (name) {
+  await this.page.hover(`#member-view .field-card[data-member="${name}"]`);
+  await this.page.waitForSelector(`#member-view .field-card[data-member="${name}"].trace-source`);
+});
+
+When('I hover the {string} method card', async function (name) {
+  await this.page.hover(`#member-view .method-card[data-member="${name}"]`);
+  await this.page.waitForSelector(`#member-view .method-card[data-member="${name}"].trace-source`);
+});
+
+Then('the methods wired to {string} are traced', async function (_field) {
+  const hit = await memberNames(this.page, '#member-view .method-card.trace-hit');
+  assert.deepEqual(hit.sort(), ['add', 'reset'], `wired methods should be traced, got ${hit}`);
+  const dim = await memberNames(this.page, '#member-view .method-card.trace-unrelated');
+  assert.ok(dim.includes('fail'), `unwired methods should recede, got ${dim}`);
+});
+
+Then('the field wired to {string} is traced', async function (_method) {
+  const hit = await memberNames(this.page, '#member-view .field-card.trace-hit');
+  assert.deepEqual(hit, ['lastError'], `the written field should be traced, got ${hit}`);
+  const dim = await memberNames(this.page, '#member-view .field-card.trace-unrelated');
+  assert.ok(dim.includes('value') && dim.includes('label'), `untouched fields should recede, got ${dim}`);
+});
+
+When('I step to the members step', async function () {
+  await this.page.click('#member-next');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.dataset.step === 'members',
+    undefined,
+    { timeout: 5_000 },
+  );
+});
+
+When('I play the walkthrough', async function () {
+  await this.page.click('#member-play');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.classList.contains('is-playing') === true,
+    undefined,
+    { timeout: 5_000 },
+  );
+});
+
+Then('the member cards reveal in cluster order', async function () {
+  await this.page.waitForFunction(
+    () => {
+      const card = document.querySelector('#member-view .member-card');
+      return card != null && getComputedStyle(card).animationName === 'cluster-reveal';
+    },
+    undefined,
+    { timeout: 5_000 },
+  );
+  const staggers = await this.page.$$eval('#member-view .member-card', (cards) =>
+    cards.map((card) => card.style.getPropertyValue('--cluster-stagger')),
+  );
+  assert.ok(
+    new Set(staggers).size > 1,
+    `cluster order should stagger the reveal, got ${staggers}`,
+  );
+  await this.page.click('#member-play');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.classList.contains('is-playing') === false,
+    undefined,
+    { timeout: 5_000 },
+  );
 });

@@ -298,6 +298,15 @@ Then('the review panel reports a working-tree review', async function () {
   assert.match(panel, /Unstaged \(\d+\)/);
 });
 
+Then('the change passport reports a cohesion delta', async function () {
+  await this.page.waitForSelector('#review-panel [data-role="change-passport"]', {
+    timeout: 15_000,
+  });
+  const text = (await this.page.textContent('#review-panel [data-role="change-passport"]')) ?? '';
+  assert.match(text, /Counter\.kt/);
+  assert.match(text, /cohesion 67 → 100 \(\+33\)/);
+});
+
 Then('the status line reports nodes and a cache status', async function () {
   const status = (await this.page.textContent('#status')) ?? '';
   assert.match(status, /\d+ nodes . \d+ edges/);

@@ -59,11 +59,13 @@ export {
   parseNumstat,
 } from './analysis/review.ts';
 export type { ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
+export { computeChangePassport } from './analysis/change-passport.ts';
+export type { ChangePassport, CohesionChange } from './analysis/change-passport.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';
-export { computeFileHealth } from './analysis/file-health.ts';
-export type { FileHealthReport, FileHealthMetrics } from './analysis/file-health.ts';
+export { computeFileHealth, computeMemberCohesion } from './analysis/file-health.ts';
+export type { FileHealthReport, FileHealthMetrics, MemberCohesion } from './analysis/file-health.ts';
 export { buildMemberMap } from './analysis/member-map.ts';
 export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member-map.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';

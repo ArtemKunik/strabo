@@ -125,12 +125,25 @@ Commit review uses `git show --first-parent` rather than a bare `<ref>` diff. A 
 would fold in uncommitted working-tree edits, and `<ref>^..<ref>` fails on a root commit;
 `--first-parent` reports a merge against its first parent and resolves for the root.
 
+The review panel's **Change passport** adds each changed file's cohesion before and after
+the change. Cohesion comes from the recorded member wiring, which needs only the file's own
+content, so it is read from the baseline revision with `git show <base>:<path>` — HEAD for
+the working tree, the first parent for a commit — and re-extracted for the reviewed copy. A
+file whose language has no extractor, is new, or was deleted names the missing side rather
+than showing a fabricated score.
+
 ## Delegate to an agent
 
-Right-clicking a node, edge, diagnostic, commit, overlay item, or empty canvas opens a
-**Delegate** menu that hands the selected item to a coding agent. `POST /delegate` accepts
-only `opencode` or `claude`, writes the prompt to a temp file, and opens the agent's
-**interactive TUI** with the repository as its working directory.
+Right-clicking a node, edge, diagnostic, commit, overlay item, the Git review panel, or
+empty canvas opens a **Delegate** menu that hands the selected item to a coding agent.
+`POST /delegate` accepts only `opencode` or `claude`, writes the prompt to a temp file, and
+opens the agent's **interactive TUI** with the repository as its working directory.
+
+Delegating from the Git review panel hands the agent the same evidence shown on screen —
+every changed file's status and line counts, plus the reverse-impact list — and asks it to
+explain the change **as a function of the app**: what capability or behaviour it adds,
+changes, or removes, not just which files moved. The agent still reads the actual diff
+itself; Strabo only ever hands over what it recorded, never a guess at intent.
 
 The TUI is seeded with a prompt that names the task file, so the operator can add their own
 instruction before sending — the delegation does not silently run Strabo's canned task.
@@ -220,7 +233,11 @@ Explain this class, Night vision, Compare versions, Show only this flow, and Res
 
 **Flow walkthrough** walks the class in five steps — fingerprint, members, wiring, data
 flow, consumption — with Prev / Play / Step. Every caption comes from recorded data, so a
-step with no evidence says so instead of inventing a story.
+step with no evidence says so instead of inventing a story. While **Play** runs, the region
+for the current step comes forward and the others step back, member cards reveal in cluster
+order, and the `data flow` step pulses the recorded panels while a dot falls down the
+`read / write` divider. Hovering a field or method traces the members the scan recorded it
+reading or writing, and the rest recede.
 
 See `docs/ROADMAP.md` for the phased plan.
 

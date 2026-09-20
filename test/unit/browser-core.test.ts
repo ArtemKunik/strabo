@@ -9,6 +9,7 @@ import {
   buildAgentPrompt,
   buildElements,
   buildGraphQuery,
+  cohesionDelta,
   constellationLayout,
   constellationPoints,
   diameter,
@@ -378,6 +379,27 @@ test('reviewGroups orders commit, staged, unstaged, then untracked and drops emp
   assert.deepEqual(groups.map(([name]) => name), ['commit', 'staged', 'untracked']);
 });
 
+test('cohesionDelta reports direction and names a missing side instead of a zero', () => {
+  assert.deepEqual(cohesionDelta({ before: 67, after: 100 }), {
+    tone: 'up',
+    text: 'cohesion 67 → 100 (+33)',
+  });
+  assert.deepEqual(cohesionDelta({ before: 100, after: 80 }), {
+    tone: 'down',
+    text: 'cohesion 100 → 80 (-20)',
+  });
+  assert.equal(cohesionDelta({ before: 80, after: 80 }).tone, 'flat');
+  assert.deepEqual(cohesionDelta({ before: null, after: 100, note: 'no baseline revision' }), {
+    tone: 'new',
+    text: 'new · cohesion 100',
+  });
+  assert.deepEqual(cohesionDelta({ before: 80, after: null, note: 'deleted — no reviewed state' }), {
+    tone: 'removed',
+    text: 'removed · cohesion 80',
+  });
+  assert.match(cohesionDelta({ before: null, after: null, note: 'no symbol extractor' }).text, /unavailable/);
+});
+
 const memberMap = {
   available: true,
   types: [
@@ -523,6 +545,25 @@ test('buildAgentPrompt renders recorded evidence and a kind-aware task', () => {
   assert.match(prompt, /Blast radius: 4/);
   assert.match(prompt, /do not invent links/);
   assert.match(prompt, /Assess this file/);
+});
+
+test('buildAgentPrompt frames a review target around functional effect', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'claude',
+    repository: { name: 'demo', root: '/demo' },
+    target: {
+      kind: 'review',
+      label: 'pending working tree',
+      evidence: [
+        'modified (unstaged): public/strabo.js — +12 -3',
+        'potentially affected: public/index.html (distance 1)',
+      ],
+    },
+  });
+  assert.match(prompt, /# Strabo task — pending working tree/);
+  assert.match(prompt, /Target: review/);
+  assert.match(prompt, /modified \(unstaged\): public\/strabo\.js/);
+  assert.match(prompt, /as a function of the app/);
 });
 
 test('buildAgentPrompt degrades gracefully and rejects unknown agents', () => {

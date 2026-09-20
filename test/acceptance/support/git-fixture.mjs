@@ -34,3 +34,48 @@ export function ensureTimelineRepo() {
     fs.appendFileSync(file, '// acceptance change\n');
   }
 }
+
+/**
+ * A Git-backed Kotlin fixture for the Change passport.
+ *
+ * The committed Counter has two clusters (cohesion 67); the uncommitted `tag` change reads
+ * `value`, joining them (cohesion 100). It lives under `test/fixtures/change-repo`, which is
+ * gitignored, so the nested repository never touches Strabo's own tree.
+ */
+export function ensureChangeRepo() {
+  const root = path.resolve('test/fixtures/change-repo');
+  const file = path.join(root, 'src', 'main', 'kotlin', 'com', 'acme', 'app', 'Counter.kt');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+
+  const baseline = `package com.acme.app
+
+class Counter {
+    private var value: Int = 0
+    private var label: String = "counter"
+
+    fun bump() {
+        value = value + 1
+    }
+
+    fun tag() {
+        println(label)
+    }
+}
+`;
+  const modified = baseline.replace(
+    'fun tag() {\n        println(label)\n    }',
+    'fun tag() {\n        println(label)\n        value = value + 1\n    }',
+  );
+
+  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    fs.writeFileSync(file, baseline);
+    git('init', '-q');
+    git('config', 'user.email', 'acceptance@example.com');
+    git('config', 'user.name', 'Acceptance');
+    git('add', '.');
+    git('commit', '-q', '-m', 'baseline');
+  }
+  // Leave the cohesion-raising edit uncommitted so the working-tree review compares to HEAD.
+  fs.writeFileSync(file, modified);
+}

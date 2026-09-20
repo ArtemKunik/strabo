@@ -37,3 +37,22 @@ Feature: Timeline and compare versions
     And I use the selected folder
     When I open the working-tree review
     Then the review panel reports a working-tree review
+
+  @review @change-passport
+  Scenario: The Change passport reports the cohesion a change made
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "change-repo" folder
+    And I use the selected folder
+    When I open the working-tree review
+    Then the change passport reports a cohesion delta
+
+  @review @delegate
+  Scenario: Delegating the pending change set hands over the review evidence
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    When I open the working-tree review
+    And I right-click the review panel
+    Then the delegate menu title is "pending working tree"

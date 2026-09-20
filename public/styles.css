@@ -768,6 +768,63 @@ button.primary {
   color: var(--ink-2);
 }
 
+.change-passport {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.change-passport li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.passport-change-path {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.health-delta {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-delta.up {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.health-delta.down {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.health-delta.flat {
+  color: var(--ink-3);
+}
+
+.health-delta.new {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.health-delta.removed {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.health-delta.none {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .risk-panel {
   border-left: 3px solid var(--danger);
   background: var(--bg-0);
@@ -1365,11 +1422,24 @@ button.primary {
   border-left: 3px solid var(--accent);
   border-radius: 6px;
   background: var(--panel);
-  transition: transform 0.12s, border-color 0.12s;
+  transition: transform 0.12s, border-color 0.12s, opacity 0.14s;
 }
 
 .member-card:hover {
   transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+/* Hover-to-trace: the hovered member and its recorded wiring stay lit; the rest recede. */
+.member-card.trace-unrelated {
+  opacity: 0.25;
+}
+
+.member-card.trace-hit {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.member-card.trace-source {
   border-color: var(--accent);
 }
 
@@ -1464,6 +1534,8 @@ button.primary {
 }
 
 .flow-divider {
+  position: relative;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1472,6 +1544,25 @@ button.primary {
   color: var(--accent);
   font-size: 10px;
   letter-spacing: 0.1em;
+}
+
+.flow-marker {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.flow-marker::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
 }
 
 .flow-divider::before,
@@ -1490,6 +1581,90 @@ button.primary {
   color: var(--muted);
   font-size: 9px;
   writing-mode: vertical-rl;
+}
+
+/* ------------------------------------------------------------------ Flow walkthrough animation */
+/* While Play runs, the region for the current step comes forward and the rest step back.
+   Only recorded wiring is animated; a step with no evidence highlights an empty panel. */
+.member-view.is-playing .member-header,
+.member-view.is-playing .member-type,
+.member-view.is-playing .flow-panel {
+  opacity: 0.45;
+  transition: opacity 240ms ease;
+}
+
+.member-view.is-playing[data-step='fingerprint'] .member-header,
+.member-view.is-playing[data-step='members'] .member-type,
+.member-view.is-playing[data-step='wiring'] .member-type {
+  opacity: 1;
+}
+
+.member-view.is-playing[data-step='data-flow'] .member-dataflow .flow-panel:not([data-flow='external']),
+.member-view.is-playing[data-step='consumption'] .member-dataflow .flow-panel[data-flow='external'] {
+  opacity: 1;
+  animation: dataflow-pulse 1.4s ease-out 1;
+}
+
+/* Members reveal in cluster order, so a class reads as its connected components. */
+.member-view.is-playing[data-step='members'] .member-card {
+  animation: cluster-reveal 420ms ease-out backwards;
+  animation-delay: calc(var(--cluster-stagger, 0) * 70ms);
+}
+
+/* The divider dot falls from `read` to `write`, the direction the recorded wiring runs. */
+.member-view.is-playing[data-step='data-flow'] .flow-marker {
+  animation: read-write-flow 1.4s ease-in-out infinite;
+}
+
+@keyframes dataflow-pulse {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.45);
+  }
+  70% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 8px rgba(76, 154, 255, 0);
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0);
+  }
+}
+
+@keyframes cluster-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes read-write-flow {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member-view.is-playing .flow-panel,
+  .member-view.is-playing[data-step='members'] .member-card,
+  .member-view.is-playing[data-step='data-flow'] .flow-marker {
+    animation: none;
+  }
 }
 
 .member-insights {

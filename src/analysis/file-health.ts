@@ -74,7 +74,7 @@ export function computeFileHealth(
     }
   }
 
-  const cohesion = memberCohesion(symbols, accesses);
+  const cohesion = computeMemberCohesion(symbols, accesses);
   axes.push({ key: 'cohesion', label: 'Cohesion', value: cohesion.value, detail: cohesion.detail });
 
   axes.push(fileCoverage(graph, file, node));
@@ -118,7 +118,7 @@ function fileCoverage(graph: Graph, file: string, node: Graph['nodes'][number] |
   return { key: 'coverage', label: 'Coverage', value: 0, detail: 'no path from a test' };
 }
 
-interface Cohesion {
+export interface MemberCohesion {
   value: number | null;
   detail: string;
 }
@@ -130,7 +130,7 @@ interface Cohesion {
  * close the member graph is to a single component: one component is 100, and every field
  * touched by no method lowers it. With no members at all it is reported unavailable.
  */
-function memberCohesion(symbols: CodeSymbol[], accesses: MemberAccess[]): Cohesion {
+export function computeMemberCohesion(symbols: CodeSymbol[], accesses: MemberAccess[]): MemberCohesion {
   const fields = new Set<string>();
   const methods = new Set<string>();
   for (const symbol of symbols) {

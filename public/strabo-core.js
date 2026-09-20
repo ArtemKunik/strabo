@@ -468,6 +468,30 @@ export function reviewGroups(files) {
   return [...groups.entries()].filter(([, list]) => list.length > 0);
 }
 
+/**
+ * The Change passport line for one file: cohesion before -> after with its direction.
+ *
+ * A missing side is named (new, removed, unavailable) rather than shown as a zero, because
+ * cohesion is measured from recorded member wiring and an absent measurement is not a score.
+ */
+export function cohesionDelta(change) {
+  const before = change?.before ?? null;
+  const after = change?.after ?? null;
+  if (before === null && after === null) {
+    return { tone: 'none', text: `cohesion unavailable — ${change?.note ?? 'not recorded'}` };
+  }
+  if (before === null) {
+    return { tone: 'new', text: `new · cohesion ${after}` };
+  }
+  if (after === null) {
+    return { tone: 'removed', text: `removed · cohesion ${before}` };
+  }
+  const delta = after - before;
+  const tone = delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat';
+  const marker = delta > 0 ? `+${delta}` : `${delta}`;
+  return { tone, text: `cohesion ${before} → ${after} (${marker})` };
+}
+
 const SEVERITY_ORDER = ['unknown', 'low', 'moderate', 'high', 'critical'];
 
 /**
@@ -841,6 +865,7 @@ const DELEGATE_TASKS = {
   diagnostic: 'Resolve this diagnostic: explain the cause and propose the smallest safe fix.',
   commit: 'Summarise what this change did and what it may still affect in the working tree.',
   member: 'Explain this member: what it does and how it is wired to state.',
+  review: 'Explain this change set as a function of the app: what capability or behaviour it adds, changes, or removes for a user of the app — not just which files and lines moved. Read the actual diff for the listed files to ground the explanation.',
   view: 'Give an architectural overview of this view: hotspots, coupling, and where to look first.',
   group: 'Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.',
 };

@@ -16,6 +16,7 @@ parsers/vendor/
 
 # Acceptance creates a throwaway Git repository here
 test/fixtures/timeline-repo/
+test/fixtures/change-repo/
 
 # Logs and local env
 *.log

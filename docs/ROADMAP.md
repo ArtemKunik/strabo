@@ -58,7 +58,9 @@ Per-language symbol extraction plus the Member map built from it.
   Reset layout, and a Data flow toggle.
 - **Flow walkthrough**: a five-step narrative (fingerprint, members, wiring, data flow,
   consumption) with Prev / Play / Step. Each caption is derived from recorded evidence and
-  says so when evidence is missing.
+  says so when evidence is missing. During Play the active step's region is emphasised,
+  cards reveal in cluster order, and the `data flow` panels pulse while a dot falls down the
+  `read / write` divider. Hovering a member traces the recorded field/method wiring.
 - `SOURCE / INPUTS -> RESOURCES / HUBS -> TRANSFORMS -> SINKS / OUTPUTS` panels joined by a
   `DATA FLOW` read/write divider, plus `EXTERNAL CONSUMPTION`.
 - **Insights**: an Architecture Health radar (the Phase 4 axes) and a Dependency
@@ -106,6 +108,11 @@ dependency impact of the change set.
   are counted directly and reported as uncounted when unreadable, never as zero lines.
 - `Timeline` selects a commit into the same review panel; `Review changes` (`R`) opens the
   working tree. Changed paths outside the scanned graph are listed, not annotated.
+- **Change passport**: every changed file's cohesion before → after, from recorded member
+  wiring. The baseline content is read with `git show <base>:<path>` (HEAD for the working
+  tree, the first parent for a commit), so the comparison is the recorded revision without a
+  second graph scan. A language with no extractor, a new file, or a deletion names the
+  missing side rather than scoring it.
 
 Spec: `test/acceptance/features/timeline.feature` (scenarios `@review`).
 

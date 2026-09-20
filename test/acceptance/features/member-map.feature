@@ -43,3 +43,32 @@ Feature: Member map
     And the member map view shows architecture health and the dependency constellation
     When I step through the flow walkthrough
     Then the flow walkthrough reports the wiring step
+    When I step to the data flow step
+    Then playing the walkthrough animates the data flow panels
+
+  @member-view
+  Scenario: Hovering a member traces the wiring the scan recorded
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    When I hover the "value" field card
+    Then the methods wired to "value" are traced
+    When I hover the "fail" method card
+    Then the field wired to "fail" is traced
+
+  @member-view
+  Scenario: Playing the members step reveals cards in cluster order
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    When I step to the members step
+    And I play the walkthrough
+    Then the member cards reveal in cluster order

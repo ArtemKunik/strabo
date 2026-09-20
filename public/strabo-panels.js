@@ -8,6 +8,7 @@
 import {
   SHAPES,
   breadcrumb,
+  cohesionDelta,
   constellationLayout,
   constellationPoints,
   explainClass,
@@ -800,6 +801,8 @@ export function renderReview(container, result, handlers = {}) {
     container.append(list);
   }
 
+  renderChangePassport(container, result.cohesion);
+
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
   const impactHeading = document.createElement('h4');
   impactHeading.textContent = `Potentially affected (${affected.length})`;
@@ -847,6 +850,56 @@ const REVIEW_GROUP_LABELS = {
   unstaged: 'Unstaged',
   untracked: 'Untracked',
 };
+
+/**
+ * The Change passport: cohesion before and after each changed file, from recorded wiring.
+ * A file whose side is missing names why instead of showing a number.
+ */
+function renderChangePassport(container, passport) {
+  if (!passport || !Array.isArray(passport.files) || passport.files.length === 0) {
+    return;
+  }
+
+  const heading = document.createElement('h4');
+  heading.textContent = 'Change passport';
+  container.append(heading);
+
+  const caption = document.createElement('p');
+  caption.className = 'unavailable';
+  caption.textContent = passport.baseline
+    ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.`
+    : 'Cohesion from recorded member wiring; no baseline revision was available.';
+  container.append(caption);
+
+  const list = document.createElement('ul');
+  list.className = 'change-passport';
+  list.dataset.role = 'change-passport';
+  for (const change of passport.files) {
+    const item = document.createElement('li');
+    const path = document.createElement('span');
+    path.className = 'passport-change-path';
+    path.textContent = change.previousPath
+      ? `${change.previousPath} → ${change.path}`
+      : change.path;
+    item.append(path);
+    const delta = cohesionDelta(change);
+    const value = document.createElement('span');
+    value.className = `health-delta ${delta.tone}`;
+    value.dataset.role = 'cohesion-delta';
+    value.textContent = delta.text;
+    value.title = change.note ?? '';
+    item.append(value);
+    list.append(item);
+  }
+  container.append(list);
+
+  if (passport.capped) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = 'Only the first files in the change set were measured.';
+    container.append(note);
+  }
+}
 
 export { graphSummary };
 
@@ -1291,6 +1344,19 @@ function buildTypeSection(type, view, clusters, handlers) {
     view.order,
   );
 
+  const relations = memberRelations(type);
+  section.addEventListener('pointerover', (event) => {
+    const card = event.target.closest?.('.member-card');
+    if (card) traceMember(section, card);
+  });
+  section.addEventListener('pointerout', (event) => {
+    const card = event.target.closest?.('.member-card');
+    if (!card) return;
+    const next = event.relatedTarget?.closest?.('.member-card');
+    if (next && section.contains(next)) return;
+    clearTrace(section);
+  });
+
   const fieldHeading = document.createElement('h4');
   fieldHeading.textContent = `Fields / data (${fields.length})`;
   section.append(fieldHeading);
@@ -1298,7 +1364,7 @@ function buildTypeSection(type, view, clusters, handlers) {
   fieldList.className = 'member-cards';
   fieldList.dataset.role = 'fields';
   for (const field of fields) {
-    fieldList.append(buildFieldCard(field, clusters.clusterOf.get(field.name)));
+    fieldList.append(buildFieldCard(field, clusters.clusterOf.get(field.name), relations.get(field.name)));
   }
   if (fields.length === 0) {
     fieldList.append(unavailableNote('No fields recorded.'));
@@ -1312,7 +1378,7 @@ function buildTypeSection(type, view, clusters, handlers) {
   methodList.className = 'member-cards';
   methodList.dataset.role = 'methods';
   for (const method of methods) {
-    methodList.append(buildMethodCard(method, clusters.clusterOf.get(method.name)));
+    methodList.append(buildMethodCard(method, clusters.clusterOf.get(method.name), relations.get(method.name)));
   }
   if (methods.length === 0) {
     methodList.append(unavailableNote('No methods recorded.'));
@@ -1322,16 +1388,61 @@ function buildTypeSection(type, view, clusters, handlers) {
   return section;
 }
 
+/**
+ * The recorded read/write wiring as a member -> member map, so hovering a field can name
+ * the methods that touch it and vice versa. Only recorded references are linked.
+ */
+function memberRelations(type) {
+  const relations = new Map();
+  const link = (owner, other) => {
+    if (!relations.has(owner)) relations.set(owner, new Set());
+    relations.get(owner).add(other);
+  };
+  for (const method of type.methods) {
+    for (const fieldName of [...method.reads, ...method.writes]) {
+      link(method.name, fieldName);
+      link(fieldName, method.name);
+    }
+  }
+  return relations;
+}
+
+function traceMember(section, card) {
+  const name = card.dataset.member;
+  const related = new Set((card.dataset.related ?? '').split(' ').filter(Boolean));
+  related.add(name);
+  for (const other of section.querySelectorAll('.member-card')) {
+    const member = other.dataset.member;
+    other.classList.toggle('trace-unrelated', !related.has(member));
+    other.classList.toggle('trace-hit', related.has(member) && member !== name);
+  }
+  card.classList.remove('trace-unrelated');
+  card.classList.add('trace-source');
+}
+
+function clearTrace(section) {
+  for (const card of section.querySelectorAll('.member-card')) {
+    card.classList.remove('trace-unrelated', 'trace-hit', 'trace-source');
+  }
+}
+
+/** Bound the cluster stagger so a class with many clusters does not outrun the step tick. */
+function staggerFor(clusterIndex) {
+  return Math.min(Math.max(0, (clusterIndex ?? 1) - 1), 6);
+}
+
 function matches(name, needle) {
   return !needle || name.toLowerCase().includes(needle);
 }
 
-function buildFieldCard(field, clusterIndex) {
+function buildFieldCard(field, clusterIndex, related) {
   const card = fieldCard(field);
   const element = document.createElement('article');
   element.className = 'member-card field-card';
   element.dataset.member = field.name;
   element.dataset.cluster = String(clusterIndex ?? 0);
+  element.dataset.related = related ? [...related].join(' ') : '';
+  element.style.setProperty('--cluster-stagger', String(staggerFor(clusterIndex)));
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));
   const tag = cardLine('card-tag', card.tag);
@@ -1341,12 +1452,14 @@ function buildFieldCard(field, clusterIndex) {
   return element;
 }
 
-function buildMethodCard(method, clusterIndex) {
+function buildMethodCard(method, clusterIndex, related) {
   const card = methodCard(method);
   const element = document.createElement('article');
   element.className = 'member-card method-card';
   element.dataset.member = method.name;
   element.dataset.cluster = String(clusterIndex ?? 0);
+  element.dataset.related = related ? [...related].join(' ') : '';
+  element.style.setProperty('--cluster-stagger', String(staggerFor(clusterIndex)));
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));
   const tag = cardLine('card-tag', card.tag);
@@ -1431,7 +1544,10 @@ function buildDataFlow(memberMap, consumerIds) {
   const dividerAxis = document.createElement('span');
   dividerAxis.className = 'flow-divider-axis';
   dividerAxis.textContent = 'read / write';
-  divider.append(dividerLabel, dividerAxis);
+  const dividerMarker = document.createElement('span');
+  dividerMarker.className = 'flow-marker';
+  dividerMarker.setAttribute('aria-hidden', 'true');
+  divider.append(dividerLabel, dividerAxis, dividerMarker);
   row.append(divider);
 
   const right = document.createElement('div');

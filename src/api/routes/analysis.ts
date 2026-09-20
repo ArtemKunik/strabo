@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { computeCoverage } from '../../analysis/coverage.ts';
+import { computeChangePassport } from '../../analysis/change-passport.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
@@ -147,11 +148,18 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       const base = typeof request.query.base === 'string' ? request.query.base : '';
-      response.json(
-        base
-          ? await reviewCommit(repository.root, cached.report.graph, base)
-          : await reviewWorkingTree(repository.root, cached.report.graph),
-      );
+      const review = base
+        ? await reviewCommit(repository.root, cached.report.graph, base)
+        : await reviewWorkingTree(repository.root, cached.report.graph);
+      if (!review.available) {
+        response.json(review);
+        return;
+      }
+      // The baseline matches the review's own comparison: HEAD for the working tree, and
+      // the first parent for a commit (which `^` names for a merge and fails on the root).
+      const baseline = base ? `${base}^` : 'HEAD';
+      const cohesion = await computeChangePassport(repository.root, review.files, baseline);
+      response.json({ ...review, cohesion });
     } catch (error) {
       sendError(response, error);
     }

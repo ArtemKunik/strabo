@@ -39,6 +39,8 @@ let selected = null;
 let selectedEdgeId = null;
 /** Node ids currently held in cytoscape's own selection: ⌘/ctrl-click or shift-drag. */
 let groupSelection = [];
+/** The Git review result currently shown in the review panel, for delegation. */
+let currentReview = null;
 
 const state = {
   repository: null,
@@ -583,6 +585,7 @@ function stopMemberPlay() {
     clearInterval(memberTimer);
     memberTimer = null;
   }
+  elements.memberView.classList.remove('is-playing');
 }
 
 function toggleMemberPlay() {
@@ -590,6 +593,7 @@ function toggleMemberPlay() {
     stopMemberPlay();
     return;
   }
+  elements.memberView.classList.add('is-playing');
   memberTimer = setInterval(() => {
     if (memberUI.stepIndex >= memberStepCount() - 1) {
       memberUI.stepIndex = 0;
@@ -681,6 +685,7 @@ async function showReview(query, commit = null) {
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
   const data = await request(`/analysis/review${query}${repository}`);
 
+  currentReview = data;
   if (data.available === false) {
     elements.reviewPanel.hidden = false;
     renderReview(elements.reviewPanel, data, { onClose: closeReview });
@@ -699,6 +704,7 @@ async function showReview(query, commit = null) {
 }
 
 function closeReview() {
+  currentReview = null;
   elements.reviewPanel.hidden = true;
   renderReview(elements.reviewPanel, null, {});
 }
@@ -1205,6 +1211,33 @@ function diagnosticDelegateTarget(text) {
   };
 }
 
+/**
+ * Recorded facts for the currently shown Git review: which files changed, by how much,
+ * and what depends on them — the same evidence rendered in the panel, nothing more.
+ */
+function reviewDelegateTarget(result) {
+  const label = result.kind === 'commit' && result.commit ? `commit ${result.commit.shortHash}` : 'pending working tree';
+  const evidence = [];
+  if (result.commit) {
+    evidence.push(`commit: ${result.commit.shortHash} · ${result.commit.author} · ${result.commit.subject}`);
+  }
+  for (const file of result.files ?? []) {
+    const counts =
+      file.insertions === null || file.deletions === null
+        ? 'line counts unavailable'
+        : `+${file.insertions} -${file.deletions}`;
+    evidence.push(`${file.status} (${file.group}): ${file.path} — ${counts}${file.inGraph ? '' : ' (outside scanned graph)'}`);
+  }
+  const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+  for (const entry of affected.slice(0, 30)) {
+    evidence.push(`potentially affected: ${entry.id} (distance ${entry.distance})`);
+  }
+  if (affected.length > 30) {
+    evidence.push(`…and ${affected.length - 30} more affected file(s) (truncated).`);
+  }
+  return { kind: 'review', label, evidence };
+}
+
 function commitDelegateTarget(button) {
   const meta = button.parentElement?.querySelector('.evidence')?.textContent ?? '';
   return {
@@ -1273,6 +1306,10 @@ function resolveDomDelegateTarget(node) {
   const commit = node.closest('#timeline-panel .commit');
   if (commit) {
     return commitDelegateTarget(commit);
+  }
+  const reviewPanel = node.closest('#review-panel');
+  if (reviewPanel && currentReview?.available) {
+    return reviewDelegateTarget(currentReview);
   }
   const overlayItem = node.closest('#overlay-panel li');
   if (overlayItem) {

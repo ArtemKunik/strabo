@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
+import type { ChangePassport } from './change-passport.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { TimelineCommit } from './timeline.ts';
 
@@ -60,6 +61,8 @@ export type ReviewResult =
       files: ReviewFile[];
       totals: ReviewTotals;
       impact: ReviewImpact;
+      /** Cohesion before/after for the changed files, when the caller computed it. */
+      cohesion?: ChangePassport;
     }
   | {
       available: false;
