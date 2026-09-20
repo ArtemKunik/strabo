@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
-import { impactFromPaths, type ImpactResult } from './impact.ts';
+import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { TimelineCommit } from './timeline.ts';
 
 const run = promisify(execFile);
@@ -92,6 +92,11 @@ export async function reviewCommit(
   if (!ref.trim()) {
     return { available: false, reason: 'unknown-revision', detail: 'A revision is required.' };
   }
+  if (!isSafeRevision(ref)) {
+    // Reported exactly like any other unresolvable ref — never a distinct "rejected"
+    // shape, so a probing caller learns nothing about why it failed.
+    return { available: false, reason: 'unknown-revision', detail: `Unknown revision "${ref}".` };
+  }
   try {
     await assertRepository(root);
     const commit = await getCommit(root, ref);
@@ -174,6 +179,9 @@ export async function reviewWorkingTree(root: string, graph: Graph): Promise<Rev
 
 /** Read one commit's metadata, or null when the revision does not resolve. */
 export async function getCommit(root: string, ref: string): Promise<TimelineCommit | null> {
+  if (!isSafeRevision(ref)) {
+    return null;
+  }
   try {
     const stdout = await git(root, [
       'show',

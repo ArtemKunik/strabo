@@ -165,6 +165,33 @@ test('reviewCommit reports an unknown revision without inventing changes', async
   }
 });
 
+/**
+ * `git show`/`git diff` accept `--output=<path>` as a self-contained flag, so an
+ * unvalidated revision reaching the raw argv can make the process write a file anywhere
+ * it has access to — proved against the real git binary before this test existed:
+ * `git show -s --format=%H --output=pwned.txt HEAD` really does write `pwned.txt`, even
+ * to a path outside the repository the scan ceiling would otherwise bound. This asserts
+ * the exploit payload produces no file and is reported exactly like any other
+ * unresolvable revision, not a distinct "rejected" shape a caller could probe for.
+ */
+test('reviewCommit rejects a revision shaped like a git flag rather than passing it to git', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  const target = path.join(root, 'pwned.txt');
+  const report = await scanRepository(root);
+  const result = await reviewCommit(root, report.graph, `--output=${target}`);
+
+  assert.equal(result.available, false);
+  if (!result.available) {
+    assert.equal(result.reason, 'unknown-revision');
+  }
+  assert.equal(fs.existsSync(target), false, 'the flag-shaped revision must not reach git as an argument');
+});
+
 test('reviewWorkingTree splits staged, unstaged, and untracked', async () => {
   const root = tempDir();
   fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");
@@ -221,4 +248,16 @@ test('getCommit returns null for a revision that does not resolve', async () => 
   assert.equal(await getCommit(root, 'nope'), null);
   const head = git(root, 'rev-parse', 'HEAD').trim();
   assert.equal((await getCommit(root, head))?.subject, 'init');
+});
+
+test('getCommit rejects a revision shaped like a git flag rather than passing it to git', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  const target = path.join(root, 'pwned.txt');
+  assert.equal(await getCommit(root, `--output=${target}`), null);
+  assert.equal(fs.existsSync(target), false);
 });

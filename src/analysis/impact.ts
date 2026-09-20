@@ -17,8 +17,28 @@ export interface ImpactResult {
   outsideGraph: string[];
 }
 
+/**
+ * A revision handed to a raw `git` argv must never be able to pass as an option: `git
+ * show`/`git diff` both accept `--output=<path>`, so an unvalidated `base` from an API
+ * caller can make the server write a file anywhere its process can — outside the scan
+ * ceiling entirely, since that boundary only ever governed *paths*, not this argument.
+ * No legitimate SHA, branch, tag, or relative ref (`HEAD~1`, `abc123^2`, …) starts with
+ * `-`, so rejecting one closes the class without narrowing what a real revision can be.
+ *
+ * A `--` separator does not do this safely: verified empirically before choosing this
+ * fix, it demotes the ref to a *pathspec* and git silently falls back to `HEAD` for
+ * anything that doesn't resolve, which would make an unrelated typo in `base` return
+ * HEAD's diff instead of the "unknown revision" the caller already reports for one.
+ */
+export function isSafeRevision(ref: string): boolean {
+  return !ref.startsWith('-');
+}
+
 /** Read local changes, and optionally a base-ref diff, from Git. */
 export async function getChangedFiles(root: string, baseRef?: string): Promise<ChangedFile[]> {
+  if (baseRef && !isSafeRevision(baseRef)) {
+    return [];
+  }
   const args = baseRef
     ? ['diff', '--name-status', baseRef]
     : ['status', '--porcelain'];

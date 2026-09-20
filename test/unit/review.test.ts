@@ -7,7 +7,7 @@ import { after, test } from 'node:test';
 
 import { computeCoverage } from '../../src/analysis/coverage.ts';
 import { analyzeModuleDepth } from '../../src/analysis/depth.ts';
-import { computeImpact } from '../../src/analysis/impact.ts';
+import { computeImpact, getChangedFiles } from '../../src/analysis/impact.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../src/analysis/ownership.ts';
 import { scanRepository } from '../../src/scan/scan.ts';
 import type { Graph } from '../../src/types.ts';
@@ -83,6 +83,29 @@ test('computeImpact walks reverse edges and reports distance from the change', a
       ['a.ts', 2],
     ],
   );
+});
+
+/**
+ * `git diff` accepts `--output=<path>` as a self-contained flag, so an unvalidated
+ * `baseRef` reaching the raw argv can make the process write a file anywhere it has
+ * access to — proved against the real git binary before this test existed:
+ * `git diff --name-status --output=pwned.txt` really does create `pwned.txt`, even
+ * outside the repository the scan ceiling would otherwise bound. Reported as an empty
+ * change list, matching how any other bad `baseRef` already degrades — not a distinct
+ * "rejected" shape a caller could probe for.
+ */
+test('getChangedFiles rejects a baseRef shaped like a git flag rather than passing it to git', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  const target = path.join(root, 'pwned.txt');
+  const changed = await getChangedFiles(root, `--output=${target}`);
+
+  assert.deepEqual(changed, []);
+  assert.equal(fs.existsSync(target), false, 'the flag-shaped baseRef must not reach git as an argument');
 });
 
 test('analyzeModuleDepth flags wide and pass-through modules', () => {
