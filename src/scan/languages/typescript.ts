@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic } from '../../types.ts';
+import { collectFunctionMetrics, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
@@ -102,11 +103,12 @@ export async function extractTypeScriptSymbols(
     };
 
     const addMethod = (method: CodeSymbol, value: Node): void => {
-      pushSymbol(method);
       const body = value.childForFieldName('body');
       if (body) {
+        method.metrics = collectFunctionMetrics(body, method.line, TYPESCRIPT_FUNCTION_RULES);
         methodBodies.push({ owner: method.owner, method: method.name, body, scope: value });
       }
+      pushSymbol(method);
     };
 
     /** Constructor parameter properties (`private readonly dep: Dep`) declare fields. */
@@ -326,6 +328,61 @@ export async function extractTypeScriptSymbols(
     return { symbols: sortSymbols(symbols), diagnostics, accesses };
   });
 }
+
+const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {
+  controlFlowTypes: new Set([
+    'if_statement',
+    'switch_statement',
+    'for_statement',
+    'for_in_statement',
+    'while_statement',
+    'do_statement',
+    'try_statement',
+    'catch_clause',
+  ]),
+  loopTypes: new Set(['for_statement', 'for_in_statement', 'while_statement', 'do_statement']),
+  decisionNodeTypes: new Set([
+    'if_statement',
+    'for_statement',
+    'for_in_statement',
+    'while_statement',
+    'do_statement',
+    'switch_case',
+    'switch_default',
+    'catch_clause',
+    'ternary_expression',
+  ]),
+  decisionOperators: new Set(['&&', '||', '??']),
+  statementTypes: new Set([
+    'expression_statement',
+    'lexical_declaration',
+    'variable_declaration',
+    'return_statement',
+    'throw_statement',
+    'break_statement',
+    'continue_statement',
+    'if_statement',
+    'for_statement',
+    'for_in_statement',
+    'while_statement',
+    'do_statement',
+    'switch_statement',
+    'try_statement',
+    'labeled_statement',
+    'empty_statement',
+  ]),
+  nestedFunctionTypes: new Set([
+    'function_declaration',
+    'generator_function_declaration',
+    'function_expression',
+    'arrow_function',
+    'function',
+    'method_definition',
+    'class_declaration',
+    'abstract_class_declaration',
+    'class',
+  ]),
+};
 
 const TYPESCRIPT_ACCESS: AccessRules = {
   identifierTypes: new Set(['identifier', 'shorthand_property_identifier']),

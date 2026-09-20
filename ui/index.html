@@ -14,14 +14,15 @@
     <header class="toolbar">
       <div class="tb-group tb-brand-group">
         <h1 class="brand"><span class="brand-mark" aria-hidden="true">◈</span> Strabo</h1>
-        <span class="brand-sub">repository map</span>
       </div>
       <div class="tb-group tb-repo-group" role="group" aria-label="Repository">
         <label class="control">
           <span class="control-label">Repository</span>
           <select id="repository"></select>
         </label>
-        <button id="browse" type="button" title="Browse filesystem for a repository">Choose folder…</button>
+        <button id="browse" type="button" title="Browse filesystem for a repository">
+          Choose folder…
+        </button>
         <button id="forget" type="button" disabled title="Forget this repository">Forget</button>
       </div>
       <div class="tb-group tb-view-group" role="group" aria-label="View">
@@ -33,10 +34,17 @@
           </select>
         </label>
         <label class="control control-search">
-          <span class="control-label">Filter</span>
           <span class="search-wrap">
-            <input id="filter" type="search" placeholder="path contains…  (⌘K)" autocomplete="off" />
-            <button id="filter-clear" type="button" class="search-clear" aria-label="Clear filter" hidden>×</button>
+            <input
+              id="filter"
+              type="search"
+              placeholder="Filter paths…  (⌘K)"
+              aria-label="Filter paths"
+              autocomplete="off"
+            />
+            <button id="filter-clear" type="button" class="search-clear" aria-label="Clear filter" hidden>
+              ×
+            </button>
           </span>
           <span id="filter-count" class="filter-count" aria-live="polite" hidden></span>
         </label>
@@ -53,14 +61,20 @@
           </select>
         </label>
         <button id="refresh" type="button" title="Rescan repository (bypass cache)">Refresh</button>
-        <button id="diagnostics-toggle" type="button" aria-expanded="false" aria-controls="diagnostics">
-          Diagnostics <span id="diagnostics-badge" class="diag-badge" hidden></span>
-        </button>
       </div>
+      <nav id="breadcrumb" class="breadcrumb tb-group" aria-label="Directory drill-down"></nav>
+      <span class="tb-spacer"></span>
+      <button
+        id="diagnostics-toggle"
+        type="button"
+        class="quiet-button"
+        aria-expanded="false"
+        aria-controls="diagnostics"
+      >
+        Diagnostics <span id="diagnostics-badge" class="diag-badge" hidden></span>
+      </button>
       <span id="status" class="status" role="status"></span>
     </header>
-
-    <nav id="breadcrumb" class="breadcrumb" aria-label="Directory drill-down"></nav>
 
     <main class="workspace">
       <div class="graph-wrap">
@@ -73,25 +87,69 @@
         <div id="graph-loading" class="graph-loading" hidden>
           <span class="spinner" aria-hidden="true"></span><span>Scanning repository…</span>
         </div>
+        <div id="graph-hint" class="graph-hint" hidden>
+          <p class="graph-hint-title">Reading the map</p>
+          <p class="graph-hint-body">
+            Click a node for its passport. Double-click a directory to drill in.
+            Press <kbd>?</kbd> for shortcuts.
+          </p>
+        </div>
         <div class="graph-toolbar" role="toolbar" aria-label="Graph actions">
-          <button id="tb-focus" type="button" title="Center selection (F)">Focus</button>
-          <button id="tb-impact" type="button" title="Show change impact (I)">Trace impact</button>
-          <button id="tb-path" type="button" title="Trace a path between two nodes (P)">Start path</button>
-          <button id="tb-boundaries" type="button" title="Toggle directories / files (B)">Boundaries</button>
-          <button id="tb-timeline" type="button" title="Show recorded changes (T)">Timeline</button>
-          <button id="tb-review" type="button" title="Review working tree changes (R)">Review changes</button>
-          <button id="tb-risk" type="button" title="Dependency risk: advisories and licenses (V)">Risk</button>
-          <button id="tb-clear" type="button" title="Clear selection (Esc)">Clear</button>
-          <span id="group-count" class="group-count" hidden role="status"></span>
+          <button id="tb-focus" type="button" class="tb-icon" title="Center selection (F)" aria-label="Center selection">
+            <span aria-hidden="true">◎</span>
+          </button>
+          <button id="tb-impact" type="button" class="tb-icon" title="Show change impact (I)" aria-label="Show change impact">
+            <span aria-hidden="true">⚡</span>
+          </button>
+          <button id="tb-path" type="button" class="tb-icon" title="Trace a path between two nodes (P)" aria-label="Trace a path">
+            <span aria-hidden="true">⇢</span>
+          </button>
+          <button id="tb-boundaries" type="button" class="tb-icon" title="Toggle directories / files (B)" aria-label="Toggle boundaries">
+            <span aria-hidden="true">▦</span>
+          </button>
+          <button id="tb-clear" type="button" class="tb-icon" title="Clear selection (Esc)" aria-label="Clear selection">
+            <span aria-hidden="true">✕</span>
+          </button>
+          <span class="tb-divider" aria-hidden="true"></span>
+          <span
+            id="group-count"
+            class="group-count"
+            hidden
+            aria-live="polite"
+          ></span>
           <button
             id="tb-delegate-group"
             type="button"
             hidden
             title="Delegate the selected files to an agent (G)"
           >
-            Delegate selection…
+            Delegate…
           </button>
           <span id="hover" class="graph-hover" role="status"></span>
+          <div class="tb-overflow-wrap">
+            <button
+              id="tb-overflow"
+              type="button"
+              class="tb-icon"
+              title="More actions"
+              aria-label="More actions"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <span aria-hidden="true">⋯</span>
+            </button>
+            <div id="tb-overflow-menu" class="tb-menu" role="menu" hidden>
+              <button id="tb-timeline" type="button" role="menuitem" title="Show recorded changes (T)">
+                Timeline <kbd>T</kbd>
+              </button>
+              <button id="tb-review" type="button" role="menuitem" title="Review working tree changes (R)">
+                Review changes <kbd>R</kbd>
+              </button>
+              <button id="tb-risk" type="button" role="menuitem" title="Dependency risk: advisories and licenses (V)">
+                Dependency risk <kbd>V</kbd>
+              </button>
+            </div>
+          </div>
         </div>
         <div id="tooltip" class="node-tooltip" hidden></div>
         <div class="zoom-controls" role="group" aria-label="Zoom">
@@ -99,7 +157,6 @@
           <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
           <button id="zoom-fit" type="button" aria-label="Fit to view">⤢</button>
         </div>
-        <div id="strip" class="strip" aria-label="Tests and components"></div>
       </div>
       <div id="float-layer" class="float-layer">
         <div id="overlay-panel" class="overlay-panel" hidden></div>
@@ -111,15 +168,16 @@
         <aside id="inspector" class="inspector" hidden></aside>
         <section id="member-view" class="member-view" aria-label="Member map" hidden></section>
         <aside id="diagnostics" class="diagnostics" aria-label="Scan diagnostics" hidden></aside>
+        <section id="shortcuts" class="shortcuts" aria-label="Keyboard shortcuts" hidden></section>
       </div>
-      <div id="float-dock" class="float-dock" role="toolbar" aria-label="Panels"></div>
     </main>
 
-    <footer class="statusbar">
-      <span id="statusbar-diag" class="statusbar-item"></span>
-      <span id="statusbar-legend" class="statusbar-item statusbar-legend"></span>
-      <span class="statusbar-spacer"></span>
-      <span id="statusbar-render" class="statusbar-item"></span>
+    <footer id="bottom-bar" class="bottom-bar">
+      <div id="strip" class="strip" aria-label="Tests and components"></div>
+      <div id="float-dock" class="float-dock" role="toolbar" aria-label="Panels"></div>
+      <div class="bottom-meta">
+        <span id="statusbar-legend" class="bottom-meta-item"></span>
+      </div>
     </footer>
 
     <dialog id="folder-dialog" class="dialog" aria-label="Select a repository folder">

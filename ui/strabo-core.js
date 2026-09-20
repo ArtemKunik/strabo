@@ -11,6 +11,7 @@
  */
 
 export * from './strabo-graph.js';
+export * from './strabo-islands.js';
 export * from './strabo-links.js';
 export * from './strabo-overlays.js';
 export * from './strabo-member-map.js';

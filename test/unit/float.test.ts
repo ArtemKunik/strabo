@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { sanitizeSize } from '../../ui/strabo-float.js';
+import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
   assert.deepEqual(sanitizeSize({ width: 420, height: 300 }), { width: 420, height: 300 });
@@ -22,4 +22,30 @@ test('sanitizeSize tolerates missing, null, and non-numeric values', () => {
   assert.deepEqual(sanitizeSize({}), none);
   assert.deepEqual(sanitizeSize({ width: 'wide', height: NaN }), none);
   assert.deepEqual(sanitizeSize({ width: Infinity, height: -5 }), none);
+});
+
+test('firstFreeSlotTop returns the start when the rail is empty', () => {
+  assert.equal(firstFreeSlotTop([], 300, { startTop: 96 }), 96);
+});
+
+test('firstFreeSlotTop stacks below an occupied slot instead of overlapping it', () => {
+  assert.equal(firstFreeSlotTop([{ top: 96, bottom: 356 }], 260, { startTop: 96, gap: 12 }), 368);
+});
+
+test('firstFreeSlotTop takes the first gap that fits between occupied slots', () => {
+  // A small window fits in the 60px gap before the first box, not just below both.
+  const occupied = [
+    { top: 300, bottom: 500 },
+    { top: 600, bottom: 800 },
+  ];
+  assert.equal(firstFreeSlotTop(occupied, 40, { startTop: 96, gap: 0 }), 96);
+  assert.equal(firstFreeSlotTop(occupied, 260, { startTop: 96, gap: 12 }), 812);
+});
+
+test('firstFreeSlotTop resumes below the tallest overlapping run', () => {
+  const occupied = [
+    { top: 96, bottom: 356 },
+    { top: 100, bottom: 500 },
+  ];
+  assert.equal(firstFreeSlotTop(occupied, 100, { startTop: 96, gap: 12 }), 512);
 });

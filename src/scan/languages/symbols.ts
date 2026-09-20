@@ -20,6 +20,48 @@ export interface CodeSymbol {
   mutable?: boolean;
   parameters?: number;
   line: number;
+  /** Body measurements for a function or method; absent for data members and signatures. */
+  metrics?: FunctionMetrics;
+}
+
+/**
+ * Deterministic measurements of one function body, counted from the parse tree.
+ *
+ * These are signals, not verdicts: `decisionPoints` is a cyclomatic-complexity proxy and
+ * `statementCount` a language-specific approximation. A function whose body the extractor
+ * could not read carries no `metrics` rather than a fabricated zero.
+ */
+export interface FunctionMetrics {
+  /** 1-based line of the end of the body. */
+  endLine: number;
+  /** Declaration line through the end of the body, inclusive. */
+  lines: number;
+  /** Named body statements; an approximation, not a token count. */
+  statementCount: number;
+  /** Cyclomatic-complexity proxy: starts at 1 and adds one per branching site. */
+  decisionPoints: number;
+  /** Deepest nesting of block control-flow constructs inside the body. */
+  maxNestingDepth: number;
+  /** Loop constructs in the body. */
+  loops: number;
+}
+
+/**
+ * A recorded call from inside a function body.
+ *
+ * Only calls the scan can prove are recorded: an intra-file `this.x()` / `self.x()` /
+ * `Type.x()` or a bare `x()` whose name resolves to a function declared in the same file.
+ * Cross-file and dynamic calls are not claimed.
+ */
+export interface FunctionCall {
+  /** The called name as authored. */
+  callee: string;
+  /** Enclosing type of the caller, or empty for a module function. */
+  owner: string;
+  /** Name of the calling function. */
+  method: string;
+  kind: 'bare' | 'self' | 'type-qualified';
+  line: number;
 }
 
 /**
@@ -43,6 +85,8 @@ export interface SymbolExtraction {
   diagnostics: Diagnostic[];
   /** Field references recorded in method bodies; empty when the language records none. */
   accesses?: MemberAccess[];
+  /** Intra-file calls recorded in method bodies; empty when the language records none. */
+  calls?: FunctionCall[];
 }
 
 /** Language-specific node rules used to find field references in a method body. */

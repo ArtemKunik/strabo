@@ -101,14 +101,19 @@ Then('the legend explains size, colour, and shape', async function () {
  * map.
  */
 Then('the status bar names the renderer the map is drawing with', async function () {
-  const text = (await this.page.textContent('#statusbar-render')) ?? '';
+  await this.page.evaluate(() => {
+    if (document.getElementById('diagnostics')?.hidden) {
+      document.getElementById('diagnostics-toggle')?.click();
+    }
+  });
+  const text = (await this.page.textContent('#diagnostics')) ?? '';
   const claimed = /renderer: (webgl2|canvas)/.exec(text);
-  assert.ok(claimed, `status bar "${text}" should name a renderer`);
+  assert.ok(claimed, `diagnostics "${text}" should name a renderer`);
 
   const drawing = await this.page.evaluate(() =>
     (window.straboTest?.cy.renderer().webgl ? 'webgl2' : 'canvas'),
   );
-  assert.equal(claimed[1], drawing, 'the status bar should name the renderer in use');
+  assert.equal(claimed[1], drawing, 'the diagnostics panel should name the renderer in use');
 });
 
 Then('the blast radius is reported for {string}', async function (id) {

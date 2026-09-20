@@ -310,7 +310,14 @@ Then('the change passport reports a cohesion delta', async function () {
 Then('the status line reports nodes and a cache status', async function () {
   const status = (await this.page.textContent('#status')) ?? '';
   assert.match(status, /\d+ nodes . \d+ edges/);
-  assert.match(status, CACHE_STATUS);
+  // Cache/renderer vocabulary lives in Diagnostics, not the header.
+  await this.page.evaluate(() => {
+    if (document.getElementById('diagnostics')?.hidden) {
+      document.getElementById('diagnostics-toggle')?.click();
+    }
+  });
+  const diagnostics = (await this.page.textContent('#diagnostics')) ?? '';
+  assert.match(diagnostics, CACHE_STATUS);
 });
 
 Then('the graph contains the directory block {string}', async function (id) {
@@ -356,8 +363,14 @@ Then('the diagnostics panel reports counts', async function () {
 });
 
 Then('the status line reports cache status {string}', async function (status) {
+  await this.page.evaluate(() => {
+    if (document.getElementById('diagnostics')?.hidden) {
+      document.getElementById('diagnostics-toggle')?.click();
+    }
+  });
   await this.page.waitForFunction(
-    (expected) => (document.getElementById('status')?.textContent ?? '').includes(`cache: ${expected}`),
+    (expected) =>
+      (document.getElementById('diagnostics')?.textContent ?? '').includes(`cache: ${expected}`),
     status,
     { timeout: 20_000 },
   );
@@ -375,4 +388,42 @@ Then('the graph endpoint still responds', async function () {
   assert.equal(response.ok, true);
   const body = await response.json();
   assert.ok(body.nodes.length > 0);
+});
+
+Then('the map draws no directory islands', async function () {
+  const directories = await this.page.evaluate(() => window.straboTest.islands());
+  assert.deepEqual(directories, [], 'block mode aggregates directories into nodes already');
+  assert.equal(await this.page.locator('.island-plate').count(), 0);
+});
+
+Then('the map draws a directory island for {string}', async function (directory) {
+  const directories = await this.page.evaluate(() => window.straboTest.islands());
+  assert.ok(
+    directories.includes(directory),
+    `expected an island for ${directory}, got ${directories.join(', ')}`,
+  );
+});
+
+Then('every directory island has a plate on the canvas', async function () {
+  const directories = await this.page.evaluate(() => window.straboTest.islands());
+  assert.equal(await this.page.locator('.island-plate').count(), directories.length);
+});
+
+/*
+ * A plate too small to hold its name drops the label rather than overflowing onto the
+ * neighbouring island, and a label wider than its plate is trimmed to the tail, so the
+ * contract is that every label drawn names a directory that is drawn — not that every
+ * island carries one.
+ */
+Then('every island label names a drawn directory', async function () {
+  const directories = await this.page.evaluate(() => window.straboTest.islands());
+  const names = directories.map((directory) => (directory === '.' ? '/' : directory));
+  const labels = await this.page.locator('.island-label:not(.is-hidden)').allTextContents();
+  assert.ok(labels.length > 0, 'the fixture has islands wide enough to name');
+  for (const label of labels) {
+    const matches = label.startsWith('…')
+      ? names.some((name) => name.endsWith(label.slice(1)))
+      : names.includes(label);
+    assert.ok(matches, `label ${label} matches no drawn directory in ${names.join(', ')}`);
+  }
 });
