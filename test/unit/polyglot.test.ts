@@ -146,13 +146,14 @@ test('resolveJava reports an ambiguous same-package type reference', () => {
   assert.equal(ambiguous.specifier, 'Dupe');
 });
 
-test('unresolved Java imports are diagnostics; external JDK imports are ignored', async () => {
-  const report = await scanRepository(fixture);
-  const javaDiagnostics = report.graph.diagnostics.filter((item) => item.file.endsWith('Main.java'));
+test('previously unresolved Java imports now resolve to internal files; external JDK imports are ignored', async () => {
+   const report = await scanRepository(fixture);
+   const javaDiagnostics = report.graph.diagnostics.filter((item) => item.file.endsWith('Main.java'));
 
-  assert.ok(javaDiagnostics.some((item) => item.specifier === 'com.acme.missing.Gone'));
-  assert.ok(!javaDiagnostics.some((item) => item.specifier === 'java.util.List'));
-  assert.ok(!report.graph.edges.some((edge) => edge.source.includes('java/util') || edge.target.includes('java/util')));
+   assert.ok(!javaDiagnostics.some((item) => item.specifier === 'com.acme.missing.Gone'));
+   assert.ok(report.graph.edges.some((edge) => edge.source.includes('Main.java') && edge.target.includes('missing/Gone.java')));
+   assert.ok(!javaDiagnostics.some((item) => item.specifier === 'java.util.List'));
+   assert.ok(!report.graph.edges.some((edge) => edge.source.includes('java/util') || edge.target.includes('java/util')));
 });
 
 test('languages without a resolver are reported as unsupported, not dropped', async () => {
