@@ -109,6 +109,29 @@ test('the symbol and file-health endpoints serve SQL members and mark cohesion u
   assert.match(cohesion?.detail ?? '', /not measured: sql members have no methods/);
 });
 
+test('the symbol endpoint serves the function inventory with body metrics', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const file = 'src/main/kotlin/com/acme/app/Counter.kt';
+  const query = `repository=${encodeURIComponent(path.join(fixtures, 'member-repo'))}&file=${encodeURIComponent(file)}`;
+
+  const body = (await (await fetch(`${base}/api/strabo/symbols?${query}`)).json()) as {
+    available: boolean;
+    functions: {
+      available: boolean;
+      functions: Array<{ name: string; metrics?: { decisionPoints: number } }>;
+    };
+  };
+  assert.equal(body.available, true);
+  assert.equal(body.functions.available, true);
+  assert.deepEqual(
+    body.functions.functions.map((fn) => fn.name),
+    ['add', 'reset', 'fail'],
+  );
+  assert.ok(body.functions.functions.every((fn) => (fn.metrics?.decisionPoints ?? 0) >= 1));
+});
+
 test('the repository store seeds the configured root and remembers a selection', async () => {
   const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}.json`);
   const store = createRepositoryStore({ file });

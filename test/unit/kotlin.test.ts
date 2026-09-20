@@ -178,6 +178,51 @@ test('extractKotlinSymbols records field reads and writes inside function bodies
   );
 });
 
+test('extractKotlinSymbols records body metrics and leaves a declaration without them', async () => {
+  const source = [
+    'class A {',
+    '  fun f(xs: List<Int>): Int {',
+    '    var t = 0',
+    '    for (x in xs) {',
+    '      if (x > 0 && x % 2 == 0) {',
+    '        t += x',
+    '      }',
+    '    }',
+    '    return if (t > 0) t else 0',
+    '  }',
+    '  fun sig(x: Int): Int',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractKotlinSymbols('A.kt', source);
+  const byName = new Map(symbols.map((symbol) => [symbol.name, symbol]));
+  assert.equal(byName.get('f')?.metrics?.endLine, 10);
+  assert.equal(byName.get('f')?.metrics?.lines, 9);
+  assert.equal(byName.get('f')?.metrics?.loops, 1);
+  assert.equal(byName.get('f')?.metrics?.maxNestingDepth, 2);
+  assert.equal(byName.get('f')?.metrics?.decisionPoints, 5);
+  assert.equal(byName.get('sig')?.metrics, undefined);
+});
+
+test('extractKotlinSymbols records intra-file calls and flags recursion', async () => {
+  const source = [
+    'class A {',
+    '  fun run() { helper(); this.two(); A.three(); x.four() }',
+    '  fun helper() {}',
+    '  fun two() {}',
+    '  companion object { fun three() {} }',
+    '  fun rec() { rec() }',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractKotlinSymbols('A.kt', source);
+  const run = calls.filter((call) => call.method === 'run').map((call) => `${call.callee}:${call.kind}`);
+  assert.deepEqual(run.sort(), ['helper:bare', 'three:type-qualified', 'two:self']);
+  assert.equal(calls.some((call) => call.callee === 'four'), false);
+  const rec = symbols.find((symbol) => symbol.name === 'rec');
+  assert.equal(rec?.metrics?.recursive, true);
+});
+
 test('Kotlin edges are deterministic across scans', async () => {
   const first = await scanRepository(fixture);
   const second = await scanRepository(fixture);

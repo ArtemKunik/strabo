@@ -44,6 +44,8 @@ export interface FunctionMetrics {
   maxNestingDepth: number;
   /** Loop constructs in the body. */
   loops: number;
+  /** True when the body calls the function it belongs to. */
+  recursive: boolean;
 }
 
 /**
@@ -61,6 +63,14 @@ export interface FunctionCall {
   /** Name of the calling function. */
   method: string;
   kind: 'bare' | 'self' | 'type-qualified';
+  /** The receiver as authored for `self`/type-qualified calls; absent for a bare call. */
+  receiver?: string;
+  /**
+   * The type that declares the callee, when the call syntax proves it (`this`/`self` or a
+   * type-qualified receiver). Absent for a bare call, which may name a module function or a
+   * method of the caller's own type.
+   */
+  targetOwner?: string;
   line: number;
 }
 
@@ -99,6 +109,19 @@ export interface AccessRules {
   selfAccess: (node: Node) => { field: string; fieldNode: Node } | null;
   /** Names declared inside the body (parameters, locals) that shadow a field. */
   declaredNames: (body: Node) => Set<string>;
+}
+
+/** Language-specific node rules used to resolve a call site to a same-file function. */
+export interface CallRules {
+  /** Node types that represent an invocation. */
+  callTypes: Set<string>;
+  /**
+   * Resolve a call node to its callee, or null when the target is not provable.
+   *
+   * A member call on a value (`obj.method()`) returns null: the receiver's type is not
+   * known, so the target file is not claimed.
+   */
+  callTarget: (node: Node) => { name: string; kind: FunctionCall['kind']; receiver?: string } | null;
 }
 
 export function sortSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
@@ -164,6 +187,83 @@ export function collectMemberAccesses(
   });
 
   return accesses;
+}
+
+/**
+ * Collect the calls inside one function body that resolve to a function in the same file.
+ *
+ * `declared` is every function name the file declares; `types` is every type name it
+ * declares. A bare call or a `this`/`self` call is recorded when its name is declared. A
+ * type-qualified call (`Type.x()`) also needs its receiver to be a type declared here (or
+ * the current owner, for `Self.x()`), so `Other.doThing()` is never claimed as local.
+ */
+export function collectFunctionCalls(
+  body: Node,
+  declared: Set<string>,
+  types: Set<string>,
+  owner: string,
+  method: string,
+  rules: CallRules,
+): FunctionCall[] {
+  if (declared.size === 0) {
+    return [];
+  }
+  const calls: FunctionCall[] = [];
+  const seen = new Set<string>();
+
+  walkNodes(body, (node) => {
+    if (!rules.callTypes.has(node.type)) {
+      return;
+    }
+    const target = rules.callTarget(node);
+    if (!target || !declared.has(target.name)) {
+      return;
+    }
+    if (target.kind === 'type-qualified') {
+      const receiver = target.receiver;
+      if (!receiver) {
+        return;
+      }
+      if (receiver === 'Self') {
+        if (!owner) {
+          return;
+        }
+      } else if (receiver !== owner && !types.has(receiver)) {
+        return;
+      }
+    }
+    const key = `${target.name}\u0000${target.kind}\u0000${node.startPosition.row}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const declaring = targetOwner(target, owner);
+    calls.push({
+      callee: target.name,
+      owner,
+      method,
+      kind: target.kind,
+      ...(target.receiver ? { receiver: target.receiver } : {}),
+      ...(declaring !== undefined ? { targetOwner: declaring } : {}),
+      line: node.startPosition.row + 1,
+    });
+  });
+
+  return calls;
+}
+
+/** The declaring type a call proves, or undefined when the syntax does not name one. */
+function targetOwner(
+  target: { kind: FunctionCall['kind']; receiver?: string },
+  owner: string,
+): string | undefined {
+  if (target.kind === 'bare') {
+    return undefined;
+  }
+  if (target.kind === 'self') {
+    return owner;
+  }
+  return target.receiver === 'Self' ? owner : target.receiver;
 }
 
 /**
