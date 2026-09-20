@@ -6,6 +6,8 @@ import { computeChangePassport } from '../../analysis/change-passport.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
+import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
+import { rankHotspots } from '../../analysis/hotspots.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
@@ -130,7 +132,56 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     }
   });
 
-router.get('/analysis/timeline', async (request, response) => {
+  /**
+   * Repository-wide function hotspots.
+   *
+   * Symbol extraction is on demand, so this extracts every supported source file in the
+   * graph (bounded), derives each function's signals, and ranks them. Files without an
+   * extractor, or that cannot be read, are counted as skipped rather than silently dropped.
+   */
+  router.get('/analysis/functions', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const limit = parsePositiveInt(request.query.limit, 50) ?? 50;
+      const scannedCeiling = 400;
+
+      const candidates = cached.report.graph.nodes
+        .map((node) => node.id)
+        .filter((file) => symbolExtractorFor(file) !== null)
+        .sort();
+      const selected = candidates.slice(0, scannedCeiling);
+
+      const reports: FunctionsReport[] = [];
+      let skipped = candidates.length - selected.length;
+      for (const file of selected) {
+        const extractor = symbolExtractorFor(file);
+        if (!extractor) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
+          const result = await extractor.extract(file, content);
+          reports.push(buildFunctions(file, result.symbols, result.calls ?? []));
+        } catch {
+          skipped += 1;
+        }
+      }
+
+      response.json(
+        rankHotspots(reports, {
+          limit,
+          filesScanned: selected.length,
+          filesSkipped: skipped,
+        }),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.get('/analysis/timeline', async (request, response) => {
      try {
        const repository = resolve(request);
        const limit = parsePositiveInt(request.query.limit, 100);

@@ -146,6 +146,7 @@ test('extractTypeScriptSymbols records function body metrics', async () => {
   assert.equal(fn?.metrics?.endLine, 9);
   assert.equal(fn?.metrics?.lines, 9);
   assert.equal(fn?.metrics?.loops, 1);
+  assert.equal(fn?.metrics?.loopNestingDepth, 1);
   assert.equal(fn?.metrics?.maxNestingDepth, 2);
   // 1 (base) + for + if + `&&` + ternary.
   assert.equal(fn?.metrics?.decisionPoints, 5);

@@ -544,6 +544,10 @@ const JAVA_FUNCTION_RULES: FunctionRules = {
     'ternary_expression',
   ]),
   decisionOperators: new Set(['&&', '||']),
+  callTypes: new Set(['method_invocation']),
+  callTargetName: (node) => node.childForFieldName('name')?.text ?? null,
+  linearScanCalls: new Set(['contains', 'indexof', 'lastindexof']),
+  sortCalls: new Set(['sort']),
   statementTypes: new Set([
     'local_variable_declaration',
     'expression_statement',

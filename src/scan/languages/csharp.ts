@@ -475,6 +475,32 @@ const CSHARP_FUNCTION_RULES: FunctionRules = {
     'conditional_expression',
   ]),
   decisionOperators: new Set(['&&', '||', '??']),
+  callTypes: new Set(['invocation_expression']),
+  callTargetName: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return fn.text;
+    }
+    if (fn.type === 'member_access_expression') {
+      return fn.childForFieldName('name')?.text ?? null;
+    }
+    return null;
+  },
+  linearScanCalls: new Set([
+    'contains',
+    'indexof',
+    'lastindexof',
+    'find',
+    'findindex',
+    'where',
+    'any',
+    'all',
+    'count',
+  ]),
+  sortCalls: new Set(['sort', 'orderby', 'orderbydescending', 'thenby']),
   statementTypes: new Set([
     'local_declaration_statement',
     'expression_statement',

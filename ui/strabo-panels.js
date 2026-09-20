@@ -34,6 +34,14 @@ import {
   shortcutSheet,
   summarizeDiagnostics,
 } from './strabo-core.js';
+import {
+  functionCallers,
+  functionCalls,
+  functionLabel,
+  functionMetrics,
+  functionSignature,
+  functionSignals,
+} from './strabo-functions.js';
 import { Fragment, h, host, mount } from './view.js';
 
 /** The Module Passport for the selected node. */
@@ -132,10 +140,21 @@ export function renderInspector(container, model, id, handlers = {}) {
   const depsSection = listSection('Dependencies', id, passport.imports, handlers);
   const dependentsSection = listSection('Dependents', id, passport.usedBy, handlers);
 
+  const functions = document.createElement('section');
+  functions.dataset.role = 'functions';
+  const functionsTitle = document.createElement('h3');
+  functionsTitle.textContent = 'Functions';
+  functions.append(functionsTitle);
+  const functionsBody = document.createElement('p');
+  functionsBody.className = 'unavailable';
+  functionsBody.textContent = 'Loading functions…';
+  functions.append(functionsBody);
+
   const tabDefs = [
     ['deps', `Dependencies (${passport.imports.length})`, depsSection],
     ['dependents', `Dependents (${passport.usedBy.length})`, dependentsSection],
     ['members', 'Members', members],
+    ['functions', 'Functions', functions],
   ];
   const tabButtons = [];
   for (const [key, label, section] of tabDefs) {
@@ -260,6 +279,83 @@ export function renderMembers(container, result) {
   }
 
   container.append(renderDataFlow(memberMap?.dataFlow));
+}
+
+/**
+ * Render the function inventory: signature, body metrics, and recorded call relationships.
+ *
+ * A language without a function extractor says so; a file with no functions says so. A
+ * function whose body was not read shows `signature only`, and a function with no recorded
+ * calls or callers says so rather than showing an empty list.
+ */
+export function renderFunctions(container, result) {
+  container.replaceChildren();
+  const report = result?.functions;
+  const title = document.createElement('h3');
+  title.textContent = `Functions (${report?.functions?.length ?? 0})`;
+  container.append(title);
+
+  if (!result || result.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = result?.detail ?? 'Functions are not recorded for this file.';
+    container.append(note);
+    return;
+  }
+  if (!report || report.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = report?.detail ?? 'Functions are not recorded for this file.';
+    container.append(note);
+    return;
+  }
+  if (report.functions.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = 'No functions declared.';
+    container.append(note);
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'function-list';
+  for (const entry of report.functions) {
+    const item = document.createElement('li');
+    item.className = 'function-entry';
+
+    const name = document.createElement('div');
+    name.className = 'function-name';
+    name.textContent = functionLabel(entry);
+    item.append(name);
+
+    const signature = document.createElement('code');
+    signature.className = 'function-signature';
+    signature.textContent = functionSignature(entry);
+    item.append(signature);
+
+    const metrics = document.createElement('div');
+    metrics.className = 'function-metrics';
+    metrics.textContent = functionMetrics(entry);
+    item.append(metrics);
+
+    const calls = document.createElement('div');
+    calls.className = 'function-calls';
+    calls.textContent = `calls: ${functionCalls(entry)}`;
+    item.append(calls);
+
+    const callers = document.createElement('div');
+    callers.className = 'function-callers';
+    callers.textContent = `called by: ${functionCallers(entry)}`;
+    item.append(callers);
+
+    const signals = document.createElement('div');
+    signals.className = 'function-signals';
+    signals.textContent = `signals: ${functionSignals(entry)}`;
+    item.append(signals);
+
+    list.append(item);
+  }
+  container.append(list);
 }
 
 function renderMemberType(type) {

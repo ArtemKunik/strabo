@@ -366,6 +366,30 @@ const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {
     'ternary_expression',
   ]),
   decisionOperators: new Set(['&&', '||', '??']),
+  callTypes: new Set(['call_expression']),
+  callTargetName: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return fn.text;
+    }
+    return fn.type === 'member_expression'
+      ? (fn.childForFieldName('property')?.text ?? null)
+      : null;
+  },
+  linearScanCalls: new Set([
+    'includes',
+    'indexof',
+    'lastindexof',
+    'find',
+    'findindex',
+    'some',
+    'every',
+    'filter',
+  ]),
+  sortCalls: new Set(['sort', 'tosorted']),
   statementTypes: new Set([
     'expression_statement',
     'lexical_declaration',

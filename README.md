@@ -160,6 +160,7 @@ Files mode because the analyses are per file.
 | Cycles | `/analysis/cycles` | Files in circular coupling (strongly connected components) |
 | Test reach | `/analysis/test-reach` | Modules something depends on that no test reaches |
 | Architecture health | `/analysis/architecture-health` | Heuristic axes (cohesion, low coupling, low fan-out, low complexity, coverage), each with the values it came from |
+| Function hotspots | `/analysis/functions` | Functions whose recorded metrics cross a fixed threshold (nested loops, deep nesting, high complexity, long body, many parameters, recursion), ranked worst-first |
 
 Also exposed but not yet surfaced in the UI: `/analysis/module-depth` and
 `/analysis/ownership`.
@@ -320,7 +321,11 @@ The **Functions** tab lists every function and method with its signature, source
 decision-point count (a cyclomatic proxy), nesting depth, loop count, and whether it calls
 itself, plus the calls that resolve inside the same file. A language without a symbol
 extractor reports that extraction is not implemented, and a function whose body was not read
-shows `signature only` rather than a fabricated zero.
+shows `signature only` rather than a fabricated zero. The same recorded metrics drive
+deterministic cost signals (nested loops, a linear scan or sort inside a loop, deep nesting,
+high complexity, long body, many parameters, recursion); the **Function hotspots** review
+overlay ranks the functions that trip at least one and marks the files that carry them. Each
+signal names the recorded value and threshold, so it points at evidence rather than a verdict.
 
 Selecting an edge opens **Edge evidence**: the relationship kind, the recorded specifier and
 line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorded fields read

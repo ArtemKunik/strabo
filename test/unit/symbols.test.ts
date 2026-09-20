@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { extractCSharpSymbols } from '../../src/scan/languages/csharp.ts';
 import { extractJavaSymbols } from '../../src/scan/languages/java.ts';
 import { extractRustSymbols } from '../../src/scan/languages/rust.ts';
-import type { CodeSymbol } from '../../src/scan/languages/symbols.ts';
+import { type CodeSymbol, sortSymbols } from '../../src/scan/languages/symbols.ts';
 
 function byName(symbols: CodeSymbol[]): Map<string, CodeSymbol> {
   return new Map(symbols.map((symbol) => [symbol.name, symbol]));
@@ -113,6 +113,42 @@ test('extractJavaSymbols records field reads and writes inside method bodies', a
     (accesses ?? []).some((entry) => entry.method === 'shadow'),
     false,
     'a parameter shadows the field, so no access is recorded',
+  );
+});
+
+test('a qualified reference wins for a field and mode, whatever order the walk sees', async () => {
+  const source = [
+    'package com.acme;',
+    'public class Main {',
+    '  private int count = 0;',
+    '  public int bump() {',
+    '    int before = count;',
+    '    this.count = before + 1;',
+    '    return this.count - before;',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const { accesses } = await extractJavaSymbols('Main.java', source);
+  const read = (accesses ?? []).find((entry) => entry.field === 'count' && entry.mode === 'read');
+  assert.equal(read?.qualified, true, 'a bare read followed by this.count is still qualified');
+});
+
+test('sortSymbols returns a sorted copy and leaves its argument untouched', () => {
+  const symbols: CodeSymbol[] = [
+    { name: 'b', kind: 'method', visibility: 'public', owner: '', line: 2 },
+    { name: 'a', kind: 'method', visibility: 'public', owner: '', line: 1 },
+  ];
+
+  const sorted = sortSymbols(symbols);
+  assert.deepEqual(
+    sorted.map((symbol) => symbol.name),
+    ['a', 'b'],
+  );
+  assert.deepEqual(
+    symbols.map((symbol) => symbol.name),
+    ['b', 'a'],
+    'the input array is not reordered in place',
   );
 });
 

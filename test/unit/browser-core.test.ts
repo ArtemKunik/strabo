@@ -46,6 +46,14 @@ import {
   summarizeDiagnostics,
   topLevelDirectory,
 } from '../../ui/strabo-core.js';
+import {
+  functionCallers,
+  functionCalls,
+  functionLabel,
+  functionMetrics,
+  functionSignature,
+  functionSignals,
+} from '../../ui/strabo-functions.js';
 
 const model = {
   repository: { name: 'demo', root: '/demo', gitUrl: 'git@github.com:owner/demo.git' },
@@ -240,6 +248,33 @@ test('overlayFor reports architecture health as a repository-level summary', () 
   ]);
 });
 
+test('overlayFor maps function hotspots onto their files with their signals', () => {
+  const overlay = overlayFor('hotspots', {
+    filesScanned: 12,
+    filesSkipped: 2,
+    hotspots: [
+      {
+        file: 'src/scan.ts',
+        owner: 'scan',
+        name: 'walk',
+        line: 4,
+        signals: [
+          { kind: 'nested-loops', line: 4, detail: 'loop nesting 2' },
+          { kind: 'long-function', line: 4, detail: '60 lines' },
+        ],
+      },
+      { file: 'src/scan.ts', owner: 'scan', name: 'other', line: 90, signals: [{ kind: 'recursion', line: 90, detail: 'calls itself' }] },
+    ],
+  });
+
+  assert.deepEqual([...overlay.classes.entries()], [['src/scan.ts', 'ov-hotspot']]);
+  assert.equal(overlay.summary, '2 hotspot(s) · 12 file(s) scanned · 2 skipped');
+  assert.deepEqual(overlay.items, [
+    'src/scan.ts · scan.walk (L4) · nested-loops, long-function',
+    'src/scan.ts · scan.other (L90) · recursion',
+  ]);
+});
+
 test('nodes in the same top-level directory share a colour', () => {
   const { nodes } = buildElements({
     nodes: [
@@ -301,7 +336,6 @@ test('passportFor reports metrics, imports, and used-by from evidence', () => {
     ],
   );
   assert.deepEqual(passport.usedBy.map((entry) => entry.id).sort(), ['src/index.ts']);
-  assert.equal(passport.functions, null);
 });
 
 test('mapCounts groups by directory and kind for the strip', () => {
@@ -710,4 +744,56 @@ test('buildAgentPrompt degrades an empty group and truncates a huge one', () => 
   });
   assert.match(many, /### …and 15 more file\(s\) \(not detailed\)/);
   assert.match(many, /src\/f44\.ts/);
+});
+
+test('functionLabel and functionSignature describe a recorded function', () => {
+  assert.equal(functionLabel({ owner: 'Counter', name: 'add' }), 'Counter.add');
+  assert.equal(functionLabel({ owner: '', name: 'util' }), 'util');
+  assert.equal(
+    functionSignature({ name: 'add', visibility: 'public', parameters: 1, type: 'void' }),
+    'public add(1 param): void',
+  );
+  assert.equal(functionSignature({ name: 'reset', visibility: 'private', parameters: 0 }), 'private reset(0 params)');
+});
+
+test('functionMetrics reports body measurements or a signature without a body', () => {
+  const withBody = functionMetrics({
+    line: 3,
+    metrics: {
+      endLine: 7,
+      lines: 5,
+      statementCount: 3,
+      decisionPoints: 2,
+      maxNestingDepth: 1,
+      loops: 1,
+      recursive: true,
+    },
+  });
+  assert.match(withBody, /L3-7/);
+  assert.match(withBody, /complexity 2/);
+  assert.match(withBody, /recursive/);
+  assert.equal(functionMetrics({ line: 9, metrics: undefined }), 'signature only; no body recorded');
+});
+
+test('functionCalls and functionCallers state the absence of wiring instead of an empty list', () => {
+  assert.equal(functionCalls({ calls: [] }), 'no same-file calls recorded');
+  assert.equal(functionCallers({ callers: [] }), 'no callers recorded in this file');
+  assert.equal(
+    functionCalls({ calls: [{ name: 'helper', line: 3 }, { name: 'util', line: 4 }] }),
+    'helper (L3), util (L4)',
+  );
+  assert.equal(functionCallers({ callers: ['A.run', 'A.branchy'] }), 'A.run, A.branchy');
+});
+
+test('functionSignals lists the recorded cost signals or says there are none', () => {
+  assert.equal(functionSignals({ signals: [] }), 'no cost signals');
+  assert.equal(
+    functionSignals({
+      signals: [
+        { kind: 'nested-loops', detail: 'loop nesting 2 (threshold 2)' },
+        { kind: 'recursion', detail: 'calls itself' },
+      ],
+    }),
+    'nested-loops (loop nesting 2 (threshold 2)); recursion (calls itself)',
+  );
 });
