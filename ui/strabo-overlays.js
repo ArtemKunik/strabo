@@ -113,17 +113,6 @@ export function riskSummary(report) {
   return `${inventory.total} dependencies · ${severity}${denied}${offline}`;
 }
 
-/** The worst severity present in a set of advisories, for the panel's accent. */
-export function worstSeverity(advisories) {
-  let worst = 'none';
-  for (const advisory of advisories ?? []) {
-    if (SEVERITY_ORDER.indexOf(advisory.severity) > SEVERITY_ORDER.indexOf(worst)) {
-      worst = advisory.severity;
-    }
-  }
-  return worst;
-}
-
 /**
  * Map a review analysis result onto node classes and a panel summary.
  *

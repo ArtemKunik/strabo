@@ -1010,14 +1010,6 @@ function unavailableNote(text) {
   return note;
 }
 
-function controlRow(label, control) {
-  const wrap = document.createElement('label');
-  wrap.className = 'member-control';
-  wrap.append(label);
-  wrap.append(control);
-  return wrap;
-}
-
 function button(id, text, handler, className = '') {
   const element = document.createElement('button');
   element.type = 'button';

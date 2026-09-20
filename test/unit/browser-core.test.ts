@@ -13,7 +13,6 @@ import {
   constellationLayout,
   constellationPoints,
   diameter,
-  drillTarget,
   edgeEvidenceFor,
   explainClass,
   fieldCard,
@@ -39,7 +38,6 @@ import {
   polygonPoints,
   radarFrame,
   radarPoints,
-  resolutionLabel,
   reviewFileLabel,
   reviewGroups,
   reviewOverlay,
@@ -138,14 +136,6 @@ test('neighbourhood and findPath report connections or no path explicitly', () =
     'src/util.ts',
   ]);
   assert.equal(findPath(model, 'src/util.ts', 'src/feature.test.ts'), null);
-});
-
-test('drillTarget drills one segment in block mode and opens files in file mode', () => {
-  const block = drillTarget({ mode: 'block', depth: 1, prefix: '' }, 'src');
-  assert.equal(block.prefix, 'src');
-
-  const file = drillTarget({ mode: 'file' }, 'src/index.ts');
-  assert.equal(file.file, 'src/index.ts');
 });
 
 test('breadcrumb starts at the repository and grows with the prefix', () => {
@@ -315,8 +305,10 @@ test('edgeEvidenceFor maps resolution codes to readable labels and hides unknown
 
   assert.equal(edgeEvidenceFor(model, 'e99'), null);
   assert.equal(edgeEvidenceFor({ edges: [] }, 'e0'), null);
-  assert.equal(resolutionLabel('module-tree'), 'module tree');
-  assert.equal(resolutionLabel(undefined), 'not recorded');
+  const moduleTree = {
+    edges: [{ source: 'a.ts', target: 'b.ts', kind: 'import', evidence: { resolution: 'module-tree' } }],
+  };
+  assert.equal(edgeEvidenceFor(moduleTree, 'e0')?.resolutionLabel, 'module tree');
 });
 
 test('folderLocation explains the scan ceiling when Up is disabled', () => {

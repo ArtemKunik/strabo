@@ -263,19 +263,6 @@ export function findPath(model, from, to, maxHops = 12) {
   return null;
 }
 
-/**
- * What a double-click means.
- *
- * In block mode, drill one path segment deeper by using the block id as the prefix.
- * In file mode, there is nothing to roll up: the caller opens the file.
- */
-export function drillTarget(state, id) {
-  if (state.mode === 'block') {
-    return { ...state, prefix: id, refresh: false };
-  }
-  return { ...state, file: id };
-}
-
 /** Breadcrumb segments for the current block prefix, root last. */
 export function breadcrumb(state) {
   if (state.mode !== 'block') {
@@ -352,10 +339,6 @@ const RESOLUTION_LABELS = {
   root: 'repo root',
   'subpath-import': 'package subpath',
 };
-
-export function resolutionLabel(resolution) {
-  return RESOLUTION_LABELS[resolution] ?? 'not recorded';
-}
 
 /** Counts used by the status line. */
 export function graphSummary(model) {

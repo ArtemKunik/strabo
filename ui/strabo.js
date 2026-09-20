@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -29,7 +29,7 @@ import {
   renderTestsStrip,
   renderTimeline,
 } from './strabo-panels.js';
-import { neighbourhood } from './strabo-selection.js';
+import { findPath, neighbourhood } from './strabo-selection.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 

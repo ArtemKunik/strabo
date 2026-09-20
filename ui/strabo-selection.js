@@ -5,4 +5,4 @@
  * documented boundary so the controller delegates here rather than to core directly.
  */
 
-export { adjacency, neighbourhood, findPath } from './strabo-core.js';
+export { neighbourhood, findPath } from './strabo-core.js';
