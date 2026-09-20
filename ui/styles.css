@@ -702,6 +702,22 @@ button.primary {
   display: none;
 }
 
+.float-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--ink-3) 50% 58%, transparent 58% 66%, var(--ink-3) 66% 74%, transparent 74%);
+}
+
+.float-window.is-collapsed .float-resize {
+  display: none;
+}
+
 /* The window header owns the close affordance, so dismiss buttons inside a body are moot. */
 .float-window .panel-dismiss {
   display: none;

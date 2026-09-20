@@ -1,16 +1,19 @@
 /**
- * Floating, draggable, collapsible windows for Strabo's auxiliary panels.
+ * Floating, draggable, resizable, collapsible windows for Strabo's auxiliary panels.
  *
  * Panels keep their own ids and `hidden` semantics: the controller still toggles
- * `element.hidden`, and each window mirrors it through a MutationObserver. Position and
- * collapsed state are remembered per panel in localStorage so a layout survives reloads.
- * Each window is mirrored by a chip in the dock, which restores a closed or collapsed one.
+ * `element.hidden`, and each window mirrors it through a MutationObserver. Position,
+ * size, and collapsed state are remembered per panel in localStorage so a layout
+ * survives reloads. Each window is mirrored by a chip in the dock, which restores a
+ * closed or collapsed one.
  */
 
-const STORAGE_KEY = 'strabo.float.windows.v1';
+const STORAGE_KEY = 'strabo.float.windows.v2';
 const GAP = 12;
 const DEFAULT_WIDTH = 384;
 const HEADER_HEIGHT = 34;
+const MIN_WIDTH = 240;
+const MIN_HEIGHT = 160;
 
 function readStore() {
   try {
@@ -68,13 +71,16 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     if (!element) continue;
 
     const saved = store[config.key] ?? {};
-    const width = config.width ?? DEFAULT_WIDTH;
+    const width = saved.size?.width ?? config.width ?? DEFAULT_WIDTH;
 
     const win = document.createElement('section');
     win.className = 'float-window';
     win.dataset.panel = config.key;
     win.hidden = true;
     win.style.width = `${width}px`;
+    if (saved.size?.height) {
+      win.style.height = `${saved.size.height}px`;
+    }
 
     const header = document.createElement('header');
     header.className = 'float-header';
@@ -107,8 +113,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     const body = document.createElement('div');
     body.className = 'float-body';
 
+    const resizeHandle = document.createElement('span');
+    resizeHandle.className = 'float-resize';
+    resizeHandle.setAttribute('aria-hidden', 'true');
+    resizeHandle.title = 'Drag to resize';
+
     header.append(grip, title, spacer, collapseButton, closeButton);
-    win.append(header, body);
+    win.append(header, body, resizeHandle);
 
     element.parentNode.insertBefore(win, element);
     body.append(element);
@@ -240,11 +251,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
+        const rect = win.getBoundingClientRect();
         return {
           position: {
             left: parseFloat(win.style.left) || 0,
             top: parseFloat(win.style.top) || 0,
           },
+          size: { width: rect.width, height: rect.height },
           collapsed: isCollapsed(),
         };
       },
@@ -298,6 +311,36 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       header.addEventListener('pointercancel', end);
       raise();
       event.preventDefault();
+    });
+
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const rect = win.getBoundingClientRect();
+      const startWidth = rect.width;
+      const startHeight = rect.height;
+      const left = parseFloat(win.style.left) || 0;
+      const top = parseFloat(win.style.top) || 0;
+      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
+      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+      resizeHandle.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
+        win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
+      };
+      const end = () => {
+        resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', end);
+        resizeHandle.removeEventListener('pointercancel', end);
+        persist();
+      };
+      resizeHandle.addEventListener('pointermove', move);
+      resizeHandle.addEventListener('pointerup', end);
+      resizeHandle.addEventListener('pointercancel', end);
+      raise();
+      event.preventDefault();
+      event.stopPropagation();
     });
 
     header.addEventListener('dblclick', (event) => {

@@ -41,6 +41,14 @@ Feature: Map legibility
   Scenario: The status bar names the renderer that is actually drawing
     Then the status bar names the renderer the map is drawing with
 
+  @float
+  Scenario: A floating panel can be moved and resized, and it survives a reload
+    When I drag the "legend" panel by 40, 30
+    And I resize the "legend" panel by 60, 40
+    And I reload the Strabo UI
+    Then the "legend" panel position moved by 40, 30
+    And the "legend" panel size grew by 60, 40
+
   @strip
   Scenario: The tests strip filters the map
     When I switch to file detail

@@ -1239,10 +1239,12 @@ async function launchAgent(agent, { repository, target, prompt, title }) {
 }
 
 // ui/strabo-float.js
-var STORAGE_KEY = "strabo.float.windows.v1";
+var STORAGE_KEY = "strabo.float.windows.v2";
 var GAP = 12;
 var DEFAULT_WIDTH = 384;
 var HEADER_HEIGHT = 34;
+var MIN_WIDTH = 240;
+var MIN_HEIGHT = 160;
 function readStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
@@ -1279,12 +1281,15 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     const element = config.element;
     if (!element) continue;
     const saved = store[config.key] ?? {};
-    const width = config.width ?? DEFAULT_WIDTH;
+    const width = saved.size?.width ?? config.width ?? DEFAULT_WIDTH;
     const win = document.createElement("section");
     win.className = "float-window";
     win.dataset.panel = config.key;
     win.hidden = true;
     win.style.width = `${width}px`;
+    if (saved.size?.height) {
+      win.style.height = `${saved.size.height}px`;
+    }
     const header = document.createElement("header");
     header.className = "float-header";
     header.tabIndex = 0;
@@ -1309,8 +1314,12 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     closeButton.textContent = "\xD7";
     const body = document.createElement("div");
     body.className = "float-body";
+    const resizeHandle = document.createElement("span");
+    resizeHandle.className = "float-resize";
+    resizeHandle.setAttribute("aria-hidden", "true");
+    resizeHandle.title = "Drag to resize";
     header.append(grip, title, spacer, collapseButton, closeButton);
-    win.append(header, body);
+    win.append(header, body, resizeHandle);
     element.parentNode.insertBefore(win, element);
     body.append(element);
     const anchors = config.position ?? {};
@@ -1423,11 +1432,13 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
+        const rect = win.getBoundingClientRect();
         return {
           position: {
             left: parseFloat(win.style.left) || 0,
             top: parseFloat(win.style.top) || 0
           },
+          size: { width: rect.width, height: rect.height },
           collapsed: isCollapsed()
         };
       },
@@ -1477,6 +1488,35 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       header.addEventListener("pointercancel", end);
       raise();
       event.preventDefault();
+    });
+    resizeHandle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const rect = win.getBoundingClientRect();
+      const startWidth = rect.width;
+      const startHeight = rect.height;
+      const left2 = parseFloat(win.style.left) || 0;
+      const top2 = parseFloat(win.style.top) || 0;
+      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left2 - GAP);
+      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top2 - GAP);
+      resizeHandle.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
+        win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
+      };
+      const end = () => {
+        resizeHandle.removeEventListener("pointermove", move);
+        resizeHandle.removeEventListener("pointerup", end);
+        resizeHandle.removeEventListener("pointercancel", end);
+        persist();
+      };
+      resizeHandle.addEventListener("pointermove", move);
+      resizeHandle.addEventListener("pointerup", end);
+      resizeHandle.addEventListener("pointercancel", end);
+      raise();
+      event.preventDefault();
+      event.stopPropagation();
     });
     header.addEventListener("dblclick", (event) => {
       if (event.target.closest("button")) return;
