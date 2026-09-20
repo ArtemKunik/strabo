@@ -19,6 +19,7 @@ import {
   renderDiagnostics,
   renderEdgeEvidence,
   renderFolderList,
+  renderFunctions,
   renderInspector,
   renderLegend,
   renderMemberMap,
@@ -482,10 +483,11 @@ function selectNode(id) {
   refreshDock();
 }
 
-/** Fetch members for the selected file; symbols are extracted on demand by the server. */
+/** Fetch members and functions for the selected file; symbols are extracted on demand. */
 async function loadMembers(id) {
-  const section = elements.inspector.querySelector('[data-role="members"]');
-  if (!section) {
+  const membersSection = elements.inspector.querySelector('[data-role="members"]');
+  const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
+  if (!membersSection && !functionsSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -498,11 +500,14 @@ async function loadMembers(id) {
       ? await response.json()
       : { available: false, detail: 'Symbols are unavailable for this file.' };
     if (selected === id) {
-      renderMembers(section, result);
+      if (membersSection) renderMembers(membersSection, result);
+      if (functionsSection) renderFunctions(functionsSection, result);
     }
   } catch {
     if (selected === id) {
-      renderMembers(section, { available: false, detail: 'Symbols could not be loaded.' });
+      const fallback = { available: false, detail: 'Symbols could not be loaded.' };
+      if (membersSection) renderMembers(membersSection, fallback);
+      if (functionsSection) renderFunctions(functionsSection, fallback);
     }
   }
 }
@@ -1005,6 +1010,7 @@ const OVERLAY_TITLES = {
   cycles: 'Cycles',
   'test-reach': 'Test reach',
   architecture: 'Architecture health',
+  hotspots: 'Function hotspots',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -1012,6 +1018,7 @@ const OVERLAY_ENDPOINTS = {
   cycles: '/analysis/cycles',
   'test-reach': '/analysis/test-reach',
   architecture: '/analysis/architecture-health',
+  hotspots: '/analysis/functions',
 };
 
 /**

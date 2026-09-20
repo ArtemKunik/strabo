@@ -132,6 +132,23 @@ test('the symbol endpoint serves the function inventory with body metrics', asyn
   assert.ok(body.functions.functions.every((fn) => (fn.metrics?.decisionPoints ?? 0) >= 1));
 });
 
+test('the functions endpoint ranks hotspots across the repository', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+
+  const body = (await (await fetch(`${base}/api/strabo/analysis/functions`)).json()) as {
+    available: boolean;
+    filesScanned: number;
+    functionsExamined: number;
+    hotspots: unknown[];
+  };
+  assert.equal(body.available, true);
+  assert.ok(body.filesScanned >= 1);
+  assert.ok(body.functionsExamined >= 1);
+  assert.ok(Array.isArray(body.hotspots));
+});
+
 test('the repository store seeds the configured root and remembers a selection', async () => {
   const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}.json`);
   const store = createRepositoryStore({ file });

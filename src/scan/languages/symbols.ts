@@ -42,8 +42,14 @@ export interface FunctionMetrics {
   decisionPoints: number;
   /** Deepest nesting of block control-flow constructs inside the body. */
   maxNestingDepth: number;
+  /** Deepest nesting of loops inside the body; 2 or more is an O(n²)-shaped risk. */
+  loopNestingDepth: number;
   /** Loop constructs in the body. */
   loops: number;
+  /** Distinct linear-scan calls (`includes`, `indexOf`, …) made inside a loop. */
+  loopScans: string[];
+  /** Distinct sort calls (`sort`, `sorted`, …) made inside a loop. */
+  loopSorts: string[];
   /** True when the body calls the function it belongs to. */
   recursive: boolean;
 }
@@ -79,7 +85,9 @@ export interface FunctionCall {
  *
  * Only references the scan can prove are recorded: an explicit `this.x` / `self.x`, or a
  * bare name that matches a field of the same type and is not shadowed by a parameter or
- * local. `qualified` distinguishes the two so callers can weigh the evidence.
+ * local. `qualified` distinguishes the two so callers can weigh the evidence; it is true
+ * when any reference recorded for that field and mode was explicit, so it does not depend
+ * on which occurrence the walk reaches first.
  */
 export interface MemberAccess {
   field: string;
@@ -125,14 +133,29 @@ export interface CallRules {
 }
 
 export function sortSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
-  return symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+  return [...symbols].sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
 }
 
-/** Depth-first walk over named children, including `node`. */
+/**
+ * Depth-first pre-order walk over named children, including `node`.
+ *
+ * Iterative rather than recursive so a pathologically deep tree cannot overflow the stack.
+ */
 export function walkNodes(node: Node, visit: (node: Node) => void): void {
-  visit(node);
-  for (const child of node.namedChildren) {
-    walkNodes(child, visit);
+  const stack: Node[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    visit(current);
+    const children = current.namedChildren;
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child) {
+        stack.push(child);
+      }
+    }
   }
 }
 
@@ -140,9 +163,11 @@ export function walkNodes(node: Node, visit: (node: Node) => void): void {
  * Collect the field references inside one method body.
  *
  * A field is recorded once per mode, so a method that reads and writes the same field
- * reports both. Bare references are dropped when a parameter or local shadows the name
- * (parameters live outside the body, so `scope` - the whole method - is searched for
- * declarations), and the field identifier of a `this.x` access is not double-counted.
+ * reports both. When a field and mode are touched more than once, the single entry is
+ * upgraded to `qualified` if any of those references was explicit, so the flag does not
+ * turn on traversal order. Bare references are dropped when a parameter or local shadows
+ * the name (parameters live outside the body, so `scope` - the whole method - is searched
+ * for declarations), and the field identifier of a `this.x` access is not double-counted.
  */
 export function collectMemberAccesses(
   body: Node,
@@ -157,18 +182,23 @@ export function collectMemberAccesses(
   }
   const declared = rules.declaredNames(scope);
   const accesses: MemberAccess[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, MemberAccess>();
 
   const record = (field: string, node: Node, qualified: boolean): void => {
     const mode: MemberAccess['mode'] = isWriteTarget(node, body, rules.assignmentTypes)
       ? 'write'
       : 'read';
     const key = `${field}\u0000${mode}`;
-    if (seen.has(key)) {
+    const existing = seen.get(key);
+    if (existing) {
+      if (qualified) {
+        existing.qualified = true;
+      }
       return;
     }
-    seen.add(key);
-    accesses.push({ field, owner, method, mode, qualified, line: node.startPosition.row + 1 });
+    const access = { field, owner, method, mode, qualified, line: node.startPosition.row + 1 };
+    seen.set(key, access);
+    accesses.push(access);
   };
 
   walkNodes(body, (node) => {

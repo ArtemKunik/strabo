@@ -58,6 +58,41 @@ test('buildFunctions sorts a signature without a body last', async () => {
   assert.deepEqual(report.functions[0]?.calls, []);
 });
 
+test('buildFunctions attaches a signal for a nested loop', async () => {
+  const source = [
+    'function scan(rows: number[][]): number {',
+    '  let hits = 0;',
+    '  for (const row of rows) {',
+    '    for (const cell of row) {',
+    '      if (cell > 0) { hits += 1; }',
+    '    }',
+    '  }',
+    '  return hits;',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractTypeScriptSymbols('scan.ts', source);
+  const scan = buildFunctions('scan.ts', symbols, calls).functions.find((fn) => fn.name === 'scan');
+  assert.ok(scan?.signals.some((signal) => signal.kind === 'nested-loops'));
+  assert.equal(scan?.metrics?.loopNestingDepth, 2);
+});
+
+test('buildFunctions attaches a signal for a linear scan inside a loop', async () => {
+  const source = [
+    'function hasDuplicates(values: number[]): boolean {',
+    '  for (const value of values) {',
+    '    if (values.includes(value)) { return true; }',
+    '  }',
+    '  return false;',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractTypeScriptSymbols('dupes.ts', source);
+  const fn = buildFunctions('dupes.ts', symbols, calls).functions.find((entry) => entry.name === 'hasDuplicates');
+  assert.ok(fn?.signals.some((signal) => signal.kind === 'linear-scan-in-loop'));
+  assert.deepEqual(fn?.metrics?.loopScans, ['includes']);
+});
+
 test('buildFunctions returns an empty list for a file with no functions', async () => {
   const { symbols, calls = [] } = await extractTypeScriptSymbols('consts.ts', 'const MAX = 10;\n');
   assert.deepEqual(buildFunctions('consts.ts', symbols, calls), {

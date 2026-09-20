@@ -57,8 +57,8 @@ export function topLevelDirectory(id) {
  * Everything the Module Passport shows for a node.
  *
  * Metrics come from the server-computed view model; imports and used-by come from the
- * evidence edges. `functions` stays null until symbol extraction records them, so the UI
- * can report "not recorded" instead of implying there are none.
+ * evidence edges. Per-function detail is loaded separately from `/symbols` (see
+ * `renderFunctions`), because it is extracted on demand rather than during the scan.
  */
 export function passportFor(model, id) {
   const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
@@ -84,7 +84,6 @@ export function passportFor(model, id) {
     ],
     imports,
     usedBy,
-    functions: null,
   };
 }
 

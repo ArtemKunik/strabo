@@ -480,6 +480,33 @@ const KOTLIN_FUNCTION_RULES: FunctionRules = {
     'elvis_expression',
   ]),
   decisionOperators: new Set(),
+  callTypes: new Set(['call_expression']),
+  callTargetName: (node) => {
+    const callee = node.namedChildren[0];
+    if (!callee) {
+      return null;
+    }
+    if (callee.type === 'simple_identifier') {
+      return callee.text;
+    }
+    if (callee.type === 'navigation_expression') {
+      const suffix = callee.namedChildren.find((child) => child.type === 'navigation_suffix');
+      return suffix?.namedChildren.find((child) => child.type === 'simple_identifier')?.text ?? null;
+    }
+    return null;
+  },
+  linearScanCalls: new Set([
+    'contains',
+    'indexof',
+    'lastindexof',
+    'find',
+    'filter',
+    'any',
+    'all',
+    'none',
+    'count',
+  ]),
+  sortCalls: new Set(['sort', 'sorted', 'sortedby', 'sortby', 'sortedwith']),
   statementTypes: new Set([
     'property_declaration',
     'assignment',

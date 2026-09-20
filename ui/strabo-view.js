@@ -16,7 +16,7 @@ import {
   projectIsland,
 } from './strabo-core.js';
 
-const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached'];
+const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot'];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
 let labelsVisible = true;
@@ -635,6 +635,7 @@ function stylesheet() {
     { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': theme.cycle, 'background-opacity': 1 } },
     { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.55 } },
+    { selector: 'node.ov-hotspot', style: { 'border-width': 3, 'border-style': 'double', 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },

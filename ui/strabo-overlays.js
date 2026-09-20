@@ -129,9 +129,38 @@ export function overlayFor(kind, data) {
       return testReachOverlay(data);
     case 'architecture':
       return architectureOverlay(data);
+    case 'hotspots':
+      return hotspotsOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
+}
+
+/**
+ * Map the repository hotspot report onto the files that carry a hotspot.
+ *
+ * Only functions with a recorded signal become hotspots; the panel names each one and the
+ * signals it tripped, so the overlay points at evidence rather than a score.
+ */
+function hotspotsOverlay(report) {
+  const hotspots = report?.hotspots ?? [];
+  const classes = new Map();
+  for (const spot of hotspots) {
+    if (!classes.has(spot.file)) {
+      classes.set(spot.file, 'ov-hotspot');
+    }
+  }
+  const skipped = report?.filesSkipped ?? 0;
+  const skippedNote = skipped > 0 ? ` · ${skipped} skipped` : '';
+  return {
+    classes,
+    summary: `${hotspots.length} hotspot(s) · ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}`,
+    items: hotspots.map((spot) => {
+      const where = spot.owner ? `${spot.owner}.${spot.name}` : spot.name;
+      const kinds = (spot.signals ?? []).map((signal) => signal.kind).join(', ');
+      return `${spot.file} · ${where} (L${spot.line}) · ${kinds}`;
+    }),
+  };
 }
 
 function impactOverlay(data) {

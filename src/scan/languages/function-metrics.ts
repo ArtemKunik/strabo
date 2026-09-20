@@ -20,6 +20,14 @@ export interface FunctionRules {
   decisionOperators: Set<string>;
   /** Nodes counted as one body statement. */
   statementTypes: Set<string>;
+  /** Call node types, used to spot work performed inside a loop. */
+  callTypes: Set<string>;
+  /** The simple callee name of a call node, or null when it has none. */
+  callTargetName: (node: Node) => string | null;
+  /** Lower-cased callee names that are linear scans (`includes`, `indexof`, `contains`). */
+  linearScanCalls: Set<string>;
+  /** Lower-cased callee names that sort (`sort`, `sorted`, `orderby`). */
+  sortCalls: Set<string>;
   /**
    * Nested function-like nodes whose bodies are measured as their own function.
    *
@@ -46,9 +54,12 @@ export function collectFunctionMetrics(
   let statementCount = 0;
   let decisionPoints = 1;
   let maxNestingDepth = 0;
+  let loopNestingDepth = 0;
   let loops = 0;
+  const loopScans = new Set<string>();
+  const loopSorts = new Set<string>();
 
-  const visit = (node: Node, depth: number): void => {
+  const visit = (node: Node, depth: number, loopDepth: number): void => {
     if (rules.nestedFunctionTypes.has(node.type)) {
       return;
     }
@@ -57,8 +68,11 @@ export function collectFunctionMetrics(
     if (control) {
       maxNestingDepth = Math.max(maxNestingDepth, nextDepth);
     }
-    if (rules.loopTypes.has(node.type)) {
+    const loop = rules.loopTypes.has(node.type);
+    const nextLoopDepth = loop ? loopDepth + 1 : loopDepth;
+    if (loop) {
       loops += 1;
+      loopNestingDepth = Math.max(loopNestingDepth, nextLoopDepth);
     }
     if (rules.decisionNodeTypes.has(node.type)) {
       decisionPoints += 1;
@@ -69,14 +83,25 @@ export function collectFunctionMetrics(
     if (hasDecisionOperator(node, rules)) {
       decisionPoints += 1;
     }
+    if (loopDepth >= 1 && rules.callTypes.has(node.type)) {
+      const name = rules.callTargetName(node);
+      if (name) {
+        const lower = name.toLowerCase();
+        if (rules.linearScanCalls.has(lower)) {
+          loopScans.add(name);
+        } else if (rules.sortCalls.has(lower)) {
+          loopSorts.add(name);
+        }
+      }
+    }
     for (const child of node.namedChildren) {
-      visit(child, nextDepth);
+      visit(child, nextDepth, nextLoopDepth);
     }
   };
 
   // Start at the body's own children so the body node is not itself counted as a construct.
   for (const child of body.namedChildren) {
-    visit(child, 0);
+    visit(child, 0, 0);
   }
 
   const endLine = body.endPosition.row + 1;
@@ -86,7 +111,10 @@ export function collectFunctionMetrics(
     statementCount,
     decisionPoints,
     maxNestingDepth,
+    loopNestingDepth,
     loops,
+    loopScans: [...loopScans].sort(),
+    loopSorts: [...loopSorts].sort(),
     recursive: false,
   };
 }

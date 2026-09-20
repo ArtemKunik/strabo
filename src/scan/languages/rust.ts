@@ -758,6 +758,25 @@ const RUST_FUNCTION_RULES: FunctionRules = {
     'try_expression',
   ]),
   decisionOperators: new Set(['&&', '||']),
+  callTypes: new Set(['call_expression']),
+  callTargetName: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return fn.text;
+    }
+    if (fn.type === 'field_expression') {
+      return fn.childForFieldName('field')?.text ?? null;
+    }
+    if (fn.type === 'scoped_identifier') {
+      return fn.childForFieldName('name')?.text ?? null;
+    }
+    return null;
+  },
+  linearScanCalls: new Set(['contains', 'position', 'find', 'filter', 'any', 'all', 'count']),
+  sortCalls: new Set(['sort', 'sort_by', 'sort_unstable', 'sort_by_key']),
   statementTypes: new Set([
     'let_declaration',
     'expression_statement',

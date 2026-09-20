@@ -23,7 +23,7 @@ record is reported as `unavailable`, never invented.
 | 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
 | 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
-| 14 | Function inventory and complexity | In progress (A1-A4: body metrics, intra-file calls, and `buildFunctions` in `/symbols` for all five languages; Functions tab pending) |
+| 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Planned (opt-in seam; off by default) |
 | — | Developer Product Graph, Chat | Out of concept |
 
@@ -417,19 +417,31 @@ extractor keep reporting `not-implemented` rather than an empty list.
   stay unclaimed, matching the `MemberAccess` confidence rule.
 - **Functions tab** in the Module Passport: signature, span, parameters, decision points,
   nesting, and recorded callees.
-- **Bad-algorithm signals** are language rule packs over the same tree: nested loops, a linear
-  scan (`includes` / `indexOf` / `find`) inside a loop, `sort` inside a loop, string
-  concatenation in a loop, and deep nesting. Each is emitted as a signal with its source line,
-  never a verdict.
-- **Hotspots** overlay: the functions with the most recorded signals across the repository.
+- **Bad-algorithm signals** are derived from the recorded metrics and loop context:
+  nested loops (loop nesting ≥ 2), a linear scan (`includes` / `indexOf` / `contains` / `find`…)
+  or a sort inside a loop, deep nesting (≥ 4), high complexity (≥ 10 decision points), long
+  body (≥ 50 lines), many parameters (≥ 5), and recorded recursion. The scan/sort sets are
+  per-language and name-based, and every signal carries its source line and the value that
+  tripped it, never a verdict.
+- **Hotspots** overlay: the functions that trip at least one signal, across the repository,
+  ranked worst-first, with their files marked on the map.
 
 Slices: **A1 (done)** contract (`FunctionMetrics`, `FunctionCall`), shared
 `collectFunctionMetrics`, TypeScript rule pack, unit tests. **A2 (done)** the same rule packs
 for Java, Kotlin, Rust, and C#. **A3 (done)** intra-file calls and the `recursive` metric for
 all five languages; a member call on a value (`obj.method()`) is not claimed. **A4 (done)**
 `buildFunctions` (`src/analysis/functions.ts`), returned by `/symbols` as `functions`, with
-callees and intra-file callers. **A5** the Functions tab. **A6** signals and the Hotspots
-overlay.
+callees and intra-file callers. **A5 (done)** the Module Passport **Functions** tab, rendering
+each function's signature, span, complexity, nesting, loops, recursion, recorded callees, and
+callers; a language without an extractor and a file with no functions each say so. Unit tests
+cover the caption helpers and a browser scenario (`module-passport.feature` `@functions`)
+asserts the tab. **A6 (done)** `computeSignals` (`src/analysis/signals.ts`) over the recorded
+metrics, `loopNestingDepth` as a metric, `rankHotspots` (`src/analysis/hotspots.ts`),
+`GET /analysis/functions`, and the **Function hotspots** review overlay with its `ov-hotspot`
+class. **A7 (done)** loop-context call signals: per-language `linearScanCalls` / `sortCalls`
+name sets, `loopScans` / `loopSorts` on the metrics, and the `linear-scan-in-loop` /
+`sort-in-loop` signals, so a linear scan or sort inside a loop is recorded with the callee
+names.
 
 ## Phase 15 - Optional LLM narrator
 

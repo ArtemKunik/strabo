@@ -57,8 +57,7 @@ function passportFor(model, id) {
       { label: "Depends on (all)", value: node.transitiveDependencies ?? 0 }
     ],
     imports,
-    usedBy,
-    functions: null
+    usedBy
   };
 }
 function mapCounts(model) {
@@ -505,9 +504,31 @@ function overlayFor(kind, data) {
       return testReachOverlay(data);
     case "architecture":
       return architectureOverlay(data);
+    case "hotspots":
+      return hotspotsOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
+}
+function hotspotsOverlay(report) {
+  const hotspots = report?.hotspots ?? [];
+  const classes = /* @__PURE__ */ new Map();
+  for (const spot of hotspots) {
+    if (!classes.has(spot.file)) {
+      classes.set(spot.file, "ov-hotspot");
+    }
+  }
+  const skipped = report?.filesSkipped ?? 0;
+  const skippedNote = skipped > 0 ? ` \xB7 ${skipped} skipped` : "";
+  return {
+    classes,
+    summary: `${hotspots.length} hotspot(s) \xB7 ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}`,
+    items: hotspots.map((spot) => {
+      const where = spot.owner ? `${spot.owner}.${spot.name}` : spot.name;
+      const kinds = (spot.signals ?? []).map((signal) => signal.kind).join(", ");
+      return `${spot.file} \xB7 ${where} (L${spot.line}) \xB7 ${kinds}`;
+    })
+  };
 }
 function impactOverlay(data) {
   const classes = /* @__PURE__ */ new Map();
@@ -889,7 +910,7 @@ function buildAgentPrompt({ agent, repository, target }) {
 }
 
 // ui/strabo-view.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot"];
 var labelsVisible = true;
 var LABEL_DETAIL_ZOOM = 0.65;
 var MIN_ZOOM = 0.12;
@@ -1334,6 +1355,7 @@ function stylesheet() {
     { selector: "node.ov-affected", style: { "border-width": 3, "border-color": theme.affected, "background-opacity": 1 } },
     { selector: "node.ov-cycle", style: { "border-width": 4, "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.55 } },
+    { selector: "node.ov-hotspot", style: { "border-width": 3, "border-style": "double", "border-color": theme.affected, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
@@ -1895,6 +1917,57 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   return controllers;
 }
 
+// ui/strabo-functions.js
+function functionLabel(entry) {
+  return entry?.owner ? `${entry.owner}.${entry.name}` : entry?.name ?? "";
+}
+function functionSignature(entry) {
+  if (!entry) return "";
+  const visibility = entry.visibility ? `${entry.visibility} ` : "";
+  const parameters = entry.parameters ?? 0;
+  const plural = parameters === 1 ? "" : "s";
+  const returns = entry.type ? `: ${entry.type}` : "";
+  return `${visibility}${entry.name}(${parameters} param${plural})${returns}`;
+}
+function functionMetrics(entry) {
+  const metrics = entry?.metrics;
+  if (!metrics) {
+    return "signature only; no body recorded";
+  }
+  const parts = [
+    `L${entry.line}-${metrics.endLine}`,
+    `${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`,
+    `complexity ${metrics.decisionPoints}`,
+    `nesting ${metrics.maxNestingDepth}`,
+    `loops ${metrics.loops}`
+  ];
+  if (metrics.recursive) {
+    parts.push("recursive");
+  }
+  return parts.join(" \xB7 ");
+}
+function functionCalls(entry) {
+  const calls = entry?.calls ?? [];
+  if (calls.length === 0) {
+    return "no same-file calls recorded";
+  }
+  return calls.map((call) => `${call.name} (L${call.line})`).join(", ");
+}
+function functionCallers(entry) {
+  const callers = entry?.callers ?? [];
+  if (callers.length === 0) {
+    return "no callers recorded in this file";
+  }
+  return callers.join(", ");
+}
+function functionSignals(entry) {
+  const signals = entry?.signals ?? [];
+  if (signals.length === 0) {
+    return "no cost signals";
+  }
+  return signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ");
+}
+
 // ui/view.js
 var Fragment = /* @__PURE__ */ Symbol("fragment");
 var HOST = /* @__PURE__ */ Symbol("host");
@@ -2230,10 +2303,20 @@ function renderInspector(container, model, id, handlers = {}) {
   members.append(membersBody);
   const depsSection = listSection("Dependencies", id, passport.imports, handlers);
   const dependentsSection = listSection("Dependents", id, passport.usedBy, handlers);
+  const functions = document.createElement("section");
+  functions.dataset.role = "functions";
+  const functionsTitle = document.createElement("h3");
+  functionsTitle.textContent = "Functions";
+  functions.append(functionsTitle);
+  const functionsBody = document.createElement("p");
+  functionsBody.className = "unavailable";
+  functionsBody.textContent = "Loading functions\u2026";
+  functions.append(functionsBody);
   const tabDefs = [
     ["deps", `Dependencies (${passport.imports.length})`, depsSection],
     ["dependents", `Dependents (${passport.usedBy.length})`, dependentsSection],
-    ["members", "Members", members]
+    ["members", "Members", members],
+    ["functions", "Functions", functions]
   ];
   const tabButtons = [];
   for (const [key, label, section2] of tabDefs) {
@@ -2340,6 +2423,66 @@ function renderMembers(container, result) {
     container.append(list);
   }
   container.append(renderDataFlow(memberMap?.dataFlow));
+}
+function renderFunctions(container, result) {
+  container.replaceChildren();
+  const report = result?.functions;
+  const title = document.createElement("h3");
+  title.textContent = `Functions (${report?.functions?.length ?? 0})`;
+  container.append(title);
+  if (!result || result.available === false) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = result?.detail ?? "Functions are not recorded for this file.";
+    container.append(note2);
+    return;
+  }
+  if (!report || report.available === false) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = report?.detail ?? "Functions are not recorded for this file.";
+    container.append(note2);
+    return;
+  }
+  if (report.functions.length === 0) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "No functions declared.";
+    container.append(note2);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "function-list";
+  for (const entry of report.functions) {
+    const item = document.createElement("li");
+    item.className = "function-entry";
+    const name = document.createElement("div");
+    name.className = "function-name";
+    name.textContent = functionLabel(entry);
+    item.append(name);
+    const signature = document.createElement("code");
+    signature.className = "function-signature";
+    signature.textContent = functionSignature(entry);
+    item.append(signature);
+    const metrics = document.createElement("div");
+    metrics.className = "function-metrics";
+    metrics.textContent = functionMetrics(entry);
+    item.append(metrics);
+    const calls = document.createElement("div");
+    calls.className = "function-calls";
+    calls.textContent = `calls: ${functionCalls(entry)}`;
+    item.append(calls);
+    const callers = document.createElement("div");
+    callers.className = "function-callers";
+    callers.textContent = `called by: ${functionCallers(entry)}`;
+    item.append(callers);
+    const signals = document.createElement("div");
+    signals.className = "function-signals";
+    signals.textContent = `signals: ${functionSignals(entry)}`;
+    item.append(signals);
+    list.append(item);
+  }
+  container.append(list);
 }
 function renderMemberType(type) {
   const section2 = document.createElement("section");
@@ -4540,8 +4683,9 @@ function selectNode(id) {
   refreshDock();
 }
 async function loadMembers(id) {
-  const section2 = elements.inspector.querySelector('[data-role="members"]');
-  if (!section2) {
+  const membersSection = elements.inspector.querySelector('[data-role="members"]');
+  const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
+  if (!membersSection && !functionsSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -4552,11 +4696,14 @@ async function loadMembers(id) {
     const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
     const result = response.ok ? await response.json() : { available: false, detail: "Symbols are unavailable for this file." };
     if (selected === id) {
-      renderMembers(section2, result);
+      if (membersSection) renderMembers(membersSection, result);
+      if (functionsSection) renderFunctions(functionsSection, result);
     }
   } catch {
     if (selected === id) {
-      renderMembers(section2, { available: false, detail: "Symbols could not be loaded." });
+      const fallback = { available: false, detail: "Symbols could not be loaded." };
+      if (membersSection) renderMembers(membersSection, fallback);
+      if (functionsSection) renderFunctions(functionsSection, fallback);
     }
   }
 }
@@ -4985,13 +5132,15 @@ var OVERLAY_TITLES = {
   impact: "Change impact",
   cycles: "Cycles",
   "test-reach": "Test reach",
-  architecture: "Architecture health"
+  architecture: "Architecture health",
+  hotspots: "Function hotspots"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
   cycles: "/analysis/cycles",
   "test-reach": "/analysis/test-reach",
-  architecture: "/analysis/architecture-health"
+  architecture: "/analysis/architecture-health",
+  hotspots: "/analysis/functions"
 };
 async function applyOverlay(generation) {
   const kind = state.overlay;

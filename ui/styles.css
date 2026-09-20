@@ -855,6 +855,41 @@ button.primary {
   font-size: 11px;
 }
 
+.function-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.function-entry {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.function-name {
+  font-weight: 600;
+}
+
+.function-signature {
+  display: block;
+  font-family: var(--font-mono);
+  color: var(--ink-1);
+  word-break: break-word;
+}
+
+.function-metrics,
+.function-calls,
+.function-callers,
+.function-signals {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .data-flow {
   margin-top: 10px;
   border-top: 1px solid var(--line);
@@ -1261,11 +1296,13 @@ button.primary {
 .overlay-kind-cycles .overlay-dot { background: var(--cycle); }
 .overlay-kind-test-reach .overlay-dot { background: var(--ink-3); }
 .overlay-kind-architecture .overlay-dot { background: var(--ok); }
+.overlay-kind-hotspots .overlay-dot { background: var(--warn); }
 
 .overlay-kind-impact { border-left-color: var(--warn); }
 .overlay-kind-cycles { border-left-color: var(--cycle); }
 .overlay-kind-test-reach { border-left-color: var(--ink-3); }
 .overlay-kind-architecture { border-left-color: var(--ok); }
+.overlay-kind-hotspots { border-left-color: var(--warn); }
 
 .panel-dismiss {
   margin-left: auto;
