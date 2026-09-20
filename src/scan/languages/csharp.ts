@@ -1,13 +1,16 @@
 import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import { addNamespacePrefixes, looksInternal } from './namespace.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
+  type CallRules,
   type CodeSymbol,
   type MemberAccess,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
+  collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
 } from './symbols.ts';
@@ -380,7 +383,7 @@ export async function extractCSharpSymbols(
         const name = node.childForFieldName('name')?.text;
         if (name) {
           const parameters = node.childForFieldName('parameters');
-          symbols.push({
+          const symbol: CodeSymbol = {
             name,
             kind: 'method',
             visibility: csharpVisibility(node),
@@ -389,8 +392,12 @@ export async function extractCSharpSymbols(
             parameters:
               parameters?.namedChildren.filter((child) => child.type === 'parameter').length ?? 0,
             line: node.startPosition.row + 1,
-          });
+          };
           const body = node.childForFieldName('body');
+          if (body) {
+            symbol.metrics = collectFunctionMetrics(body, symbol.line, CSHARP_FUNCTION_RULES);
+          }
+          symbols.push(symbol);
           if (body && owner) {
             methodBodies.push({ owner, method: name, body, scope: node });
           }
@@ -422,9 +429,140 @@ export async function extractCSharpSymbols(
       }
     }
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses };
+    const declared = new Set(
+      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+    );
+    const types = new Set(
+      symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+    );
+    const calls = methodBodies.flatMap((entry) =>
+      collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, CSHARP_CALLS),
+    );
+    markRecursive(symbols, calls);
+
+    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });
 }
+
+const CSHARP_FUNCTION_RULES: FunctionRules = {
+  controlFlowTypes: new Set([
+    'if_statement',
+    'foreach_statement',
+    'for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_statement',
+    'try_statement',
+    'catch_clause',
+    'using_statement',
+    'lock_statement',
+    'conditional_expression',
+  ]),
+  loopTypes: new Set([
+    'foreach_statement',
+    'for_statement',
+    'while_statement',
+    'do_statement',
+  ]),
+  decisionNodeTypes: new Set([
+    'if_statement',
+    'foreach_statement',
+    'for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_section',
+    'catch_clause',
+    'conditional_expression',
+  ]),
+  decisionOperators: new Set(['&&', '||', '??']),
+  callTypes: new Set(['invocation_expression']),
+  callTargetName: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return fn.text;
+    }
+    if (fn.type === 'member_access_expression') {
+      return fn.childForFieldName('name')?.text ?? null;
+    }
+    return null;
+  },
+  linearScanCalls: new Set([
+    'contains',
+    'indexof',
+    'lastindexof',
+    'find',
+    'findindex',
+    'where',
+    'any',
+    'all',
+    'count',
+  ]),
+  sortCalls: new Set(['sort', 'orderby', 'orderbydescending', 'thenby']),
+  statementTypes: new Set([
+    'local_declaration_statement',
+    'expression_statement',
+    'return_statement',
+    'throw_statement',
+    'break_statement',
+    'continue_statement',
+    'yield_statement',
+    'if_statement',
+    'foreach_statement',
+    'for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_statement',
+    'try_statement',
+    'using_statement',
+    'lock_statement',
+    'fixed_statement',
+    'checked_statement',
+    'unchecked_statement',
+  ]),
+  nestedFunctionTypes: new Set([
+    'method_declaration',
+    'constructor_declaration',
+    'local_function_statement',
+    'lambda_expression',
+    'anonymous_method_expression',
+    'class_declaration',
+    'interface_declaration',
+    'struct_declaration',
+    'record_declaration',
+    'enum_declaration',
+  ]),
+};
+
+const CSHARP_CALLS: CallRules = {
+  callTypes: new Set(['invocation_expression']),
+  callTarget: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return { name: fn.text, kind: 'bare' };
+    }
+    if (fn.type !== 'member_access_expression') {
+      return null;
+    }
+    const expression = fn.childForFieldName('expression');
+    const name = fn.childForFieldName('name');
+    if (!expression || !name || name.type !== 'identifier') {
+      return null;
+    }
+    if (expression.type === 'this_expression' || expression.text === 'this') {
+      return { name: name.text, kind: 'self', receiver: 'this' };
+    }
+    if (expression.type === 'identifier' && looksLikeTypeName(expression.text)) {
+      return { name: name.text, kind: 'type-qualified', receiver: expression.text };
+    }
+    return null;
+  },
+};
 
 const CSHARP_ACCESS: AccessRules = {
   identifierTypes: new Set(['identifier']),

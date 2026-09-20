@@ -25,7 +25,7 @@ public entry points:
 | --------------- | ---------------------------------------------------------------------------------------------- |
 | `strabo`        | scanner, view model, symbol extractors, repository artifact scanner, router factory, server factory, optional lineage pack |
 | `strabo/server` | `createStraboServer` — self-contained Express app serving `public/` and mounting the router at `/api/strabo` |
-| `strabo` CLI    | reads `STRABO_ROOT`, `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` and starts the standalone server |
+| `strabo` CLI    | `strabo [path]` — starts the standalone server; reads the root from the path argument, `STRABO_ROOT`, or the working directory, plus `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` |
 
 The same scanner, analysis, API, and browser UI are used in standalone and embedded
 modes, so there is exactly one implementation of Strabo behaviour.
@@ -36,33 +36,24 @@ Requires Node 22+ and npm. From the repository root:
 
 ```sh
 npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
+npm start            # maps the repository you are standing in
 ```
 
-Then set `STRABO_ROOT` to the repository you want to map and start the server:
+Open `http://localhost:3000` (the default `PORT`). The server scans the root, builds the
+graph, and serves the interactive map.
+
+To map a different repository, pass its path or set `STRABO_ROOT`:
 
 ```sh
-# bash / zsh
-STRABO_ROOT=. npm start
+npm start -- /path/to/repo
+# `npm start` is `node bin/strabo.js`, so this is the same thing
+node bin/strabo.js /path/to/repo
 ```
 
-```powershell
-# PowerShell (the `VAR=value cmd` prefix is not valid here)
-$env:STRABO_ROOT = "."
-npm start
-```
-
-```bat
-:: cmd.exe
-set STRABO_ROOT=.
-npm start
-```
-
-Open `http://localhost:3000` (the default `PORT`). The server scans `STRABO_ROOT`,
-builds the graph, and serves the interactive map. Use `STRABO_SCAN_CEILING` to allow
+The root is resolved from the path argument, then `STRABO_ROOT`, then the working
+directory. The resolved root and scan ceiling are printed at startup, so a run against
+the wrong directory is visible rather than silent. Use `STRABO_SCAN_CEILING` to allow
 scanning repositories outside the start root; see [Environment](#environment).
-
-`npm start` is `node bin/strabo.js`, so `STRABO_ROOT=/path/to/repo node bin/strabo.js`
-is equivalent.
 
 ## Getting started
 
@@ -79,17 +70,15 @@ npm run build
 npm run build:ui
 ```
 
-The server takes its repository root from `STRABO_ROOT` — there is no positional
-argument, and it exits with an error if the variable is unset. See
-[Running Strabo](#running-strabo) to start it.
+See [Running Strabo](#running-strabo) to start the server.
 
 ### Environment
 
 | Variable             | Meaning                                                        |
 | -------------------- | -------------------------------------------------------------- |
-| `STRABO_ROOT`        | Repository root to scan and serve.                             |
+| `STRABO_ROOT`        | Repository root to scan and serve. Overridden by a path argument; defaults to the working directory. |
 | `STRABO_CONFIG`      | Path to a Strabo config file (workspace repositories, catalogue, integrations). |
-| `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root.   |
+| `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root; editable at runtime from **Settings**. |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
@@ -119,7 +108,45 @@ may read.
 The **Choose folder** dialog browses the filesystem through `GET /api/strabo/browse`, which
 is bounded by the same ceiling. When the dialog reaches the ceiling its **Up** button is
 disabled and a note names the boundary and the `STRABO_SCAN_CEILING` variable that set it,
-so the limit is visible rather than looking like a broken control.
+so the limit is visible rather than looking like a broken control. The ceiling can also be
+changed while the server runs from **Settings** (see below).
+
+## Settings
+
+The toolbar's **Settings** button opens a floating window with two groups.
+
+**Appearance and graph defaults** are browser preferences, stored in `localStorage` under
+`strabo.settings.v1` and applied immediately:
+
+| Preference | Meaning |
+| ---------- | ------- |
+| Theme | `System`, `Dark`, or `Light`. `System` follows `prefers-color-scheme` and updates live. |
+| Reduce motion | Collapse the app's transitions and the member-map playback; also follows the OS preference. |
+| Default detail | Whether the map opens in **Directories** or **Files** mode, unless a URL mode or a per-repository preference overrides it. |
+| Show node labels | Hide every node label for a cleaner map. Directory-island labels are a separate layer and are unaffected. |
+
+The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
+colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
+together (the graph stylesheet reads `--graph-*` at runtime). Reduce motion sets
+`data-reduce-motion`, which the graph viewport also honours.
+
+**Server settings** are read from `GET /api/strabo/settings` and written with
+`PUT /api/strabo/settings`:
+
+| Field | Editable | Meaning |
+| ----- | -------- | ------- |
+| `workspaceRoot` | no | The start root the process was launched with. |
+| `scanCeiling` | yes | The boundary every path is resolved through. `null` resets it to the startup value. |
+| `riskOnline` | yes | Whether OSV.dev / deps.dev lookups are enabled (`STRABO_RISK`). |
+| `configPath`, `riskDeniedLicenses` | no | The workspace config path and the denied-license policy, shown for reference. |
+
+A ceiling update takes effect immediately for the graph, browse, and repository routes. It
+is process-local: a restart returns to `STRABO_SCAN_CEILING`. Unlike the environment
+variable, which only ever *narrows* what the server may read, this endpoint can **widen**
+the boundary — it is bounded only by what the server process may already read. Treat the
+server as an operator tool and do not expose it to untrusted users. The requested path must
+name an existing directory; anything else is rejected with `400` and the ceiling is left
+unchanged.
 
 ## Review overlays
 
@@ -133,6 +160,7 @@ Files mode because the analyses are per file.
 | Cycles | `/analysis/cycles` | Files in circular coupling (strongly connected components) |
 | Test reach | `/analysis/test-reach` | Modules something depends on that no test reaches |
 | Architecture health | `/analysis/architecture-health` | Heuristic axes (cohesion, low coupling, low fan-out, low complexity, coverage), each with the values it came from |
+| Function hotspots | `/analysis/functions` | Functions whose recorded metrics cross a fixed threshold (nested loops, deep nesting, high complexity, long body, many parameters, recursion), ranked worst-first |
 
 Also exposed but not yet surfaced in the UI: `/analysis/module-depth` and
 `/analysis/ownership`.
@@ -286,8 +314,18 @@ collapsed state are remembered per panel in `localStorage`, so a layout survives
 
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an
-`Open in Workspace` action. Dependencies, Dependents, and Members are separate tabs so a
-large file does not push its member list off screen.
+`Open in Workspace` action. Dependencies, Dependents, Members, and Functions are separate
+tabs so a large file does not push its member list off screen.
+
+The **Functions** tab lists every function and method with its signature, source span,
+decision-point count (a cyclomatic proxy), nesting depth, loop count, and whether it calls
+itself, plus the calls that resolve inside the same file. A language without a symbol
+extractor reports that extraction is not implemented, and a function whose body was not read
+shows `signature only` rather than a fabricated zero. The same recorded metrics drive
+deterministic cost signals (nested loops, a linear scan or sort inside a loop, deep nesting,
+high complexity, long body, many parameters, recursion); the **Function hotspots** review
+overlay ranks the functions that trip at least one and marks the files that carry them. Each
+signal names the recorded value and threshold, so it points at evidence rather than a verdict.
 
 Selecting an edge opens **Edge evidence**: the relationship kind, the recorded specifier and
 line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorded fields read
@@ -295,8 +333,8 @@ line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorde
 endpoint or trace a path between them.
 
 The **Member map** in the inspector groups declared types, fields, properties, and methods
-with their visibility and type where symbol extraction is available (TypeScript/TSX, Java,
-Kotlin, Rust, and C# today); other languages report that extraction is not implemented
+with their visibility and type where symbol extraction is available (TypeScript/TSX,
+JavaScript/JSX, Java, Kotlin, Rust, and C# today); other languages report that extraction is not implemented
 rather than an empty list. Where the scan recorded field references inside method bodies — an explicit
 `this.x` / `self.x`, or an unshadowed bare name — it also shows **Data flow** panels
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
@@ -390,6 +428,7 @@ implicit failure.
 | C# | `parsers/vendor/c_sharp` | Implemented: `using`, `using static`, and alias directives -> namespaces/types |
 | Kotlin | `parsers/vendor/kotlin` | Implemented: `package` + `import` (wildcards, aliases, nested types) -> repository files |
 | TypeScript, TSX | `parsers/vendor/typescript`, `parsers/vendor/tsx` | Member extraction (classes, interfaces, enums, module functions); imports resolve through the JS/TS scanner above |
+| JavaScript, JSX | `parsers/vendor/tsx` | Member extraction, sharing the TypeScript extractor; `.js`, `.jsx`, `.mjs`, `.cjs` parse with the TSX grammar, because JavaScript has no type assertions, so a leading `<` is always JSX |
 | SQL | `parsers/vendor/sql` | Implemented: `table` edges from a file that uses a table or view (`FROM`/`JOIN`, `UPDATE`, `DELETE`, `INSERT`, `ALTER`, `CREATE INDEX ... ON`, trigger `ON`, `REFERENCES`) to the one file that defines it (`CREATE TABLE`/`VIEW`/`MATERIALIZED VIEW`); `import` edges from `\i`/`\ir`, `:r`, `source`, and `@` includes of another `.sql` file; member extraction (tables/views and their columns) |
 | C++ | not vendored | Recognised and reported as unsupported |
 | COBOL, ABL | not vendored | Out of scope for now; treated as non-source files |

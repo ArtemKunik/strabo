@@ -164,6 +164,24 @@ Then('the inspector lists members including {string}', async function (name) {
   );
 });
 
+Then('the inspector lists functions including {string}', async function (name) {
+  await this.openInspectorTab('functions');
+  await this.page.waitForFunction(
+    (fn) => {
+      const section = document.querySelector('#inspector [data-role="functions"]');
+      return Boolean(section) && section.textContent.includes(fn) && /Functions \(\d+\)/.test(section.textContent);
+    },
+    name,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the inspector reports body metrics for a listed function', async function () {
+  const text = (await this.page.textContent('#inspector [data-role="functions"]')) ?? '';
+  assert.match(text, /complexity \d+/);
+  assert.match(text, /nesting \d+/);
+});
+
 Then('the member map lists fields with declared types', async function () {
   await this.openInspectorTab('members');
   await this.page.waitForFunction(

@@ -1,15 +1,17 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic } from '../../types.ts';
-import { collectFunctionMetrics, type FunctionRules } from './function-metrics.ts';
+import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
+  type CallRules,
   type CodeSymbol,
   type MemberAccess,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
+  collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
 } from './symbols.ts';
@@ -325,7 +327,18 @@ export async function extractTypeScriptSymbols(
       }
     }
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses };
+    const declared = new Set(
+      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+    );
+    const types = new Set(
+      symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+    );
+    const calls = methodBodies.flatMap((entry) =>
+      collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, TYPESCRIPT_CALLS),
+    );
+    markRecursive(symbols, calls);
+
+    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });
 }
 
@@ -353,6 +366,30 @@ const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {
     'ternary_expression',
   ]),
   decisionOperators: new Set(['&&', '||', '??']),
+  callTypes: new Set(['call_expression']),
+  callTargetName: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return fn.text;
+    }
+    return fn.type === 'member_expression'
+      ? (fn.childForFieldName('property')?.text ?? null)
+      : null;
+  },
+  linearScanCalls: new Set([
+    'includes',
+    'indexof',
+    'lastindexof',
+    'find',
+    'findindex',
+    'some',
+    'every',
+    'filter',
+  ]),
+  sortCalls: new Set(['sort', 'tosorted']),
   statementTypes: new Set([
     'expression_statement',
     'lexical_declaration',
@@ -382,6 +419,34 @@ const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {
     'abstract_class_declaration',
     'class',
   ]),
+};
+
+const TYPESCRIPT_CALLS: CallRules = {
+  callTypes: new Set(['call_expression']),
+  callTarget: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return { name: fn.text, kind: 'bare' };
+    }
+    if (fn.type !== 'member_expression') {
+      return null;
+    }
+    const object = fn.childForFieldName('object');
+    const property = fn.childForFieldName('property');
+    if (!object || !property || property.type !== 'property_identifier') {
+      return null;
+    }
+    if (object.type === 'this') {
+      return { name: property.text, kind: 'self', receiver: 'this' };
+    }
+    if (object.type === 'identifier' && looksLikeTypeName(object.text)) {
+      return { name: property.text, kind: 'type-qualified', receiver: object.text };
+    }
+    return null;
+  },
 };
 
 const TYPESCRIPT_ACCESS: AccessRules = {
@@ -417,9 +482,19 @@ const TYPESCRIPT_ACCESS: AccessRules = {
     }),
 };
 
-/** `.tsx` needs the TSX grammar for JSX; every other module extension uses TypeScript. */
+/**
+ * JavaScript dialects parse with the TSX grammar, not the TypeScript one. The two differ
+ * only in how they read a leading `<`: TypeScript takes it as a type assertion, TSX as a
+ * JSX element. JavaScript has no type assertions, so TSX is the correct reading for every
+ * `.js` file, and it is the only one that survives JSX in a `.js` or `.jsx` file.
+ */
+const TSX_EXTENSIONS = ['.tsx', '.jsx', '.js', '.mjs', '.cjs'];
+
 function grammarFor(file: string): GrammarLanguage {
-  return file.toLowerCase().endsWith('.tsx') ? TSX_LANGUAGE : TYPESCRIPT_LANGUAGE;
+  const lower = file.toLowerCase();
+  return TSX_EXTENSIONS.some((extension) => lower.endsWith(extension))
+    ? TSX_LANGUAGE
+    : TYPESCRIPT_LANGUAGE;
 }
 
 /** The owner shared by a module's top-level declarations, e.g. `scan` for `src/scan.ts`. */

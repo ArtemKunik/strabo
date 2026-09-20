@@ -42,8 +42,16 @@ export interface FunctionMetrics {
   decisionPoints: number;
   /** Deepest nesting of block control-flow constructs inside the body. */
   maxNestingDepth: number;
+  /** Deepest nesting of loops inside the body; 2 or more is an O(n²)-shaped risk. */
+  loopNestingDepth: number;
   /** Loop constructs in the body. */
   loops: number;
+  /** Distinct linear-scan calls (`includes`, `indexOf`, …) made inside a loop. */
+  loopScans: string[];
+  /** Distinct sort calls (`sort`, `sorted`, …) made inside a loop. */
+  loopSorts: string[];
+  /** True when the body calls the function it belongs to. */
+  recursive: boolean;
 }
 
 /**
@@ -61,6 +69,14 @@ export interface FunctionCall {
   /** Name of the calling function. */
   method: string;
   kind: 'bare' | 'self' | 'type-qualified';
+  /** The receiver as authored for `self`/type-qualified calls; absent for a bare call. */
+  receiver?: string;
+  /**
+   * The type that declares the callee, when the call syntax proves it (`this`/`self` or a
+   * type-qualified receiver). Absent for a bare call, which may name a module function or a
+   * method of the caller's own type.
+   */
+  targetOwner?: string;
   line: number;
 }
 
@@ -69,7 +85,9 @@ export interface FunctionCall {
  *
  * Only references the scan can prove are recorded: an explicit `this.x` / `self.x`, or a
  * bare name that matches a field of the same type and is not shadowed by a parameter or
- * local. `qualified` distinguishes the two so callers can weigh the evidence.
+ * local. `qualified` distinguishes the two so callers can weigh the evidence; it is true
+ * when any reference recorded for that field and mode was explicit, so it does not depend
+ * on which occurrence the walk reaches first.
  */
 export interface MemberAccess {
   field: string;
@@ -101,15 +119,43 @@ export interface AccessRules {
   declaredNames: (body: Node) => Set<string>;
 }
 
-export function sortSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
-  return symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+/** Language-specific node rules used to resolve a call site to a same-file function. */
+export interface CallRules {
+  /** Node types that represent an invocation. */
+  callTypes: Set<string>;
+  /**
+   * Resolve a call node to its callee, or null when the target is not provable.
+   *
+   * A member call on a value (`obj.method()`) returns null: the receiver's type is not
+   * known, so the target file is not claimed.
+   */
+  callTarget: (node: Node) => { name: string; kind: FunctionCall['kind']; receiver?: string } | null;
 }
 
-/** Depth-first walk over named children, including `node`. */
+export function sortSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
+  return [...symbols].sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+}
+
+/**
+ * Depth-first pre-order walk over named children, including `node`.
+ *
+ * Iterative rather than recursive so a pathologically deep tree cannot overflow the stack.
+ */
 export function walkNodes(node: Node, visit: (node: Node) => void): void {
-  visit(node);
-  for (const child of node.namedChildren) {
-    walkNodes(child, visit);
+  const stack: Node[] = [node];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) {
+      continue;
+    }
+    visit(current);
+    const children = current.namedChildren;
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const child = children[i];
+      if (child) {
+        stack.push(child);
+      }
+    }
   }
 }
 
@@ -117,9 +163,11 @@ export function walkNodes(node: Node, visit: (node: Node) => void): void {
  * Collect the field references inside one method body.
  *
  * A field is recorded once per mode, so a method that reads and writes the same field
- * reports both. Bare references are dropped when a parameter or local shadows the name
- * (parameters live outside the body, so `scope` - the whole method - is searched for
- * declarations), and the field identifier of a `this.x` access is not double-counted.
+ * reports both. When a field and mode are touched more than once, the single entry is
+ * upgraded to `qualified` if any of those references was explicit, so the flag does not
+ * turn on traversal order. Bare references are dropped when a parameter or local shadows
+ * the name (parameters live outside the body, so `scope` - the whole method - is searched
+ * for declarations), and the field identifier of a `this.x` access is not double-counted.
  */
 export function collectMemberAccesses(
   body: Node,
@@ -134,18 +182,23 @@ export function collectMemberAccesses(
   }
   const declared = rules.declaredNames(scope);
   const accesses: MemberAccess[] = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, MemberAccess>();
 
   const record = (field: string, node: Node, qualified: boolean): void => {
     const mode: MemberAccess['mode'] = isWriteTarget(node, body, rules.assignmentTypes)
       ? 'write'
       : 'read';
     const key = `${field}\u0000${mode}`;
-    if (seen.has(key)) {
+    const existing = seen.get(key);
+    if (existing) {
+      if (qualified) {
+        existing.qualified = true;
+      }
       return;
     }
-    seen.add(key);
-    accesses.push({ field, owner, method, mode, qualified, line: node.startPosition.row + 1 });
+    const access = { field, owner, method, mode, qualified, line: node.startPosition.row + 1 };
+    seen.set(key, access);
+    accesses.push(access);
   };
 
   walkNodes(body, (node) => {
@@ -164,6 +217,83 @@ export function collectMemberAccesses(
   });
 
   return accesses;
+}
+
+/**
+ * Collect the calls inside one function body that resolve to a function in the same file.
+ *
+ * `declared` is every function name the file declares; `types` is every type name it
+ * declares. A bare call or a `this`/`self` call is recorded when its name is declared. A
+ * type-qualified call (`Type.x()`) also needs its receiver to be a type declared here (or
+ * the current owner, for `Self.x()`), so `Other.doThing()` is never claimed as local.
+ */
+export function collectFunctionCalls(
+  body: Node,
+  declared: Set<string>,
+  types: Set<string>,
+  owner: string,
+  method: string,
+  rules: CallRules,
+): FunctionCall[] {
+  if (declared.size === 0) {
+    return [];
+  }
+  const calls: FunctionCall[] = [];
+  const seen = new Set<string>();
+
+  walkNodes(body, (node) => {
+    if (!rules.callTypes.has(node.type)) {
+      return;
+    }
+    const target = rules.callTarget(node);
+    if (!target || !declared.has(target.name)) {
+      return;
+    }
+    if (target.kind === 'type-qualified') {
+      const receiver = target.receiver;
+      if (!receiver) {
+        return;
+      }
+      if (receiver === 'Self') {
+        if (!owner) {
+          return;
+        }
+      } else if (receiver !== owner && !types.has(receiver)) {
+        return;
+      }
+    }
+    const key = `${target.name}\u0000${target.kind}\u0000${node.startPosition.row}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    const declaring = targetOwner(target, owner);
+    calls.push({
+      callee: target.name,
+      owner,
+      method,
+      kind: target.kind,
+      ...(target.receiver ? { receiver: target.receiver } : {}),
+      ...(declaring !== undefined ? { targetOwner: declaring } : {}),
+      line: node.startPosition.row + 1,
+    });
+  });
+
+  return calls;
+}
+
+/** The declaring type a call proves, or undefined when the syntax does not name one. */
+function targetOwner(
+  target: { kind: FunctionCall['kind']; receiver?: string },
+  owner: string,
+): string | undefined {
+  if (target.kind === 'bare') {
+    return undefined;
+  }
+  if (target.kind === 'self') {
+    return owner;
+  }
+  return target.receiver === 'Self' ? owner : target.receiver;
 }
 
 /**

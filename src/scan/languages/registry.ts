@@ -34,6 +34,13 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.tsx': { language: 'typescript', extract: extractTypeScriptSymbols },
   '.mts': { language: 'typescript', extract: extractTypeScriptSymbols },
   '.cts': { language: 'typescript', extract: extractTypeScriptSymbols },
+  // JavaScript reuses the TypeScript extractor: the grammar is a superset, so the same
+  // walk finds classes, functions, and top-level declarations. Only the reported language
+  // differs, so a `.js` file is not described as TypeScript.
+  '.js': { language: 'javascript', extract: extractTypeScriptSymbols },
+  '.jsx': { language: 'javascript', extract: extractTypeScriptSymbols },
+  '.mjs': { language: 'javascript', extract: extractTypeScriptSymbols },
+  '.cjs': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.sql': { language: 'sql', extract: extractSqlSymbols, tracksAccess: false },
 };
 

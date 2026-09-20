@@ -19,6 +19,7 @@ import {
   renderDiagnostics,
   renderEdgeEvidence,
   renderFolderList,
+  renderFunctions,
   renderInspector,
   renderLegend,
   renderMemberMap,
@@ -31,6 +32,7 @@ import {
   renderTimeline,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
+import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 
@@ -166,6 +168,21 @@ function applyViewPrefs() {
 
 const view = createView(document.getElementById('graph'));
 
+/**
+ * Client preferences, read once and re-applied on every change. `applyAppearance` sets the
+ * theme and reduce-motion attributes before the first render; the canvas reads them for its
+ * own palette, so it is restyled here too.
+ */
+let clientPrefs = readSettings();
+
+function applyClientPrefs() {
+  applyAppearance(clientPrefs);
+  view.applyTheme();
+  view.setLabelsVisible(clientPrefs.labels);
+}
+
+applyClientPrefs();
+
 const elements = {
   repository: document.getElementById('repository'),
   browse: document.getElementById('browse'),
@@ -219,6 +236,8 @@ const elements = {
   memberView: document.getElementById('member-view'),
   graphHint: document.getElementById('graph-hint'),
   shortcuts: document.getElementById('shortcuts'),
+  settingsToggle: document.getElementById('settings-toggle'),
+  settingsPanel: document.getElementById('settings-panel'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -464,10 +483,11 @@ function selectNode(id) {
   refreshDock();
 }
 
-/** Fetch members for the selected file; symbols are extracted on demand by the server. */
+/** Fetch members and functions for the selected file; symbols are extracted on demand. */
 async function loadMembers(id) {
-  const section = elements.inspector.querySelector('[data-role="members"]');
-  if (!section) {
+  const membersSection = elements.inspector.querySelector('[data-role="members"]');
+  const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
+  if (!membersSection && !functionsSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -480,11 +500,14 @@ async function loadMembers(id) {
       ? await response.json()
       : { available: false, detail: 'Symbols are unavailable for this file.' };
     if (selected === id) {
-      renderMembers(section, result);
+      if (membersSection) renderMembers(membersSection, result);
+      if (functionsSection) renderFunctions(functionsSection, result);
     }
   } catch {
     if (selected === id) {
-      renderMembers(section, { available: false, detail: 'Symbols could not be loaded.' });
+      const fallback = { available: false, detail: 'Symbols could not be loaded.' };
+      if (membersSection) renderMembers(membersSection, fallback);
+      if (functionsSection) renderFunctions(functionsSection, fallback);
     }
   }
 }
@@ -850,6 +873,75 @@ async function toggleRisk() {
   }
 }
 
+/* ------------------------------------------- Settings */
+
+/** Server settings from `/settings`, or null while loading. */
+let serverSettings = null;
+let settingsStatus = '';
+let settingsStatusError = false;
+
+function renderSettingsView() {
+  if (!elements.settingsPanel) return;
+  renderSettings(elements.settingsPanel, {
+    prefs: clientPrefs,
+    server: serverSettings,
+    status: settingsStatus || null,
+    statusError: settingsStatusError,
+    onPref: (key, value) => {
+      clientPrefs = { ...clientPrefs, [key]: value };
+      writeSettings(clientPrefs);
+      applyClientPrefs();
+      renderSettingsView();
+    },
+    onSaveCeiling: (value) =>
+      saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
+    onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
+  });
+}
+
+/** Write one server setting, then re-render; failures are shown in the panel, not thrown. */
+async function saveServerSettings(patch, successMessage) {
+  try {
+    await putServerSettings(patch);
+    settingsStatus = successMessage;
+    settingsStatusError = false;
+  } catch (error) {
+    settingsStatus = error.message;
+    settingsStatusError = true;
+  }
+  renderSettingsView();
+  // The repository picker filters against the ceiling; refresh it so a change shows there.
+  loadCatalogue().catch(() => {});
+}
+
+async function putServerSettings(patch) {
+  const response = await fetch(`${API_PATH}/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not save settings (${response.status}).`);
+  }
+  serverSettings = body;
+  return body;
+}
+
+/** Open the settings window and load the current server values. */
+async function openSettings() {
+  settingsStatus = '';
+  settingsStatusError = false;
+  renderSettingsView();
+  try {
+    serverSettings = await request('/settings');
+  } catch (error) {
+    settingsStatus = error.message;
+    settingsStatusError = true;
+  }
+  renderSettingsView();
+}
+
 function clearOverlay() {
   state.overlay = 'none';
   elements.overlay.value = 'none';
@@ -918,6 +1010,7 @@ const OVERLAY_TITLES = {
   cycles: 'Cycles',
   'test-reach': 'Test reach',
   architecture: 'Architecture health',
+  hotspots: 'Function hotspots',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -925,6 +1018,7 @@ const OVERLAY_ENDPOINTS = {
   cycles: '/analysis/cycles',
   'test-reach': '/analysis/test-reach',
   architecture: '/analysis/architecture-health',
+  hotspots: '/analysis/functions',
 };
 
 /**
@@ -1691,6 +1785,25 @@ const floatingWindows = initFloatingWindows({
       },
     },
     {
+      key: 'settings',
+      element: elements.settingsPanel,
+      title: 'Settings',
+      dockLabel: 'Settings',
+      width: 420,
+      onOpen: () => {
+        if (elements.settingsPanel.hidden) {
+          openSettings().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+        elements.settingsToggle?.setAttribute('aria-expanded', 'true');
+      },
+      onClose: () => {
+        elements.settingsPanel.hidden = true;
+        elements.settingsToggle?.setAttribute('aria-expanded', 'false');
+      },
+    },
+    {
       key: 'shortcuts',
       element: elements.shortcuts,
       title: 'Keyboard shortcuts',
@@ -1728,6 +1841,13 @@ function refreshDock() {
   }
 }
 
+elements.settingsToggle?.addEventListener('click', () => {
+  floatingWindows.find((controller) => controller.key === 'settings')?.toggle();
+});
+
+// Follow the OS theme/motion preference while the theme is set to "system".
+watchSystemPreferences(clientPrefs, () => applyClientPrefs());
+
 // Gated automation hook for browser acceptance tests. It exposes measurement and the
 // same handlers the UI uses; it is inert unless the page opts in with window.STRABO_TEST.
 if (window.STRABO_TEST) {
@@ -1755,6 +1875,9 @@ if (window.STRABO_TEST) {
 
 loadCatalogue()
   .then(() => {
+    // The graph default is the fallback: a URL mode or a per-repository pref overrides it.
+    state.mode = clientPrefs.defaultDetail;
+    elements.detail.value = clientPrefs.defaultDetail;
     applyUrl();
     if (
       state.repository &&

@@ -79,8 +79,16 @@ export { computeFileHealth, computeMemberCohesion } from './analysis/file-health
 export type { FileHealthReport, FileHealthMetrics, MemberCohesion } from './analysis/file-health.ts';
 export { buildMemberMap } from './analysis/member-map.ts';
 export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member-map.ts';
+export { buildFunctions } from './analysis/functions.ts';
+export type { FunctionEntry, FunctionCallSite, FunctionsReport } from './analysis/functions.ts';
+export { computeSignals, SIGNAL_THRESHOLDS } from './analysis/signals.ts';
+export type { FunctionSignal, FunctionSignalKind } from './analysis/signals.ts';
+export { rankHotspots } from './analysis/hotspots.ts';
+export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
+export { createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
+export type { StraboSettings } from './api/routes/settings.ts';
 
 export { readWorkspaceConfig, resolveWorkspaceRepositories } from './workspace/config.ts';
 export type { WorkspaceConfig } from './workspace/config.ts';

@@ -30,3 +30,10 @@ Feature: Module Passport
     And I switch to file detail
     And I select the "src/main/kotlin/com/acme/app/Main.kt" node
     Then the inspector lists members including "helper"
+
+  @functions
+  Scenario: Functions are listed with body metrics for a supported language
+    When I switch to file detail
+    And I select the "main.ts" node
+    Then the inspector lists functions including "main"
+    And the inspector reports body metrics for a listed function

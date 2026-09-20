@@ -1,16 +1,18 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, EdgeEvidence, GraphEdge } from '../../types.ts';
-import { collectFunctionMetrics, type FunctionRules } from './function-metrics.ts';
+import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import { addNamespacePrefixes, looksInternal } from './namespace.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
+  type CallRules,
   type CodeSymbol,
   type MemberAccess,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
+  collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
 } from './symbols.ts';
@@ -450,7 +452,7 @@ export async function extractJavaSymbols(
         const name = node.childForFieldName('name')?.text;
         if (name) {
           const parameters = node.childForFieldName('parameters');
-          symbols.push({
+          const symbol: CodeSymbol = {
             name,
             kind: 'method',
             visibility: javaVisibility(node),
@@ -460,8 +462,12 @@ export async function extractJavaSymbols(
               parameters?.namedChildren.filter((child) => child.type === 'formal_parameter')
                 .length ?? 0,
             line: node.startPosition.row + 1,
-          });
+          };
           const body = node.childForFieldName('body');
+          if (body) {
+            symbol.metrics = collectFunctionMetrics(body, symbol.line, JAVA_FUNCTION_RULES);
+          }
+          symbols.push(symbol);
           if (body && owner) {
             methodBodies.push({ owner, method: name, body, scope: node });
           }
@@ -493,9 +499,108 @@ export async function extractJavaSymbols(
       }
     }
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses };
+    const declared = new Set(
+      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+    );
+    const types = new Set(
+      symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+    );
+    const calls = methodBodies.flatMap((entry) =>
+      collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, JAVA_CALLS),
+    );
+    markRecursive(symbols, calls);
+
+    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });
 }
+
+const JAVA_FUNCTION_RULES: FunctionRules = {
+  controlFlowTypes: new Set([
+    'if_statement',
+    'for_statement',
+    'enhanced_for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_expression',
+    'try_statement',
+    'try_with_resources_statement',
+    'catch_clause',
+    'synchronized_statement',
+  ]),
+  loopTypes: new Set([
+    'for_statement',
+    'enhanced_for_statement',
+    'while_statement',
+    'do_statement',
+  ]),
+  decisionNodeTypes: new Set([
+    'if_statement',
+    'for_statement',
+    'enhanced_for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_label',
+    'catch_clause',
+    'ternary_expression',
+  ]),
+  decisionOperators: new Set(['&&', '||']),
+  callTypes: new Set(['method_invocation']),
+  callTargetName: (node) => node.childForFieldName('name')?.text ?? null,
+  linearScanCalls: new Set(['contains', 'indexof', 'lastindexof']),
+  sortCalls: new Set(['sort']),
+  statementTypes: new Set([
+    'local_variable_declaration',
+    'expression_statement',
+    'return_statement',
+    'throw_statement',
+    'break_statement',
+    'continue_statement',
+    'yield_statement',
+    'if_statement',
+    'for_statement',
+    'enhanced_for_statement',
+    'while_statement',
+    'do_statement',
+    'switch_expression',
+    'try_statement',
+    'try_with_resources_statement',
+    'synchronized_statement',
+    'assert_statement',
+    'labeled_statement',
+    'local_class_declaration',
+  ]),
+  nestedFunctionTypes: new Set([
+    'method_declaration',
+    'constructor_declaration',
+    'lambda_expression',
+    'class_declaration',
+    'interface_declaration',
+    'enum_declaration',
+    'record_declaration',
+    'annotation_type_declaration',
+  ]),
+};
+
+const JAVA_CALLS: CallRules = {
+  callTypes: new Set(['method_invocation']),
+  callTarget: (node) => {
+    const name = node.childForFieldName('name');
+    if (!name || name.type !== 'identifier') {
+      return null;
+    }
+    const object = node.childForFieldName('object');
+    if (!object) {
+      return { name: name.text, kind: 'bare' };
+    }
+    if (object.type === 'this') {
+      return { name: name.text, kind: 'self', receiver: 'this' };
+    }
+    if (object.type === 'identifier' && looksLikeTypeName(object.text)) {
+      return { name: name.text, kind: 'type-qualified', receiver: object.text };
+    }
+    return null;
+  },
+};
 
 const JAVA_ACCESS: AccessRules = {
   identifierTypes: new Set(['identifier']),
