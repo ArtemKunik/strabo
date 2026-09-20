@@ -29,19 +29,25 @@ const RESOLVED_LANGUAGES: ReadonlySet<PolyglotLanguage> = new Set([
   'sql',
 ]);
 
-let queue: Promise<unknown> = Promise.resolve();
+const emptyResult: PolyglotResult = { edges: [], diagnostics: [] };
+
+let queue: Promise<PolyglotResult> = Promise.resolve(emptyResult);
 
 /**
  * Serialise polyglot scans so shared parser state is never mutated concurrently.
  *
  * Parser runtime state is process-global, so scans run one at a time through this queue.
+ * Errors are re-thrown after the queue resets so callers are not left with silently empty results.
  */
 export function scanPolyglotEdges(
   files: readonly string[],
   contentByFile?: ReadonlyMap<string, string>,
 ): Promise<PolyglotResult> {
   const task = queue.then(() => extractAndResolve(files, contentByFile));
-  queue = task.catch(() => undefined);
+  queue = task.then(
+    (result) => result,
+    (error) => { queue = Promise.resolve(emptyResult); throw error; },
+  );
   return task;
 }
 

@@ -37,6 +37,22 @@ function clamp(value, min, max) {
 }
 
 /**
+ * The saved size of a window, or null per axis when it is not a usable box.
+ *
+ * A hidden (`display: none`) or collapsed window has no real rect, and earlier builds
+ * persisted that 0-wide / header-tall box. Reading it back gave a hairline window, so
+ * anything non-finite or below the resize minimum is ignored and the default applies.
+ */
+export function sanitizeSize(size) {
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  return {
+    width: Number.isFinite(width) && width >= MIN_WIDTH ? width : null,
+    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null,
+  };
+}
+
+/**
  * Create one floating window per config and wire a dock chip to each.
  *
  * A config names the panel `element`, a `title`, and optional `position`, `width`,
@@ -71,15 +87,17 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     if (!element) continue;
 
     const saved = store[config.key] ?? {};
-    const width = saved.size?.width ?? config.width ?? DEFAULT_WIDTH;
+    // Only a size the user set by resizing is remembered; otherwise the config's default applies.
+    let size = sanitizeSize(saved.size);
+    const width = size.width ?? config.width ?? DEFAULT_WIDTH;
 
     const win = document.createElement('section');
     win.className = 'float-window';
     win.dataset.panel = config.key;
     win.hidden = true;
     win.style.width = `${width}px`;
-    if (saved.size?.height) {
-      win.style.height = `${saved.size.height}px`;
+    if (size.height) {
+      win.style.height = `${size.height}px`;
     }
 
     const header = document.createElement('header');
@@ -251,13 +269,12 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
-        const rect = win.getBoundingClientRect();
         return {
           position: {
             left: parseFloat(win.style.left) || 0,
             top: parseFloat(win.style.top) || 0,
           },
-          size: { width: rect.width, height: rect.height },
+          size: { ...size },
           collapsed: isCollapsed(),
         };
       },
@@ -333,6 +350,12 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         resizeHandle.removeEventListener('pointermove', move);
         resizeHandle.removeEventListener('pointerup', end);
         resizeHandle.removeEventListener('pointercancel', end);
+        // A click without a drag leaves no inline height; keep what was remembered.
+        const resized = sanitizeSize({
+          width: parseFloat(win.style.width),
+          height: parseFloat(win.style.height),
+        });
+        size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
         persist();
       };
       resizeHandle.addEventListener('pointermove', move);
