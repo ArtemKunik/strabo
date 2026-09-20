@@ -39,6 +39,10 @@ function record(run: DelegateRun): void {
   }
 }
 
+function getRuns(): readonly DelegateRun[] {
+  return runs;
+}
+
 function toForwardSlashes(value: string): string {
   return value.split(path.sep).join('/');
 }
@@ -168,12 +172,12 @@ export function createDelegateRouter(config: StraboConfig): Router {
     }
   });
 
-  router.get('/delegate', (_request, response) => {
-    response.json({ runs });
-  });
+router.get('/delegate', (_request, response) => {
+     response.json({ runs: getRuns() });
+   });
 
-  router.get('/delegate/:id', (request, response) => {
-    const run = runs.find((entry) => entry.id === request.params.id);
+   router.get('/delegate/:id', (request, response) => {
+     const run = getRuns().find((entry) => entry.id === request.params.id);
     if (!run) {
       response.status(404).json({ error: 'Unknown delegate run.' });
       return;

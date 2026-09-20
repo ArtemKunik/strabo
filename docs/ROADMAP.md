@@ -22,6 +22,7 @@ record is reported as `unavailable`, never invented.
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
+| 13 | Visual design | Planned (map legibility at scale, panel placement, chrome consolidation) |
 | — | Developer Product Graph, Chat, Narrate | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -204,9 +205,67 @@ keeps the identity but adds a build step and a small view/state layer.
   window manager (`ui/strabo-float.js`) already provides dock, float, collapse, and
   persistence, so it was kept rather than rewritten.
 - **M4 - Design system + a11y.** Tokens, shared controls, focus-visible, keyboard navigation,
-  and ARIA on tabs/menus/cards.
+  and ARIA on tabs/menus/cards. The tokens and shared controls are what Phase 13 M4 spends;
+  they land once, here.
 - **M5 - Scale.** List virtualization for long panels, incremental graph overlay, and
   jsdom unit tests for panels.
+
+## Phase 13 - Visual design
+
+A UI/UX pass over the browser app, from a review of the running product against this
+repository on 2026-09-20 at 1600x950 and 1280x720. Phase 1 made the map legible at one
+size; this makes it hold at every size and gives the chrome a designed identity. Ordered
+by what changes the first impression most, not by effort. Every item below is an observed
+defect in the running app, not a preference.
+
+- **M0 - Zoom clamp and zoom-compensated labels.** Cytoscape node size and `font-size` are
+  model units, so they scale with zoom, and `fit()` (`ui/strabo-viewport.js`) has no
+  ceiling. Measured on this repository: Directories mode (5 nodes) fits at zoom `5.11`,
+  rendering a 10-unit label at 51px over ~300px nodes; Files mode (192 nodes) fits at
+  `0.38`, rendering the same label at 3.8px. One encoding, two unusable extremes. Clamp
+  `maxZoom` / `minZoom` in `createCytoscape` and derive label `font-size` from `cy.zoom()`
+  so type holds roughly 11 device pixels at any zoom. `applyLabelBudget` stays as the
+  density control; this is about size, not about which labels show.
+- **M1 - Colour encodes nothing.** The legend claims `colour = directory`, but no server
+  response sets `paletteIndex`, so `paletteColor` always falls back to hashing
+  `topLevelDirectory(node.id)` (`ui/strabo-graph.js`). In block mode a node id is a bare
+  directory name with no slash, which `topLevelDirectory` maps to `.` — so every block node
+  hashes the same string and the Directories view renders in a single colour. Assign the
+  palette index server-side where directories are already grouped, and make the legend
+  state the encoding the view actually uses.
+- **M2 - Panel placement.** Floating windows open at fixed points and overlap both the
+  canvas and each other: the legend's default position covers a node, the timeline covers
+  the first five canvas-toolbar buttons, and selecting `Architecture health` opens the
+  overlay panel underneath the timeline, so the result of the action is invisible. Give
+  windows a default home in a right-hand rail, place each new window in the first free slot
+  rather than a fixed offset, and raise-to-front plus flash the dock chip on open.
+  `ui/strabo-float.js` already owns drag, collapse, and persistence, so this is placement
+  policy rather than a rewrite.
+- **M3 - Structure at scale.** `buildPositions` already packs nodes into directory islands,
+  but nothing draws them, so a 192-node view reads as a grid of unrelated dots. Render a
+  backplate and directory name per island from the positions the layout already produces.
+  Lift edge contrast (`#3a4a5e` at 0.55 opacity over `#10141a` reads as haze at 0.38 zoom)
+  and dim non-neighbourhood edges on hover instead of drawing 454 edges at equal weight.
+- **M4 - Chrome consolidation.** The map is ringed by eight control surfaces: toolbar,
+  breadcrumb, canvas toolbar, panel dock, tests strip, status bar, zoom controls, and the
+  node counter. At 1280px the toolbar wraps to two rows and the dock overlaps a node label.
+  Fold the breadcrumb into the toolbar, make the canvas toolbar icon-only with an overflow
+  menu (keeping the F/I/P/B/T/R/V keys and their tooltips), and merge strip, dock, and
+  status bar into one bottom bar. Consumes the Phase 12 M4 tokens and shared controls.
+- **M5 - Type, controls, and copy.** A single 11/12/13px range at one weight leaves the
+  chrome without hierarchy; native `<select>` elements sit beside custom-styled buttons;
+  and the uppercase field labels (`REPOSITORY`, `DETAIL`, `FILTER`, `REVIEW`) spend toolbar
+  width restating what each control already shows. Adopt a type scale, style or replace the
+  selects, and move internal vocabulary (`cache: miss`, `renderer: canvas`, `excluded 105`,
+  `diagnostics 0`) behind Diagnostics — the header should count files and dependencies and
+  stop there. Split the legend in two: a visual key for size, colour, and shape, and a
+  shortcut sheet on `?`, rather than one box mixing encoding with keyboard gestures.
+- **M6 - First run.** Opening a repository renders a map and a legend with no suggested
+  first action. Say what to click.
+
+This phase changes presentation only. No item here alters what the scan records or what
+the API reports, so `evidence over speculation` is unaffected: M1 and M5 exist precisely
+because the legend currently claims an encoding the view does not carry.
 
 ## Phase 6 - Release readiness
 

@@ -1,0 +1,3 @@
+CREATE TABLE recent (
+  id INT PRIMARY KEY
+);

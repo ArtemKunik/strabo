@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -144,21 +146,34 @@ test('resolveJava reports an ambiguous same-package type reference', () => {
   assert.equal(ambiguous.specifier, 'Dupe');
 });
 
-test('unresolved Java imports are diagnostics; external JDK imports are ignored', async () => {
-  const report = await scanRepository(fixture);
-  const javaDiagnostics = report.graph.diagnostics.filter((item) => item.file.endsWith('Main.java'));
+test('previously unresolved Java imports now resolve to internal files; external JDK imports are ignored', async () => {
+   const report = await scanRepository(fixture);
+   const javaDiagnostics = report.graph.diagnostics.filter((item) => item.file.endsWith('Main.java'));
 
-  assert.ok(javaDiagnostics.some((item) => item.specifier === 'com.acme.missing.Gone'));
-  assert.ok(!javaDiagnostics.some((item) => item.specifier === 'java.util.List'));
-  assert.ok(!report.graph.edges.some((edge) => edge.source.includes('java/util') || edge.target.includes('java/util')));
+   assert.ok(!javaDiagnostics.some((item) => item.specifier === 'com.acme.missing.Gone'));
+   assert.ok(report.graph.edges.some((edge) => edge.source.includes('Main.java') && edge.target.includes('missing/Gone.java')));
+   assert.ok(!javaDiagnostics.some((item) => item.specifier === 'java.util.List'));
+   assert.ok(!report.graph.edges.some((edge) => edge.source.includes('java/util') || edge.target.includes('java/util')));
 });
 
 test('languages without a resolver are reported as unsupported, not dropped', async () => {
-  const report = await scanRepository(fixture);
-  const sql = report.graph.diagnostics.find((item) => item.file.endsWith('schema.sql'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-unsupported-'));
+  try {
+    fs.writeFileSync(path.join(directory, 'engine.cpp'), '#include "engine.h"\nint main() { return 0; }\n');
+    const report = await scanRepository(directory);
+    const cpp = report.graph.diagnostics.find((item) => item.file === 'engine.cpp');
 
-  assert.ok(sql);
-  assert.equal(sql.kind, 'unsupported');
+    assert.ok(cpp);
+    assert.equal(cpp.kind, 'unsupported');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('SQL files are resolved, not reported as unsupported', async () => {
+  const report = await scanRepository(fixture);
+
+  assert.ok(!report.graph.diagnostics.some((item) => item.file.endsWith('schema.sql')));
 });
 
 test('Java edges are deterministic across scans', async () => {

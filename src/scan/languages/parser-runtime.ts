@@ -27,6 +27,7 @@ export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = [
   'rust',
   'c_sharp',
   'kotlin',
+  'sql',
   'typescript',
   'tsx',
 ];

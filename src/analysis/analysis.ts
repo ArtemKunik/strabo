@@ -40,7 +40,7 @@ export interface GraphMetrics {
  * Direct fan-in/fan-out plus transitive dependencies and dependents.
  *
  * The concept calls for an SCC-reachability algorithm when the bitset allocation is
- * safe, otherwise a cycle-safe breadth-first traversal. The BFS below is the safe
+ * safe, otherwise a cycle-safe iterative depth-first traversal. The DFS below is the safe
  * baseline; the optimised path is tracked as a follow-up.
  */
 export function computeGraphMetrics(graph: Graph, adjacency?: Adjacency): GraphMetrics {
