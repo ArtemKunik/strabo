@@ -36,9 +36,11 @@ modes, so there is exactly one implementation of Strabo behaviour.
 # install (bun preferred for local development)
 bun install
 
-# typecheck + build
+# typecheck + build (tsc, then the UI bundle)
 bun run typecheck
 bun run build
+# or just the UI bundle
+bun run build:ui
 
 # run the standalone server against a repository
 STRABO_ROOT=/path/to/repo bun run start
@@ -53,7 +55,7 @@ Then open `http://localhost:3000` (default `PORT`).
 | Variable             | Meaning                                                        |
 | -------------------- | -------------------------------------------------------------- |
 | `STRABO_ROOT`        | Repository root to scan and serve.                             |
-| `STRABO_CONFIG`      | Path to a Strabo config file (catalogue, integrations).        |
+| `STRABO_CONFIG`      | Path to a Strabo config file (workspace repositories, catalogue, integrations). |
 | `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root.   |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
@@ -132,6 +134,39 @@ the working tree, the first parent for a commit — and re-extracted for the rev
 file whose language has no extractor, is new, or was deleted names the missing side rather
 than showing a fabricated score.
 
+## Workspace analysis
+
+`STRABO_CONFIG` can name a workspace: several local repositories analyzed together.
+
+```json
+{ "name": "acme", "repositories": ["../core", "services/api"] }
+```
+
+Roots are relative to the config file, and every one is still resolved through
+`STRABO_SCAN_CEILING`, so naming a path can never widen what Strabo may read. Without a
+config the workspace is the single configured root, so multi-repo analysis stays opt-in.
+`GET /api/strabo/workspace` returns the repositories, the flows between them, and the data
+contracts they share.
+
+**Cross-repo flows** are package publish/consume edges. A repository's published coordinate
+is read from its own manifest (`package.json` `name`, `Cargo.toml` `[package] name`,
+`pom.xml` `groupId:artifactId`); a sibling's recorded external import matches it exactly, or
+by Maven `groupId` prefix. The flow carries the importing file, line, and specifier, and the
+publishing manifest. Nothing is inferred from names or proximity, and if two repositories
+claim the same coordinate both flows are emitted rather than one being chosen silently.
+
+**Data contracts** are extracted from Protobuf messages, OpenAPI `components.schemas`, and
+JSON Schema objects, normalised to field name, type, and required-ness. The
+`/api/strabo/workspace/contracts` endpoint returns them alongside **contract drift**: where
+the same contract id is declared by more than one repository, the fields that are missing on
+a side, have a different type, or disagree on required-ness. An identical shared contract is
+kept with no deviations rather than silently omitted.
+
+Each repository's graph comes from the shared graph cache, and its coordinate and contracts
+are cached per git fingerprint, so an unchanged repository is never rescanned or
+re-extracted. A root that is not a git working tree is not cached under a key that cannot be
+checked.
+
 ## Delegate to an agent
 
 Right-clicking a node, edge, diagnostic, commit, overlay item, the Git review panel, or
@@ -206,6 +241,16 @@ clicking an entry filters the map. The zoom controls on the canvas adjust the vi
 the status bar reports the diagnostics and exclusion counts, the node kinds on screen, and
 the active renderer (WebGL2 or canvas).
 
+### Floating panels
+
+Every panel — Review, Dependency risk, Timeline, Overlay, Edge evidence, Legend, the Module
+Passport, Diagnostics, and the Member map — opens as a **floating window** rather than a
+docked column, so the map keeps the full width. Drag a window by its header to move it,
+double-click the header (or use `–`) to collapse it to its title bar, and close it with `×`.
+The **dock** along the bottom restores any window, showing a solid chip for an open window,
+an outlined chip for a collapsed one, and a plain chip for a closed one. Position and
+collapsed state are remembered per panel in `localStorage`, so a layout survives a reload.
+
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an
 `Open in Workspace` action. Dependencies, Dependents, and Members are separate tabs so a
@@ -225,9 +270,9 @@ empty list. Where the scan recorded field references inside method bodies — an
 read/write wiring. When nothing was recorded, the panels say so; cross-file access is not
 claimed.
 
-**Member map** opens that file in a full-screen workspace: member cards with cluster tags
-and read/write counts, the four `DATA FLOW` panels behind a read/write divider, an
-Architecture Health radar, and a Dependency constellation of fields, methods, and
+**Member map** opens that file in its own large floating workspace: member cards with
+cluster tags and read/write counts, the four `DATA FLOW` panels behind a read/write divider,
+an Architecture Health radar, and a Dependency constellation of fields, methods, and
 repository consumers. Controls include Find member, Order, Show wiring, zoom levels,
 Explain this class, Night vision, Compare versions, Show only this flow, and Reset layout.
 
@@ -269,12 +314,13 @@ prevents path traversal and prevents host-wide scans by default.
 ## Architecture
 
 ```
-Browser app (public/)          framework-free UI · Cytoscape renderer · optional host adapters
+Browser app (public/)          framework-free UI · Cytoscape renderer · floating panel windows
 HTTP API                       router mounted at /api/strabo
 Repository boundary            resolveRepositoryRoot + scanCeiling
 Scanner                        JS/TS + polyglot resolvers
-Graph cache                    memory (60s) + disk artifact
+Graph cache                    memory (60s) + disk artifact · workspace fact cache
 Analysis & layout              metrics, impact, cycles, blocks, depth, ownership
+Workspace analysis             declared multi-repo flows · contract drift
 Optional integration seams     catalogue · vulnerability · lineage pack
 ```
 
@@ -344,16 +390,22 @@ src/
   scan/            collectSourceFiles, scanRepository, exclusion + gitignore handling
   resolve/         language facts -> internal repository paths
   analysis/        metrics, impact, coverage, cycles, depth, ownership, blocks
+  workspace/       declared multi-repo analysis: published coordinates, flows, contracts
   view/            deterministic server-side view model
-  cache/           memory + disk graph cache, fingerprints, refresh
+  cache/           memory + disk graph cache, workspace fact cache, fingerprints, refresh
   api/             router composition and focused routes
   integrations/    optional catalogue, vulnerability, and lineage seams
-public/            framework-free browser app (consumes the HTTP contract only)
+ui/                framework-free browser app source (ES modules, no framework)
+public/            generated UI served by the server, bundled from ui/ by `build:ui`
 parsers/           package-owned native and vendor grammar assets
 bin/               `strabo` CLI
 test/unit/         unit tests
 test/acceptance/   Gherkin .feature browser acceptance specs
 ```
+
+`scripts/build-ui.mjs` bundles `ui/` into `public/` with esbuild (not minified, so the
+served code stays readable); `npm run build` runs it after `tsc`. The published package
+ships the built `public/`, so a consumer never needs a build step.
 
 ## Non-goals
 

@@ -40,6 +40,7 @@ Feature: Member map
     And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
     And I open the member map
     Then the member map view shows fields, clusters, and the data flow
+    And the member map view draws the recorded wiring as a diagram
     And the member map view shows architecture health and the dependency constellation
     When I step through the flow walkthrough
     Then the flow walkthrough reports the wiring step

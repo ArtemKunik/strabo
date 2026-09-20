@@ -13,6 +13,8 @@ import {
   constellationPoints,
   explainClass,
   fieldCard,
+  flowGraph,
+  layoutFlowGraph,
   graphSummary,
   isWiredField,
   isWiredMethod,
@@ -30,6 +32,7 @@ import {
   riskSummary,
   summarizeDiagnostics,
 } from './strabo-core.js';
+import { Fragment, h, mount } from './view.js';
 
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
@@ -473,24 +476,33 @@ export function renderLegend(container, model) {
 
 /** Counts by directory and kind; clicking a chip filters the map. */
 export function renderTestsStrip(container, counts, onFilter, activeFilter = '') {
-  container.replaceChildren();
+  const chip = (label, filter, className = 'strip-chip') =>
+    h(
+      'button',
+      {
+        // The filter is the chip's stable identity, so a re-render reuses the same button.
+        key: filter || 'modules',
+        type: 'button',
+        className,
+        dataset: { filter },
+        'aria-pressed': activeFilter === filter ? 'true' : 'false',
+        onClick: () => onFilter(filter),
+      },
+      label,
+    );
 
-  const chip = (label, filter, className = 'strip-chip') => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = className;
-    button.textContent = label;
-    button.dataset.filter = filter;
-    button.setAttribute('aria-pressed', activeFilter === filter ? 'true' : 'false');
-    button.addEventListener('click', () => onFilter(filter));
-    return button;
-  };
-
-  container.append(chip(`tests ${counts.tests}`, '.test'));
-  container.append(chip(`modules ${counts.modules}`, ''));
-  for (const entry of counts.entries.slice(0, 12)) {
-    container.append(chip(`${entry.label} ${entry.count}`, entry.filter, 'strip-chip strip-dir'));
-  }
+  mount(
+    container,
+    h(
+      Fragment,
+      null,
+      chip(`tests ${counts.tests}`, '.test'),
+      chip(`modules ${counts.modules}`, ''),
+      ...counts.entries
+        .slice(0, 12)
+        .map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, 'strip-chip strip-dir')),
+    ),
+  );
 }
 
 export function renderBreadcrumb(container, state, onNavigate) {
@@ -1514,6 +1526,193 @@ function emptyFlowText(key) {
   );
 }
 
+/**
+ * SVG data-flow diagram: fields left, methods right, arrows for recorded
+ * reads (blue) and writes (amber). Hover traces one member's wiring, click
+ * isolates it; everything else dims. Renders nothing when there is no wiring
+ * to draw, so the panels below stay the source of truth.
+ */
+function buildFlowDiagram(memberMap) {
+  const graph = flowGraph(memberMap);
+  if (graph.edges.length === 0) {
+    if (graph.nodes.length === 0) {
+      return null;
+    }
+    return unavailableNote('Members recorded, but no read/write wiring between them.');
+  }
+  const layout = layoutFlowGraph(graph);
+  const byId = new Map(layout.nodes.map((node) => [node.id, node]));
+
+  const svg = svgElement('svg', {
+    viewBox: `0 0 ${layout.width} ${layout.height}`,
+    class: 'flow-diagram',
+    role: 'img',
+    'aria-label': `Data flow: ${graph.edges.length} recorded read/write connection(s)`,
+  });
+  svg.dataset.role = 'flow-diagram';
+
+  const defs = svgElement('defs', {});
+  for (const kind of ['read', 'write']) {
+    const marker = svgElement('marker', {
+      id: `flow-arrow-${kind}`,
+      viewBox: '0 0 10 10',
+      refX: '8',
+      refY: '5',
+      markerWidth: '7',
+      markerHeight: '7',
+      orient: 'auto-start-reverse',
+    });
+    marker.append(svgElement('path', { d: 'M 0 1 L 9 5 L 0 9 z', class: `flow-arrowhead ${kind}` }));
+    defs.append(marker);
+  }
+  svg.append(defs);
+
+  const edgeLayer = svgElement('g', { class: 'flow-edges' });
+  for (const edge of layout.edges) {
+    const from = byId.get(edge.from);
+    const to = byId.get(edge.to);
+    if (!from || !to) {
+      continue;
+    }
+    const x1 = from.x + from.w;
+    const y1 = from.y + from.h / 2;
+    const x2 = to.x;
+    const y2 = to.y + to.h / 2;
+    const dx = Math.max(30, (x2 - x1) / 2);
+    const path = svgElement('path', {
+      d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2 - 2} ${y2}`,
+      class: `flow-edge ${edge.kind}`,
+      'marker-end': `url(#flow-arrow-${edge.kind})`,
+    });
+    path.dataset.from = edge.from;
+    path.dataset.to = edge.to;
+    const title = svgElement('title', {});
+    title.textContent = edge.kind === 'read'
+      ? `${to.label} reads ${from.label}`
+      : `${from.label} writes ${to.label}`;
+    path.append(title);
+    edgeLayer.append(path);
+  }
+  svg.append(edgeLayer);
+
+  const nodeLayer = svgElement('g', { class: 'flow-nodes' });
+  for (const node of layout.nodes) {
+    const group = svgElement('g', {
+      class: `flow-node ${node.kind}`,
+      transform: `translate(${node.x},${node.y})`,
+      tabindex: '0',
+      role: 'button',
+      'aria-label': `${node.kind} ${node.label}: activate to isolate its wiring`,
+    });
+    group.dataset.node = node.id;
+    group.dataset.member = node.label;
+    group.append(svgElement('rect', { width: node.w, height: node.h, rx: '6' }));
+    const text = svgElement('text', { x: '10', y: String(node.h / 2 + 4) });
+    text.textContent = truncateLabel(node.label, 20);
+    group.append(text);
+    const title = svgElement('title', {});
+    title.textContent = `${node.kind}: ${node.label}`;
+    group.append(title);
+    nodeLayer.append(group);
+  }
+  svg.append(nodeLayer);
+
+  const connected = (id) => {
+    const ids = new Set([id]);
+    for (const edge of layout.edges) {
+      if (edge.from === id) {
+        ids.add(edge.to);
+      }
+      if (edge.to === id) {
+        ids.add(edge.from);
+      }
+    }
+    return ids;
+  };
+  const paint = (id) => {
+    const ids = id ? connected(id) : null;
+    for (const group of nodeLayer.childNodes) {
+      const hit = !ids || ids.has(group.dataset.node);
+      group.classList.toggle('dim', !hit);
+      group.classList.toggle('hit', Boolean(ids) && group.dataset.node === id);
+    }
+    for (const path of edgeLayer.childNodes) {
+      const hit = !ids || path.dataset.from === id || path.dataset.to === id;
+      path.classList.toggle('dim', !hit);
+    }
+  };
+
+  let isolated = null;
+  const clearIsolation = () => {
+    isolated = null;
+    svg.classList.remove('isolated', 'tracing');
+    paint(null);
+  };
+  for (const group of nodeLayer.childNodes) {
+    const id = group.dataset.node;
+    group.addEventListener('mouseenter', () => {
+      if (!isolated) {
+        svg.classList.add('tracing');
+        paint(id);
+      }
+    });
+    group.addEventListener('mouseleave', () => {
+      if (!isolated) {
+        svg.classList.remove('tracing');
+        paint(null);
+      }
+    });
+    group.addEventListener('focus', () => {
+      if (!isolated) {
+        svg.classList.add('tracing');
+        paint(id);
+      }
+    });
+    group.addEventListener('blur', () => {
+      if (!isolated) {
+        svg.classList.remove('tracing');
+        paint(null);
+      }
+    });
+    const toggle = () => {
+      if (isolated === id) {
+        clearIsolation();
+        return;
+      }
+      isolated = id;
+      svg.classList.add('isolated');
+      svg.classList.remove('tracing');
+      paint(id);
+    };
+    group.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggle();
+    });
+    group.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggle();
+      } else if (event.key === 'Escape') {
+        clearIsolation();
+      }
+    });
+  }
+  svg.addEventListener('click', clearIsolation);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'flow-diagram-wrap';
+  wrap.append(svg);
+  const hint = document.createElement('p');
+  hint.className = 'caveat';
+  hint.textContent = 'Reads flow left → right in blue, writes right → left in amber. Hover traces, click isolates.';
+  wrap.append(hint);
+  return wrap;
+}
+
+function truncateLabel(label, max) {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
+
 function buildDataFlow(memberMap, consumerIds) {
   const section = document.createElement('section');
   section.className = 'member-dataflow';
@@ -1529,6 +1728,11 @@ function buildDataFlow(memberMap, consumerIds) {
     note.dataset.role = 'flow-unavailable';
     section.append(note);
     return section;
+  }
+
+  const diagram = buildFlowDiagram(memberMap);
+  if (diagram) {
+    section.append(diagram);
   }
 
   const row = document.createElement('div');

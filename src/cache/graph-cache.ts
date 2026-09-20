@@ -49,7 +49,7 @@ const inflight = new Map<string, Promise<ScanReport>>();
  * untracked directory changes `git status`, which is part of the fingerprint. It would
  * also dirty the working tree of the repository being inspected.
  */
-function cacheRoot(): string {
+export function cacheRoot(): string {
   const configured = process.env.STRABO_CACHE_DIR?.trim();
   return configured ? path.resolve(configured) : path.join(os.tmpdir(), 'strabo-cache');
 }

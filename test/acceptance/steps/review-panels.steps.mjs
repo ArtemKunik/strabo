@@ -233,6 +233,16 @@ Then('the member map view shows fields, clusters, and the data flow', async func
   assert.match(flow, /EXTERNAL CONSUMPTION/);
 });
 
+Then('the member map view draws the recorded wiring as a diagram', async function () {
+  await this.page.waitForSelector('#member-view [data-role="flow-diagram"]', { timeout: 15_000 });
+  const reads = await this.page.locator('#member-view [data-role="flow-diagram"] .flow-edge.read').count();
+  const writes = await this.page.locator('#member-view [data-role="flow-diagram"] .flow-edge.write').count();
+  assert.ok(reads > 0, 'diagram should draw at least one recorded read');
+  assert.ok(writes > 0, 'diagram should draw at least one recorded write');
+  const nodes = await this.page.locator('#member-view [data-role="flow-diagram"] .flow-node').count();
+  assert.ok(nodes > 0, 'diagram should place member nodes');
+});
+
 Then('the member map view shows architecture health and the dependency constellation', async function () {
   await this.page.waitForSelector('#member-view [data-role="health"] .radar', { timeout: 15_000 });
   const health = (await this.page.textContent('#member-view [data-role="health"]')) ?? '';

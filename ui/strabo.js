@@ -13,6 +13,7 @@
 import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, findPath, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
+import { initFloatingWindows } from './strabo-float.js';
 import {
   renderBreadcrumb,
   renderDiagnostics,
@@ -312,6 +313,7 @@ async function scan({ refresh = false } = {}) {
     } else {
       renderOverlayPanel(elements.overlayPanel, '', null);
     }
+    refreshDock();
   } catch (error) {
     if (generation !== scanGeneration) {
       return;
@@ -423,6 +425,7 @@ function selectNode(id) {
     },
   });
   loadMembers(id);
+  refreshDock();
 }
 
 /** Fetch members for the selected file; symbols are extracted on demand by the server. */
@@ -465,6 +468,7 @@ function clearSelection() {
   closeRisk();
   elements.inspector.hidden = true;
   view.clearGroupSelection();
+  refreshDock();
 }
 
 /** Load the member map, repository health, and consumers, then open the full view. */
@@ -497,6 +501,7 @@ async function openMemberMap(id) {
   memberUI.find = '';
   elements.memberView.hidden = false;
   renderMemberMapView();
+  refreshDock();
 }
 
 function memberStepCount() {
@@ -610,6 +615,7 @@ function closeMemberMap() {
   stopMemberPlay();
   elements.memberView.hidden = true;
   memberUI.dim = false;
+  refreshDock();
 }
 
 document.addEventListener('keydown', (event) => {
@@ -763,6 +769,7 @@ function clearOverlay() {
   elements.overlay.value = 'none';
   view.overlay(null);
   renderOverlayPanel(elements.overlayPanel, '', null);
+  refreshDock();
 }
 
 function applyStripFilter(filter) {
@@ -795,6 +802,7 @@ function selectEdge(edgeId) {
     view.clearEdge();
     selectedEdgeId = null;
     renderEdgeEvidence(elements.edgePanel, null);
+    refreshDock();
     return;
   }
   selectedEdgeId = edgeId;
@@ -806,11 +814,13 @@ function selectEdge(edgeId) {
       view.clearEdge();
       selectedEdgeId = null;
       renderEdgeEvidence(elements.edgePanel, null);
+      refreshDock();
     },
   });
   if (evidence) {
     elements.hover.textContent = `${evidence.source} → ${evidence.target} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
   }
+  refreshDock();
 }
 
 function onSelect(id) {
@@ -840,6 +850,7 @@ async function applyOverlay(generation) {
   if (kind === 'none') {
     view.overlay(null);
     renderOverlayPanel(elements.overlayPanel, '', null);
+    refreshDock();
     return;
   }
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
@@ -854,6 +865,7 @@ async function applyOverlay(generation) {
     onClose: clearOverlay,
     onSelect: (id) => selectNode(id),
   });
+  refreshDock();
 }
 
 /** Folder selection is a server-side browse bounded by the configured scan ceiling. */
@@ -1448,6 +1460,154 @@ view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);
 
+/**
+ * Turn every auxiliary panel into a floating window. The panels keep their ids and
+ * `hidden` semantics; these handlers only supply app-aware open/close so the dock can
+ * restore a panel without desyncing overlay or selection state.
+ */
+const floatingWindows = initFloatingWindows({
+  dock: document.getElementById('float-dock'),
+  panels: [
+    {
+      key: 'review',
+      element: elements.reviewPanel,
+      title: 'Review',
+      dockLabel: 'Review',
+      width: 400,
+      position: { left: 16, top: 96 },
+      titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
+      onOpen: () => {
+        if (elements.reviewPanel.hidden) toggleReview();
+      },
+      onClose: () => {
+        closeReview();
+        view.overlay(null);
+      },
+    },
+    {
+      key: 'risk',
+      element: elements.riskPanel,
+      title: 'Dependency risk',
+      dockLabel: 'Risk',
+      width: 400,
+      position: { left: 16, top: 96 },
+      onOpen: () => {
+        if (elements.riskPanel.hidden) toggleRisk();
+      },
+      onClose: () => closeRisk(),
+    },
+    {
+      key: 'timeline',
+      element: elements.timelinePanel,
+      title: 'Timeline',
+      dockLabel: 'Timeline',
+      width: 380,
+      position: { left: 16, top: 96 },
+      onOpen: () => {
+        if (elements.timelinePanel.hidden) {
+          toggleTimeline().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      },
+      onClose: () => {
+        elements.timelinePanel.hidden = true;
+      },
+    },
+    {
+      key: 'overlay',
+      element: elements.overlayPanel,
+      title: 'Overlay',
+      dockLabel: 'Overlay',
+      width: 360,
+      position: { left: 16, top: 96 },
+      titleFrom: (panel) => (panel.querySelector('h3')?.textContent ?? '').split(' · ')[0].trim(),
+      canOpen: () => state.overlay !== 'none',
+      blockedTitle: 'Select an overlay (Review dropdown) to open Overlay',
+      onBlocked: () => {
+        elements.status.textContent = 'Select an overlay first — Overlay has nothing to show.';
+      },
+      onClose: () => clearOverlay(),
+    },
+    {
+      key: 'edge',
+      element: elements.edgePanel,
+      title: 'Edge',
+      dockLabel: 'Edge',
+      width: 360,
+      position: { left: 16, top: 96 },
+      titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
+      canOpen: () => Boolean(selectedEdgeId),
+      blockedTitle: 'Click an edge in the graph to open Edge',
+      onBlocked: () => {
+        elements.status.textContent = 'Click an edge in the graph first — no edge selected.';
+      },
+      onClose: () => selectEdge(null),
+    },
+    {
+      key: 'legend',
+      element: elements.legend,
+      title: 'Legend',
+      dockLabel: 'Legend',
+      width: 340,
+      position: { left: 16, bottom: 56 },
+    },
+    {
+      key: 'inspector',
+      element: elements.inspector,
+      title: 'Module passport',
+      dockLabel: 'Passport',
+      width: 384,
+      position: { right: 16, top: 96 },
+      canOpen: () => Boolean(selected),
+      blockedTitle: 'Select a module in the graph to open Passport',
+      onBlocked: () => {
+        elements.status.textContent = 'Select a module first — no passport to show.';
+      },
+      onClose: () => {
+        elements.inspector.hidden = true;
+      },
+    },
+    {
+      key: 'diagnostics',
+      element: elements.diagnostics,
+      title: 'Diagnostics',
+      dockLabel: 'Diagnostics',
+      width: 420,
+      position: { right: 16, bottom: 56 },
+      titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
+      onClose: () => {
+        elements.diagnostics.hidden = true;
+        elements.diagnosticsToggle.setAttribute('aria-expanded', 'false');
+      },
+    },
+    {
+      key: 'member',
+      element: elements.memberView,
+      title: 'Member map',
+      dockLabel: 'Member map',
+      width: 900,
+      height: 700,
+      center: true,
+      canOpen: () => Boolean(memberData),
+      blockedTitle: 'Open a member map from a module passport first',
+      onBlocked: () => {
+        elements.status.textContent = 'Open a member map from a module passport first.';
+      },
+      onOpen: () => renderMemberMapView(),
+      onClose: () => closeMemberMap(),
+    },
+  ],
+});
+
+function refreshDock() {
+  try {
+    floatingWindows?.refresh?.();
+  } catch {
+    // Dock not yet initialized; initial renderDock() covers startup.
+  }
+}
+
 // Gated automation hook for browser acceptance tests. It exposes measurement and the
 // same handlers the UI uses; it is inert unless the page opts in with window.STRABO_TEST.
 if (window.STRABO_TEST) {
@@ -1468,6 +1628,7 @@ if (window.STRABO_TEST) {
     reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
     risk: () => showRisk(),
     groupSelection: () => groupSelection,
+    floatingWindows: () => floatingWindows,
   };
 }
 

@@ -20,6 +20,8 @@ record is reported as `unavailable`, never invented.
 | 5 | Timeline and compare versions | Done (commit list + impact against a revision) |
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
+| 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
+| 12 | Frontend foundation | M0 done (`ui/` source bundled to `public/` by esbuild); view/state/panel/a11y milestones pending |
 | — | Developer Product Graph, Chat, Narrate | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -148,6 +150,54 @@ that import the affected package.
   /vulnerabilities` stays a host-injectable seam.
 
 Spec: `test/acceptance/features/dependency-risk.feature`.
+
+## Phase 11 - Multi-repo workspace
+
+Analyze several local repositories together, from an explicitly declared list. Only what the
+scan recorded is drawn; nothing is inferred from names or proximity.
+
+- Workspace config via `STRABO_CONFIG`: `{ "name": ..., "repositories": [...] }`, each root
+  resolved through `STRABO_SCAN_CEILING`. Without a config the workspace is the single root.
+- **Cross-repo flows**: a repository's published coordinate (`package.json` name,
+  `Cargo.toml` `[package] name`, `pom.xml` `groupId:artifactId`) joined to a sibling's
+  recorded external import (exact, or Maven `groupId` prefix). A coordinate claimed by two
+  repositories emits both flows rather than choosing one.
+- **Data contracts**: Protobuf messages, OpenAPI `components.schemas`, and JSON Schema
+  objects, normalised to field name, type, and required-ness.
+- **Contract drift**: a contract id declared by more than one repository, with the fields
+  that are missing, differently typed, or disagree on required-ness. An identical shared
+  contract is kept with no deviations.
+- **Caching**: graphs come from the shared graph cache; per-repo coordinates and contracts
+  are cached per git fingerprint (`strabo-workspace.json`), so an unchanged repository is
+  never rescanned or re-extracted. A non-git root is not cached under a key that cannot be
+  checked.
+- Endpoints: `GET /workspace` and `GET /workspace/contracts`.
+
+Next: a workspace UI, HTTP/service-call flows, and language DTO contracts.
+
+## Phase 12 - Frontend foundation
+
+Revamp the browser app without adopting a framework. The UI is a framework-free app that
+had grown into large modules building DOM by hand and re-rendering whole panels. This phase
+keeps the identity but adds a build step and a small view/state layer.
+
+- **M0 - Build & layout (done).** UI source lives in `ui/` (ES modules, no framework) and is
+  bundled by esbuild into the served `public/` (`scripts/build-ui.mjs`, `npm run build:ui`,
+  part of `npm run build`). The bundle is not minified so the served code stays readable;
+  Cytoscape stays a separate global script served from `node_modules`. `test:pack` asserts
+  the shipped `public/` and that `ui/` source is not published. No behaviour change.
+- **M1 - View layer.** A tiny `h()` + keyed patch (or signals) in `ui/`, porting one panel
+  first as proof, keeping the browser contract stable.
+- **M2 - State store.** One store for selection, mode, filters, open panels, and workspace,
+  with selectors/subscriptions, replacing the full `renderMemberMapView()` rebuilds and
+  enabling URL state (`?repo=&node=&panel=&mode=`).
+- **M3 - Panel manager.** Formalize the floating/dockable window layer (`ui/strabo-float.js`)
+  into one manager for inspector, review, risk, member map, and floats, with persisted
+  layout and focus handling.
+- **M4 - Design system + a11y.** Tokens, shared controls, focus-visible, keyboard navigation,
+  and ARIA on tabs/menus/cards.
+- **M5 - Scale.** List virtualization for long panels, incremental graph overlay, and
+  jsdom unit tests for panels.
 
 ## Phase 6 - Release readiness
 

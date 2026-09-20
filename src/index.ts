@@ -71,6 +71,17 @@ export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 
+export { readWorkspaceConfig, resolveWorkspaceRepositories } from './workspace/config.ts';
+export type { WorkspaceConfig } from './workspace/config.ts';
+export { readPublishedCoordinate } from './workspace/coordinate.ts';
+export { computeCrossRepoFlows } from './workspace/flows.ts';
+export type { RepoFlowFact } from './workspace/flows.ts';
+export { extractContracts, computeContractDrift, findContractFiles } from './workspace/contracts.ts';
+export { analyzeWorkspace } from './workspace/analyze.ts';
+export type { AnalyzeWorkspaceOptions } from './workspace/analyze.ts';
+export { openWorkspaceCache, clearWorkspaceCache, workspaceCachePath, WORKSPACE_CACHE_VERSION } from './cache/workspace-cache.ts';
+export type { WorkspaceCache, CachedRepoFacts } from './cache/workspace-cache.ts';
+
 export { findManifestFiles, readDependencies, parseNpmLock, parseNpmManifest, parseCargoLock, parseMavenPom } from './risk/inventory.ts';
 export { createOsvClient, normalizeSeverity, fixedVersions, createResponseCache, riskCacheDir } from './risk/osv.ts';
 export type { OsvClient, OsvQuery, OsvVulnerability, ResponseCache, FetchLike } from './risk/osv.ts';

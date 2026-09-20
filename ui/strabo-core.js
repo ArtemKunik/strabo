@@ -747,6 +747,71 @@ export function memberClusters(memberMap) {
   return { clusters, clusterOf };
 }
 
+/**
+ * Bipartite data-flow graph from recorded wiring only: fields on the left,
+ * methods on the right. A read is an edge field → method, a write is an edge
+ * method → field. References to undeclared members are dropped so the diagram
+ * never draws dangling arrows; use the panels when you need the raw lists.
+ */
+export function flowGraph(memberMap) {
+  const nodes = [];
+  const seen = new Set();
+  const edges = [];
+  const edgeKeys = new Set();
+
+  const addNode = (id, kind, label) => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      nodes.push({ id, kind, label });
+    }
+  };
+  const addEdge = (from, to, kind) => {
+    const key = `${from}→${to}:${kind}`;
+    if (!edgeKeys.has(key)) {
+      edgeKeys.add(key);
+      edges.push({ from, to, kind });
+    }
+  };
+
+  for (const type of memberMap?.types ?? []) {
+    for (const field of type.fields ?? []) {
+      addNode(`field:${field.name}`, 'field', field.name);
+    }
+    for (const method of type.methods ?? []) {
+      const methodId = `method:${method.name}`;
+      addNode(methodId, 'method', method.name);
+      for (const name of method.reads ?? []) {
+        addEdge(`field:${name}`, methodId, 'read');
+      }
+      for (const name of method.writes ?? []) {
+        addEdge(methodId, `field:${name}`, 'write');
+      }
+    }
+  }
+
+  const known = new Set(nodes.map((node) => node.id));
+  return { nodes, edges: edges.filter((edge) => known.has(edge.from) && known.has(edge.to)) };
+}
+
+/**
+ * Deterministic two-column layout for a flow graph: fields left, methods
+ * right, rows in declaration order. Pure positions, no simulation, so the
+ * diagram is stable across renders.
+ */
+export function layoutFlowGraph(graph, { width = 680, nodeWidth = 170, nodeHeight = 30, gap = 12 } = {}) {
+  const place = (kind, x) =>
+    graph.nodes
+      .filter((node) => node.kind === kind)
+      .map((node, index) => ({ ...node, x, y: index * (nodeHeight + gap), w: nodeWidth, h: nodeHeight }));
+  const placed = [...place('field', 0), ...place('method', Math.max(0, width - nodeWidth))];
+  const rows = Math.max(
+    graph.nodes.filter((node) => node.kind === 'field').length,
+    graph.nodes.filter((node) => node.kind === 'method').length,
+    1,
+  );
+  return { nodes: placed, edges: graph.edges, width, height: rows * (nodeHeight + gap) - gap };
+}
+
 /** A one-sentence explanation of the class, from recorded members and wiring only. */
 export function explainClass(memberMap) {
   const type = (memberMap?.types ?? [])[0];

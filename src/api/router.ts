@@ -11,6 +11,7 @@ import { createRepositoriesRouter } from './routes/repositories.ts';
 import { createRiskRouter } from './routes/risk.ts';
 import { createSymbolsRouter } from './routes/symbols.ts';
 import { createVulnerabilityRouter } from './routes/vulnerabilities.ts';
+import { createWorkspaceRouter } from './routes/workspace.ts';
 import type { StraboConfig } from '../types.ts';
 import { sendError } from './http.ts';
 
@@ -59,6 +60,7 @@ export function createStraboRouter(config: StraboConfig, store?: RepositoryStore
   router.use(createRepositoriesRouter(config, repositoryStore));
   router.use(createVulnerabilityRouter(config));
   router.use(createLineageRouter(config));
+  router.use(createWorkspaceRouter(config));
 
   return router;
 }

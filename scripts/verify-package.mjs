@@ -56,7 +56,7 @@ try {
     'dist/cli.js',
     'bin/strabo.js',
     'public/index.html',
-    'public/strabo-core.js',
+    'public/strabo.bundle.js',
     'parsers/vendor/java/tree-sitter-java.wasm',
     'parsers/vendor/rust/tree-sitter-rust.wasm',
     'parsers/vendor/c_sharp/tree-sitter-c_sharp.wasm',
@@ -65,7 +65,7 @@ try {
   ]) {
     check(entries.includes(required), `includes ${required}`);
   }
-  for (const forbidden of ['src/index.ts', 'test/unit/scan.test.ts', 'node_modules/express/package.json']) {
+  for (const forbidden of ['src/index.ts', 'ui/strabo.js', 'test/unit/scan.test.ts', 'node_modules/express/package.json']) {
     check(!entries.includes(forbidden), `excludes ${forbidden}`);
   }
 

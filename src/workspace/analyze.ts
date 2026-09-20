@@ -1,0 +1,82 @@
+import type { ResolvedRepository } from '../boundary/repository-root.ts';
+import { getCachedGraph } from '../cache/graph-cache.ts';
+import { openWorkspaceCache, type WorkspaceCache } from '../cache/workspace-cache.ts';
+import { describeRepository } from '../repository.ts';
+import type { ContractDefinition, WorkspaceReport, WorkspaceRepository } from '../types.ts';
+import { computeContractDrift, extractContracts } from './contracts.ts';
+import { readPublishedCoordinate } from './coordinate.ts';
+import { computeCrossRepoFlows, type RepoFlowFact } from './flows.ts';
+
+export interface AnalyzeWorkspaceOptions {
+  /** Injectable fact cache; defaults to the persisted one beside the graph cache. */
+  cache?: WorkspaceCache;
+}
+
+interface RepoAnalysis extends RepoFlowFact {
+  descriptor: WorkspaceRepository;
+  contracts: ContractDefinition[];
+}
+
+/**
+ * Analyze several repositories together.
+ *
+ * Each repository's graph comes from the shared graph cache, so an unchanged repository is
+ * never rescanned. Its published coordinate and data contracts are cached per fingerprint
+ * in the workspace fact cache and re-extracted only when that fingerprint changes. Flows and
+ * contract drift are then computed from those facts, which is cheap and always current.
+ */
+export async function analyzeWorkspace(
+  name: string,
+  repositories: ResolvedRepository[],
+  options: AnalyzeWorkspaceOptions = {},
+): Promise<WorkspaceReport> {
+  const cache = options.cache ?? openWorkspaceCache();
+  const analyses: RepoAnalysis[] = [];
+
+  for (const repository of repositories) {
+    const cached = await getCachedGraph(repository.root);
+    const info = await describeRepository(repository.root);
+    const stored = cache.get(repository.root, cached.fingerprint);
+    const facts = stored ?? {
+      publishes: readPublishedCoordinate(repository.root),
+      contracts: extractContracts(repository.root, repository.name),
+    };
+    if (!stored) {
+      cache.set(repository.root, cached.fingerprint, facts);
+    }
+    analyses.push({
+      name: repository.name,
+      publishes: facts.publishes,
+      graph: cached.report.graph,
+      contracts: facts.contracts,
+      descriptor: {
+        name: repository.name,
+        root: repository.root,
+        head: info.head,
+        dirty: info.dirty,
+        gitUrl: info.gitUrl,
+        publishes: facts.publishes,
+      },
+    });
+  }
+  cache.save();
+
+  const flows = computeCrossRepoFlows(analyses);
+  const contracts = analyses.flatMap((analysis) => analysis.contracts);
+  const drift = computeContractDrift(contracts);
+  const descriptor = analyses.map((analysis) => analysis.descriptor);
+
+  return {
+    name,
+    repositories: descriptor,
+    flows,
+    contracts,
+    drift,
+    summary: {
+      repositories: descriptor.length,
+      flows: flows.length,
+      contracts: contracts.length,
+      drifting: drift.filter((entry) => entry.deviations.length > 0).length,
+    },
+  };
+}

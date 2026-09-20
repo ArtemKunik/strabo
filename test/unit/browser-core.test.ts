@@ -20,10 +20,12 @@ import {
   fileWebUrl,
   filterNodes,
   findPath,
+  flowGraph,
   folderLocation,
   graphSummary,
   isWiredField,
   isWiredMethod,
+  layoutFlowGraph,
   mapCounts,
   memberClusters,
   memberMapSteps,
@@ -43,7 +45,7 @@ import {
   reviewOverlay,
   summarizeDiagnostics,
   topLevelDirectory,
-} from '../../public/strabo-core.js';
+} from '../../ui/strabo-core.js';
 
 const model = {
   repository: { name: 'demo', root: '/demo', gitUrl: 'git@github.com:owner/demo.git' },
@@ -476,6 +478,51 @@ test('memberClusters groups members connected by recorded wiring', () => {
   assert.equal(clusterOf.get('value'), clusterOf.get('reset'));
   assert.notEqual(clusterOf.get('value'), clusterOf.get('fail'));
   assert.equal(clusterOf.get('fail'), clusterOf.get('lastError'));
+});
+
+test('flowGraph draws reads field-to-method and writes method-to-field', () => {
+  const graph = flowGraph(memberMap);
+  assert.deepEqual(
+    graph.nodes.map((node) => node.id).sort(),
+    ['field:label', 'field:lastError', 'field:value', 'method:add', 'method:fail', 'method:reset'],
+  );
+  const kinds = new Map(graph.edges.map((edge) => [`${edge.from}→${edge.to}`, edge.kind]));
+  assert.equal(kinds.get('field:value→method:add'), 'read');
+  assert.equal(kinds.get('method:add→field:value'), 'write');
+  assert.equal(kinds.get('field:label→method:reset'), 'read');
+  assert.equal(kinds.get('method:reset→field:value'), 'write');
+  assert.equal(kinds.get('method:fail→field:lastError'), 'write');
+  assert.equal(graph.edges.length, 5);
+});
+
+test('flowGraph drops references to undeclared members instead of dangling', () => {
+  const graph = flowGraph({
+    types: [
+      {
+        name: 'Orphan',
+        fields: [{ name: 'kept' }],
+        methods: [{ name: 'touch', reads: ['kept', 'ghost'], writes: [] }],
+      },
+    ],
+  });
+  assert.deepEqual(graph.edges, [{ from: 'field:kept', to: 'method:touch', kind: 'read' }]);
+});
+
+test('flowGraph reports nothing to draw without wiring', () => {
+  assert.deepEqual(flowGraph(null), { nodes: [], edges: [] });
+  assert.deepEqual(flowGraph({ types: [] }).edges, []);
+});
+
+test('layoutFlowGraph columns fields left and methods right, deterministically', () => {
+  const first = layoutFlowGraph(flowGraph(memberMap));
+  const second = layoutFlowGraph(flowGraph(memberMap));
+  assert.deepEqual(first, second);
+  const byId = new Map(first.nodes.map((node) => [node.id, node]));
+  for (const node of first.nodes) {
+    assert.equal(node.x, node.kind === 'field' ? 0 : first.width - node.w);
+  }
+  assert.ok(byId.get('field:value').y < byId.get('field:lastError').y);
+  assert.ok(first.height > 0);
 });
 
 test('explainClass summarises members and wiring in one sentence', () => {

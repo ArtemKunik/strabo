@@ -214,6 +214,96 @@ export interface RepositoryDescriptor {
   gitUrl: string | null;
 }
 
+/** The coordinate a repository publishes, read from its own manifest. */
+export interface PublishedCoordinate {
+  ecosystem: DependencyEcosystem;
+  /** npm package name, Cargo crate name, or Maven `groupId:artifactId`. */
+  name: string;
+  /** Manifest that declared it, repository-relative. */
+  source: string;
+}
+
+/** One repository included in a workspace analysis. */
+export interface WorkspaceRepository {
+  name: string;
+  root: string;
+  head: string | null;
+  dirty: boolean;
+  gitUrl: string | null;
+  /** The coordinate this repository publishes, or null when no manifest names one. */
+  publishes: PublishedCoordinate | null;
+}
+
+/** A recorded package reference from one workspace repository to another. */
+export interface CrossRepoFlow {
+  /** Repository whose source imports the package. */
+  from: string;
+  /** Repository whose manifest publishes it. */
+  to: string;
+  ecosystem: DependencyEcosystem;
+  /** The coordinate that joined them. */
+  package: string;
+  /** Files in `from` that cite the package, with the authored specifier. */
+  files: Array<{ file: string; line: number; specifier: string }>;
+  /** Manifest in `to` that published the coordinate, for evidence. */
+  publishedBy: string;
+}
+
+/** One field of a data contract, normalised across formats. */
+export interface ContractField {
+  name: string;
+  type: string;
+  required: boolean;
+}
+
+/** A data contract definition found in one repository. */
+export interface ContractDefinition {
+  /** Stable id used to match the same contract across repositories. */
+  id: string;
+  format: 'protobuf' | 'openapi' | 'json-schema';
+  /** Repository name. */
+  repository: string;
+  /** Repository-relative source file. */
+  source: string;
+  /** Contract version when the format records one (OpenAPI `info.version`). */
+  version?: string;
+  fields: ContractField[];
+}
+
+/** One field of a shared contract that is not identical in every repository. */
+export interface ContractDeviation {
+  name: string;
+  /** One entry per repository that declares the field. */
+  declared: Array<{ repository: string; type: string; required: boolean }>;
+  issue: 'missing' | 'type' | 'required';
+}
+
+/** A contract id defined by more than one repository, with its divergences. */
+export interface ContractDrift {
+  id: string;
+  format: ContractDefinition['format'];
+  /** Repositories that define this contract id. */
+  repositories: string[];
+  /** Fields that diverge. Empty means the definitions match field-for-field. */
+  deviations: ContractDeviation[];
+}
+
+/** The combined multi-repository analysis. */
+export interface WorkspaceReport {
+  name: string;
+  repositories: WorkspaceRepository[];
+  flows: CrossRepoFlow[];
+  contracts: ContractDefinition[];
+  drift: ContractDrift[];
+  /** Totals for the status line; never a verdict. */
+  summary: {
+    repositories: number;
+    flows: number;
+    contracts: number;
+    drifting: number;
+  };
+}
+
 /** A graph node enriched with workspace-relative paths for presentation. */
 export interface ViewNode extends GraphNode {
   workspacePath: string;
