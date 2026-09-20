@@ -351,3 +351,7 @@ test/acceptance/   Gherkin .feature browser acceptance specs
 Named for Strabo (c. 64 BC – AD 24), whose *Geographica* compiled the known world
 almost entirely from other people's accounts — and who said plainly which of those
 sources he trusted and which he would not repeat.
+
+## License
+
+[MIT](LICENSE)

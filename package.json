@@ -10,7 +10,7 @@
     "static-analysis"
   ],
   "author": "Artem Kunyk",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {
