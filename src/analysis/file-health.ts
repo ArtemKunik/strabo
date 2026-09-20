@@ -26,13 +26,15 @@ export interface FileHealthReport {
  * The graph axes (coupling, fan-out, complexity, coverage) are the repository signals
  * scoped to this file. **Cohesion** is different: it is measured from the member wiring
  * recorded for the file, so a class whose methods share fields scores higher than one whose
- * fields are never touched. Axes the scan cannot derive are `null`, never a fabricated 0.
+ * fields are never touched. Axes the scan cannot derive are `null`, never a fabricated 0;
+ * `cohesionUnavailable` states why cohesion does not apply to this file's language.
  */
 export function computeFileHealth(
   graph: Graph,
   file: string,
   symbols: CodeSymbol[] = [],
   accesses: MemberAccess[] = [],
+  cohesionUnavailable?: string,
 ): FileHealthReport {
   const { forward, backward } = buildAdjacency(graph);
   const metrics = computeGraphMetrics(graph);
@@ -74,7 +76,9 @@ export function computeFileHealth(
     }
   }
 
-  const cohesion = computeMemberCohesion(symbols, accesses);
+  const cohesion = cohesionUnavailable
+    ? { value: null, detail: cohesionUnavailable }
+    : computeMemberCohesion(symbols, accesses);
   axes.push({ key: 'cohesion', label: 'Cohesion', value: cohesion.value, detail: cohesion.detail });
 
   axes.push(fileCoverage(graph, file, node));

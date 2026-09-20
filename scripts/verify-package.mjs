@@ -61,6 +61,7 @@ try {
     'parsers/vendor/rust/tree-sitter-rust.wasm',
     'parsers/vendor/c_sharp/tree-sitter-c_sharp.wasm',
     'parsers/vendor/kotlin/tree-sitter-kotlin.wasm',
+    'parsers/vendor/sql/tree-sitter-sql.wasm',
     'README.md',
   ]) {
     check(entries.includes(required), `includes ${required}`);

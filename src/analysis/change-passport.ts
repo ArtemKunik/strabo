@@ -73,6 +73,9 @@ async function cohesionChange(
   if (!extractor) {
     return { ...base, before: null, after: null, note: 'no symbol extractor for this language' };
   }
+  if (extractor.tracksAccess === false) {
+    return { ...base, before: null, after: null, note: 'this language records no member access' };
+  }
 
   const sourcePath = file.previousPath ?? file.path;
   const beforeContent = baseline ? await contentAtRevision(root, baseline, sourcePath) : null;

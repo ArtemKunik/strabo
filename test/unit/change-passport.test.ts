@@ -105,3 +105,26 @@ test('computeChangePassport names an unavailable side instead of inventing a sco
   assert.equal(change.after, null);
   assert.match(change.note, /no symbol extractor/);
 });
+
+test('computeChangePassport does not score SQL columns, which have no member access', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'schema.sql'), 'CREATE TABLE t (id INT);\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(path.join(root, 'schema.sql'), 'CREATE TABLE t (id INT, name TEXT, note TEXT);\n');
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) {
+    return;
+  }
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD');
+  const change = passport.files.find((entry) => entry.path === 'schema.sql');
+  assert.ok(change);
+  assert.equal(change.before, null);
+  assert.equal(change.after, null);
+  assert.match(change.note, /records no member access/);
+});
