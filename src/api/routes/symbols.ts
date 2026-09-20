@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
+import { collectRelatedSources } from '../../analysis/related-sources.ts';
+import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { StraboConfig } from '../../types.ts';
 import { sendError } from '../http.ts';
@@ -45,7 +47,16 @@ export function createSymbolsRouter(config: StraboConfig): Router {
       }
 
       const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
-      const result = await extractor.extract(file, content);
+      // A language that splits a type across files needs the headers this one includes;
+      // they come from the recorded edges, never from a search.
+      const related = extractor.usesRelatedSources
+        ? collectRelatedSources(
+            repository.root,
+            (await getCachedGraph(repository.root)).report.graph,
+            file,
+          )
+        : undefined;
+      const result = await extractor.extract(file, content, related ? { related } : undefined);
       response.json({
         file,
         language: extractor.language,
