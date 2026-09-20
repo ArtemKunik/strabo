@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { extractCSharpSymbols } from '../../src/scan/languages/csharp.ts';
-import { extractJavaSymbols } from '../../src/scan/languages/java.ts';
-import { extractRustSymbols } from '../../src/scan/languages/rust.ts';
+import { extractCSharpSymbols } from '../../src/index.ts';
+import { extractJavaSymbols } from '../../src/index.ts';
+import { extractRustSymbols } from '../../src/index.ts';
 import { type CodeSymbol, sortSymbols } from '../../src/scan/languages/symbols.ts';
 
 function byName(symbols: CodeSymbol[]): Map<string, CodeSymbol> {

@@ -78,7 +78,15 @@ export interface Diagnostic {
 /** Why a path was left out of the graph. */
 export interface Exclusion {
   path: string;
-  reason: 'generated' | 'vendor' | 'build' | 'gitignored' | 'minified' | 'unsupported' | 'symlink';
+  reason:
+    | 'generated'
+    | 'vendor'
+    | 'build'
+    | 'fixture'
+    | 'gitignored'
+    | 'minified'
+    | 'unsupported'
+    | 'symlink';
   detail?: string;
 }
 

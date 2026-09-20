@@ -1,3 +1,4 @@
+import { extractCppSymbols } from './cpp.ts';
 import { extractCSharpSymbols } from './csharp.ts';
 import { extractJavaSymbols } from './java.ts';
 import { extractKotlinSymbols } from './kotlin.ts';
@@ -43,6 +44,14 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.mjs': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.cjs': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.py': { language: 'python', extract: extractPythonSymbols },
+  // A `.h` may hold C or C++; the C++ grammar reads both, so it is the safe reading.
+  '.cpp': { language: 'cpp', extract: extractCppSymbols },
+  '.cc': { language: 'cpp', extract: extractCppSymbols },
+  '.cxx': { language: 'cpp', extract: extractCppSymbols },
+  '.hpp': { language: 'cpp', extract: extractCppSymbols },
+  '.hh': { language: 'cpp', extract: extractCppSymbols },
+  '.hxx': { language: 'cpp', extract: extractCppSymbols },
+  '.h': { language: 'cpp', extract: extractCppSymbols },
   '.sql': { language: 'sql', extract: extractSqlSymbols, tracksAccess: false },
 };
 

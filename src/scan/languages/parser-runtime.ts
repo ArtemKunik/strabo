@@ -32,6 +32,7 @@ export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = [
   'typescript',
   'tsx',
   'python',
+  'cpp',
 ];
 
 export class GrammarUnavailableError extends Error {

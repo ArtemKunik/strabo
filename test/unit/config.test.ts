@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { configFromEnv, readEnv } from '../../src/config.ts';
+import { configFromEnv, readEnv } from '../../src/index.ts';
 
 test('readEnv falls back to the working directory when no root is given', () => {
   const env = readEnv({});

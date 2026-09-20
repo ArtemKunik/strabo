@@ -3,7 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { scanRepository } from '../../src/scan/scan.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'alias-repo');

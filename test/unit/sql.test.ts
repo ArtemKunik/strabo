@@ -3,12 +3,12 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { computeFileHealth } from '../../src/analysis/file-health.ts';
-import { buildMemberMap } from '../../src/analysis/member-map.ts';
-import { symbolExtractorFor } from '../../src/scan/languages/registry.ts';
-import { extractSqlFacts, extractSqlSymbols, resolveSql } from '../../src/scan/languages/sql.ts';
+import { computeFileHealth } from '../../src/index.ts';
+import { buildMemberMap } from '../../src/index.ts';
+import { symbolExtractorFor } from '../../src/index.ts';
+import { extractSqlFacts, extractSqlSymbols, resolveSql } from '../../src/index.ts';
 import type { SqlFileFacts } from '../../src/scan/languages/sql.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'sql-repo');

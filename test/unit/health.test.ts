@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { computeArchitectureHealth } from '../../src/analysis/health.ts';
-import type { Graph } from '../../src/types.ts';
+import { computeArchitectureHealth } from '../../src/index.ts';
+import type { Graph } from '../../src/index.ts';
 
 function graph(nodes: Graph['nodes'], edges: Graph['edges']): Graph {
   return { nodes, edges, diagnostics: [], excluded: [] };

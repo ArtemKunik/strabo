@@ -14,8 +14,8 @@ import {
   fingerprint,
   getCachedGraph,
 } from '../../src/cache/graph-cache.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
-import type { ScanReport } from '../../src/types.ts';
+import { scanRepository } from '../../src/index.ts';
+import type { ScanReport } from '../../src/index.ts';
 
 const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-cache-test-'));
 process.env.STRABO_CACHE_DIR = cacheDir;

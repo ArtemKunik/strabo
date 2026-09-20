@@ -5,12 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { computeCoverage } from '../../src/analysis/coverage.ts';
-import { analyzeModuleDepth } from '../../src/analysis/depth.ts';
-import { computeImpact, getChangedFiles } from '../../src/analysis/impact.ts';
-import { computeOwnership, getFileAuthorHistory } from '../../src/analysis/ownership.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
-import type { Graph } from '../../src/types.ts';
+import { computeCoverage } from '../../src/index.ts';
+import { analyzeModuleDepth } from '../../src/index.ts';
+import { computeImpact, getChangedFiles } from '../../src/index.ts';
+import { computeOwnership, getFileAuthorHistory } from '../../src/index.ts';
+import { scanRepository } from '../../src/index.ts';
+import type { Graph } from '../../src/index.ts';
 
 const created: string[] = [];
 

@@ -627,7 +627,12 @@ function renderMemberMapView() {
     onOrder: (value) => store.set('member', { order: value }),
     onWiring: (value) => store.set('member', { showWiring: value }),
     onZoom: (value) => store.set('member', { zoom: value }),
-    onExplain: () => store.set('member', { explain: !memberUI.explain }),
+    onExplain: () => {
+      store.set('member', { explain: !memberUI.explain });
+      if (memberUI.explain) {
+        revealMemberExplain();
+      }
+    },
     onNight: () => store.set('member', { dim: !memberUI.dim }),
     onCompare: () => {
       toggleTimeline().catch((error) => {
@@ -657,6 +662,28 @@ function renderMemberMapView() {
     onPlay: () => toggleMemberPlay(),
     onClose: () => closeMemberMap(),
   });
+}
+
+/**
+ * Bring the explanation into view when it is switched on.
+ *
+ * The summary sits above the member list, so a panel scrolled down to the methods would insert
+ * it off-screen and the toggle would look like it did nothing. It is scrolled to just below the
+ * sticky toolbar, which the panel scrolls under.
+ */
+function revealMemberExplain() {
+  const container = elements.memberView;
+  const explain = container.querySelector('[data-role="explain"]');
+  if (!explain) {
+    return;
+  }
+  const toolbar = container.querySelector('.member-toolbar');
+  const containerTop = container.getBoundingClientRect().top;
+  const offset = (toolbar?.offsetHeight ?? 0) + 8;
+  const top = explain.getBoundingClientRect().top;
+  if (top < containerTop + offset) {
+    container.scrollTop = Math.max(0, container.scrollTop + (top - containerTop - offset));
+  }
 }
 
 function stopMemberPlay() {

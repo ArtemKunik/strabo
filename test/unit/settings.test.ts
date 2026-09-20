@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
-import { createStraboRouter } from '../../src/api/router.ts';
-import type { StraboConfig } from '../../src/types.ts';
+import { createStraboRouter } from '../../src/index.ts';
+import type { StraboConfig } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');

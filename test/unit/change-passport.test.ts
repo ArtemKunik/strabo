@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { computeChangePassport } from '../../src/analysis/change-passport.ts';
-import { reviewWorkingTree } from '../../src/analysis/review.ts';
-import { scanRepository } from '../../src/scan/scan.ts';
+import { computeChangePassport } from '../../src/index.ts';
+import { reviewWorkingTree } from '../../src/index.ts';
+import { scanRepository } from '../../src/index.ts';
 
 const created: string[] = [];
 
@@ -85,11 +85,11 @@ test('computeChangePassport reports cohesion before and after a working-tree cha
 
 test('computeChangePassport names an unavailable side instead of inventing a score', async () => {
   const root = tempDir();
-  fs.writeFileSync(path.join(root, 'a.cpp'), 'int a = 1;\n');
+  fs.writeFileSync(path.join(root, 'a.go'), 'int a = 1;\n');
   initRepo(root);
   git(root, 'add', '.');
   git(root, 'commit', '-q', '-m', 'baseline');
-  fs.writeFileSync(path.join(root, 'a.cpp'), 'int a = 2;\n');
+  fs.writeFileSync(path.join(root, 'a.go'), 'int a = 2;\n');
 
   const report = await scanRepository(root);
   const review = await reviewWorkingTree(root, report.graph);
@@ -99,7 +99,7 @@ test('computeChangePassport names an unavailable side instead of inventing a sco
   }
 
   const passport = await computeChangePassport(root, review.files, 'HEAD');
-  const change = passport.files.find((entry) => entry.path === 'a.cpp');
+  const change = passport.files.find((entry) => entry.path === 'a.go');
   assert.ok(change);
   assert.equal(change.before, null);
   assert.equal(change.after, null);

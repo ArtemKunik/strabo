@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { SIGNAL_THRESHOLDS, computeSignals } from '../../src/analysis/signals.ts';
-import type { CodeSymbol, FunctionMetrics } from '../../src/scan/languages/symbols.ts';
+import { SIGNAL_THRESHOLDS, computeSignals } from '../../src/index.ts';
+import type { CodeSymbol, FunctionMetrics } from '../../src/index.ts';
 
 const BASE_METRICS: FunctionMetrics = {
   endLine: 10,

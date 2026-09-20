@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildMemberMap } from '../../src/analysis/member-map.ts';
-import type { CodeSymbol, MemberAccess } from '../../src/scan/languages/symbols.ts';
+import { buildMemberMap } from '../../src/index.ts';
+import type { CodeSymbol, MemberAccess } from '../../src/index.ts';
 
 function symbol(partial: Partial<CodeSymbol> & Pick<CodeSymbol, 'name' | 'kind'>): CodeSymbol {
   return { visibility: 'public', owner: '', line: 1, ...partial };

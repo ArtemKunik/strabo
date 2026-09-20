@@ -4,39 +4,13 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
-import type { ChangePassport } from './change-passport.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
+import type { ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
 
 const run = promisify(execFile);
 
-/** How a path differs between the two sides of a review. */
-export type ReviewStatus =
-  | 'added'
-  | 'modified'
-  | 'deleted'
-  | 'renamed'
-  | 'copied'
-  | 'typechange'
-  | 'unmerged'
-  | 'untracked';
-
-/** Which side of a review a path belongs to. Commit reviews report `commit`. */
-export type ReviewGroup = 'commit' | 'staged' | 'unstaged' | 'untracked';
-
-/** One path in a change set, with the line counts Git recorded for it. */
-export interface ReviewFile {
-  path: string;
-  /** Source path for a rename or copy. Absent otherwise. */
-  previousPath?: string;
-  status: ReviewStatus;
-  group: ReviewGroup;
-  /** `null` when Git reported no line counts (binary or untracked). */
-  insertions: number | null;
-  deletions: number | null;
-  /** True when the path is a node in the scanned graph, so impact can reach it. */
-  inGraph: boolean;
-}
+export type { CohesionChange, ReviewFile, ReviewGroup, ReviewStatus } from './review-types.ts';
 
 export interface ReviewTotals {
   files: number;
