@@ -20,7 +20,7 @@ const targetRoot = path.join(packageRoot, 'parsers', 'vendor');
  * vendored, so the published package does not carry unused multi-megabyte binaries.
  * Add a language here when its resolver lands and the runtime will find it automatically.
  */
-const LANGUAGES = ['java', 'rust', 'c_sharp', 'kotlin', 'typescript', 'tsx'];
+const LANGUAGES = ['java', 'rust', 'c_sharp', 'kotlin', 'sql', 'typescript', 'tsx'];
 
 if (fs.existsSync(targetRoot)) {
   fs.rmSync(targetRoot, { recursive: true, force: true });

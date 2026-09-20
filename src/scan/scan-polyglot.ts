@@ -6,6 +6,7 @@ import { type JavaFileFacts, extractJavaFacts, resolveJava } from './languages/j
 import { type KotlinFileFacts, extractKotlinFacts, resolveKotlin } from './languages/kotlin.ts';
 import { GrammarUnavailableError } from './languages/parser-runtime.ts';
 import { type RustFileFacts, extractRustFacts, resolveRust } from './languages/rust.ts';
+import { type SqlFileFacts, extractSqlFacts, resolveSql } from './languages/sql.ts';
 
 /**
  * Languages named by the product concept that Strabo recognises today. COBOL and ABL are
@@ -25,6 +26,7 @@ const RESOLVED_LANGUAGES: ReadonlySet<PolyglotLanguage> = new Set([
   'rust',
   'csharp',
   'kotlin',
+  'sql',
 ]);
 
 let queue: Promise<unknown> = Promise.resolve();
@@ -80,6 +82,11 @@ async function extractAndResolve(
   const kotlinResolution = resolveKotlin(kotlin);
   edges.push(...kotlinResolution.edges);
   diagnostics.push(...kotlinResolution.diagnostics);
+
+  const sql = await extractFacts(byLanguage.get('sql') ?? [], contentByFile, diagnostics, extractSqlFacts);
+  const sqlResolution = resolveSql(sql);
+  edges.push(...sqlResolution.edges);
+  diagnostics.push(...sqlResolution.diagnostics);
 
   for (const [language, languageFiles] of byLanguage) {
     if (RESOLVED_LANGUAGES.has(language)) {

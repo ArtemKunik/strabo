@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -154,11 +156,23 @@ test('unresolved Java imports are diagnostics; external JDK imports are ignored'
 });
 
 test('languages without a resolver are reported as unsupported, not dropped', async () => {
-  const report = await scanRepository(fixture);
-  const sql = report.graph.diagnostics.find((item) => item.file.endsWith('schema.sql'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-unsupported-'));
+  try {
+    fs.writeFileSync(path.join(directory, 'engine.cpp'), '#include "engine.h"\nint main() { return 0; }\n');
+    const report = await scanRepository(directory);
+    const cpp = report.graph.diagnostics.find((item) => item.file === 'engine.cpp');
 
-  assert.ok(sql);
-  assert.equal(sql.kind, 'unsupported');
+    assert.ok(cpp);
+    assert.equal(cpp.kind, 'unsupported');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('SQL files are resolved, not reported as unsupported', async () => {
+  const report = await scanRepository(fixture);
+
+  assert.ok(!report.graph.diagnostics.some((item) => item.file.endsWith('schema.sql')));
 });
 
 test('Java edges are deterministic across scans', async () => {
