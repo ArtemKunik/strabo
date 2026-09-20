@@ -63,3 +63,96 @@ Then('the {string} panel size grew by {int}, {int}', async function (key, dx, dy
     `height grew by ${after.height - before.height}, expected ~${dy}`,
   );
 });
+
+/** Find a dock chip by its visible label; labels are user-facing, keys are not. */
+async function dockChip(page, label) {
+  return page.evaluate((text) => {
+    const chips = [...document.querySelectorAll('#float-dock .dock-chip')];
+    const chip = chips.find((candidate) => candidate.textContent.trim() === text);
+    if (!chip) return null;
+    const rect = chip.getBoundingClientRect();
+    return {
+      disabled: Boolean(chip.disabled),
+      title: chip.title ?? '',
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+    };
+  }, label);
+}
+
+Then('the {string} dock chip is disabled', async function (label) {
+  await this.page.waitForFunction(
+    (text) => {
+      const chips = [...document.querySelectorAll('#float-dock .dock-chip')];
+      const chip = chips.find((candidate) => candidate.textContent.trim() === text);
+      return chip != null && chip.disabled === true;
+    },
+    label,
+    { timeout: 10_000 },
+  );
+  const chip = await dockChip(this.page, label);
+  assert.ok(chip, `dock chip "${label}" should be present`);
+  assert.equal(chip.disabled, true, `dock chip "${label}" should be disabled without its context`);
+  assert.ok(chip.title.length > 0, `dock chip "${label}" should explain why it cannot open`);
+});
+
+Then('the {string} dock chip is enabled', async function (label) {
+  await this.page.waitForFunction(
+    (text) => {
+      const chips = [...document.querySelectorAll('#float-dock .dock-chip')];
+      const chip = chips.find((candidate) => candidate.textContent.trim() === text);
+      return chip != null && chip.disabled === false;
+    },
+    label,
+    { timeout: 10_000 },
+  );
+  const chip = await dockChip(this.page, label);
+  assert.ok(chip, `dock chip "${label}" should be present`);
+  assert.equal(chip.disabled, false, `dock chip "${label}" should be enabled`);
+});
+
+Then('the overlay panel reports test reach counts', async function () {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.match(text, /test files/, `overlay panel "${text}" should name the test file count`);
+  assert.match(text, /reached/, `overlay panel "${text}" should name the reached count`);
+});
+
+function rectsOverlap(a, b) {
+  return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+}
+
+Then('the dock does not overlap the tests strip', async function () {
+  const rects = await this.page.evaluate(() => {
+    const rectOf = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+    };
+    return { dock: rectOf('#float-dock'), strip: rectOf('#strip') };
+  });
+  assert.ok(rects.dock, 'the dock should be present');
+  assert.ok(rects.strip, 'the tests strip should be present');
+  assert.equal(
+    rectsOverlap(rects.dock, rects.strip),
+    false,
+    'the dock should stack above the tests strip, not paint over it',
+  );
+});
+
+Then('the zoom controls sit above the dock', async function () {
+  const rects = await this.page.evaluate(() => {
+    const rectOf = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+    };
+    return { dock: rectOf('#float-dock'), zoom: rectOf('.zoom-controls') };
+  });
+  assert.ok(rects.dock, 'the dock should be present');
+  assert.ok(rects.zoom, 'the zoom controls should be present');
+  assert.ok(
+    rects.zoom.bottom <= rects.dock.top + 2,
+    'the zoom controls should sit above the dock, not under its chips',
+  );
+});
