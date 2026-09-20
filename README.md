@@ -78,7 +78,7 @@ See [Running Strabo](#running-strabo) to start the server.
 | -------------------- | -------------------------------------------------------------- |
 | `STRABO_ROOT`        | Repository root to scan and serve. Overridden by a path argument; defaults to the working directory. |
 | `STRABO_CONFIG`      | Path to a Strabo config file (workspace repositories, catalogue, integrations). |
-| `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root.   |
+| `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root; editable at runtime from **Settings**. |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
@@ -108,7 +108,45 @@ may read.
 The **Choose folder** dialog browses the filesystem through `GET /api/strabo/browse`, which
 is bounded by the same ceiling. When the dialog reaches the ceiling its **Up** button is
 disabled and a note names the boundary and the `STRABO_SCAN_CEILING` variable that set it,
-so the limit is visible rather than looking like a broken control.
+so the limit is visible rather than looking like a broken control. The ceiling can also be
+changed while the server runs from **Settings** (see below).
+
+## Settings
+
+The toolbar's **Settings** button opens a floating window with two groups.
+
+**Appearance and graph defaults** are browser preferences, stored in `localStorage` under
+`strabo.settings.v1` and applied immediately:
+
+| Preference | Meaning |
+| ---------- | ------- |
+| Theme | `System`, `Dark`, or `Light`. `System` follows `prefers-color-scheme` and updates live. |
+| Reduce motion | Collapse the app's transitions and the member-map playback; also follows the OS preference. |
+| Default detail | Whether the map opens in **Directories** or **Files** mode, unless a URL mode or a per-repository preference overrides it. |
+| Show node labels | Hide every node label for a cleaner map. Directory-island labels are a separate layer and are unaffected. |
+
+The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
+colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
+together (the graph stylesheet reads `--graph-*` at runtime). Reduce motion sets
+`data-reduce-motion`, which the graph viewport also honours.
+
+**Server settings** are read from `GET /api/strabo/settings` and written with
+`PUT /api/strabo/settings`:
+
+| Field | Editable | Meaning |
+| ----- | -------- | ------- |
+| `workspaceRoot` | no | The start root the process was launched with. |
+| `scanCeiling` | yes | The boundary every path is resolved through. `null` resets it to the startup value. |
+| `riskOnline` | yes | Whether OSV.dev / deps.dev lookups are enabled (`STRABO_RISK`). |
+| `configPath`, `riskDeniedLicenses` | no | The workspace config path and the denied-license policy, shown for reference. |
+
+A ceiling update takes effect immediately for the graph, browse, and repository routes. It
+is process-local: a restart returns to `STRABO_SCAN_CEILING`. Unlike the environment
+variable, which only ever *narrows* what the server may read, this endpoint can **widen**
+the boundary — it is bounded only by what the server process may already read. Treat the
+server as an operator tool and do not expose it to untrusted users. The requested path must
+name an existing directory; anything else is rejected with `400` and the ceiling is left
+unchanged.
 
 ## Review overlays
 

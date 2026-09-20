@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg-0: #0c1016;
   --bg-1: #10141a;
   --bg-2: #161c24;
@@ -22,6 +23,31 @@
      the canvas rather than competing with any node on it. */
   --island-fill: rgba(255, 255, 255, 0.028);
   --island-line: rgba(255, 255, 255, 0.07);
+  /* Canvas colours. The Cytoscape stylesheet in strabo-view.js reads these at runtime, so
+     the graph follows the theme instead of carrying a second palette in JavaScript. */
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #eef3fa;
+  --graph-ink-outline: #0c1016;
+  --graph-node-border: rgba(255, 255, 255, 0.22);
+  --graph-edge: #4a5e78;
+  --graph-edge-accent: #7fb4ff;
+  --graph-edge-selected: #4c9aff;
+  --graph-hub: #4c9aff;
+  --graph-selected: #ffffff;
+  --graph-changed: #ff5c5c;
+  --graph-affected: #f2b25c;
+  --graph-cycle: #c98bf0;
+  --graph-unreached: #8da0b5;
+  /* Chrome surfaces: the translucent overlays that sit above the canvas. Tokens so the
+     light theme can re-skin them without rewriting each rule. */
+  --chrome: rgba(22, 28, 36, 0.92);
+  --chrome-strong: rgba(22, 28, 36, 0.98);
+  --chrome-deep: rgba(14, 18, 24, 0.94);
+  --chrome-tooltip: rgba(14, 18, 24, 0.96);
+  --chrome-bar: rgba(22, 28, 36, 0.97);
+  --chrome-float: rgba(20, 26, 34, 0.98);
+  --scrim: rgba(12, 16, 22, 0.72);
+  --input-bg: #0e1218;
   --radius-s: 6px;
   --radius-m: 8px;
   --radius-l: 12px;
@@ -34,6 +60,80 @@
   --text-sm: 12px;
   --text-md: 13px;
   --bg: #10141a;
+}
+
+/*
+ * Light theme. Only the tokens change: every component is written against them, so the
+ * surfaces, ink, borders, and canvas colours all flip together. `color-scheme` makes the
+ * native controls (selects, scrollbars, form fields) follow too, which CSS cannot paint.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-0: #e7ebf2;
+  --bg-1: #f4f6fa;
+  --bg-2: #ffffff;
+  --bg-3: #e9eef5;
+  --panel: #ffffff;
+  --ink-1: #16202c;
+  --ink-2: #374353;
+  --ink-3: #66748a;
+  --ink: #1b2530;
+  --muted: #66748a;
+  --line: #d2dae5;
+  --line-soft: #e2e8f0;
+  --accent: #2f6fd0;
+  --accent-soft: rgba(47, 111, 208, 0.12);
+  --accent-ink: #1c4f9c;
+  --ok: #1f9e7c;
+  --warn: #b9741a;
+  --danger: #d23b3b;
+  --cycle: #8a4fbf;
+  --island-fill: rgba(20, 40, 70, 0.045);
+  --island-line: rgba(20, 40, 70, 0.14);
+  --shadow-1: 0 2px 8px rgba(30, 45, 70, 0.12);
+  --shadow-2: 0 10px 30px rgba(30, 45, 70, 0.18);
+  --bg: #f4f6fa;
+  --graph-grid: rgba(20, 40, 70, 0.10);
+  --graph-ink: #1b2530;
+  --graph-ink-outline: #f4f6fa;
+  --graph-node-border: rgba(20, 40, 70, 0.32);
+  --graph-edge: #9aa9bb;
+  --graph-edge-accent: #2f6fd0;
+  --graph-edge-selected: #2f6fd0;
+  --graph-hub: #2f6fd0;
+  --graph-selected: #16202c;
+  --graph-changed: #d23b3b;
+  --graph-affected: #b9741a;
+  --graph-cycle: #8a4fbf;
+  --graph-unreached: #66748a;
+  --chrome: rgba(255, 255, 255, 0.92);
+  --chrome-strong: rgba(255, 255, 255, 0.98);
+  --chrome-deep: rgba(255, 255, 255, 0.95);
+  --chrome-tooltip: rgba(255, 255, 255, 0.97);
+  --chrome-bar: rgba(255, 255, 255, 0.97);
+  --chrome-float: rgba(255, 255, 255, 0.99);
+  --scrim: rgba(240, 243, 248, 0.7);
+  --input-bg: #ffffff;
+}
+
+/*
+ * Reduce motion (the setting, or the OS preference applied by strabo-settings.js). The
+ * animations Strabo has are decorative transitions and the member-map playback; none of
+ * them carries information that is not also shown statically, so they collapse to their
+ * end state.
+ */
+:root[data-reduce-motion='1'] *,
+:root[data-reduce-motion='1'] *::before,
+:root[data-reduce-motion='1'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* The loading spinner conveys status, not decoration, so it keeps turning. */
+:root[data-reduce-motion='1'] .spinner {
+  animation-duration: 0.8s !important;
+  animation-iteration-count: infinite !important;
 }
 
 * {
@@ -281,7 +381,7 @@ button.primary {
   position: absolute;
   inset: 0;
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.045) 1px, transparent 1.4px);
+    radial-gradient(circle at 1px 1px, var(--graph-grid) 1px, transparent 1.4px);
   background-size: 26px 26px;
 }
 
@@ -328,7 +428,7 @@ button.primary {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(22, 28, 36, 0.92);
+  background: var(--chrome);
   box-shadow: var(--shadow-1);
   backdrop-filter: blur(6px);
   max-width: calc(100% - 24px);
@@ -381,7 +481,7 @@ button.primary {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: rgba(22, 28, 36, 0.98);
+  background: var(--chrome-strong);
   box-shadow: var(--shadow-2);
 }
 
@@ -452,7 +552,7 @@ button.primary {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: rgba(14, 18, 24, 0.96);
+  background: var(--chrome-tooltip);
   box-shadow: var(--shadow-2);
   font-size: var(--text-sm);
   pointer-events: none;
@@ -498,7 +598,7 @@ button.primary {
   height: 30px;
   padding: 0;
   border-radius: 8px;
-  background: rgba(22, 28, 36, 0.92);
+  background: var(--chrome);
   font-size: 15px;
   line-height: 1;
 }
@@ -512,7 +612,7 @@ button.primary {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: rgba(12, 16, 22, 0.72);
+  background: var(--scrim);
   z-index: 4;
   text-align: center;
 }
@@ -544,7 +644,7 @@ button.primary {
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: rgba(14, 18, 24, 0.94);
+  background: var(--chrome-deep);
   box-shadow: var(--shadow-1);
   text-align: center;
   pointer-events: none;
@@ -795,7 +895,7 @@ button.primary {
   max-height: calc(100vh - 116px);
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
-  background: rgba(20, 26, 34, 0.98);
+  background: var(--chrome-float);
   box-shadow: var(--shadow-2);
   overflow: hidden;
   pointer-events: auto;
@@ -967,7 +1067,7 @@ button.primary {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(22, 28, 36, 0.92);
+  background: var(--chrome);
   backdrop-filter: blur(6px);
   box-shadow: var(--shadow-1);
 }
@@ -1316,7 +1416,7 @@ button.primary {
   padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #0e1218;
+  background: var(--input-bg);
   color: var(--muted);
   font: inherit;
   font-size: 11px;
@@ -1599,7 +1699,7 @@ button.primary {
 }
 
 .dialog-note.at-ceiling {
-  color: #f2b25c;
+  color: var(--warn);
 }
 
 .dialog-footer {
@@ -1615,7 +1715,7 @@ button.primary {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #0e1218;
+  background: var(--input-bg);
   color: var(--muted);
   cursor: pointer;
 }
@@ -1666,7 +1766,7 @@ button.primary {
   gap: 8px 12px;
   padding: 8px 20px;
   border-block: 1px solid var(--line);
-  background: rgba(22, 28, 36, 0.97);
+  background: var(--chrome-bar);
   backdrop-filter: blur(8px);
 }
 
@@ -1689,7 +1789,7 @@ button.primary {
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #0e1218;
+  background: var(--input-bg);
   color: var(--ink);
   font: inherit;
   font-size: 12px;
@@ -1699,7 +1799,7 @@ button.primary {
   padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #0e1218;
+  background: var(--input-bg);
   color: var(--muted);
   font: inherit;
   font-size: 12px;
@@ -1747,7 +1847,7 @@ button.primary {
   gap: 10px;
   padding: 8px 20px;
   border-top: 1px solid var(--line);
-  background: rgba(22, 28, 36, 0.97);
+  background: var(--chrome-bar);
 }
 
 .walk-dots {
@@ -2310,7 +2410,7 @@ button.primary {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: rgba(20, 26, 34, 0.98);
+  background: var(--chrome-float);
   box-shadow: var(--shadow-2);
 }
 
@@ -2387,7 +2487,7 @@ button.primary {
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 9px;
-  background: rgba(20, 26, 34, 0.98);
+  background: var(--chrome-float);
   box-shadow: var(--shadow-2);
   font-size: 12.5px;
 }
@@ -2495,4 +2595,78 @@ button.primary {
 .shortcut-list dd {
   margin: 0;
   color: var(--ink-2);
+}
+
+/* ---------------------------------------------------------------- Settings */
+.settings-panel {
+  padding: 12px 14px;
+}
+
+.float-body .settings-panel {
+  border-bottom: none;
+  background: none;
+}
+
+.settings-panel h3 {
+  margin: 0 0 10px;
+  font-size: var(--text-md);
+}
+
+.setting-section {
+  margin-bottom: 16px;
+}
+
+.setting-section h4 {
+  margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.setting-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setting-field .setting-label {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.setting-field input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-row {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.setting-row input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-note {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.setting-status {
+  margin: 6px 0 0;
+  color: var(--ok);
+  font-size: var(--text-xs);
+}
+
+.setting-status.is-error {
+  color: var(--danger);
 }

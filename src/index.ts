@@ -83,6 +83,8 @@ export { buildFunctions } from './analysis/functions.ts';
 export type { FunctionEntry, FunctionCallSite, FunctionsReport } from './analysis/functions.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
+export { createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
+export type { StraboSettings } from './api/routes/settings.ts';
 
 export { readWorkspaceConfig, resolveWorkspaceRepositories } from './workspace/config.ts';
 export type { WorkspaceConfig } from './workspace/config.ts';

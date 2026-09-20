@@ -65,6 +65,16 @@
       <nav id="breadcrumb" class="breadcrumb tb-group" aria-label="Directory drill-down"></nav>
       <span class="tb-spacer"></span>
       <button
+        id="settings-toggle"
+        type="button"
+        class="quiet-button"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+        title="Strabo settings"
+      >
+        Settings
+      </button>
+      <button
         id="diagnostics-toggle"
         type="button"
         class="quiet-button"
@@ -168,6 +178,7 @@
         <aside id="inspector" class="inspector" hidden></aside>
         <section id="member-view" class="member-view" aria-label="Member map" hidden></section>
         <aside id="diagnostics" class="diagnostics" aria-label="Scan diagnostics" hidden></aside>
+        <section id="settings-panel" class="settings-panel" aria-label="Settings" hidden></section>
         <section id="shortcuts" class="shortcuts" aria-label="Keyboard shortcuts" hidden></section>
       </div>
     </main>

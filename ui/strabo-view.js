@@ -18,6 +18,9 @@ import {
 
 const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached'];
 
+/** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
+let labelsVisible = true;
+
 /** Zoom level at which ordinary nodes earn a label. */
 const LABEL_DETAIL_ZOOM = 0.65;
 
@@ -166,6 +169,15 @@ export function createView(container) {
     capabilities: { webgl2: gpu, renderer: gpu ? 'webgl2' : 'canvas' },
     resize() {
       cy.resize();
+    },
+    /** Re-read the CSS theme variables and restyle the canvas after a theme switch. */
+    applyTheme() {
+      cy.style().fromJson(stylesheet()).update();
+    },
+    /** Show or hide every node label. Islands draw their own layer and are unaffected. */
+    setLabelsVisible(visible) {
+      labelsVisible = Boolean(visible);
+      applyLabelBudget(cy, true);
     },
     render(model) {
       const elements = buildElements(model);
@@ -533,6 +545,18 @@ function rescaleLabels(cy) {
  * walk otherwise; callers that change the nodes themselves pass `force`.
  */
 function applyLabelBudget(cy, force = false) {
+  if (!labelsVisible) {
+    if (!force && cy.scratch('_straboLabelHidden') === true) {
+      return;
+    }
+    cy.scratch('_straboLabelHidden', true);
+    cy.batch(() => cy.nodes().addClass('label-hidden'));
+    return;
+  }
+  if (cy.scratch('_straboLabelHidden') === true) {
+    cy.scratch('_straboLabelHidden', false);
+    force = true;
+  }
   const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
   if (!force && detailed === cy.scratch('_straboLabelDetail')) {
     return;
@@ -546,7 +570,33 @@ function applyLabelBudget(cy, force = false) {
   });
 }
 
+/**
+ * Canvas colours, read from the CSS custom properties so the graph follows the active
+ * theme. Falls back to the dark values when the variables are missing (a bare test DOM).
+ */
+function graphTheme() {
+  const read = (name, fallback) => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  };
+  return {
+    ink: read('--graph-ink', '#eef3fa'),
+    inkOutline: read('--graph-ink-outline', '#0c1016'),
+    nodeBorder: read('--graph-node-border', 'rgba(255,255,255,0.22)'),
+    edge: read('--graph-edge', '#4a5e78'),
+    edgeAccent: read('--graph-edge-accent', '#7fb4ff'),
+    edgeSelected: read('--graph-edge-selected', '#4c9aff'),
+    hub: read('--graph-hub', '#4c9aff'),
+    selected: read('--graph-selected', '#ffffff'),
+    changed: read('--graph-changed', '#ff5c5c'),
+    affected: read('--graph-affected', '#f2b25c'),
+    cycle: read('--graph-cycle', '#c98bf0'),
+    unreached: read('--graph-unreached', '#8da0b5'),
+  };
+}
+
 function stylesheet() {
+  const theme = graphTheme();
   const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
     selector: `node.kind-${kind}`,
     style: { shape },
@@ -566,25 +616,25 @@ function stylesheet() {
         // which the zoom handler calls. See `LABEL_DEVICE_PX`.
         'font-size': (ele) => labelFontSize(ele.cy().zoom()),
         'font-weight': 500,
-        color: '#eef3fa',
+        color: theme.ink,
         'text-valign': 'bottom',
         'text-margin-y': (ele) => 4 / Math.max(0.0001, ele.cy().zoom()),
         'text-opacity': 1,
-        'text-outline-color': '#0c1016',
+        'text-outline-color': theme.inkOutline,
         'text-outline-width': (ele) => 2 / Math.max(0.0001, ele.cy().zoom()),
         'text-outline-opacity': 0.9,
         'border-width': 1.5,
-        'border-color': 'rgba(255,255,255,0.22)',
+        'border-color': theme.nodeBorder,
         'border-opacity': 1,
       },
     },
     ...kindRules,
-    { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff', 'background-opacity': 1 } },
-    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': '#4c9aff', 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
-    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': '#ff5c5c', 'background-opacity': 1 } },
-    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': '#f2b25c', 'background-opacity': 1 } },
-    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': '#c98bf0', 'background-opacity': 1 } },
-    { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': '#8da0b5', 'background-opacity': 0.55 } },
+    { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
+    { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
+    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': theme.changed, 'background-opacity': 1 } },
+    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': theme.affected, 'background-opacity': 1 } },
+    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': theme.cycle, 'background-opacity': 1 } },
+    { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.55 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
@@ -597,8 +647,8 @@ function stylesheet() {
         // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
         // repository is fitted at 0.38 zoom.
         opacity: 0.72,
-        'line-color': '#4a5e78',
-        'target-arrow-color': '#4a5e78',
+        'line-color': theme.edge,
+        'target-arrow-color': theme.edge,
         'arrow-scale': 0.9,
       },
     },
@@ -609,8 +659,8 @@ function stylesheet() {
       style: {
         width: 2.75,
         opacity: 1,
-        'line-color': '#4c9aff',
-        'target-arrow-color': '#4c9aff',
+        'line-color': theme.edgeSelected,
+        'target-arrow-color': theme.edgeSelected,
         'arrow-scale': 1.1,
         'z-index': 10,
       },
@@ -620,8 +670,8 @@ function stylesheet() {
       style: {
         width: 2,
         opacity: 0.9,
-        'line-color': '#7fb4ff',
-        'target-arrow-color': '#7fb4ff',
+        'line-color': theme.edgeAccent,
+        'target-arrow-color': theme.edgeAccent,
       },
     },
   ];
