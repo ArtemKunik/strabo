@@ -4,6 +4,7 @@ import type { Diagnostic, GraphEdge } from '../types.ts';
 import { type CSharpFileFacts, extractCSharpFacts, resolveCSharp } from './languages/csharp.ts';
 import { type JavaFileFacts, extractJavaFacts, resolveJava } from './languages/java.ts';
 import { type KotlinFileFacts, extractKotlinFacts, resolveKotlin } from './languages/kotlin.ts';
+import { type PythonFileFacts, extractPythonFacts, resolvePython } from './languages/python.ts';
 import { GrammarUnavailableError } from './languages/parser-runtime.ts';
 import { type RustFileFacts, extractRustFacts, resolveRust } from './languages/rust.ts';
 import { type SqlFileFacts, extractSqlFacts, resolveSql } from './languages/sql.ts';
@@ -13,7 +14,14 @@ import { type SqlFileFacts, extractSqlFacts, resolveSql } from './languages/sql.
  * out of scope for now; their extensions are ambiguous (`.cls` is usually Apex, `.i` is
  * SWIG/C), so they are treated as non-source rather than mislabelled.
  */
-export type PolyglotLanguage = 'java' | 'rust' | 'csharp' | 'kotlin' | 'cpp' | 'sql';
+export type PolyglotLanguage =
+  | 'java'
+  | 'rust'
+  | 'csharp'
+  | 'kotlin'
+  | 'python'
+  | 'cpp'
+  | 'sql';
 
 export interface PolyglotResult {
   edges: GraphEdge[];
@@ -26,6 +34,7 @@ const RESOLVED_LANGUAGES: ReadonlySet<PolyglotLanguage> = new Set([
   'rust',
   'csharp',
   'kotlin',
+  'python',
   'sql',
 ]);
 
@@ -88,6 +97,16 @@ async function extractAndResolve(
   const kotlinResolution = resolveKotlin(kotlin);
   edges.push(...kotlinResolution.edges);
   diagnostics.push(...kotlinResolution.diagnostics);
+
+  const python = await extractFacts(
+    byLanguage.get('python') ?? [],
+    contentByFile,
+    diagnostics,
+    extractPythonFacts,
+  );
+  const pythonResolution = resolvePython(python);
+  edges.push(...pythonResolution.edges);
+  diagnostics.push(...pythonResolution.diagnostics);
 
   const sql = await extractFacts(byLanguage.get('sql') ?? [], contentByFile, diagnostics, extractSqlFacts);
   const sqlResolution = resolveSql(sql);
@@ -208,6 +227,7 @@ const POLYGLOT_EXTENSIONS = [
   '.cs',
   '.kt',
   '.kts',
+  '.py',
   '.cpp',
   '.cc',
   '.cxx',
@@ -232,6 +252,8 @@ export function languageOf(file: string): PolyglotLanguage | undefined {
     case '.kt':
     case '.kts':
       return 'kotlin';
+    case '.py':
+      return 'python';
     case '.cpp':
     case '.cc':
     case '.cxx':

@@ -20,7 +20,8 @@ export type GrammarLanguage =
   | 'cpp'
   | 'rust'
   | 'typescript'
-  | 'tsx';
+  | 'tsx'
+  | 'python';
 
 export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = [
   'java',
@@ -30,6 +31,7 @@ export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = [
   'sql',
   'typescript',
   'tsx',
+  'python',
 ];
 
 export class GrammarUnavailableError extends Error {

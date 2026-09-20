@@ -25,6 +25,7 @@ export { extractRustFacts, resolveRust, extractRustSymbols, RUST_LANGUAGE, modul
 export { extractCSharpFacts, resolveCSharp, extractCSharpSymbols, CSHARP_LANGUAGE } from './scan/languages/csharp.ts';
 export { extractKotlinFacts, resolveKotlin, extractKotlinSymbols, KOTLIN_LANGUAGE } from './scan/languages/kotlin.ts';
 export { extractSqlFacts, resolveSql, extractSqlSymbols, SQL_LANGUAGE } from './scan/languages/sql.ts';
+export { extractPythonFacts, resolvePython, extractPythonSymbols, PYTHON_LANGUAGE } from './scan/languages/python.ts';
 export {
   extractTypeScriptSymbols,
   TYPESCRIPT_LANGUAGE,
