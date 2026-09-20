@@ -84,13 +84,40 @@ function mapCounts(model) {
   return { tests, modules, entries };
 }
 function readingLegend() {
+  return ["size = dependents", "colour = directory", "diamond = test"];
+}
+function shortcutSheet() {
   return [
-    "size = dependents",
-    "colour = directory",
-    "diamond = test",
-    "hover = blast radius",
-    "\u2318/ctrl-click or shift-drag = select group"
+    { keys: "F", action: "Focus the selection" },
+    { keys: "I", action: "Trace change impact" },
+    { keys: "P", action: "Start a path between two nodes" },
+    { keys: "B", action: "Toggle directories / files" },
+    { keys: "T", action: "Timeline" },
+    { keys: "R", action: "Review working-tree changes" },
+    { keys: "V", action: "Dependency risk" },
+    { keys: "G", action: "Delegate a selected group" },
+    { keys: "\u2318K / ctrl-K", action: "Filter paths" },
+    { keys: "Esc", action: "Clear the selection or close a panel" },
+    { keys: "?", action: "Show this sheet" },
+    { keys: "hover a node", action: "Report its blast radius" },
+    { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
   ];
+}
+function paletteKey(model) {
+  const isBlock = model?.prefixLength !== void 0;
+  const byIndex = /* @__PURE__ */ new Map();
+  for (const node of model?.nodes ?? []) {
+    const index = Number.isInteger(node.paletteIndex) ? node.paletteIndex : 0;
+    const region = isBlock ? node.id === "." ? "/" : node.id.split("/")[0] : topLevelDirectory(node.id);
+    const regions = byIndex.get(index) ?? /* @__PURE__ */ new Set();
+    regions.add(region);
+    byIndex.set(index, regions);
+  }
+  return [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([index, regions]) => ({
+    index,
+    regions: [...regions].sort().map((region) => region === "." ? "/" : region),
+    color: paletteColor(index, "")
+  }));
 }
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
@@ -231,7 +258,10 @@ function summarizeDiagnostics(model) {
     excluded: (model.excluded ?? []).length,
     byKind,
     excludedByReason,
-    samples: (model.diagnostics ?? []).slice(0, 50)
+    samples: (model.diagnostics ?? []).slice(0, 50),
+    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
+    cache: model.cache?.status ?? "unknown",
+    stale: Boolean(model.cache?.stale)
   };
 }
 function filterNodes(model, text) {
@@ -272,9 +302,88 @@ var RESOLUTION_LABELS = {
 function graphSummary(model) {
   const nodes = (model.nodes ?? []).length;
   const edges = (model.edges ?? []).length;
-  const cache = model.cache?.status ?? "unknown";
-  const stale = model.cache?.stale ? " (stale)" : "";
-  return `${nodes} nodes \xB7 ${edges} edges \xB7 cache: ${cache}${stale}`;
+  return `${nodes} nodes \xB7 ${edges} edges`;
+}
+
+// ui/strabo-islands.js
+var ISLAND_PADDING = 26;
+function islandLabel(directory) {
+  return directory === "." ? "/" : directory;
+}
+function islandsApply(model) {
+  return Boolean(model) && model.prefixLength === void 0;
+}
+function islandBounds(model, options = {}) {
+  if (!islandsApply(model)) {
+    return [];
+  }
+  const padding = options.padding ?? ISLAND_PADDING;
+  const visible = options.visible ?? null;
+  const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
+  const groups = /* @__PURE__ */ new Map();
+  for (const node of model.nodes ?? []) {
+    if (visible && !visible.has(node.id)) {
+      continue;
+    }
+    const position = positions.get(node.id);
+    if (!position) {
+      continue;
+    }
+    const directory = node.directory ?? ".";
+    const radius = diameter(node.transitiveDependents) / 2;
+    const group = groups.get(directory) ?? {
+      directory,
+      count: 0,
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity
+    };
+    group.count += 1;
+    group.minX = Math.min(group.minX, position.x - radius);
+    group.minY = Math.min(group.minY, position.y - radius);
+    group.maxX = Math.max(group.maxX, position.x + radius);
+    group.maxY = Math.max(group.maxY, position.y + radius);
+    groups.set(directory, group);
+  }
+  return [...groups.values()].map((group) => ({
+    directory: group.directory,
+    label: islandLabel(group.directory),
+    count: group.count,
+    x: group.minX - padding,
+    y: group.minY - padding,
+    width: group.maxX - group.minX + padding * 2,
+    height: group.maxY - group.minY + padding * 2
+  })).sort(
+    (a, b) => b.width * b.height - a.width * a.height || a.directory.localeCompare(b.directory)
+  );
+}
+function projectIsland(island, viewport) {
+  const zoom = viewport.zoom;
+  return {
+    x: island.x * zoom + viewport.pan.x,
+    y: island.y * zoom + viewport.pan.y,
+    width: island.width * zoom,
+    height: island.height * zoom
+  };
+}
+var LABEL_MIN_WIDTH = 64;
+var LABEL_MIN_HEIGHT = 28;
+function islandLabelFits(projected) {
+  return projected.width >= LABEL_MIN_WIDTH && projected.height >= LABEL_MIN_HEIGHT;
+}
+var LABEL_INSET = 10;
+var LABEL_CHAR_WIDTH = 6.6;
+var LABEL_MIN_CHARS = 4;
+function fitLabel(label, widthPx) {
+  const budget = Math.floor((widthPx - LABEL_INSET * 2) / LABEL_CHAR_WIDTH);
+  if (budget < LABEL_MIN_CHARS) {
+    return "";
+  }
+  if (label.length <= budget) {
+    return label;
+  }
+  return `\u2026${label.slice(-(budget - 1))}`;
 }
 
 // ui/strabo-links.js
@@ -782,9 +891,26 @@ function buildAgentPrompt({ agent, repository, target }) {
 // ui/strabo-view.js
 var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached"];
 var LABEL_DETAIL_ZOOM = 0.65;
+var MIN_ZOOM = 0.12;
+var MAX_ZOOM = 2.5;
+var LABEL_DEVICE_PX = 11;
+var HUB_LABEL_DEVICE_PX = 12;
+function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return devicePx / safeZoom;
+}
 function createView(container) {
+  const islands = createIslandLayer(container);
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
+  let islandModel = null;
+  let islandVisible = null;
+  function repaintIslands() {
+    islands.paint(islandBounds(islandModel, { visible: islandVisible }), {
+      pan: cy.pan(),
+      zoom: cy.zoom()
+    });
+  }
   const selectHandlers = [];
   const drillHandlers = [];
   const hoverHandlers = [];
@@ -792,8 +918,12 @@ function createView(container) {
   const contextHandlers = [];
   const groupHandlers = [];
   let selectedEdge = null;
-  const observer = new ResizeObserver(() => cy.resize());
+  const observer = new ResizeObserver(() => {
+    cy.resize();
+    repaintIslands();
+  });
   observer.observe(container);
+  cy.on("pan zoom resize", repaintIslands);
   cy.on("tap", "node", (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
     applyLabelBudget(cy, true);
@@ -811,7 +941,10 @@ function createView(container) {
       for (const handler of edgeHandlers) handler(null);
     }
   });
-  cy.on("zoom", () => applyLabelBudget(cy));
+  cy.on("zoom", () => {
+    rescaleLabels(cy);
+    applyLabelBudget(cy);
+  });
   cy.on("cxttap", "node", (event) => {
     for (const handler of contextHandlers) {
       handler({ kind: "node", id: event.target.id() }, event.originalEvent);
@@ -830,9 +963,11 @@ function createView(container) {
     }
   });
   cy.on("mouseover", "node", (event) => {
+    fadeEdgesAround(cy, event.target);
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
   cy.on("mouseout", "node", () => {
+    fadeEdgesAround(cy, null);
     for (const handler of hoverHandlers) handler(null);
   });
   cy.on("mouseover", "edge", (event) => {
@@ -870,6 +1005,9 @@ function createView(container) {
         cy.add(elements2.nodes);
         cy.add(elements2.edges);
       });
+      islandModel = model;
+      islandVisible = null;
+      repaintIslands();
       applyLabelBudget(cy, true);
       notifyGroup();
     },
@@ -880,6 +1018,10 @@ function createView(container) {
         if (keep) {
           cy.nodes().forEach((node) => {
             if (!keep.has(node.id())) node.addClass("dimmed");
+          });
+          cy.edges().forEach((edge) => {
+            const inside = keep.has(edge.source().id()) && keep.has(edge.target().id());
+            if (!inside) edge.addClass("dimmed");
           });
         }
       });
@@ -903,6 +1045,8 @@ function createView(container) {
           node.toggleClass("filtered-out", !visible);
         });
       });
+      islandVisible = keep;
+      repaintIslands();
       applyLabelBudget(cy, true);
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
@@ -944,15 +1088,68 @@ function createView(container) {
     },
     clearGroupSelection() {
       cy.nodes(":selected").unselect();
+    },
+    /** Directories currently drawn as islands, largest plate first. Empty in block mode. */
+    islandDirectories() {
+      return islandBounds(islandModel, { visible: islandVisible }).map(
+        (island) => island.directory
+      );
     }
   };
+}
+var SVG_NS = "http://www.w3.org/2000/svg";
+var LABEL_BASELINE_GAP = 6;
+var LABEL_MIN_TOP = 12;
+function createIslandLayer(container) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.classList.add("island-layer");
+  svg.setAttribute("aria-hidden", "true");
+  const plates = document.createElementNS(SVG_NS, "g");
+  const labels = document.createElementNS(SVG_NS, "g");
+  svg.append(plates, labels);
+  container.prepend(svg);
+  return {
+    /** Draw `islands` (model coordinates) under the given viewport transform. */
+    paint(islands, viewport) {
+      sync(plates, "rect", islands.length);
+      sync(labels, "text", islands.length);
+      islands.forEach((island, index) => {
+        const box = projectIsland(island, viewport);
+        const rect = plates.childNodes[index];
+        rect.setAttribute("x", String(box.x));
+        rect.setAttribute("y", String(box.y));
+        rect.setAttribute("width", String(Math.max(0, box.width)));
+        rect.setAttribute("height", String(Math.max(0, box.height)));
+        rect.setAttribute("class", "island-plate");
+        const label = labels.childNodes[index];
+        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : "";
+        label.setAttribute("class", text ? "island-label" : "island-label is-hidden");
+        label.setAttribute("x", String(box.x + LABEL_INSET));
+        const above = box.y - LABEL_BASELINE_GAP;
+        label.setAttribute("y", String(above >= LABEL_MIN_TOP ? above : box.y + 16));
+        if (label.textContent !== text) {
+          label.textContent = text;
+        }
+      });
+    }
+  };
+}
+function sync(parent, tag, count) {
+  while (parent.childNodes.length > count) {
+    parent.removeChild(parent.lastChild);
+  }
+  while (parent.childNodes.length < count) {
+    parent.appendChild(document.createElementNS(SVG_NS, tag));
+  }
 }
 function createCytoscape(container) {
   const options = {
     container,
     style: stylesheet(),
     layout: { name: "preset" },
-    wheelSensitivity: 0.2
+    wheelSensitivity: 0.2,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM
   };
   if (webglRequested() && !webglRefused() && probeWebGL2()) {
     container.style.backgroundColor = surfaceColour(container);
@@ -1022,6 +1219,27 @@ function probeWebGL2() {
     return false;
   }
 }
+function fadeEdgesAround(cy, node) {
+  cy.batch(() => {
+    cy.edges().removeClass("edge-faded");
+    if (!node || node.empty()) {
+      return;
+    }
+    cy.edges().forEach((edge) => {
+      const incident = edge.source().same(node) || edge.target().same(node);
+      if (!incident) edge.addClass("edge-faded");
+    });
+  });
+}
+function rescaleLabels(cy) {
+  const zoom = cy.zoom();
+  const last = cy.scratch("_straboLabelZoom");
+  if (typeof last === "number" && Math.abs(zoom - last) < last * 0.02) {
+    return;
+  }
+  cy.scratch("_straboLabelZoom", zoom);
+  cy.style().update();
+}
 function applyLabelBudget(cy, force = false) {
   const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
   if (!force && detailed === cy.scratch("_straboLabelDetail")) {
@@ -1050,14 +1268,16 @@ function stylesheet() {
         width: "data(diameter)",
         height: "data(diameter)",
         label: "data(label)",
-        "font-size": 10,
+        // Functions of the live zoom: Cytoscape re-evaluates them on `style().update()`,
+        // which the zoom handler calls. See `LABEL_DEVICE_PX`.
+        "font-size": (ele) => labelFontSize(ele.cy().zoom()),
         "font-weight": 500,
         color: "#eef3fa",
         "text-valign": "bottom",
-        "text-margin-y": 4,
+        "text-margin-y": (ele) => 4 / Math.max(1e-4, ele.cy().zoom()),
         "text-opacity": 1,
         "text-outline-color": "#0c1016",
-        "text-outline-width": 3,
+        "text-outline-width": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
         "text-outline-opacity": 0.9,
         "border-width": 1.5,
         "border-color": "rgba(255,255,255,0.22)",
@@ -1066,7 +1286,7 @@ function stylesheet() {
     },
     ...kindRules,
     { selector: "node:selected", style: { "border-width": 3, "border-color": "#ffffff", "background-opacity": 1 } },
-    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": "#4c9aff", "font-size": 12, "font-weight": 700 } },
+    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": "#4c9aff", "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
     { selector: "node.ov-changed", style: { "border-width": 4, "border-color": "#ff5c5c", "background-opacity": 1 } },
     { selector: "node.ov-affected", style: { "border-width": 3, "border-color": "#f2b25c", "background-opacity": 1 } },
     { selector: "node.ov-cycle", style: { "border-width": 4, "border-color": "#c98bf0", "background-opacity": 1 } },
@@ -1080,12 +1300,15 @@ function stylesheet() {
         "curve-style": "bezier",
         "target-arrow-shape": "triangle",
         width: 1.2,
-        opacity: 0.55,
-        "line-color": "#3a4a5e",
-        "target-arrow-color": "#3a4a5e",
+        // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
+        // repository is fitted at 0.38 zoom.
+        opacity: 0.72,
+        "line-color": "#4a5e78",
+        "target-arrow-color": "#4a5e78",
         "arrow-scale": 0.9
       }
     },
+    { selector: "edge.edge-faded", style: { opacity: 0.1 } },
     { selector: "edge.dimmed", style: { opacity: 0.05 } },
     {
       selector: "edge.edge-selected",
@@ -1276,6 +1499,8 @@ var DEFAULT_WIDTH = 384;
 var HEADER_HEIGHT = 34;
 var MIN_WIDTH = 240;
 var MIN_HEIGHT = 160;
+var RAIL_RIGHT = GAP;
+var RAIL_TOP = 96;
 function readStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
@@ -1301,6 +1526,17 @@ function sanitizeSize(size) {
     height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
   };
 }
+function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } = {}) {
+  const sorted = [...occupied].sort((a, b) => a.top - b.top);
+  let candidate = startTop;
+  for (const rect of sorted) {
+    if (candidate + height <= rect.top) {
+      break;
+    }
+    candidate = Math.max(candidate, rect.bottom + gap);
+  }
+  return candidate;
+}
 function initFloatingWindows({ dock, panels = [] } = {}) {
   const store2 = readStore();
   const controllers = [];
@@ -1315,6 +1551,13 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   const renderDock = () => {
     if (!dock) return;
     dock.replaceChildren(...controllers.map((controller) => controller.dockButton()));
+  };
+  const flashChip = (key) => {
+    const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
+    if (!chip) return;
+    chip.classList.remove("is-flash");
+    void chip.offsetWidth;
+    chip.classList.add("is-flash");
   };
   for (const config of panels) {
     const element = config.element;
@@ -1362,39 +1605,43 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     win.append(header, body, resizeHandle);
     element.parentNode.insertBefore(win, element);
     body.append(element);
-    const anchors = config.position ?? {};
-    const hasLeft = typeof anchors.left === "number";
-    const hasRight = typeof anchors.right === "number";
-    if (!hasLeft && !hasRight) {
-      if (["overlay", "edge", "timeline", "inspector"].includes(config.key)) {
-        anchors.right = GAP;
-        anchors.top = 96;
-      } else if (["legend", "diagnostics"].includes(config.key)) {
-        anchors.left = GAP;
-        anchors.bottom = 56;
-      }
-    }
+    const fallbackHeight = config.height ?? 260;
+    let hasPosition = false;
     const place = (x, y) => {
       win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
       win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+      hasPosition = true;
+    };
+    const firstFreeRailTop = () => {
+      const height = win.offsetHeight || fallbackHeight;
+      const occupied = [];
+      for (const other of controllers) {
+        if (other.window === win || other.window.hidden || other.isCollapsed()) {
+          continue;
+        }
+        const rect = other.window.getBoundingClientRect();
+        if (rect.height > 0) {
+          occupied.push(rect);
+        }
+      }
+      occupied.sort((a, b) => a.top - b.top);
+      return firstFreeSlotTop(occupied, height);
+    };
+    const placeInRail = () => {
+      const railWidth = win.offsetWidth || width;
+      place(window.innerWidth - railWidth - RAIL_RIGHT, firstFreeRailTop());
     };
     const position = saved.position ?? config.position ?? {};
-    const fallbackHeight = config.height ?? 260;
-    let left = typeof position.left === "number" ? position.left : null;
-    let top = typeof position.top === "number" ? position.top : null;
-    if (left === null && config.center) {
-      left = (window.innerWidth - width) / 2;
+    if (config.center) {
+      place(
+        (window.innerWidth - width) / 2,
+        Math.max(56, (window.innerHeight - fallbackHeight) / 2)
+      );
+    } else if (Object.keys(position).length > 0) {
+      const left = typeof position.left === "number" ? position.left : window.innerWidth - width - (typeof position.right === "number" ? position.right : RAIL_RIGHT);
+      const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
+      place(left, top);
     }
-    if (left === null) {
-      left = typeof position.right === "number" ? window.innerWidth - width - position.right : GAP;
-    }
-    if (top === null && config.center) {
-      top = Math.max(56, (window.innerHeight - fallbackHeight) / 2);
-    }
-    if (top === null) {
-      top = typeof position.bottom === "number" ? window.innerHeight - fallbackHeight - position.bottom : 96;
-    }
-    place(left, top);
     const isCollapsed = () => win.classList.contains("is-collapsed");
     const updateCollapseChrome = () => {
       const collapsed = isCollapsed();
@@ -1410,7 +1657,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
     updateCollapseChrome();
     let lastHidden = null;
-    const sync = () => {
+    const sync2 = () => {
       const hidden = element.hidden === true;
       win.hidden = hidden;
       if (!hidden && config.titleFrom) {
@@ -1420,9 +1667,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       if (hidden !== lastHidden) {
         lastHidden = hidden;
         renderDock();
+        if (!hidden) flashChip(config.key);
       }
     };
-    new MutationObserver(sync).observe(element, {
+    new MutationObserver(sync2).observe(element, {
       attributes: true,
       attributeFilter: ["hidden"],
       childList: true,
@@ -1447,6 +1695,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         config.onOpen?.();
         element.hidden = false;
         win.hidden = false;
+        if (!hasPosition) {
+          placeInRail();
+        }
+        sync2();
         raise();
         persist();
         return true;
@@ -1472,14 +1724,17 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
-        return {
-          position: {
-            left: parseFloat(win.style.left) || 0,
-            top: parseFloat(win.style.top) || 0
-          },
+        const snapshot = {
           size: { ...size },
           collapsed: isCollapsed()
         };
+        if (hasPosition) {
+          snapshot.position = {
+            left: parseFloat(win.style.left) || 0,
+            top: parseFloat(win.style.top) || 0
+          };
+        }
+        return snapshot;
       },
       dockButton() {
         const button = document.createElement("button");
@@ -1535,10 +1790,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       const rect = win.getBoundingClientRect();
       const startWidth = rect.width;
       const startHeight = rect.height;
-      const left2 = parseFloat(win.style.left) || 0;
-      const top2 = parseFloat(win.style.top) || 0;
-      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left2 - GAP);
-      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top2 - GAP);
+      const left = parseFloat(win.style.left) || 0;
+      const top = parseFloat(win.style.top) || 0;
+      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
+      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
       resizeHandle.setPointerCapture(event.pointerId);
       const move = (moveEvent) => {
         win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
@@ -1576,12 +1831,16 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     win.addEventListener("pointerdown", raise, true);
     win.addEventListener("contextmenu", raise, true);
+    if (!hasPosition && element.hidden !== true) {
+      placeInRail();
+    }
     controllers.push(controller);
-    sync();
+    sync2();
   }
   window.addEventListener("resize", () => {
     for (const controller of controllers) {
       const win = controller.window;
+      if (win.hidden) continue;
       const left = parseFloat(win.style.left) || 0;
       const top = parseFloat(win.style.top) || 0;
       win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - 60))}px`;
@@ -2146,12 +2405,17 @@ function renderDataFlow(dataFlow) {
   section.append(caveat);
   return section;
 }
-function renderDiagnostics(container, model) {
+function renderDiagnostics(container, model, runtime = {}) {
   const summary = summarizeDiagnostics(model);
   container.replaceChildren();
   const title = document.createElement("h3");
   title.textContent = `Diagnostics \xB7 ${summary.diagnostics}`;
   container.append(title);
+  const runtimeLine = document.createElement("p");
+  runtimeLine.className = "diag-runtime";
+  runtimeLine.dataset.role = "runtime";
+  runtimeLine.textContent = `cache: ${summary.cache}${summary.stale ? " (stale)" : ""} \xB7 renderer: ${runtime.renderer ?? "unknown"} \xB7 ${runtime.shown ?? 0} shown`;
+  container.append(runtimeLine);
   const counts = document.createElement("p");
   counts.textContent = `excluded: ${summary.excluded} \xB7 ${Object.entries(summary.byKind).map(([kind, count]) => `${kind}: ${count}`).join(", ") || "none"}`;
   container.append(counts);
@@ -2215,6 +2479,22 @@ function renderLegend(container, model) {
     guide.append(item);
   }
   container.append(guide);
+  const directories = paletteKey(model);
+  if (directories.length > 0) {
+    const key = document.createElement("div");
+    key.className = "legend-dirs";
+    for (const entry of directories) {
+      const item = document.createElement("span");
+      item.className = "legend-dir";
+      const swatch = document.createElement("span");
+      swatch.className = "legend-dot";
+      swatch.style.background = entry.color;
+      item.append(swatch);
+      item.append(document.createTextNode(entry.regions.join(" \xB7 ")));
+      key.append(item);
+    }
+    container.append(key);
+  }
   const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement("span");
@@ -2226,6 +2506,24 @@ function renderLegend(container, model) {
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
     container.append(item);
   }
+}
+function renderShortcuts(container) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Keyboard shortcuts";
+  container.append(title);
+  const list = document.createElement("dl");
+  list.className = "shortcut-list";
+  for (const entry of shortcutSheet()) {
+    const term = document.createElement("dt");
+    const kbd = document.createElement("kbd");
+    kbd.textContent = entry.keys;
+    term.append(kbd);
+    const description = document.createElement("dd");
+    description.textContent = entry.action;
+    list.append(term, description);
+  }
+  container.append(list);
 }
 function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
   const chip = (label, filter, className = "strip-chip") => h(
@@ -3736,6 +4034,8 @@ var elements = {
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
   tbClear: document.getElementById("tb-clear"),
+  tbOverflow: document.getElementById("tb-overflow"),
+  tbOverflowMenu: document.getElementById("tb-overflow-menu"),
   groupCount: document.getElementById("group-count"),
   tbDelegateGroup: document.getElementById("tb-delegate-group"),
   timelinePanel: document.getElementById("timeline-panel"),
@@ -3748,9 +4048,8 @@ var elements = {
   folderCancel: document.getElementById("folder-cancel"),
   forget: document.getElementById("forget"),
   memberView: document.getElementById("member-view"),
-  statusbarDiag: document.getElementById("statusbar-diag"),
-  statusbarLegend: document.getElementById("statusbar-legend"),
-  statusbarRender: document.getElementById("statusbar-render")
+  graphHint: document.getElementById("graph-hint"),
+  shortcuts: document.getElementById("shortcuts")
 };
 var memberData = null;
 var memberTimer = null;
@@ -3825,7 +4124,10 @@ async function scan({ refresh = false } = {}) {
     applyFilterToView();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
-    const summary = renderDiagnostics(elements.diagnostics, model);
+    const summary = renderDiagnostics(elements.diagnostics, model, {
+      renderer: rendererName(),
+      shown: view.cy.nodes().length
+    });
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       state.prefix = prefix;
@@ -3838,6 +4140,9 @@ async function scan({ refresh = false } = {}) {
     updateEmptyState();
     view.resize();
     fit(view.cy);
+    if (shouldShowHint()) {
+      elements.graphHint.hidden = false;
+    }
     if (state.overlay !== "none") {
       await applyOverlay(generation);
     } else {
@@ -3863,17 +4168,26 @@ function rendererName() {
   return view.capabilities?.renderer ?? "canvas";
 }
 function updateStatusbar(model) {
-  if (elements.statusbarDiag && model) {
-    const d = (model.diagnostics ?? []).length;
-    const e = (model.excluded ?? []).length;
-    elements.statusbarDiag.textContent = `diagnostics ${d} \xB7 excluded ${e}`;
-  }
   if (elements.statusbarLegend && model) {
     const kinds = [...new Set((model.nodes ?? []).map((n) => n.kind))].join(" \xB7 ");
     elements.statusbarLegend.textContent = kinds || "";
   }
-  if (elements.statusbarRender) {
-    elements.statusbarRender.textContent = `renderer: ${rendererName()} \xB7 ${view.cy.nodes().length} shown`;
+}
+var HINT_SEEN_KEY = "strabo.hint.seen";
+function shouldShowHint() {
+  try {
+    return window.localStorage.getItem(HINT_SEEN_KEY) !== "1";
+  } catch {
+    return true;
+  }
+}
+function dismissHint() {
+  if (elements.graphHint) {
+    elements.graphHint.hidden = true;
+  }
+  try {
+    window.localStorage.setItem(HINT_SEEN_KEY, "1");
+  } catch {
   }
 }
 function updateEmptyState() {
@@ -3902,14 +4216,12 @@ function applyFilterToView() {
   if (current) {
     renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
   }
-  if (elements.statusbarRender) {
-    elements.statusbarRender.textContent = `renderer: ${rendererName()} \xB7 ${ids.length}/${current.nodes.length} shown`;
-  }
 }
 function selectNode(id) {
   if (!current) {
     return;
   }
+  dismissHint();
   if (state.pathMode) {
     if (!state.pathFrom) {
       state.pathFrom = id;
@@ -4156,6 +4468,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape") {
+    closeOverflowMenu();
     if (!elements.memberView.hidden) {
       closeMemberMap();
       return;
@@ -4167,6 +4480,11 @@ document.addEventListener("keydown", (event) => {
       return;
     }
     if (!inField) clearSelection();
+    return;
+  }
+  if (event.key === "?" && !inField) {
+    event.preventDefault();
+    toggleShortcuts();
     return;
   }
   if (inField || !elements.memberView.hidden) return;
@@ -4486,6 +4804,7 @@ elements.overlay.addEventListener("change", () => {
   applyOverlay();
 });
 elements.filter.addEventListener("input", () => {
+  dismissHint();
   state.filter = elements.filter.value;
   applyFilterToView();
   schedulePrefsSave();
@@ -4516,6 +4835,7 @@ elements.diagnosticsToggle.addEventListener("click", () => {
   elements.diagnosticsToggle.setAttribute("aria-expanded", String(hidden));
 });
 elements.browse.addEventListener("click", openFolderDialog);
+document.getElementById("graph")?.addEventListener("pointerdown", dismissHint, { capture: true });
 elements.folderCancel.addEventListener("click", () => elements.folderDialog.close());
 elements.folderUp.addEventListener("click", () => {
   const parent = elements.folderUp.dataset.parent;
@@ -4607,6 +4927,28 @@ elements.tbRisk.addEventListener("click", () => {
   });
 });
 elements.tbClear.addEventListener("click", clearSelection);
+function closeOverflowMenu() {
+  if (!elements.tbOverflowMenu) return;
+  elements.tbOverflowMenu.hidden = true;
+  elements.tbOverflow.setAttribute("aria-expanded", "false");
+}
+if (elements.tbOverflow) {
+  elements.tbOverflow.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = elements.tbOverflowMenu.hidden;
+    elements.tbOverflowMenu.hidden = !willOpen;
+    elements.tbOverflow.setAttribute("aria-expanded", String(willOpen));
+  });
+  for (const id of ["tb-timeline", "tb-review", "tb-risk"]) {
+    document.getElementById(id)?.addEventListener("click", closeOverflowMenu);
+  }
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest?.(".tb-overflow-wrap")) closeOverflowMenu();
+  });
+}
+function toggleShortcuts() {
+  floatingWindows?.find?.((controller) => controller.key === "shortcuts")?.toggle();
+}
 function nodeDelegateTarget(id) {
   const passport = current ? passportFor(current, id) : null;
   const node = current?.nodes.find((candidate) => candidate.id === id);
@@ -4883,7 +5225,6 @@ var floatingWindows = initFloatingWindows({
       title: "Review",
       dockLabel: "Review",
       width: 400,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
       onOpen: () => {
         if (elements.reviewPanel.hidden) toggleReview();
@@ -4899,7 +5240,6 @@ var floatingWindows = initFloatingWindows({
       title: "Dependency risk",
       dockLabel: "Risk",
       width: 400,
-      position: { left: 16, top: 96 },
       onOpen: () => {
         if (elements.riskPanel.hidden) toggleRisk();
       },
@@ -4911,7 +5251,6 @@ var floatingWindows = initFloatingWindows({
       title: "Timeline",
       dockLabel: "Timeline",
       width: 380,
-      position: { left: 16, top: 96 },
       onOpen: () => {
         if (elements.timelinePanel.hidden) {
           toggleTimeline().catch((error) => {
@@ -4929,7 +5268,6 @@ var floatingWindows = initFloatingWindows({
       title: "Overlay",
       dockLabel: "Overlay",
       width: 360,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
       canOpen: () => state.overlay !== "none",
       blockedTitle: "Select an overlay (Review dropdown) to open Overlay",
@@ -4944,7 +5282,6 @@ var floatingWindows = initFloatingWindows({
       title: "Edge",
       dockLabel: "Edge",
       width: 360,
-      position: { left: 16, top: 96 },
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
       canOpen: () => Boolean(selectedEdgeId),
       blockedTitle: "Click an edge in the graph to open Edge",
@@ -4958,8 +5295,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.legend,
       title: "Legend",
       dockLabel: "Legend",
-      width: 340,
-      position: { left: 16, bottom: 56 }
+      width: 340
     },
     {
       key: "inspector",
@@ -4967,7 +5303,6 @@ var floatingWindows = initFloatingWindows({
       title: "Module passport",
       dockLabel: "Passport",
       width: 384,
-      position: { right: 16, top: 96 },
       canOpen: () => Boolean(selected),
       blockedTitle: "Select a module in the graph to open Passport",
       onBlocked: () => {
@@ -4983,11 +5318,21 @@ var floatingWindows = initFloatingWindows({
       title: "Diagnostics",
       dockLabel: "Diagnostics",
       width: 420,
-      position: { right: 16, bottom: 56 },
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
       onClose: () => {
         elements.diagnostics.hidden = true;
         elements.diagnosticsToggle.setAttribute("aria-expanded", "false");
+      }
+    },
+    {
+      key: "shortcuts",
+      element: elements.shortcuts,
+      title: "Keyboard shortcuts",
+      dockLabel: "Shortcuts",
+      width: 320,
+      onOpen: () => renderShortcuts(elements.shortcuts),
+      onClose: () => {
+        elements.shortcuts.hidden = true;
       }
     },
     {
@@ -5032,7 +5377,8 @@ if (window.STRABO_TEST) {
     reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
     risk: () => showRisk(),
     groupSelection: () => groupSelection,
-    floatingWindows: () => floatingWindows
+    floatingWindows: () => floatingWindows,
+    islands: () => view.islandDirectories()
   };
 }
 loadCatalogue().then(() => {

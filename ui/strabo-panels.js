@@ -23,6 +23,7 @@ import {
   methodCard,
   orderAdvisories,
   orderMembers,
+  paletteKey,
   passportFor,
   polygonPoints,
   radarFrame,
@@ -30,6 +31,7 @@ import {
   readingLegend,
   reviewGroups,
   riskSummary,
+  shortcutSheet,
   summarizeDiagnostics,
 } from './strabo-core.js';
 import { Fragment, h, host, mount } from './view.js';
@@ -383,13 +385,21 @@ function renderDataFlow(dataFlow) {
   return section;
 }
 
-export function renderDiagnostics(container, model) {
+export function renderDiagnostics(container, model, runtime = {}) {
   const summary = summarizeDiagnostics(model);
   container.replaceChildren();
 
   const title = document.createElement('h3');
   title.textContent = `Diagnostics · ${summary.diagnostics}`;
   container.append(title);
+
+  const runtimeLine = document.createElement('p');
+  runtimeLine.className = 'diag-runtime';
+  runtimeLine.dataset.role = 'runtime';
+  runtimeLine.textContent = `cache: ${summary.cache}${summary.stale ? ' (stale)' : ''} · renderer: ${
+    runtime.renderer ?? 'unknown'
+  } · ${runtime.shown ?? 0} shown`;
+  container.append(runtimeLine);
 
   const counts = document.createElement('p');
   counts.textContent = `excluded: ${summary.excluded} · ${Object.entries(summary.byKind)
@@ -461,6 +471,25 @@ export function renderLegend(container, model) {
   }
   container.append(guide);
 
+  // The actual directory → colour key, so the legend shows the colours the view draws
+  // rather than a gradient that stands for "some colour".
+  const directories = paletteKey(model);
+  if (directories.length > 0) {
+    const key = document.createElement('div');
+    key.className = 'legend-dirs';
+    for (const entry of directories) {
+      const item = document.createElement('span');
+      item.className = 'legend-dir';
+      const swatch = document.createElement('span');
+      swatch.className = 'legend-dot';
+      swatch.style.background = entry.color;
+      item.append(swatch);
+      item.append(document.createTextNode(entry.regions.join(' · ')));
+      key.append(item);
+    }
+    container.append(key);
+  }
+
   const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement('span');
@@ -472,6 +501,28 @@ export function renderLegend(container, model) {
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? 'round-rectangle'})`));
     container.append(item);
   }
+}
+
+/** The keyboard cheat-sheet, split out of the legend so it opens on `?` instead. */
+export function renderShortcuts(container) {
+  container.replaceChildren();
+
+  const title = document.createElement('h3');
+  title.textContent = 'Keyboard shortcuts';
+  container.append(title);
+
+  const list = document.createElement('dl');
+  list.className = 'shortcut-list';
+  for (const entry of shortcutSheet()) {
+    const term = document.createElement('dt');
+    const kbd = document.createElement('kbd');
+    kbd.textContent = entry.keys;
+    term.append(kbd);
+    const description = document.createElement('dd');
+    description.textContent = entry.action;
+    list.append(term, description);
+  }
+  container.append(list);
 }
 
 /** Counts by directory and kind; clicking a chip filters the map. */

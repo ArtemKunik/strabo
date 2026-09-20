@@ -34,6 +34,7 @@ import {
   orderMembers,
   overlayFor,
   paletteColor,
+  paletteKey,
   passportFor,
   polygonPoints,
   radarFrame,
@@ -41,6 +42,7 @@ import {
   reviewFileLabel,
   reviewGroups,
   reviewOverlay,
+  shortcutSheet,
   summarizeDiagnostics,
   topLevelDirectory,
 } from '../../ui/strabo-core.js';
@@ -176,12 +178,9 @@ test('filterNodes matches case-insensitively and returns everything when empty',
   assert.deepEqual(filterNodes(model, '  '), ['src/index.ts', 'src/util.ts', 'src/feature.test.ts']);
 });
 
-test('graphSummary reports cache status and staleness', () => {
-  assert.equal(graphSummary(model), '3 nodes · 2 edges · cache: memory');
-  assert.equal(
-    graphSummary({ nodes: [], edges: [], cache: { status: 'disk', stale: true } }),
-    '0 nodes · 0 edges · cache: disk (stale)',
-  );
+test('graphSummary counts nodes and edges without internal vocabulary', () => {
+  assert.equal(graphSummary(model), '3 nodes · 2 edges');
+  assert.equal(graphSummary({ nodes: [], edges: [] }), '0 nodes · 0 edges');
 });
 
 test('overlayFor maps change impact onto changed and affected nodes', () => {
@@ -253,6 +252,40 @@ test('nodes in the same top-level directory share a colour', () => {
   });
 
   assert.equal(nodes[0].data.color, nodes[1].data.color);
+});
+
+test('paletteKey lists each palette index with the directory it encodes', () => {
+  const key = paletteKey({
+    nodes: [
+      { id: 'src/a.ts', paletteIndex: 0 },
+      { id: 'src/b.ts', paletteIndex: 0 },
+      { id: 'ui/c.ts', paletteIndex: 1 },
+    ],
+  });
+  assert.deepEqual(key.map((entry) => entry.regions), [['src'], ['ui']]);
+  assert.notEqual(key[0].color, key[1].color);
+});
+
+test('paletteKey merges directories that share a wrapped palette index', () => {
+  const key = paletteKey({
+    nodes: [
+      { id: 'a/x.ts', paletteIndex: 0 },
+      { id: 'b/y.ts', paletteIndex: 0 },
+    ],
+  });
+  assert.deepEqual(key[0].regions, ['a', 'b']);
+  assert.equal(key[0].color, paletteColor(0, ''));
+});
+
+test('paletteKey labels a block id by its own directory', () => {
+  const key = paletteKey({ prefixLength: 1, nodes: [{ id: 'ui', paletteIndex: 2 }] });
+  assert.deepEqual(key[0].regions, ['ui']);
+});
+
+test('shortcutSheet carries the gestures the legend no longer mixes in', () => {
+  const keys = shortcutSheet().map((entry) => entry.keys);
+  assert.ok(keys.includes('?'));
+  assert.ok(keys.some((key) => key.includes('hover')));
 });
 
 test('passportFor reports metrics, imports, and used-by from evidence', () => {

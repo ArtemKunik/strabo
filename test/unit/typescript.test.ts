@@ -127,6 +127,57 @@ test('extractTypeScriptSymbols parses interfaces and TSX with the TSX grammar', 
   assert.ok(symbols.some((symbol) => symbol.name === 'App' && symbol.kind === 'method'));
 });
 
+test('extractTypeScriptSymbols records function body metrics', async () => {
+  const source = [
+    'function decide(items: number[]): number {',
+    '  let total = 0;',
+    '  for (const item of items) {',
+    '    if (item > 0 && item % 2 === 0) {',
+    '      total += item;',
+    '    }',
+    '  }',
+    '  return total > 0 ? total : 0;',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractTypeScriptSymbols('decide.ts', source);
+  const fn = symbols.find((symbol) => symbol.name === 'decide');
+
+  assert.equal(fn?.metrics?.endLine, 9);
+  assert.equal(fn?.metrics?.lines, 9);
+  assert.equal(fn?.metrics?.loops, 1);
+  assert.equal(fn?.metrics?.maxNestingDepth, 2);
+  // 1 (base) + for + if + `&&` + ternary.
+  assert.equal(fn?.metrics?.decisionPoints, 5);
+  assert.ok((fn?.metrics?.statementCount ?? 0) >= 5);
+});
+
+test('extractTypeScriptSymbols does not fold an inline callback into its caller', async () => {
+  const source = [
+    'function outer(): void {',
+    '  const inner = () => {',
+    '    if (true) { return; }',
+    '  };',
+    '  inner();',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractTypeScriptSymbols('nested.ts', source);
+  const outer = symbols.find((symbol) => symbol.name === 'outer');
+
+  // The arrow's `if` belongs to the callback, so it does not branch `outer`.
+  assert.equal(outer?.metrics?.decisionPoints, 1);
+  assert.equal(outer?.metrics?.maxNestingDepth, 0);
+});
+
+test('extractTypeScriptSymbols leaves signatures without body metrics', async () => {
+  const source = ['interface Api {', '  call(x: number): void;', '}'].join('\n');
+
+  const { symbols } = await extractTypeScriptSymbols('api.ts', source);
+  const method = symbols.find((symbol) => symbol.name === 'call');
+  assert.equal(method?.metrics, undefined);
+});
+
 test('symbolExtractorFor covers TypeScript module extensions', () => {
   assert.equal(symbolExtractorFor('a.ts')?.language, 'typescript');
   assert.equal(symbolExtractorFor('a.tsx')?.language, 'typescript');

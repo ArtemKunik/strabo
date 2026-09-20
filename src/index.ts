@@ -33,9 +33,13 @@ export {
 export type {
   CodeSymbol,
   CodeSymbolKind,
+  FunctionCall,
+  FunctionMetrics,
   MemberAccess,
   SymbolExtraction,
 } from './scan/languages/symbols.ts';
+export { collectFunctionMetrics } from './scan/languages/function-metrics.ts';
+export type { FunctionRules } from './scan/languages/function-metrics.ts';
 export { SYMBOL_EXTRACTORS, symbolExtractorFor } from './scan/languages/registry.ts';
 export type { SymbolExtractor } from './scan/languages/registry.ts';
 export { addNamespacePrefixes, namespaceDepth, looksInternal } from './scan/languages/namespace.ts';
@@ -53,6 +57,7 @@ export {
   neighbourhood,
 } from './analysis/analysis.ts';
 export { buildPositions } from './analysis/layout.ts';
+export { PALETTE_SIZE, assignPaletteIndexes, blockRegion, topLevelDirectory } from './analysis/palette.ts';
 export { buildBlockViewModel } from './analysis/blocks.ts';
 export { analyzeModuleDepth } from './analysis/depth.ts';
 export { computeImpact, getChangedFiles, impactFromPaths } from './analysis/impact.ts';
