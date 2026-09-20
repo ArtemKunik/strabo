@@ -275,8 +275,14 @@ collapsed state are remembered per panel in `localStorage`, so a layout survives
 
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an
-`Open in Workspace` action. Dependencies, Dependents, and Members are separate tabs so a
-large file does not push its member list off screen.
+`Open in Workspace` action. Dependencies, Dependents, Members, and Functions are separate
+tabs so a large file does not push its member list off screen.
+
+The **Functions** tab lists every function and method with its signature, source span,
+decision-point count (a cyclomatic proxy), nesting depth, loop count, and whether it calls
+itself, plus the calls that resolve inside the same file. A language without a symbol
+extractor reports that extraction is not implemented, and a function whose body was not read
+shows `signature only` rather than a fabricated zero.
 
 Selecting an edge opens **Edge evidence**: the relationship kind, the recorded specifier and
 line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorded fields read
@@ -284,8 +290,8 @@ line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorde
 endpoint or trace a path between them.
 
 The **Member map** in the inspector groups declared types, fields, properties, and methods
-with their visibility and type where symbol extraction is available (TypeScript/TSX, Java,
-Kotlin, Rust, and C# today); other languages report that extraction is not implemented
+with their visibility and type where symbol extraction is available (TypeScript/TSX,
+JavaScript/JSX, Java, Kotlin, Rust, and C# today); other languages report that extraction is not implemented
 rather than an empty list. Where the scan recorded field references inside method bodies — an explicit
 `this.x` / `self.x`, or an unshadowed bare name — it also shows **Data flow** panels
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
@@ -379,6 +385,7 @@ implicit failure.
 | C# | `parsers/vendor/c_sharp` | Implemented: `using`, `using static`, and alias directives -> namespaces/types |
 | Kotlin | `parsers/vendor/kotlin` | Implemented: `package` + `import` (wildcards, aliases, nested types) -> repository files |
 | TypeScript, TSX | `parsers/vendor/typescript`, `parsers/vendor/tsx` | Member extraction (classes, interfaces, enums, module functions); imports resolve through the JS/TS scanner above |
+| JavaScript, JSX | `parsers/vendor/tsx` | Member extraction, sharing the TypeScript extractor; `.js`, `.jsx`, `.mjs`, `.cjs` parse with the TSX grammar, because JavaScript has no type assertions, so a leading `<` is always JSX |
 | SQL | `parsers/vendor/sql` | Implemented: `table` edges from a file that uses a table or view (`FROM`/`JOIN`, `UPDATE`, `DELETE`, `INSERT`, `ALTER`, `CREATE INDEX ... ON`, trigger `ON`, `REFERENCES`) to the one file that defines it (`CREATE TABLE`/`VIEW`/`MATERIALIZED VIEW`); `import` edges from `\i`/`\ir`, `:r`, `source`, and `@` includes of another `.sql` file; member extraction (tables/views and their columns) |
 | C++ | not vendored | Recognised and reported as unsupported |
 | COBOL, ABL | not vendored | Out of scope for now; treated as non-source files |

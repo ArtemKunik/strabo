@@ -458,9 +458,19 @@ const TYPESCRIPT_ACCESS: AccessRules = {
     }),
 };
 
-/** `.tsx` needs the TSX grammar for JSX; every other module extension uses TypeScript. */
+/**
+ * JavaScript dialects parse with the TSX grammar, not the TypeScript one. The two differ
+ * only in how they read a leading `<`: TypeScript takes it as a type assertion, TSX as a
+ * JSX element. JavaScript has no type assertions, so TSX is the correct reading for every
+ * `.js` file, and it is the only one that survives JSX in a `.js` or `.jsx` file.
+ */
+const TSX_EXTENSIONS = ['.tsx', '.jsx', '.js', '.mjs', '.cjs'];
+
 function grammarFor(file: string): GrammarLanguage {
-  return file.toLowerCase().endsWith('.tsx') ? TSX_LANGUAGE : TYPESCRIPT_LANGUAGE;
+  const lower = file.toLowerCase();
+  return TSX_EXTENSIONS.some((extension) => lower.endsWith(extension))
+    ? TSX_LANGUAGE
+    : TYPESCRIPT_LANGUAGE;
 }
 
 /** The owner shared by a module's top-level declarations, e.g. `scan` for `src/scan.ts`. */
