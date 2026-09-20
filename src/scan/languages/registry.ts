@@ -1,6 +1,7 @@
 import { extractCSharpSymbols } from './csharp.ts';
 import { extractJavaSymbols } from './java.ts';
 import { extractKotlinSymbols } from './kotlin.ts';
+import { extractPythonSymbols } from './python.ts';
 import { extractRustSymbols } from './rust.ts';
 import { extractSqlSymbols } from './sql.ts';
 import { extractTypeScriptSymbols } from './typescript.ts';
@@ -41,6 +42,7 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.jsx': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.mjs': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.cjs': { language: 'javascript', extract: extractTypeScriptSymbols },
+  '.py': { language: 'python', extract: extractPythonSymbols },
   '.sql': { language: 'sql', extract: extractSqlSymbols, tracksAccess: false },
 };
 

@@ -173,6 +173,7 @@ const SOURCE_EXTENSIONS = new Set([
   '.java', '.kt', '.kts',
   '.cs',
   '.rs',
+  '.py',
   '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.h',
   '.sql',
 ]);
