@@ -357,7 +357,8 @@ implicit failure.
 | C# | `parsers/vendor/c_sharp` | Implemented: `using`, `using static`, and alias directives -> namespaces/types |
 | Kotlin | `parsers/vendor/kotlin` | Implemented: `package` + `import` (wildcards, aliases, nested types) -> repository files |
 | TypeScript, TSX | `parsers/vendor/typescript`, `parsers/vendor/tsx` | Member extraction (classes, interfaces, enums, module functions); imports resolve through the JS/TS scanner above |
-| C++, SQL | not vendored | Recognised and reported as unsupported |
+| SQL | `parsers/vendor/sql` | Implemented: `table` edges from a file that uses a table or view (`FROM`/`JOIN`, `UPDATE`, `DELETE`, `INSERT`, `ALTER`, `CREATE INDEX ... ON`, trigger `ON`, `REFERENCES`) to the one file that defines it (`CREATE TABLE`/`VIEW`/`MATERIALIZED VIEW`); `import` edges from `\i`/`\ir`, `:r`, `source`, and `@` includes of another `.sql` file; member extraction (tables/views and their columns) |
+| C++ | not vendored | Recognised and reported as unsupported |
 | COBOL, ABL | not vendored | Out of scope for now; treated as non-source files |
 
 Resolution is **import-based**, plus references that do not need an import. An import only
@@ -383,6 +384,28 @@ is declared by more than one file in that package/namespace, Strabo reports an `
 diagnostic instead of guessing. Remaining limit: there is no full type inference, so
 references that cannot be matched by name are left as diagnostics rather than speculative
 edges.
+
+SQL has no imports, so its edges follow **schema objects**: a file that uses a relation
+links to the single file that creates it. Names match case-insensitively and loosely on
+schema, as a search path would (`public.users` finds a `users` created without a schema);
+temporary tables and CTE names never define or reference anything. A relation no file
+defines is treated as external and stays silent, a relation created by more than one file
+(common with re-run migrations) is an `ambiguous` diagnostic with no edge, and an include
+of a `.sql` file that does not exist is `unresolved`. The grammar is strongest on
+PostgreSQL/ANSI DDL and DML; dialect-specific statements it cannot parse (`GRANT`,
+T-SQL `[bracketed]` names, `CREATE PROCEDURE`) are reported as a `parse-failure` warning
+for the file while the statements around them still contribute. Functions, procedures,
+types, and `DROP`/`TRUNCATE` are not tracked yet.
+
+The SQL **member map** lists each table or view as a type and each column as a field it
+owns, with the declared type (`DECIMAL(10, 2)`, `INT[]`). Columns come from
+`CREATE TABLE` and `ALTER TABLE ... ADD COLUMN`, so a migration that only adds columns
+still shows them. SQL has no access modifiers (visibility reads `n/a`) and no methods that
+read or write columns, so the data-flow panels are unavailable and **cohesion is reported
+as unavailable** rather than scored, in file health and in the change passport. View
+columns and functions are not extracted: a select list declares no types, and the grammar
+drops most `plpgsql` function bodies to error recovery, so only an arbitrary subset would
+appear.
 
 ## Layout
 ```
