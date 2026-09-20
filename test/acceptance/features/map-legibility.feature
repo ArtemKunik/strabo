@@ -49,6 +49,13 @@ Feature: Map legibility
     Then the "legend" panel position moved by 40, 30
     And the "legend" panel size grew by 60, 40
 
+  @float
+  Scenario: A panel that was never opened still opens at a usable size after another panel moved
+    When I drag the "legend" panel by 40, 30
+    And I reload the Strabo UI
+    And I open the diagnostics panel
+    Then the "diagnostics" panel is at least 240 pixels wide
+
   @strip
   Scenario: The tests strip filters the map
     When I switch to file detail

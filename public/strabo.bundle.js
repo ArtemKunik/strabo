@@ -1293,6 +1293,14 @@ function writeStore(store2) {
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
+function sanitizeSize(size) {
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  return {
+    width: Number.isFinite(width) && width >= MIN_WIDTH ? width : null,
+    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
+  };
+}
 function initFloatingWindows({ dock, panels = [] } = {}) {
   const store2 = readStore();
   const controllers = [];
@@ -1312,14 +1320,15 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     const element = config.element;
     if (!element) continue;
     const saved = store2[config.key] ?? {};
-    const width = saved.size?.width ?? config.width ?? DEFAULT_WIDTH;
+    let size = sanitizeSize(saved.size);
+    const width = size.width ?? config.width ?? DEFAULT_WIDTH;
     const win = document.createElement("section");
     win.className = "float-window";
     win.dataset.panel = config.key;
     win.hidden = true;
     win.style.width = `${width}px`;
-    if (saved.size?.height) {
-      win.style.height = `${saved.size.height}px`;
+    if (size.height) {
+      win.style.height = `${size.height}px`;
     }
     const header = document.createElement("header");
     header.className = "float-header";
@@ -1463,13 +1472,12 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       },
       snapshot() {
-        const rect = win.getBoundingClientRect();
         return {
           position: {
             left: parseFloat(win.style.left) || 0,
             top: parseFloat(win.style.top) || 0
           },
-          size: { width: rect.width, height: rect.height },
+          size: { ...size },
           collapsed: isCollapsed()
         };
       },
@@ -1540,6 +1548,11 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         resizeHandle.removeEventListener("pointermove", move);
         resizeHandle.removeEventListener("pointerup", end);
         resizeHandle.removeEventListener("pointercancel", end);
+        const resized = sanitizeSize({
+          width: parseFloat(win.style.width),
+          height: parseFloat(win.style.height)
+        });
+        size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
         persist();
       };
       resizeHandle.addEventListener("pointermove", move);
