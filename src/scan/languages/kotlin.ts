@@ -1,15 +1,18 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import { addNamespacePrefixes, looksInternal } from './namespace.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
+  type CallRules,
   type CodeSymbol,
   type MemberAccess,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
+  collectFunctionCalls,
   collectMemberAccesses,
 } from './symbols.ts';
 
@@ -368,6 +371,8 @@ export async function extractKotlinSymbols(
       return { symbols, diagnostics };
     }
 
+    const typeNames = new Set<string>();
+
     const visit = (node: Node, owner: string): void => {
       if (
         node.type === 'class_declaration' ||
@@ -375,6 +380,9 @@ export async function extractKotlinSymbols(
         node.type === 'object_declaration'
       ) {
         const name = node.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+        if (name) {
+          typeNames.add(name);
+        }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
         for (const child of node.namedChildren) {
           visit(child, nextOwner);
@@ -401,8 +409,11 @@ export async function extractKotlinSymbols(
       if (node.type === 'function_declaration') {
         const method = methodOf(node, owner);
         if (method) {
-          symbols.push(method);
           const body = node.namedChildren.find((child) => child.type === 'function_body');
+          if (body) {
+            method.metrics = collectFunctionMetrics(body, method.line, KOTLIN_FUNCTION_RULES);
+          }
+          symbols.push(method);
           if (body && owner) {
             methodBodies.push({ owner, method: method.name, body, scope: node });
           }
@@ -433,10 +444,93 @@ export async function extractKotlinSymbols(
       }
     }
 
+    const declared = new Set(
+      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+    );
+    const calls = methodBodies.flatMap((entry) =>
+      collectFunctionCalls(entry.body, declared, typeNames, entry.owner, entry.method, KOTLIN_CALLS),
+    );
+    markRecursive(symbols, calls);
+
     symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
-    return { symbols, diagnostics, accesses };
+    return { symbols, diagnostics, accesses, calls };
   });
 }
+
+const KOTLIN_FUNCTION_RULES: FunctionRules = {
+  controlFlowTypes: new Set([
+    'if_expression',
+    'when_expression',
+    'for_statement',
+    'while_statement',
+    'do_while_statement',
+    'try_expression',
+    'catch_block',
+  ]),
+  loopTypes: new Set(['for_statement', 'while_statement', 'do_while_statement']),
+  decisionNodeTypes: new Set([
+    'if_expression',
+    'when_entry',
+    'for_statement',
+    'while_statement',
+    'do_while_statement',
+    'catch_block',
+    'conjunction_expression',
+    'disjunction_expression',
+    'elvis_expression',
+  ]),
+  decisionOperators: new Set(),
+  statementTypes: new Set([
+    'property_declaration',
+    'assignment',
+    'call_expression',
+    'if_expression',
+    'when_expression',
+    'for_statement',
+    'while_statement',
+    'do_while_statement',
+    'try_expression',
+    'jump_expression',
+  ]),
+  nestedFunctionTypes: new Set([
+    'function_declaration',
+    'lambda_literal',
+    'anonymous_function',
+    'object_literal',
+    'class_declaration',
+    'object_declaration',
+    'interface_declaration',
+  ]),
+};
+
+const KOTLIN_CALLS: CallRules = {
+  callTypes: new Set(['call_expression']),
+  callTarget: (node) => {
+    const callee = node.namedChildren[0];
+    if (!callee) {
+      return null;
+    }
+    if (callee.type === 'simple_identifier') {
+      return { name: callee.text, kind: 'bare' };
+    }
+    if (callee.type !== 'navigation_expression') {
+      return null;
+    }
+    const receiver = callee.namedChildren[0];
+    const suffix = callee.namedChildren.find((child) => child.type === 'navigation_suffix');
+    const property = suffix?.namedChildren.find((child) => child.type === 'simple_identifier');
+    if (!receiver || !property) {
+      return null;
+    }
+    if (receiver.type === 'this_expression' || receiver.text === 'this') {
+      return { name: property.text, kind: 'self', receiver: 'this' };
+    }
+    if (receiver.type === 'simple_identifier' && looksLikeTypeName(receiver.text)) {
+      return { name: property.text, kind: 'type-qualified', receiver: receiver.text };
+    }
+    return null;
+  },
+};
 
 const KOTLIN_ACCESS: AccessRules = {
   identifierTypes: new Set(['simple_identifier']),

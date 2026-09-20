@@ -151,3 +151,134 @@ test('extractRustSymbols records self.field reads and writes', async () => {
   assert.ok((accesses ?? []).some((entry) => entry.field === 'count' && entry.mode === 'write'));
   assert.ok((accesses ?? []).some((entry) => entry.field === 'count' && entry.mode === 'read'));
 });
+
+test('extractJavaSymbols records body metrics and leaves a signature without them', async () => {
+  const source = [
+    'class A {',
+    '  int f(int[] xs) {',
+    '    int t = 0;',
+    '    for (int x : xs) {',
+    '      if (x > 0 && x % 2 == 0) {',
+    '        t += x;',
+    '      }',
+    '    }',
+    '    return t > 0 ? t : 0;',
+    '  }',
+    '  int sig(int x);',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractJavaSymbols('A.java', source);
+  const map = byName(symbols);
+  assert.equal(map.get('f')?.metrics?.endLine, 10);
+  assert.equal(map.get('f')?.metrics?.lines, 9);
+  assert.equal(map.get('f')?.metrics?.loops, 1);
+  assert.equal(map.get('f')?.metrics?.maxNestingDepth, 2);
+  assert.equal(map.get('f')?.metrics?.decisionPoints, 5);
+  assert.equal(map.get('sig')?.metrics, undefined);
+});
+
+test('extractRustSymbols records body metrics from loops, branches, and operators', async () => {
+  const source = [
+    'impl A {',
+    '  fn f(xs: &[i32]) -> i32 {',
+    '    let mut t = 0;',
+    '    for x in xs {',
+    '      if *x > 0 && x % 2 == 0 {',
+    '        t += x;',
+    '      }',
+    '    }',
+    '    if t > 0 { t } else { 0 }',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractRustSymbols('a.rs', source);
+  const map = byName(symbols);
+  assert.equal(map.get('f')?.metrics?.endLine, 10);
+  assert.equal(map.get('f')?.metrics?.lines, 9);
+  assert.equal(map.get('f')?.metrics?.loops, 1);
+  assert.equal(map.get('f')?.metrics?.maxNestingDepth, 2);
+  assert.equal(map.get('f')?.metrics?.decisionPoints, 5);
+});
+
+test('extractCSharpSymbols records body metrics and leaves a signature without them', async () => {
+  const source = [
+    'class A {',
+    '  int F(int[] xs) {',
+    '    int t = 0;',
+    '    foreach (var x in xs) {',
+    '      if (x > 0 && x % 2 == 0) {',
+    '        t += x;',
+    '      }',
+    '    }',
+    '    return t > 0 ? t : 0;',
+    '  }',
+    '  int Sig(int x);',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractCSharpSymbols('A.cs', source);
+  const map = byName(symbols);
+  assert.equal(map.get('F')?.metrics?.endLine, 10);
+  assert.equal(map.get('F')?.metrics?.lines, 9);
+  assert.equal(map.get('F')?.metrics?.loops, 1);
+  assert.equal(map.get('F')?.metrics?.maxNestingDepth, 2);
+  assert.equal(map.get('F')?.metrics?.decisionPoints, 5);
+  assert.equal(map.get('Sig')?.metrics, undefined);
+});
+
+test('extractJavaSymbols records intra-file calls, skips a member call on a value, and flags recursion', async () => {
+  const source = [
+    'class A {',
+    '  void run() { helper(); this.two(); A.three(); x.four(); }',
+    '  void helper() {}',
+    '  void two() {}',
+    '  static void three() {}',
+    '  void rec() { rec(); }',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractJavaSymbols('A.java', source);
+  const run = calls.filter((call) => call.method === 'run').map((call) => `${call.callee}:${call.kind}`);
+  assert.deepEqual(run.sort(), ['helper:bare', 'three:type-qualified', 'two:self']);
+  assert.equal(calls.some((call) => call.callee === 'four'), false);
+  assert.equal(byName(symbols).get('rec')?.metrics?.recursive, true);
+  assert.equal(byName(symbols).get('run')?.metrics?.recursive, false);
+});
+
+test('extractRustSymbols records bare, self, and type-qualified calls', async () => {
+  const source = [
+    'fn helper() {}',
+    'impl A {',
+    '  fn run(&self) { helper(); self.two(); A::three(); x.four(); }',
+    '  fn two(&self) {}',
+    '  fn three() {}',
+    '  fn rec(&self) { self.rec(); }',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractRustSymbols('a.rs', source);
+  const run = calls.filter((call) => call.method === 'run').map((call) => `${call.callee}:${call.kind}`);
+  assert.deepEqual(run.sort(), ['helper:bare', 'three:type-qualified', 'two:self']);
+  assert.equal(calls.some((call) => call.callee === 'four'), false);
+  assert.equal(byName(symbols).get('rec')?.metrics?.recursive, true);
+});
+
+test('extractCSharpSymbols records intra-file calls and flags recursion', async () => {
+  const source = [
+    'class A {',
+    '  void Run() { Helper(); this.Two(); A.Three(); x.Four(); }',
+    '  void Helper() {}',
+    '  void Two() {}',
+    '  static void Three() {}',
+    '  void Rec() { Rec(); }',
+    '}',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractCSharpSymbols('A.cs', source);
+  const run = calls.filter((call) => call.method === 'Run').map((call) => `${call.callee}:${call.kind}`);
+  assert.deepEqual(run.sort(), ['Helper:bare', 'Three:type-qualified', 'Two:self']);
+  assert.equal(calls.some((call) => call.callee === 'Four'), false);
+  assert.equal(byName(symbols).get('Rec')?.metrics?.recursive, true);
+});

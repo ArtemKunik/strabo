@@ -1,6 +1,6 @@
 import type { Node } from 'web-tree-sitter';
 
-import type { FunctionMetrics } from './symbols.ts';
+import type { CodeSymbol, FunctionCall, FunctionMetrics } from './symbols.ts';
 
 /**
  * Language-specific node rules used to measure one function body.
@@ -87,7 +87,39 @@ export function collectFunctionMetrics(
     decisionPoints,
     maxNestingDepth,
     loops,
+    recursive: false,
   };
+}
+
+/** A syntactic hint that a receiver names a type rather than a value (leading capital). */
+export function looksLikeTypeName(name: string): boolean {
+  return /^[A-Z]/.test(name);
+}
+
+/** True when a recorded call is the function calling itself. */
+export function isRecursiveCall(call: FunctionCall): boolean {
+  if (call.callee !== call.method) {
+    return false;
+  }
+  return call.kind === 'bare' || call.targetOwner === call.owner;
+}
+
+/** Set `metrics.recursive` on each function whose body calls itself. */
+export function markRecursive(symbols: CodeSymbol[], calls: FunctionCall[]): void {
+  for (const call of calls) {
+    if (!isRecursiveCall(call)) {
+      continue;
+    }
+    const symbol = symbols.find(
+      (candidate) =>
+        candidate.kind === 'method' &&
+        candidate.owner === call.owner &&
+        candidate.name === call.method,
+    );
+    if (symbol?.metrics) {
+      symbol.metrics.recursive = true;
+    }
+  }
 }
 
 /** True when a node carries a branching binary operator as a direct token. */

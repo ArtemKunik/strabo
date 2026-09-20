@@ -79,6 +79,8 @@ export { computeFileHealth, computeMemberCohesion } from './analysis/file-health
 export type { FileHealthReport, FileHealthMetrics, MemberCohesion } from './analysis/file-health.ts';
 export { buildMemberMap } from './analysis/member-map.ts';
 export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member-map.ts';
+export { buildFunctions } from './analysis/functions.ts';
+export type { FunctionEntry, FunctionCallSite, FunctionsReport } from './analysis/functions.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 

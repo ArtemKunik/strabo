@@ -178,6 +178,25 @@ test('extractTypeScriptSymbols leaves signatures without body metrics', async ()
   assert.equal(method?.metrics, undefined);
 });
 
+test('extractTypeScriptSymbols records intra-file calls and flags recursion', async () => {
+  const source = [
+    'class A {',
+    '  run(): void { this.helper(); helper2(); A.static1(); x.four(); }',
+    '  helper(): void {}',
+    '  static static1(): void {}',
+    '}',
+    'function helper2(): void {}',
+    'function loop(): void { loop(); }',
+  ].join('\n');
+
+  const { symbols, calls = [] } = await extractTypeScriptSymbols('a.ts', source);
+  const run = calls.filter((call) => call.method === 'run').map((call) => `${call.callee}:${call.kind}`);
+  assert.deepEqual(run.sort(), ['helper2:bare', 'helper:self', 'static1:type-qualified']);
+  assert.equal(calls.some((call) => call.callee === 'four'), false);
+  const loop = symbols.find((symbol) => symbol.name === 'loop');
+  assert.equal(loop?.metrics?.recursive, true);
+});
+
 test('symbolExtractorFor covers TypeScript module extensions', () => {
   assert.equal(symbolExtractorFor('a.ts')?.language, 'typescript');
   assert.equal(symbolExtractorFor('a.tsx')?.language, 'typescript');

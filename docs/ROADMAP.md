@@ -23,7 +23,7 @@ record is reported as `unavailable`, never invented.
 | 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
 | 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
-| 14 | Function inventory and complexity | In progress (A1: per-function body metrics for TypeScript; other languages, intra-file calls, and UI pending) |
+| 14 | Function inventory and complexity | In progress (A1-A4: body metrics, intra-file calls, and `buildFunctions` in `/symbols` for all five languages; Functions tab pending) |
 | 15 | Optional LLM narrator | Planned (opt-in seam; off by default) |
 | — | Developer Product Graph, Chat | Out of concept |
 
@@ -424,9 +424,12 @@ extractor keep reporting `not-implemented` rather than an empty list.
 - **Hotspots** overlay: the functions with the most recorded signals across the repository.
 
 Slices: **A1 (done)** contract (`FunctionMetrics`, `FunctionCall`), shared
-`collectFunctionMetrics`, TypeScript rule pack, unit tests. **A2** the same rule packs for
-Java, Kotlin, Rust, and C#. **A3** intra-file calls. **A4** `buildFunctions` and the
-`/symbols` payload. **A5** the Functions tab. **A6** signals and the Hotspots overlay.
+`collectFunctionMetrics`, TypeScript rule pack, unit tests. **A2 (done)** the same rule packs
+for Java, Kotlin, Rust, and C#. **A3 (done)** intra-file calls and the `recursive` metric for
+all five languages; a member call on a value (`obj.method()`) is not claimed. **A4 (done)**
+`buildFunctions` (`src/analysis/functions.ts`), returned by `/symbols` as `functions`, with
+callees and intra-file callers. **A5** the Functions tab. **A6** signals and the Hotspots
+overlay.
 
 ## Phase 15 - Optional LLM narrator
 

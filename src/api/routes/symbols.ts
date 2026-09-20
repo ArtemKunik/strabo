@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
+import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { StraboConfig } from '../../types.ts';
@@ -52,6 +53,7 @@ export function createSymbolsRouter(config: StraboConfig): Router {
         symbols: result.symbols,
         diagnostics: result.diagnostics,
         memberMap: buildMemberMap(file, result.symbols, result.accesses ?? []),
+        functions: buildFunctions(file, result.symbols, result.calls ?? []),
       });
     } catch (error) {
       sendError(response, error);

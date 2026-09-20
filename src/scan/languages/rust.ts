@@ -1,14 +1,17 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
+  type CallRules,
   type CodeSymbol,
   type MemberAccess,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
+  collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
 } from './symbols.ts';
@@ -676,7 +679,7 @@ export async function extractRustSymbols(
         const name = node.childForFieldName('name')?.text;
         if (name) {
           const parameters = node.childForFieldName('parameters');
-          symbols.push({
+          const symbol: CodeSymbol = {
             name,
             kind: 'method',
             visibility: rustVisibility(node),
@@ -684,8 +687,12 @@ export async function extractRustSymbols(
             type: node.childForFieldName('return_type')?.text,
             parameters: parameters?.namedChildren.length ?? 0,
             line: node.startPosition.row + 1,
-          });
+          };
           const body = node.childForFieldName('body');
+          if (body) {
+            symbol.metrics = collectFunctionMetrics(body, symbol.line, RUST_FUNCTION_RULES);
+          }
+          symbols.push(symbol);
           if (body && owner) {
             methodBodies.push({ owner, method: name, body, scope: node });
           }
@@ -717,9 +724,94 @@ export async function extractRustSymbols(
       }
     }
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses };
+    const declared = new Set(
+      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+    );
+    const types = new Set(
+      symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+    );
+    const calls = methodBodies.flatMap((entry) =>
+      collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, RUST_CALLS),
+    );
+    markRecursive(symbols, calls);
+
+    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });
 }
+
+const RUST_FUNCTION_RULES: FunctionRules = {
+  controlFlowTypes: new Set([
+    'if_expression',
+    'for_expression',
+    'while_expression',
+    'loop_expression',
+    'match_expression',
+    'try_expression',
+  ]),
+  loopTypes: new Set(['for_expression', 'while_expression', 'loop_expression']),
+  decisionNodeTypes: new Set([
+    'if_expression',
+    'for_expression',
+    'while_expression',
+    'loop_expression',
+    'match_arm',
+    'try_expression',
+  ]),
+  decisionOperators: new Set(['&&', '||']),
+  statementTypes: new Set([
+    'let_declaration',
+    'expression_statement',
+    'return_expression',
+    'break_expression',
+    'continue_expression',
+    'if_expression',
+    'for_expression',
+    'while_expression',
+    'loop_expression',
+    'match_expression',
+  ]),
+  nestedFunctionTypes: new Set(['function_item', 'closure_expression']),
+};
+
+const RUST_CALLS: CallRules = {
+  callTypes: new Set(['call_expression']),
+  callTarget: (node) => {
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return null;
+    }
+    if (fn.type === 'identifier') {
+      return { name: fn.text, kind: 'bare' };
+    }
+    if (fn.type === 'field_expression') {
+      const value = fn.childForFieldName('value');
+      const field = fn.childForFieldName('field');
+      if (!value || !field) {
+        return null;
+      }
+      if (value.text === 'self') {
+        return { name: field.text, kind: 'self', receiver: 'self' };
+      }
+      return null;
+    }
+    if (fn.type === 'scoped_identifier') {
+      const path = fn.childForFieldName('path');
+      const name = fn.childForFieldName('name');
+      if (!path || !name) {
+        return null;
+      }
+      if (path.text === 'Self') {
+        return { name: name.text, kind: 'type-qualified', receiver: 'Self' };
+      }
+      const separator = path.text.lastIndexOf('::');
+      const receiver = separator === -1 ? path.text : path.text.slice(separator + 2);
+      if (looksLikeTypeName(receiver)) {
+        return { name: name.text, kind: 'type-qualified', receiver };
+      }
+    }
+    return null;
+  },
+};
 
 const RUST_ACCESS: AccessRules = {
   identifierTypes: new Set(['identifier']),
