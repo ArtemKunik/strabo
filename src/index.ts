@@ -109,6 +109,38 @@ export { createLicenseClient, classifyLicenseExpression, isDeniedLicense, parseD
 export type { LicenseClient, DepsDevVersion } from './risk/licenses.ts';
 export { computeRiskReport } from './risk/report.ts';
 export type { RiskOptions } from './risk/report.ts';
+export {
+  resolveNarratorConfig,
+  isLoopbackHost,
+  NARRATOR_DEFAULT_KEY_ENV,
+  NARRATOR_DEFAULT_BUDGET,
+} from './narrator/config.ts';
+export type {
+  NarratorResolution,
+  ResolvedNarratorConfig,
+  UnresolvedNarratorConfig,
+  NarratorUnavailableReason,
+} from './narrator/config.ts';
+export {
+  createNarratorClient,
+  createMemoryNarratorCache,
+  buildNarratorPrompt,
+  frameUntrusted,
+  NARRATOR_PROMPT_VERSION,
+  NARRATOR_MAX_EVIDENCE_CHARS,
+} from './narrator/client.ts';
+export type {
+  NarratorClient,
+  NarratorClientOptions,
+  NarratorCache,
+  NarratorRequest,
+  NarratorReply,
+  NarratorNarrative,
+  NarratorUnavailable,
+  NarratorAuditEntry,
+  NarratorStatus,
+  NarratorPrompt,
+} from './narrator/client.ts';
 export { collectPolyglotExternalImports, mavenCoordinateMatches } from './scan/external-polyglot.ts';
 
 export { buildViewModel } from './view/view-model.ts';

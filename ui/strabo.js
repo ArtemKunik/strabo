@@ -30,8 +30,10 @@ import {
   renderShortcuts,
   renderTestsStrip,
   renderTimeline,
+  renderWorkspace,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
+import { buildNarratorEvidence } from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
@@ -46,6 +48,8 @@ let selectedEdgeId = null;
 let groupSelection = [];
 /** The Git review result currently shown in the review panel, for delegation. */
 let currentReview = null;
+/** The narrator status from `/narrator`, fetched once; null until it resolves. */
+let narratorStatus = null;
 
 /**
  * One store for the app's UI state. `state` and `memberUI` stay the view onto the `view` and
@@ -238,6 +242,7 @@ const elements = {
   shortcuts: document.getElementById('shortcuts'),
   settingsToggle: document.getElementById('settings-toggle'),
   settingsPanel: document.getElementById('settings-panel'),
+  workspacePanel: document.getElementById('workspace-panel'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -495,21 +500,64 @@ async function loadMembers(id) {
     params.set('repository', state.repository);
   }
   try {
+    if (narratorStatus === null) {
+      narratorStatus = await fetchNarratorStatus();
+    }
     const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
     const result = response.ok
       ? await response.json()
       : { available: false, detail: 'Symbols are unavailable for this file.' };
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
-      if (functionsSection) renderFunctions(functionsSection, result);
+      if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
     }
   } catch {
     if (selected === id) {
       const fallback = { available: false, detail: 'Symbols could not be loaded.' };
       if (membersSection) renderMembers(membersSection, fallback);
-      if (functionsSection) renderFunctions(functionsSection, fallback);
+      if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
     }
   }
+}
+
+/** Handlers that let the Functions tab ask the opt-in narrator about the recorded evidence. */
+function functionsHandlers(result) {
+  return {
+    narratorStatus,
+    onNarrate: () => narrateFile(result),
+  };
+}
+
+/** Read the narrator status once; failures degrade to the unconfigured caption, not an error. */
+async function fetchNarratorStatus() {
+  try {
+    const response = await fetch(`${API_PATH}/narrator`);
+    return response.ok ? await response.json() : { configured: false, reason: 'not-configured' };
+  } catch {
+    return { configured: false, reason: 'not-configured' };
+  }
+}
+
+/**
+ * Ask the narrator about one file's recorded evidence.
+ *
+ * Only recorded evidence is sent; the endpoint decides whether it is enabled. The reply is
+ * narrative text, rendered apart from the recorded facts and never applied to the source.
+ */
+async function narrateFile(result) {
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      instruction: 'Summarise the recorded complexity, signals, and call wiring in this file.',
+      evidence: buildNarratorEvidence(result),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
 }
 
 function clearSelection() {
@@ -940,6 +988,32 @@ async function openSettings() {
     settingsStatusError = true;
   }
   renderSettingsView();
+}
+
+/**
+ * Open the workspace window and load the declared multi-repo report.
+ *
+ * The workspace is fixed by the server's config; the panel is read-only and a server error
+ * (invalid config, a root outside the ceiling) is shown in the panel rather than thrown.
+ */
+async function showWorkspace() {
+  elements.workspacePanel.hidden = false;
+  try {
+    const report = await request('/workspace');
+    renderWorkspace(elements.workspacePanel, report, { onClose: closeWorkspace });
+  } catch (error) {
+    renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = error.message;
+    elements.workspacePanel.append(note);
+  }
+  refreshDock();
+}
+
+function closeWorkspace() {
+  elements.workspacePanel.hidden = true;
+  refreshDock();
 }
 
 function clearOverlay() {
@@ -1830,6 +1904,17 @@ const floatingWindows = initFloatingWindows({
       onOpen: () => renderMemberMapView(),
       onClose: () => closeMemberMap(),
     },
+    {
+      key: 'workspace',
+      element: elements.workspacePanel,
+      title: 'Workspace',
+      dockLabel: 'Workspace',
+      width: 460,
+      onOpen: () => {
+        showWorkspace().catch(() => {});
+      },
+      onClose: () => closeWorkspace(),
+    },
   ],
 });
 
@@ -1870,6 +1955,7 @@ if (window.STRABO_TEST) {
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
     islands: () => view.islandDirectories(),
+    workspace: () => showWorkspace(),
   };
 }
 

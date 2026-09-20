@@ -890,6 +890,61 @@ button.primary {
   margin-top: 2px;
 }
 
+.narrator-block {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.narrator-note {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.narrator-reply {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  color: var(--ink-1);
+}
+
+.narrator-attribution {
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.workspace-summary {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.workspace-repositories,
+.workspace-flows,
+.workspace-contracts,
+.workspace-drift {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.workspace-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-name {
+  font-weight: 600;
+}
+
+.workspace-detail {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .data-flow {
   margin-top: 10px;
   border-top: 1px solid var(--line);
