@@ -21,7 +21,7 @@ record is reported as `unavailable`, never invented.
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Backend done (declared list, package flows, contracts, drift, per-fingerprint cache); workspace UI pending |
-| 12 | Frontend foundation | M0 done (`ui/` source bundled to `public/` by esbuild); view/state/panel/a11y milestones pending |
+| 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
 | — | Developer Product Graph, Chat, Narrate | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -186,14 +186,23 @@ keeps the identity but adds a build step and a small view/state layer.
   part of `npm run build`). The bundle is not minified so the served code stays readable;
   Cytoscape stays a separate global script served from `node_modules`. `test:pack` asserts
   the shipped `public/` and that `ui/` source is not published. No behaviour change.
-- **M1 - View layer.** A tiny `h()` + keyed patch (or signals) in `ui/`, porting one panel
-  first as proof, keeping the browser contract stable.
-- **M2 - State store.** One store for selection, mode, filters, open panels, and workspace,
-  with selectors/subscriptions, replacing the full `renderMemberMapView()` rebuilds and
-  enabling URL state (`?repo=&node=&panel=&mode=`).
-- **M3 - Panel manager.** Formalize the floating/dockable window layer (`ui/strabo-float.js`)
-  into one manager for inspector, review, risk, member map, and floats, with persisted
-  layout and focus handling.
+- **M1 - View layer (done).** `ui/view.js`: `h()` builds vnodes and `mount()` reconciles a
+  container against them, matching children by `key` and reusing DOM nodes so focus, scroll,
+  and CSS transitions survive a re-render. The tests strip (`renderTestsStrip`) is ported as
+  the proof; the other panels stay on the current path until M2/M3.
+- **M2 - State store (done).** `ui/store.js`: one observable store with `view`, `member`, and
+  `ui` slices, plus `set`/`commit`/`subscribe`. A single subscription decides what a change
+  redraws — the member map re-renders from a `member` change instead of every handler calling
+  `renderMemberMapView()` by hand — and mirrors the repository, mode, selected node, and open
+  panel into the URL, so a deep link reopens the member map. The graph and member-map trees
+  still rebuild internally; folding them into the diff is M3.
+- **M3 - Member-map render port (done).** The member map now renders through `ui/view.js`:
+  the shell, toolbar, and walkthrough are vnodes, and the type sections, data-flow panels,
+  health radar, constellation, and flow diagram are adopted behind `host()` keyed to the
+  inputs that change them. A walkthrough tick or a zoom change reuses the cards instead of
+  rebuilding, so the find input keeps focus and CSS animations do not restart. The floating
+  window manager (`ui/strabo-float.js`) already provides dock, float, collapse, and
+  persistence, so it was kept rather than rewritten.
 - **M4 - Design system + a11y.** Tokens, shared controls, focus-visible, keyboard navigation,
   and ARIA on tabs/menus/cards.
 - **M5 - Scale.** List virtualization for long panels, incremental graph overlay, and

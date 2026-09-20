@@ -32,7 +32,7 @@ import {
   riskSummary,
   summarizeDiagnostics,
 } from './strabo-core.js';
-import { Fragment, h, mount } from './view.js';
+import { Fragment, h, host, mount } from './view.js';
 
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
@@ -575,25 +575,99 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     heading.append(dismiss);
   }
 
+  if (overlay.meta && (overlay.meta.testFiles !== undefined || overlay.meta.unreached !== undefined)) {
+    const counts = document.createElement('p');
+    counts.className = 'overlay-counts';
+    const parts = [];
+    if (overlay.meta.testFiles !== undefined) parts.push(`${overlay.meta.testFiles} test files`);
+    if (overlay.meta.reached !== undefined) parts.push(`${overlay.meta.reached} reached`);
+    if (overlay.meta.unreached !== undefined) parts.push(`${overlay.meta.unreached} unreached`);
+    counts.textContent = parts.join(' · ');
+    container.append(counts);
+  }
+
+  if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
+    const note = document.createElement('p');
+    note.className = 'overlay-empty';
+    note.textContent = overlay.emptyNote;
+    container.append(note);
+    return;
+  }
+
   if (overlay.items.length > 0) {
+    const needsSearch = overlay.items.length > 8;
+    let filter = '';
     const list = document.createElement('ul');
-    for (const item of overlay.items.slice(0, 50)) {
-      const entry = document.createElement('li');
-      if (typeof item === 'string') {
-        entry.dataset.delegateOverlayItem = item;
+    const moreWrap = document.createElement('div');
+    moreWrap.className = 'overlay-more-wrap';
+    const moreButton = document.createElement('button');
+    moreButton.type = 'button';
+    moreButton.className = 'overlay-more';
+    const PAGE = 50;
+    let shown = PAGE;
+
+    const matchingItems = () => (
+      filter
+        ? overlay.items.filter((item) => String(item).toLowerCase().includes(filter))
+        : overlay.items
+    );
+
+    const renderList = () => {
+      list.replaceChildren();
+      const matching = matchingItems();
+      for (const item of matching.slice(0, shown)) {
+        const entry = document.createElement('li');
+        if (typeof item === 'string') {
+          entry.dataset.delegateOverlayItem = item;
+        }
+        if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
+          const jump = document.createElement('button');
+          jump.type = 'button';
+          jump.textContent = item;
+          jump.title = `Select ${item}`;
+          jump.addEventListener('click', () => options.onSelect(item.split(' · ')[0]));
+          entry.append(jump);
+        } else {
+          entry.textContent = item;
+        }
+        list.append(entry);
       }
-      if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
-        const jump = document.createElement('button');
-        jump.type = 'button';
-        jump.textContent = item;
-        jump.addEventListener('click', () => options.onSelect(item.split(' · ')[0]));
-        entry.append(jump);
+      const remaining = matching.length - Math.min(shown, matching.length);
+      if (remaining > 0) {
+        moreButton.hidden = false;
+        moreButton.textContent = `Show ${Math.min(PAGE, remaining)} more (${remaining} remaining)`;
       } else {
-        entry.textContent = item;
+        moreButton.hidden = true;
       }
-      list.append(entry);
+      if (filter && matching.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'overlay-empty';
+        empty.textContent = 'No modules match this filter.';
+        list.append(empty);
+      }
+    };
+
+    if (needsSearch) {
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'overlay-filter';
+      search.placeholder = 'Filter modules…';
+      search.setAttribute('aria-label', 'Filter overlay modules');
+      search.addEventListener('input', () => {
+        filter = search.value.trim().toLowerCase();
+        shown = PAGE;
+        renderList();
+      });
+      container.append(search);
     }
+    moreButton.addEventListener('click', () => {
+      shown += PAGE;
+      renderList();
+    });
     container.append(list);
+    container.append(moreWrap);
+    moreWrap.append(moreButton);
+    renderList();
   }
 }
 
@@ -1160,37 +1234,62 @@ export function renderMemberMap(container, data, view, handlers = {}) {
   container.dataset.step = steps[stepIndex]?.key ?? 'fingerprint';
   container.classList.toggle('wiring-off', view.showWiring === false);
   container.classList.toggle('dim-unrelated', view.dim === true);
-  container.replaceChildren();
 
-  const header = document.createElement('header');
-  header.className = 'member-header';
-  const crumb = document.createElement('p');
-  crumb.className = 'member-crumb';
-  crumb.textContent = `${data?.repository ?? 'repository'} / ${data?.file ?? ''}`;
-  header.append(crumb);
-  const title = document.createElement('h2');
-  title.textContent = 'Member map';
-  header.append(title);
-  container.append(header);
+  // The heavy sections stay imperative but are hosted under a key built from the inputs that
+  // actually change them. A walkthrough tick or a zoom change reuses them instead of
+  // rebuilding the tree, so the find input keeps focus and CSS animations do not restart.
+  const mainKey = [
+    data?.file ?? '',
+    view.find ?? '',
+    view.order ?? '',
+    view.showWiring !== false,
+    view.onlyFlow === true,
+    view.dataFlow !== false,
+  ].join('|');
+  const insightsKey = [
+    data?.file ?? '',
+    data?.health?.score ?? '',
+    (data?.consumerIds ?? []).length,
+    (memberMap?.types ?? []).length,
+  ].join('|');
 
-  container.append(buildMemberToolbar(view, handlers));
-  container.append(buildWalkthrough(steps, stepIndex, handlers));
-  if (view.explain) {
-    const explain = document.createElement('p');
-    explain.className = 'member-explain';
-    explain.dataset.role = 'explain';
-    explain.textContent = explainClass(memberMap);
-    container.append(explain);
-  }
+  mount(
+    container,
+    h(
+      Fragment,
+      null,
+      h(
+        'header',
+        { className: 'member-header', key: 'header' },
+        h('p', { className: 'member-crumb' }, `${data?.repository ?? 'repository'} / ${data?.file ?? ''}`),
+        h('h2', null, 'Member map'),
+      ),
+      memberToolbar(view, handlers),
+      memberWalkthrough(steps, stepIndex, handlers),
+      view.explain
+        ? h(
+            'p',
+            { className: 'member-explain', key: 'explain', dataset: { role: 'explain' } },
+            explainClass(memberMap),
+          )
+        : null,
+      h(
+        'div',
+        { className: 'member-body', key: 'body' },
+        host(`main:${mainKey}`, () => buildMemberMain(memberMap, view, data)),
+        host(`insights:${insightsKey}`, () => buildMemberInsights(data, memberMap)),
+      ),
+    ),
+  );
+}
 
-  const body = document.createElement('div');
-  body.className = 'member-body';
-
+/** The type sections and data-flow panels, rebuilt only when a filter or toggle changes. */
+function buildMemberMain(memberMap, view, data) {
   const main = document.createElement('section');
   main.className = 'member-main';
   const clusters = memberClusters(memberMap);
   for (const type of memberMap?.types ?? []) {
-    main.append(buildTypeSection(type, view, clusters, handlers));
+    main.append(buildTypeSection(type, view, clusters, {}));
   }
   if ((memberMap?.types ?? []).length === 0) {
     main.append(unavailableNote(memberMap?.detail ?? 'No members declared for this file.'));
@@ -1198,128 +1297,151 @@ export function renderMemberMap(container, data, view, handlers = {}) {
   if (view.dataFlow !== false) {
     main.append(buildDataFlow(memberMap, data?.consumerIds ?? null));
   }
-  body.append(main);
+  return main;
+}
 
+function buildMemberInsights(data, memberMap) {
   const insights = document.createElement('aside');
   insights.className = 'member-insights';
   insights.append(buildHealth(data?.health, data?.metrics));
   insights.append(buildConstellation(memberMap, data?.consumerIds ?? null));
-  body.append(insights);
-
-  container.append(body);
+  return insights;
 }
 
-function buildMemberToolbar(view, handlers) {
-  const toolbar = document.createElement('div');
-  toolbar.className = 'member-toolbar';
-  toolbar.setAttribute('role', 'toolbar');
+function memberToolbar(view, handlers) {
+  const zoom = h(
+    'span',
+    { key: 'zoom', className: 'member-zoom', role: 'group', 'aria-label': 'Zoom' },
+    ...ZOOM_LEVELS.map(([value, label]) =>
+      h(
+        'button',
+        {
+          key: value,
+          type: 'button',
+          id: `member-zoom-${value}`,
+          className: (view.zoom ?? 'medium') === value ? 'active' : undefined,
+          dataset: { zoom: value },
+          onClick: () => handlers.onZoom?.(value),
+        },
+        label,
+      ),
+    ),
+  );
 
-  const find = document.createElement('input');
-  find.type = 'search';
-  find.id = 'member-find';
-  find.placeholder = 'Method or field name';
-  find.value = view.find ?? '';
-  find.addEventListener('input', () => handlers.onFind?.(find.value));
-  toolbar.append(controlRow('Find member', find));
-
-  const order = document.createElement('select');
-  order.id = 'member-order';
-  for (const [value, label] of MEMBER_ORDER_OPTIONS) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    order.append(option);
-  }
-  order.value = view.order ?? 'source';
-  order.addEventListener('change', () => handlers.onOrder?.(order.value));
-  toolbar.append(controlRow('Order', order));
-
-  toolbar.append(separator());
-
-  const zoom = document.createElement('span');
-  zoom.className = 'member-zoom';
-  zoom.setAttribute('role', 'group');
-  zoom.setAttribute('aria-label', 'Zoom');
-  for (const [value, label] of ZOOM_LEVELS) {
-    const active = (view.zoom ?? 'medium') === value;
-    const zoomButton = button(`member-zoom-${value}`, label, () => handlers.onZoom?.(value), active ? 'active' : '');
-    zoomButton.dataset.zoom = value;
-    zoom.append(zoomButton);
-  }
-  toolbar.append(zoom);
-
-  const wiring = document.createElement('input');
-  wiring.type = 'checkbox';
-  wiring.id = 'member-wiring';
-  wiring.checked = view.showWiring !== false;
-  wiring.addEventListener('change', () => handlers.onWiring?.(wiring.checked));
-  toolbar.append(controlRow('Show wiring', wiring));
-
-  const dataFlow = document.createElement('input');
-  dataFlow.type = 'checkbox';
-  dataFlow.id = 'member-dataflow';
-  dataFlow.checked = view.dataFlow !== false;
-  dataFlow.addEventListener('change', () => handlers.onDataFlow?.(dataFlow.checked));
-  toolbar.append(controlRow('Data flow', dataFlow));
-
-  toolbar.append(separator());
-
-  toolbar.append(button('member-explain', 'Explain', () => handlers.onExplain?.()));
-  const night = button('member-night', view.dim ? 'Undim' : 'Dim unrelated', () => handlers.onNight?.());
-  night.title = 'Dim cards outside the current walkthrough step';
-  night.classList.toggle('active', Boolean(view.dim));
-  toolbar.append(night);
-  toolbar.append(button('member-compare', 'Compare', () => handlers.onCompare?.()));
-  toolbar.append(button('member-only-flow', view.onlyFlow ? 'Show all' : 'Wired only', () => handlers.onOnlyFlow?.()));
-  toolbar.append(button('member-reset', 'Reset', () => handlers.onReset?.()));
-
-  toolbar.append(button('member-close', 'Close ✕', () => handlers.onClose?.()));
-
-  return toolbar;
+  return h(
+    'div',
+    { className: 'member-toolbar', role: 'toolbar', key: 'toolbar' },
+    memberControl(
+      'Find member',
+      h('input', {
+        type: 'search',
+        id: 'member-find',
+        placeholder: 'Method or field name',
+        value: view.find ?? '',
+        onInput: (event) => handlers.onFind?.(event.target.value),
+      }),
+      'find',
+    ),
+    memberControl(
+      'Order',
+      h(
+        'select',
+        {
+          id: 'member-order',
+          value: view.order ?? 'source',
+          onChange: (event) => handlers.onOrder?.(event.target.value),
+        },
+        ...MEMBER_ORDER_OPTIONS.map(([value, label]) => h('option', { key: value, value }, label)),
+      ),
+      'order',
+    ),
+    memberSeparator('sep-1'),
+    zoom,
+    memberControl(
+      'Show wiring',
+      h('input', {
+        type: 'checkbox',
+        id: 'member-wiring',
+        checked: view.showWiring !== false,
+        onChange: (event) => handlers.onWiring?.(event.target.checked),
+      }),
+      'wiring',
+    ),
+    memberControl(
+      'Data flow',
+      h('input', {
+        type: 'checkbox',
+        id: 'member-dataflow',
+        checked: view.dataFlow !== false,
+        onChange: (event) => handlers.onDataFlow?.(event.target.checked),
+      }),
+      'dataflow',
+    ),
+    memberSeparator('sep-2'),
+    memberButton('member-explain', 'Explain', () => handlers.onExplain?.()),
+    h(
+      'button',
+      {
+        key: 'night',
+        type: 'button',
+        id: 'member-night',
+        className: view.dim ? 'active' : undefined,
+        title: 'Dim cards outside the current walkthrough step',
+        onClick: () => handlers.onNight?.(),
+      },
+      view.dim ? 'Undim' : 'Dim unrelated',
+    ),
+    memberButton('member-compare', 'Compare', () => handlers.onCompare?.()),
+    memberButton('member-only-flow', view.onlyFlow ? 'Show all' : 'Wired only', () => handlers.onOnlyFlow?.()),
+    memberButton('member-reset', 'Reset', () => handlers.onReset?.()),
+    memberButton('member-close', 'Close ✕', () => handlers.onClose?.()),
+  );
 }
 
-function separator() {
-  const sep = document.createElement('span');
-  sep.className = 'tb-sep';
-  sep.setAttribute('aria-hidden', 'true');
-  return sep;
+function memberWalkthrough(steps, index, handlers) {
+  return h(
+    'div',
+    { className: 'member-walkthrough', key: 'walkthrough' },
+    h(
+      'div',
+      { className: 'walk-dots', key: 'dots' },
+      ...steps.map((step, stepIndex) =>
+        h('button', {
+          key: step.key,
+          type: 'button',
+          className: 'walk-dot',
+          title: step.label,
+          'aria-label': `Go to step ${stepIndex + 1}: ${step.label}`,
+          'aria-current': stepIndex === index ? 'step' : undefined,
+          onClick: () => handlers.onStep?.(stepIndex - index),
+        }),
+      ),
+    ),
+    h(
+      'p',
+      { className: 'member-step', key: 'line', dataset: { role: 'member-step' } },
+      `Step ${index + 1} of ${steps.length} (${steps[index]?.label ?? ''}): ${steps[index]?.caption ?? ''}`,
+    ),
+    h(
+      'div',
+      { className: 'walk-actions', key: 'actions' },
+      memberButton('member-prev', '← Prev', () => handlers.onStep?.(-1)),
+      memberButton('member-play', '▶ Play', () => handlers.onPlay?.()),
+      memberButton('member-next', 'Step →', () => handlers.onStep?.(1)),
+    ),
+  );
 }
 
-function buildWalkthrough(steps, index, handlers) {
-  const bar = document.createElement('div');
-  bar.className = 'member-walkthrough';
-
-  const dots = document.createElement('div');
-  dots.className = 'walk-dots';
-  steps.forEach((step, stepIndex) => {
-    const dot = document.createElement('button');
-    dot.type = 'button';
-    dot.className = 'walk-dot';
-    dot.title = step.label;
-    dot.setAttribute('aria-label', `Go to step ${stepIndex + 1}: ${step.label}`);
-    if (stepIndex === index) dot.setAttribute('aria-current', 'step');
-    dot.addEventListener('click', () => handlers.onStep?.(stepIndex - index));
-    dots.append(dot);
-  });
-  bar.append(dots);
-  bar.append(buildStepLine(steps, index));
-
-  const actions = document.createElement('div');
-  actions.className = 'walk-actions';
-  actions.append(button('member-prev', '← Prev', () => handlers.onStep?.(-1)));
-  actions.append(button('member-play', '▶ Play', () => handlers.onPlay?.()));
-  actions.append(button('member-next', 'Step →', () => handlers.onStep?.(1)));
-  bar.append(actions);
-  return bar;
+function memberControl(label, control, key) {
+  return h('label', { className: 'member-control', key }, label, control);
 }
 
-function buildStepLine(steps, index) {
-  const line = document.createElement('p');
-  line.className = 'member-step';
-  line.dataset.role = 'member-step';
-  const step = steps[index];
-  line.textContent = `Step ${index + 1} of ${steps.length} (${step?.label ?? ''}): ${step?.caption ?? ''}`;
-  return line;
+function memberSeparator(key) {
+  return h('span', { className: 'tb-sep', key, 'aria-hidden': 'true' });
+}
+
+function memberButton(id, text, handler, className = '') {
+  return h('button', { key: id, type: 'button', id, className: className || undefined, onClick: handler }, text);
 }
 
 function buildTypeSection(type, view, clusters, handlers) {

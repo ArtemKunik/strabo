@@ -15,6 +15,8 @@ vendored. Carrying unused grammars costs megabytes for code paths that never run
 | `vendor/rust/tree-sitter-rust.wasm` | Rust resolver | ~1.1 MB |
 | `vendor/c_sharp/tree-sitter-c_sharp.wasm` | C# resolver | ~5.1 MB |
 | `vendor/kotlin/tree-sitter-kotlin.wasm` | Kotlin resolver | ~3.9 MB |
+| `vendor/typescript/tree-sitter-typescript.wasm` | TypeScript/JSX (`.ts`, `.mts`, `.cts`) symbol extractor | ~1.4 MB |
+| `vendor/tsx/tree-sitter-tsx.wasm` | TSX (`.tsx`) symbol extractor | ~1.5 MB |
 
 To add a language, implement its resolver, add it to `LANGUAGES` in
 `scripts/vendor-parsers.mjs` and to `GRAMMAR_LANGUAGES` in `parser-runtime.ts`, then run

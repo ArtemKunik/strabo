@@ -71,7 +71,7 @@ export interface Diagnostic {
   line: number;
   message: string;
   severity: 'info' | 'warning' | 'error';
-  kind: 'unresolved' | 'ambiguous' | 'parse-failure' | 'unsupported';
+  kind: 'unresolved' | 'ambiguous' | 'parse-failure' | 'unsupported' | 'read-failure';
   specifier?: string;
 }
 

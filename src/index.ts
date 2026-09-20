@@ -24,6 +24,11 @@ export { extractJavaFacts, resolveJava, extractJavaSymbols, JAVA_LANGUAGE } from
 export { extractRustFacts, resolveRust, extractRustSymbols, RUST_LANGUAGE, moduleCoordinates, expandUse } from './scan/languages/rust.ts';
 export { extractCSharpFacts, resolveCSharp, extractCSharpSymbols, CSHARP_LANGUAGE } from './scan/languages/csharp.ts';
 export { extractKotlinFacts, resolveKotlin, extractKotlinSymbols, KOTLIN_LANGUAGE } from './scan/languages/kotlin.ts';
+export {
+  extractTypeScriptSymbols,
+  TYPESCRIPT_LANGUAGE,
+  TSX_LANGUAGE,
+} from './scan/languages/typescript.ts';
 export type {
   CodeSymbol,
   CodeSymbolKind,

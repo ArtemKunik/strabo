@@ -1,4 +1,4 @@
-import type { ExternalImport } from '../types.ts';
+import type { Diagnostic, ExternalImport } from '../types.ts';
 
 /** Rust prelude crates and path roots that never name an external dependency. */
 const RUST_RESERVED = new Set(['crate', 'self', 'super', 'std', 'core', 'alloc', 'proc_macro']);
@@ -21,11 +21,19 @@ const JVM_IMPORT = /^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;?/gm;
 export function collectPolyglotExternalImports(
   files: readonly string[],
   contentByFile: ReadonlyMap<string, string>,
+  diagnostics: Diagnostic[],
 ): ExternalImport[] {
   const imports: ExternalImport[] = [];
   for (const file of files) {
     const content = contentByFile.get(file);
     if (content === undefined) {
+      diagnostics.push({
+        file,
+        line: 1,
+        message: `Source content was not available for external import scanning.`,
+        severity: 'warning',
+        kind: 'read-failure',
+      });
       continue;
     }
     if (file.endsWith('.rs')) {

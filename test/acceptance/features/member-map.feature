@@ -73,3 +73,26 @@ Feature: Member map
     When I step to the members step
     And I play the walkthrough
     Then the member cards reveal in cluster order
+
+  @member-view @deep-link
+  Scenario: A deep link reopens the member map
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    When I reload the page
+    Then the member map is open for "src/main/kotlin/com/acme/app/Counter.kt"
+
+  @member-view @no-rebuild
+  Scenario: A walkthrough step does not rebuild the member cards
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    Then stepping the walkthrough keeps the member card nodes

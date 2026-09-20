@@ -141,8 +141,12 @@ export function createOsvClient(options: OsvClientOptions = {}): OsvClient {
         results.push(...(await queryBatch(chunk)));
       }
 
-      const uniqueIds = [...new Set(results.flat().map((entry) => entry.id))].slice(0, MAX_VULN_LOOKUPS);
-      const details = await lookupMany(uniqueIds);
+      const uniqueIds = [...new Set(results.flat().map((entry) => entry.id))];
+      if (uniqueIds.length > MAX_VULN_LOOKUPS) {
+        log?.('OSV vulnerability lookup truncated', `${uniqueIds.length} ids, capped at ${MAX_VULN_LOOKUPS}`);
+      }
+      const truncated = uniqueIds.slice(0, MAX_VULN_LOOKUPS);
+      const details = await lookupMany(truncated);
 
       const byOriginal = new Map<number, OsvVulnerability[]>();
       usable.forEach(({ original }, index) => {

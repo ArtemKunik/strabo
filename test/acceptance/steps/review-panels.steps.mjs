@@ -217,6 +217,53 @@ When('I open the member map', async function () {
   );
 });
 
+When('I reload the page', async function () {
+  await this.page.reload();
+  await this.page.waitForFunction(() => window.straboTest?.model?.() != null, undefined, {
+    timeout: 20_000,
+  });
+});
+
+Then('the member map is open for {string}', async function (id) {
+  await this.page.waitForFunction(
+    (target) => {
+      const view = document.getElementById('member-view');
+      const crumb = view?.querySelector('.member-crumb')?.textContent ?? '';
+      return Boolean(view) && !view.hidden && crumb.includes(target);
+    },
+    id,
+    { timeout: 20_000 },
+  );
+});
+
+/**
+ * The view layer is supposed to reuse the card nodes: mark one, advance a step, and the mark
+ * must survive. A full `replaceChildren()` rebuild would drop the marker with the old node.
+ */
+Then('stepping the walkthrough keeps the member card nodes', async function () {
+  const marked = await this.page.evaluate(() => {
+    const card = document.querySelector('#member-view .member-card');
+    if (!card) {
+      return false;
+    }
+    card.dataset.probe = 'kept';
+    return true;
+  });
+  assert.equal(marked, true, 'the member map should render at least one card');
+
+  await this.page.click('#member-next');
+  await this.page.waitForFunction(
+    () => document.getElementById('member-view')?.dataset.step === 'members',
+    undefined,
+    { timeout: 5_000 },
+  );
+
+  const kept = await this.page.evaluate(
+    () => document.querySelector('#member-view .member-card')?.dataset.probe === 'kept',
+  );
+  assert.equal(kept, true, 'the card DOM should be reused across a walkthrough step');
+});
+
 Then('the member map view shows fields, clusters, and the data flow', async function () {
   const view = '#member-view';
   const fields = (await this.page.textContent(`${view} [data-role="fields"]`)) ?? '';

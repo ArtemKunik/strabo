@@ -262,9 +262,9 @@ line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorde
 endpoint or trace a path between them.
 
 The **Member map** in the inspector groups declared types, fields, properties, and methods
-with their visibility and type where symbol extraction is available (Java, Kotlin, Rust,
-and C# today); other languages report that extraction is not implemented rather than an
-empty list. Where the scan recorded field references inside method bodies — an explicit
+with their visibility and type where symbol extraction is available (TypeScript/TSX, Java,
+Kotlin, Rust, and C# today); other languages report that extraction is not implemented
+rather than an empty list. Where the scan recorded field references inside method bodies — an explicit
 `this.x` / `self.x`, or an unshadowed bare name — it also shows **Data flow** panels
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
 read/write wiring. When nothing was recorded, the panels say so; cross-file access is not
@@ -356,6 +356,7 @@ implicit failure.
 | Rust | `parsers/vendor/rust` | Implemented: `mod` declarations, module paths, `use`/`pub use` (items, re-exports), and inline `crate::`/`self::`/`super::` paths |
 | C# | `parsers/vendor/c_sharp` | Implemented: `using`, `using static`, and alias directives -> namespaces/types |
 | Kotlin | `parsers/vendor/kotlin` | Implemented: `package` + `import` (wildcards, aliases, nested types) -> repository files |
+| TypeScript, TSX | `parsers/vendor/typescript`, `parsers/vendor/tsx` | Member extraction (classes, interfaces, enums, module functions); imports resolve through the JS/TS scanner above |
 | C++, SQL | not vendored | Recognised and reported as unsupported |
 | COBOL, ABL | not vendored | Out of scope for now; treated as non-source files |
 
@@ -405,7 +406,12 @@ test/acceptance/   Gherkin .feature browser acceptance specs
 
 `scripts/build-ui.mjs` bundles `ui/` into `public/` with esbuild (not minified, so the
 served code stays readable); `npm run build` runs it after `tsc`. The published package
-ships the built `public/`, so a consumer never needs a build step.
+ships the built `public/`, so a consumer never needs a build step. The UI stays
+framework-free: `ui/view.js` is a small `h()` / `mount()` keyed renderer that panels adopt
+incrementally — the tests strip and the member map are ported, the heavy member-map sections
+via a keyed `host()` so a step or zoom change reuses their nodes — and `ui/store.js` is the
+observable state store whose single subscription drives re-renders and mirrors the
+repository, mode, node, and open panel into the URL, so a view can be shared as a deep link.
 
 ## Non-goals
 

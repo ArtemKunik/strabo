@@ -76,7 +76,7 @@ test('the symbol endpoint reports not-implemented rather than an empty list', as
   host.use('/api/strabo', createStraboRouter(config));
   const base = await listen(host);
 
-  const response = await fetch(`${base}/api/strabo/symbols?file=main.ts`);
+  const response = await fetch(`${base}/api/strabo/symbols?file=main.cpp`);
   const body = (await response.json()) as { available: boolean; reason?: string };
   assert.equal(body.available, false);
   assert.equal(body.reason, 'not-implemented');

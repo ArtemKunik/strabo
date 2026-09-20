@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { Fragment, h } from '../../ui/view.js';
+import { Fragment, h, host } from '../../ui/view.js';
 
 test('h builds a vnode and lifts key out of props', () => {
   const vnode = h('button', { type: 'button', className: 'chip', key: 'k', dataset: { filter: 'x' } }, 'label');
@@ -29,4 +29,13 @@ test('h returns a fragment that groups children without a wrapper', () => {
 
   assert.equal(vnode.type, Fragment);
   assert.equal(vnode.children.length, 2);
+});
+
+test('host embeds an external element and is accepted as a child', () => {
+  const embedded = host('main:x', () => null);
+  const parent = h('div', null, embedded);
+
+  assert.equal(embedded.key, 'main:x');
+  assert.equal(typeof embedded.create, 'function');
+  assert.equal(parent.children[0], embedded);
 });

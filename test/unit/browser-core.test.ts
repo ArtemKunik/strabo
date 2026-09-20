@@ -216,9 +216,16 @@ test('overlayFor maps cycles and test reach onto their node classes', () => {
   assert.equal(cycles.classes.get('b.ts'), 'ov-cycle');
   assert.equal(cycles.summary, '1 cycle(s)');
 
-  const reach = overlayFor('test-reach', { unreachedWithDependents: ['d.ts'] });
+  const reach = overlayFor('test-reach', { testFiles: ['t.ts'], reached: ['a.ts'], unreachedWithDependents: ['d.ts'] });
   assert.equal(reach.classes.get('d.ts'), 'ov-unreached');
-  assert.equal(reach.summary, '1 unreached with dependents');
+  assert.equal(reach.summary, '1 unreached · 1 reached · 1 test files');
+  assert.deepEqual(reach.items, ['d.ts']);
+
+  const reachEmpty = overlayFor('test-reach', { testFiles: [], reached: [], unreachedWithDependents: [] });
+  assert.equal(reachEmpty.summary, 'no test files identified');
+
+  const reachAll = overlayFor('test-reach', { testFiles: ['t.ts'], reached: ['a.ts'], unreachedWithDependents: [] });
+  assert.equal(reachAll.items.length, 0);
 });
 
 test('overlayFor returns an empty overlay for an unknown kind', () => {

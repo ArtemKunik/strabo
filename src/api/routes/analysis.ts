@@ -16,7 +16,7 @@ import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import type { StraboConfig } from '../../types.ts';
-import { sendError } from '../http.ts';
+import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 
 /** Review-focused analyses. All of them inherit the scanner's scope. */
 export function createAnalysisRouter(config: StraboConfig): Router {
@@ -126,15 +126,15 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     }
   });
 
-  router.get('/analysis/timeline', async (request, response) => {
-    try {
-      const repository = resolve(request);
-      const limit = Number.parseInt(String(request.query.limit ?? ''), 10);
-      response.json(await getTimeline(repository.root, Number.isFinite(limit) && limit > 0 ? limit : 30));
-    } catch (error) {
-      sendError(response, error);
-    }
-  });
+router.get('/analysis/timeline', async (request, response) => {
+     try {
+       const repository = resolve(request);
+       const limit = parsePositiveInt(request.query.limit, 100);
+       response.json(await getTimeline(repository.root, limit ?? 30));
+     } catch (error) {
+       sendError(response, error);
+     }
+   });
 
   /**
    * Review a commit's own changes, or the working tree.

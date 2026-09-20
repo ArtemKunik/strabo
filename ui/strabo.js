@@ -31,6 +31,7 @@ import {
 } from './strabo-panels.js';
 import { neighbourhood } from './strabo-selection.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
+import { createStore } from './store.js';
 
 /** Incremented on every scan; async completions check their captured generation. */
 let scanGeneration = 0;
@@ -43,17 +44,38 @@ let groupSelection = [];
 /** The Git review result currently shown in the review panel, for delegation. */
 let currentReview = null;
 
-const state = {
-  repository: null,
-  mode: 'block',
-  depth: 1,
-  prefix: '',
-  filter: '',
-  overlay: 'none',
-  pathMode: false,
-  pathFrom: null,
-  renderedGeneration: 0,
-};
+/**
+ * One store for the app's UI state. `state` and `memberUI` stay the view onto the `view` and
+ * `member` slices so existing code keeps reading them, but changes go through `store.set`,
+ * which notifies a single subscription that re-renders and keeps the URL in sync.
+ */
+const store = createStore({
+  view: {
+    repository: null,
+    mode: 'block',
+    depth: 1,
+    prefix: '',
+    filter: '',
+    overlay: 'none',
+    pathMode: false,
+    pathFrom: null,
+    renderedGeneration: 0,
+  },
+  member: {
+    order: 'source',
+    find: '',
+    showWiring: true,
+    zoom: 'medium',
+    dataFlow: true,
+    onlyFlow: false,
+    explain: false,
+    stepIndex: 0,
+    dim: false,
+  },
+  ui: { node: null, memberOpen: false },
+});
+const state = store.get().view;
+const memberUI = store.get().member;
 
 /* ------------------------------------------- Persisted view preferences */
 
@@ -197,18 +219,7 @@ const elements = {
   statusbarRender: document.getElementById('statusbar-render'),
 };
 
-/** Full-screen Member map UI state; `memberData` holds the last loaded payload. */
-const memberUI = {
-  order: 'source',
-  find: '',
-  showWiring: true,
-  zoom: 'medium',
-  dataFlow: true,
-  onlyFlow: false,
-  explain: false,
-  stepIndex: 0,
-  dim: false,
-};
+/** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
 let memberData = null;
 let memberTimer = null;
 let selectedCommitHash = null;
@@ -291,6 +302,7 @@ async function scan({ refresh = false } = {}) {
     selectedEdgeId = null;
     selectedCommitHash = null;
     state.renderedGeneration = generation;
+    store.set('ui', { node: null });
     view.render(model);
     applyFilterToView();
     renderLegend(elements.legend, model);
@@ -410,6 +422,7 @@ function selectNode(id) {
   }
 
   selected = id;
+  store.set('ui', { node: id });
   view.clearEdge();
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
@@ -455,6 +468,7 @@ async function loadMembers(id) {
 
 function clearSelection() {
   selected = null;
+  store.set('ui', { node: null });
   state.pathFrom = null;
   state.pathMode = false;
   elements.tbPath.classList.remove('active');
@@ -497,10 +511,9 @@ async function openMemberMap(id) {
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
   };
-  memberUI.stepIndex = 0;
-  memberUI.find = '';
   elements.memberView.hidden = false;
-  renderMemberMapView();
+  store.set('ui', { memberOpen: true, node: id });
+  store.set('member', { stepIndex: 0, find: '' });
   refreshDock();
 }
 
@@ -514,43 +527,22 @@ function renderMemberMapView() {
   if (!memberData) {
     return;
   }
-  const refocusFind = document.activeElement?.id === 'member-find';
+  // The view layer reuses the find input, so its focus and caret survive a re-render.
   renderMemberMap(elements.memberView, memberData, memberUI, {
-    onFind: (value) => {
-      memberUI.find = value;
-      renderMemberMapView();
-    },
-    onOrder: (value) => {
-      memberUI.order = value;
-      renderMemberMapView();
-    },
-    onWiring: (value) => {
-      memberUI.showWiring = value;
-      renderMemberMapView();
-    },
-    onZoom: (value) => {
-      memberUI.zoom = value;
-      renderMemberMapView();
-    },
-    onExplain: () => {
-      memberUI.explain = !memberUI.explain;
-      renderMemberMapView();
-    },
-    onNight: () => {
-      memberUI.dim = !memberUI.dim;
-      renderMemberMapView();
-    },
+    onFind: (value) => store.set('member', { find: value }),
+    onOrder: (value) => store.set('member', { order: value }),
+    onWiring: (value) => store.set('member', { showWiring: value }),
+    onZoom: (value) => store.set('member', { zoom: value }),
+    onExplain: () => store.set('member', { explain: !memberUI.explain }),
+    onNight: () => store.set('member', { dim: !memberUI.dim }),
     onCompare: () => {
       toggleTimeline().catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
       });
     },
-    onOnlyFlow: () => {
-      memberUI.onlyFlow = !memberUI.onlyFlow;
-      renderMemberMapView();
-    },
-    onReset: () => {
-      Object.assign(memberUI, {
+    onOnlyFlow: () => store.set('member', { onlyFlow: !memberUI.onlyFlow }),
+    onReset: () =>
+      store.set('member', {
         order: 'source',
         find: '',
         showWiring: true,
@@ -560,29 +552,17 @@ function renderMemberMapView() {
         explain: false,
         stepIndex: 0,
         dim: false,
-      });
-      renderMemberMapView();
-    },
-    onDataFlow: (value) => {
-      memberUI.dataFlow = value;
-      renderMemberMapView();
-    },
+      }),
+    onDataFlow: (value) => store.set('member', { dataFlow: value }),
     onStep: (delta) => {
       stopMemberPlay();
-      memberUI.stepIndex = Math.min(
-        memberStepCount() - 1,
-        Math.max(0, memberUI.stepIndex + delta),
-      );
-      renderMemberMapView();
+      store.set('member', {
+        stepIndex: Math.min(memberStepCount() - 1, Math.max(0, memberUI.stepIndex + delta)),
+      });
     },
     onPlay: () => toggleMemberPlay(),
     onClose: () => closeMemberMap(),
   });
-  if (refocusFind) {
-    const input = elements.memberView.querySelector('#member-find');
-    input?.focus();
-    input?.setSelectionRange(input.value.length, input.value.length);
-  }
 }
 
 function stopMemberPlay() {
@@ -601,13 +581,11 @@ function toggleMemberPlay() {
   elements.memberView.classList.add('is-playing');
   memberTimer = setInterval(() => {
     if (memberUI.stepIndex >= memberStepCount() - 1) {
-      memberUI.stepIndex = 0;
-      renderMemberMapView();
+      store.set('member', { stepIndex: 0 });
       stopMemberPlay();
       return;
     }
-    memberUI.stepIndex += 1;
-    renderMemberMapView();
+    store.set('member', { stepIndex: memberUI.stepIndex + 1 });
   }, 1400);
 }
 
@@ -615,8 +593,87 @@ function closeMemberMap() {
   stopMemberPlay();
   elements.memberView.hidden = true;
   memberUI.dim = false;
+  store.set('ui', { memberOpen: false });
   refreshDock();
 }
+
+/* ------------------------------------------- URL state */
+
+/**
+ * Keep the selected repository, detail mode, selected node, and open member map in the URL,
+ * so a view can be shared and a reload restores it. The URL mirrors the store; the store is
+ * still the source of truth. Writes are synchronous but skip when nothing changed, and the
+ * deep link is snapshotted on load because the first scan clears the live selection.
+ */
+let urlIntent = null;
+
+function currentUrlParams() {
+  try {
+    return new URL(window.location.href).searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+function syncUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const set = (key, value) => {
+      if (value) {
+        url.searchParams.set(key, value);
+      } else {
+        url.searchParams.delete(key);
+      }
+    };
+    set('repository', state.repository ?? '');
+    set('mode', state.mode === 'file' ? 'file' : '');
+    set('node', store.get().ui.node ?? '');
+    set('panel', store.get().ui.memberOpen ? 'member-map' : '');
+    if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, '', url);
+    }
+  } catch {
+    // A blocked history API only costs the deep link.
+  }
+}
+
+/** Apply the URL's repository and mode, and remember the panel/node for after the scan. */
+function applyUrl() {
+  const params = currentUrlParams();
+  urlIntent = { node: params.get('node'), panel: params.get('panel') };
+  const repository = params.get('repository');
+  if (repository) {
+    state.repository = repository;
+  }
+  const mode = params.get('mode');
+  if (mode === 'file' || mode === 'block') {
+    state.mode = mode;
+    elements.detail.value = mode;
+  }
+  return params;
+}
+
+/** Reopen the member map the deep link named, once the graph it refers to is loaded. */
+async function restoreUrlPanel() {
+  const intent = urlIntent;
+  urlIntent = null;
+  if (!intent || intent.panel !== 'member-map' || !intent.node) {
+    return;
+  }
+  if (!current || !(current.nodes ?? []).some((entry) => entry.id === intent.node)) {
+    return;
+  }
+  selectNode(intent.node);
+  await openMemberMap(intent.node);
+}
+
+// One subscription decides what a change redraws; handlers no longer call a render by hand.
+store.subscribe((_, changed) => {
+  if (changed.member) {
+    renderMemberMapView();
+  }
+  syncUrl();
+});
 
 document.addEventListener('keydown', (event) => {
   const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
@@ -1634,9 +1691,18 @@ if (window.STRABO_TEST) {
 
 loadCatalogue()
   .then(() => {
+    applyUrl();
+    if (
+      state.repository &&
+      [...elements.repository.options].some((option) => option.value === state.repository)
+    ) {
+      elements.repository.value = state.repository;
+      elements.forget.disabled = false;
+    }
     applyViewPrefs();
     return scan();
   })
+  .then(() => restoreUrlPanel())
   .catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
   });

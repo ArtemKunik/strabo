@@ -52,8 +52,8 @@ export async function getChangedFiles(root: string, baseRef?: string): Promise<C
         const [status = '?', ...rest] = line.split(/\s+/);
         return { status, path: rest.join(' ') };
       });
-  } catch {
-    return [];
+  } catch (error) {
+    throw new Error(`Git operation failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 

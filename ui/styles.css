@@ -364,7 +364,8 @@ button.primary {
 .zoom-controls {
   position: absolute;
   right: 12px;
-  bottom: 52px;
+  /* Above the strip + dock stack so the buttons are never under the chips. */
+  bottom: 132px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -433,6 +434,9 @@ button.primary {
   display: flex;
   gap: 6px;
   padding: 6px 8px;
+  /* Keep the strip below the panel dock: the dock sits at bottom:64px so a
+     two-row dock never paints over the chips. */
+  z-index: 20;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -780,7 +784,9 @@ button.primary {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 52px;
+  /* Stacked above the strip (bottom:10px + ~40px height) and the statusbar so
+     the chips never cover the tests/components row. */
+  bottom: 64px;
   z-index: 32;
   display: flex;
   flex-wrap: wrap;
@@ -917,6 +923,36 @@ button.primary {
 
 .overlay-panel .overlay-summary {
   color: var(--ink);
+}
+
+.overlay-counts {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-empty {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.overlay-filter {
+  width: 100%;
+  margin-top: 6px;
+  color: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 4px 8px;
+  font: inherit;
+  background: var(--bg-1);
+}
+
+.overlay-more-wrap {
+  margin-top: 6px;
+}
+
+.overlay-more {
+  font: inherit;
 }
 
 .overlay-dot {
@@ -1507,7 +1543,8 @@ button.primary {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  /* Above the statusbar so the step line never covers it. */
+  bottom: 26px;
   z-index: 3;
   display: flex;
   align-items: center;
@@ -1515,6 +1552,16 @@ button.primary {
   padding: 8px 20px;
   border-top: 1px solid var(--line);
   background: rgba(22, 28, 36, 0.97);
+}
+
+/* Inside a floating member window the walkthrough must stick to the window,
+   not the viewport, or it escapes the window and collides with dock/strip. */
+.float-body .member-walkthrough {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-l) var(--radius-l);
 }
 
 .walk-dots {

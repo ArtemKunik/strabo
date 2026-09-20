@@ -35,12 +35,8 @@ export function analyzeModuleDepth(root: string, files: readonly string[]): Modu
 }
 
 function readSource(root: string, file: string): string {
-  try {
-    const absolute = assertReadable(root, file);
-    return fs.readFileSync(absolute, 'utf8');
-  } catch {
-    return '';
-  }
+  const absolute = assertReadable(root, file);
+  return fs.readFileSync(absolute, 'utf8');
 }
 
 function countImplementationLines(content: string): number {

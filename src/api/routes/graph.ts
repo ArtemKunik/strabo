@@ -40,7 +40,7 @@ export function createGraphRouter(config: StraboConfig): Router {
         stale: cached.stale,
       };
 
-      const blockDepth = parsePositiveInt(request.query.blockDepth);
+      const blockDepth = parsePositiveInt(request.query.blockDepth, 5);
       if (blockDepth) {
         response.json(
           buildBlockViewModel(

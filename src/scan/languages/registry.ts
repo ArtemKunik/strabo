@@ -2,6 +2,7 @@ import { extractCSharpSymbols } from './csharp.ts';
 import { extractJavaSymbols } from './java.ts';
 import { extractKotlinSymbols } from './kotlin.ts';
 import { extractRustSymbols } from './rust.ts';
+import { extractTypeScriptSymbols } from './typescript.ts';
 import type { SymbolExtraction } from './symbols.ts';
 
 export interface SymbolExtractor {
@@ -22,6 +23,10 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.cs': { language: 'csharp', extract: extractCSharpSymbols },
   '.kt': { language: 'kotlin', extract: extractKotlinSymbols },
   '.kts': { language: 'kotlin', extract: extractKotlinSymbols },
+  '.ts': { language: 'typescript', extract: extractTypeScriptSymbols },
+  '.tsx': { language: 'typescript', extract: extractTypeScriptSymbols },
+  '.mts': { language: 'typescript', extract: extractTypeScriptSymbols },
+  '.cts': { language: 'typescript', extract: extractTypeScriptSymbols },
 };
 
 export function symbolExtractorFor(file: string): SymbolExtractor | null {

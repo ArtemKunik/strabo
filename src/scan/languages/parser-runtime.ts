@@ -12,9 +12,24 @@ const packageRoot = path.resolve(here, '..', '..', '..');
  * Languages that ship a grammar. Grammars are resolver-driven, so this list grows only
  * when a resolver is implemented; `GrammarLanguage` stays wider to type future work.
  */
-export type GrammarLanguage = 'java' | 'kotlin' | 'sql' | 'c_sharp' | 'cpp' | 'rust';
+export type GrammarLanguage =
+  | 'java'
+  | 'kotlin'
+  | 'sql'
+  | 'c_sharp'
+  | 'cpp'
+  | 'rust'
+  | 'typescript'
+  | 'tsx';
 
-export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = ['java', 'rust', 'c_sharp', 'kotlin'];
+export const GRAMMAR_LANGUAGES: readonly GrammarLanguage[] = [
+  'java',
+  'rust',
+  'c_sharp',
+  'kotlin',
+  'typescript',
+  'tsx',
+];
 
 export class GrammarUnavailableError extends Error {
   readonly language: GrammarLanguage;

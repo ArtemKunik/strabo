@@ -12,12 +12,15 @@ export function sendError(response: Response, error: unknown): void {
 }
 
 /** Parse a positive integer query parameter, returning undefined when absent/invalid. */
-export function parsePositiveInt(value: unknown): number | undefined {
+export function parsePositiveInt(value: unknown, max?: number): number | undefined {
   if (typeof value !== 'string' || value.trim() === '') {
     return undefined;
   }
   const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return max !== undefined ? Math.min(parsed, max) : parsed;
 }
 
 export function parseBoolean(value: unknown): boolean {

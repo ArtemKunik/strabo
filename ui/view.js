@@ -16,12 +16,26 @@
 /** Groups children without introducing an element, so a container keeps its direct kids. */
 export const Fragment = Symbol('fragment');
 
+/** Marks a vnode whose DOM is an externally-managed subtree (see {@link host}). */
+const HOST = Symbol('host');
+
 const roots = new WeakMap();
 
 /** Build a vnode. Text and numbers become text children; null/false/true are skipped. */
 export function h(type, props, ...children) {
   const { key = null, ...rest } = props ?? {};
   return { type, props: rest, key, children: normalizeChildren(children) };
+}
+
+/**
+ * Embed an externally-managed DOM element, rebuilt only when `key` changes.
+ *
+ * This is how the imperative builders are adopted incrementally: a section the changed state
+ * does not affect keeps its existing DOM because its key is unchanged and `create` is never
+ * re-run. The returned element is inserted and reused like any other node.
+ */
+export function host(key, create) {
+  return { type: HOST, key, create, props: {}, children: [] };
 }
 
 /**
@@ -104,19 +118,26 @@ function createDom(vnode) {
   if (vnode.type === '#text') {
     return document.createTextNode(vnode.text);
   }
+  if (vnode.type === HOST) {
+    return vnode.create();
+  }
   const dom = document.createElement(vnode.type);
-  patchProps(dom, vnode.props, {});
   for (const child of vnode.children) {
     const childDom = createDom(child);
     child.dom = childDom;
     dom.appendChild(childDom);
   }
+  // Props after children: a `<select>`'s `value` only applies once its options exist.
+  patchProps(dom, vnode.props, {});
   return dom;
 }
 
 function updateDom(prev, next) {
   const dom = prev.dom;
   next.dom = dom;
+  if (next.type === HOST) {
+    return;
+  }
   if (next.type === '#text') {
     if (dom.nodeValue !== next.text) {
       dom.nodeValue = next.text;
@@ -155,16 +176,18 @@ function updateChildren(parent, prevChildren, nextChildren) {
     next.push(patchChild(parent, child, match));
   }
 
-  for (const child of prevChildren) {
-    if (child.dom && child.dom.parentNode === parent && !next.includes(child)) {
-      parent.removeChild(child.dom);
-    }
-  }
-
   const desired = [];
   for (const child of next) {
     if (child.dom && child.dom !== parent) {
       desired.push(child.dom);
+    }
+  }
+
+  // Remove any node that is not part of the next tree, then fix the order. Comparing DOM
+  // nodes (not vnodes) is what lets a reused node stay put instead of being churned.
+  for (const node of [...parent.childNodes]) {
+    if (!desired.includes(node)) {
+      parent.removeChild(node);
     }
   }
   for (let index = 0; index < desired.length; index += 1) {
@@ -206,6 +229,22 @@ function applyProp(dom, name, before, after) {
   }
   if (name === 'dataset') {
     applyDataset(dom, before, after);
+    return;
+  }
+  if (name === 'value') {
+    // Set the property, not the attribute, and only when it really differs so a controlled
+    // input does not reset the caret to the end on every keystroke.
+    const next = after ?? '';
+    if (dom.value !== next) {
+      dom.value = next;
+    }
+    return;
+  }
+  if (name === 'checked' || name === 'disabled' || name === 'hidden') {
+    const next = Boolean(after);
+    if (dom[name] !== next) {
+      dom[name] = next;
+    }
     return;
   }
   if (name.length > 2 && name.startsWith('on') && name[2] === name[2].toUpperCase()) {

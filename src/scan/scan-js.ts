@@ -212,7 +212,8 @@ const MODULE_EXTENSIONS = new Set(['.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx',
  * not model. Reporting them as unresolved would be noise, so they are skipped.
  */
 function isAssetSpecifier(specifier: string): boolean {
-  const base = specifier.slice(specifier.lastIndexOf('/') + 1);
+  const specifierWithoutQuery = specifier.includes('?') ? specifier.slice(0, specifier.indexOf('?')) : specifier;
+  const base = specifierWithoutQuery.slice(specifierWithoutQuery.lastIndexOf('/') + 1);
   const dot = base.lastIndexOf('.');
   if (dot <= 0) {
     return false;

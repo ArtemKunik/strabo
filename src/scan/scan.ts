@@ -24,8 +24,8 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 export async function scanRepository(root: string): Promise<ScanReport> {
   const startedAt = Date.now();
   const excluded: Exclusion[] = [];
-
-  const candidates = collectSourceFiles(root, excluded);
+  const diagnostics: Diagnostic[] = [];
+  const candidates = collectSourceFiles(root, excluded, diagnostics);
   const ignored = await findGitIgnoredFiles(root, candidates);
   const retained = candidates.filter((file) => {
     if (ignored.has(file)) {
@@ -38,7 +38,6 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   const contentByFile = new Map<string, string>();
   const extensionCounts: Record<string, number> = {};
   const unsupportedExtensionCounts: Record<string, number> = {};
-  const parseFailures: Diagnostic[] = [];
 
   for (const file of retained) {
     const extension = extensionOf(file);
@@ -52,6 +51,13 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     try {
       stat = fs.statSync(absolute);
     } catch {
+      diagnostics.push({
+        file,
+        line: 1,
+        message: `Could not stat file; skipped.`,
+        severity: 'warning',
+        kind: 'read-failure',
+      });
       continue;
     }
     if (stat.size > MAX_FILE_BYTES) {
@@ -75,20 +81,21 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   }));
 
   const [jsScan, polyglot] = await Promise.all([
-    Promise.resolve(scanJsTsEdges(files, contentByFile, { root })),
+    scanJsTsEdges(files, contentByFile, { root }),
     scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
   ]);
 
   const externalImports: ExternalImport[] = [
     ...jsScan.externalImports,
-    ...collectPolyglotExternalImports(files, contentByFile),
+    ...collectPolyglotExternalImports(files, contentByFile, diagnostics),
   ];
 
-  const diagnostics = [...parseFailures, ...jsScan.diagnostics, ...polyglot.diagnostics];
+  const graphDiagnostics = [...diagnostics, ...jsScan.diagnostics, ...polyglot.diagnostics];
+
   const graph: Graph = {
     nodes,
     edges: [...jsScan.edges, ...polyglot.edges],
-    diagnostics,
+    diagnostics: graphDiagnostics,
     excluded,
     externalImports,
   };
@@ -97,21 +104,28 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     graph,
     extensionCounts,
     unsupportedExtensionCounts,
-    parseFailures: parseFailures.length,
-    unresolvedReferences: diagnostics.filter((item) => item.kind === 'unresolved').length,
+    parseFailures: graphDiagnostics.filter((item) => item.kind === 'parse-failure').length,
+    unresolvedReferences: graphDiagnostics.filter((item) => item.kind === 'unresolved').length,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
   };
 }
 
 /** Walk the root, skipping symbolic links, and record exclusion reasons. */
-export function collectSourceFiles(root: string, excluded: Exclusion[]): string[] {
+export function collectSourceFiles(root: string, excluded: Exclusion[], diagnostics: Diagnostic[]): string[] {
   const files: string[] = [];
   const walk = (directory: string): void => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(directory, { withFileTypes: true });
     } catch {
+      diagnostics.push({
+        file: directory,
+        line: 1,
+        message: `Could not read directory; skipped its contents.`,
+        severity: 'warning',
+        kind: 'read-failure',
+      });
       return;
     }
     for (const entry of entries) {
