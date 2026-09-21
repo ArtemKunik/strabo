@@ -424,28 +424,61 @@ function createCytoscape(container) {
 /** Where the WebGL opt-in is remembered once granted via `?renderer=webgl`. */
 const RENDERER_PREFERENCE_KEY = 'strabo:renderer-preference';
 
-/** Read and, on an explicit `?renderer=` visit, update the WebGL opt-in. */
-function webglRequested() {
+/**
+ * Whether the next map build should ask for the GPU.
+ *
+ * The Settings toggle and `?renderer=` write this one key, so the panel, the URL, and a
+ * hand-set `localStorage` entry cannot disagree about which renderer is armed.
+ */
+export function webglPreferred() {
   try {
-    const param = new URL(window.location.href).searchParams.get('renderer');
-    if (param === 'webgl') {
-      window.localStorage.setItem(RENDERER_PREFERENCE_KEY, 'webgl');
-      return true;
-    }
-    if (param === 'canvas') {
-      window.localStorage.removeItem(RENDERER_PREFERENCE_KEY);
-      return false;
-    }
     return window.localStorage.getItem(RENDERER_PREFERENCE_KEY) === 'webgl';
   } catch {
     return false;
   }
 }
 
+/**
+ * Arm or disarm the GPU renderer for the next map build.
+ *
+ * Cytoscape chooses its renderer when the instance is constructed, and tracks the canvas
+ * layer count on a module-private object shared by the whole document, so there is no
+ * supported way to swap renderers on a live map. The caller reloads.
+ */
+export function setWebglPreferred(preferred) {
+  try {
+    if (preferred) {
+      window.localStorage.setItem(RENDERER_PREFERENCE_KEY, 'webgl');
+    } else {
+      window.localStorage.removeItem(RENDERER_PREFERENCE_KEY);
+    }
+  } catch {
+    // Storage is optional; without it the choice just does not outlive the reload.
+  }
+}
+
+/** Read and, on an explicit `?renderer=` visit, update the WebGL opt-in. */
+function webglRequested() {
+  try {
+    const param = new URL(window.location.href).searchParams.get('renderer');
+    if (param === 'webgl') {
+      setWebglPreferred(true);
+      return true;
+    }
+    if (param === 'canvas') {
+      setWebglPreferred(false);
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return webglPreferred();
+}
+
 /** Session flag recording that the GPU renderer already failed in this tab. */
 const WEBGL_REFUSED = 'strabo:webgl-refused';
 
-function webglRefused() {
+export function webglRefused() {
   try {
     return window.sessionStorage.getItem(WEBGL_REFUSED) === '1';
   } catch {
@@ -558,7 +591,7 @@ function containerColourTuple(container) {
 
 /** Probe a real WebGL2 context, then release it so it does not count against the
  * browser's live-context limit. */
-function probeWebGL2() {
+export function probeWebGL2() {
   try {
     if (!window.WebGL2RenderingContext) {
       return false;

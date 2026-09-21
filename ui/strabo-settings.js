@@ -11,6 +11,8 @@
  * when either the preference or the OS asks for it.
  */
 
+import { probeWebGL2, setWebglPreferred, webglPreferred, webglRefused } from './strabo-view.js';
+
 export const SETTINGS_KEY = 'strabo.settings.v1';
 
 export const THEMES = ['system', 'dark', 'light'];
@@ -165,6 +167,48 @@ function note(text) {
 }
 
 /**
+ * The renderer choice, which is a preference about how the map is drawn rather than how
+ * it looks, so it gets its own section.
+ *
+ * Unlike every other client preference this one cannot apply in place: Cytoscape fixes
+ * its renderer when the map is constructed. The toggle therefore reloads, and says so
+ * before it is clicked rather than surprising the operator afterwards.
+ */
+function renderingSection() {
+  const group = section('Rendering');
+  const available = probeWebGL2();
+  const armed = webglPreferred();
+
+  const toggle = checkboxInput(armed, (value) => {
+    setWebglPreferred(value);
+    window.location.reload();
+  });
+  toggle.disabled = !available;
+  group.append(field('GPU rendering (WebGL2)', toggle));
+
+  if (!available) {
+    group.append(
+      note('This browser exposes no WebGL2 context, so the map draws on the 2D canvas.'),
+    );
+    return group;
+  }
+  if (armed && webglRefused()) {
+    group.append(
+      note(
+        'WebGL failed to start in this tab and the map fell back to the 2D canvas. Open a new tab to try again.',
+      ),
+    );
+    return group;
+  }
+  group.append(
+    note(
+      'Draws the map on the GPU. Changing this reloads the page. Diagnostics reports the renderer actually in use.',
+    ),
+  );
+  return group;
+}
+
+/**
  * Render the settings form into `container`.
  *
  * `handlers.onPref(key, value)` is called for every client preference change;
@@ -200,6 +244,8 @@ export function renderSettings(container, handlers = {}) {
     note('Preferences are stored in this browser.'),
   );
   container.append(local);
+
+  container.append(renderingSection());
 
   const remote = section('Server');
   if (!server) {
