@@ -576,12 +576,120 @@ var TIER_ORDER = [
   "tests",
   "unclassified"
 ];
+var TIER_LABELS = {
+  frontend: "Frontend",
+  api: "API surface",
+  domain: "Domain/service",
+  data: "Data",
+  integration: "Integration",
+  infra: "Infra/config",
+  build: "Build/tooling",
+  tests: "Tests",
+  unclassified: "Unclassified"
+};
+function tierColorVar(tier) {
+  return tier === "unclassified" ? "var(--series-other)" : `var(--tier-${tier})`;
+}
 function tierOfFile(report) {
   const map = /* @__PURE__ */ new Map();
   for (const entry of report?.files ?? []) {
     map.set(entry.file, entry.tier);
   }
   return map;
+}
+function tierMatrixRows(report) {
+  const matrix = report?.matrix;
+  if (!matrix) {
+    return [];
+  }
+  const units = matrix.units ?? [];
+  return (matrix.tiers ?? []).map((tier) => {
+    const cells = units.map((unit) => {
+      const cell = (matrix.cells ?? []).find((entry) => entry.unit === unit && entry.tier === tier);
+      return { unit, files: cell?.files ?? 0, lines: cell?.lines ?? 0 };
+    });
+    return {
+      tier,
+      label: TIER_LABELS[tier],
+      color: tierColorVar(tier),
+      cells,
+      files: cells.reduce((total, cell) => total + cell.files, 0),
+      lines: cells.reduce((total, cell) => total + cell.lines, 0)
+    };
+  }).filter((row) => row.files > 0);
+}
+function tierPerTierRows(report) {
+  return (report?.matrix?.perTier ?? []).slice().sort((a, b) => b.files - a.files || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)).map((entry) => ({
+    tier: entry.tier,
+    label: TIER_LABELS[entry.tier],
+    color: tierColorVar(entry.tier),
+    files: entry.files,
+    lines: entry.lines,
+    fileShare: entry.fileShare,
+    shareLabel: `${Math.round((entry.fileShare ?? 0) * 100)}%`
+  }));
+}
+function tierDirectionLabel(report) {
+  const directions = report?.directions ?? [];
+  if (directions.length === 0) {
+    return "No upward or skip-layer edges recorded.";
+  }
+  const upward = directions.filter((entry) => entry.kind === "upward").length;
+  const skip = directions.filter((entry) => entry.kind === "skip-layer").length;
+  return `${upward} upward \xB7 ${skip} skip-layer`;
+}
+function tierDirectionClasses(report) {
+  const byNode = /* @__PURE__ */ new Map();
+  const edges = [];
+  for (const entry of report?.directions ?? []) {
+    const nodeClass = entry.kind === "upward" ? "tier-upward" : "tier-skip";
+    byNode.set(entry.source, [...byNode.get(entry.source) ?? [], nodeClass]);
+    byNode.set(entry.target, [...byNode.get(entry.target) ?? [], nodeClass]);
+    edges.push({
+      source: entry.source,
+      target: entry.target,
+      kind: entry.kind,
+      line: entry.line
+    });
+  }
+  return { byNode, edges };
+}
+function tierTables(report) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const entry of report?.tables ?? []) {
+    counts.set(entry.table, (counts.get(entry.table) ?? 0) + 1);
+  }
+  return [...counts.entries()].map(([table, count]) => ({ table, count })).sort((a, b) => b.count - a.count || a.table.localeCompare(b.table));
+}
+function tierTableTrace(report, table) {
+  return (report?.tableTrace ?? []).filter((entry) => entry.table === table).slice().sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+function tierCallSites(report) {
+  return (report?.calls ?? []).slice().sort(
+    (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.target.localeCompare(b.target)
+  );
+}
+function tierEndpointSites(report) {
+  return (report?.endpoints ?? []).slice().sort(
+    (a, b) => a.file.localeCompare(b.file) || a.method.localeCompare(b.method) || a.path.localeCompare(b.path)
+  );
+}
+function tierTraces(report) {
+  return (report?.traces ?? []).slice();
+}
+function tierSummaryLabel(report) {
+  const total = Number(report?.summary?.total ?? 0);
+  if (total === 0) {
+    return "No files were classified into a tier.";
+  }
+  const unclassified = Number(report?.summary?.unclassified ?? 0);
+  const mixed = Number(report?.summary?.mixed ?? 0);
+  const parts = [`${total} file(s) classified`];
+  if (mixed > 0) {
+    parts.push(`${mixed} mixed`);
+  }
+  parts.push(`${unclassified} unclassified`);
+  return parts.join(" \xB7 ");
 }
 
 // ui/strabo-links.js
@@ -1160,7 +1268,11 @@ var RESET_CLASSES = [
   "edge-faded",
   "label-hidden",
   "filtered-out",
-  "tier-hidden"
+  "tier-hidden",
+  "tier-upward",
+  "tier-skip",
+  "edge-tier-upward",
+  "edge-tier-skip"
 ];
 var labelsVisible = true;
 var LABEL_DETAIL_ZOOM = 0.65;
@@ -1426,6 +1538,43 @@ function createView(container) {
           }
           const keep = filterTier === "all" || tier === filterTier;
           node.toggleClass("tier-hidden", !keep);
+        }
+      });
+    },
+    /**
+     * Mark the files and edges in a wrong-way dependency. Pass null to clear.
+     *
+     * `byNode` maps a file to its classes and `edges` names the endpoints to mark. Upward
+     * and skip-layer use different classes, so the two differ by border/line shape, not hue.
+     */
+    applyTierDirections(directions) {
+      const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
+      const edges = Array.isArray(directions?.edges) ? directions.edges : [];
+      cy.batch(() => {
+        for (const node of cy.nodes()) {
+          node.removeClass("tier-upward");
+          node.removeClass("tier-skip");
+        }
+        for (const edge of cy.edges()) {
+          edge.removeClass("edge-tier-upward");
+          edge.removeClass("edge-tier-skip");
+        }
+        if (!nodes) {
+          return;
+        }
+        for (const [id, classes] of nodes) {
+          const node = cy.getElementById(id);
+          if (node.nonempty()) {
+            for (const cls of classes) {
+              node.addClass(cls);
+            }
+          }
+        }
+        for (const direction of edges) {
+          const cls = direction.kind === "upward" ? "edge-tier-upward" : "edge-tier-skip";
+          cy.edges().filter(
+            (edge) => edge.data("source") === direction.source && edge.data("target") === direction.target
+          ).addClass(cls);
         }
       });
     },
@@ -1796,6 +1945,10 @@ function stylesheet() {
     // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
     // dotted ring that reads as "part of a workspace flow" without entering the status set.
     { selector: "node.ov-cross-repo", style: { "border-width": 4, "border-style": "dotted", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    // The tier direction check: a wrong-way dependency is a signal, so it rides on the
+    // reserved status scale and differs by shape (double vs dashed), never hue alone.
+    { selector: "node.tier-upward", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
+    { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -1821,6 +1974,8 @@ function stylesheet() {
         "arrow-scale": 0.9
       }
     },
+    { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
+    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
     { selector: "edge.edge-faded", style: { opacity: 0.1 } },
     { selector: "edge.dimmed", style: { opacity: 0.05 } },
     {
@@ -2194,7 +2349,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       if (hidden !== lastHidden) {
         lastHidden = hidden;
         renderDock();
-        if (!hidden) flashChip(config.key);
+        if (!hidden) {
+          if (!hasPosition) placeInRail();
+          flashChip(config.key);
+        }
       }
     };
     new MutationObserver(sync2).observe(element, {
@@ -5451,6 +5609,143 @@ function svgElement(name, attributes) {
   return element;
 }
 
+// ui/strabo-tier-panel.js
+function headerCell(text) {
+  const cell = document.createElement("th");
+  cell.textContent = text;
+  return cell;
+}
+function numberCell(text, title) {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  if (title) {
+    cell.title = title;
+  }
+  return cell;
+}
+function renderTierPanel(container, report, filter = "all") {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Tier lens";
+  container.append(title);
+  const note2 = document.createElement("p");
+  note2.className = "overlay-note";
+  note2.textContent = tierSummaryLabel(report);
+  container.append(note2);
+  const rows = tierMatrixRows(report);
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "unavailable";
+    empty.textContent = "No file was classified into a tier.";
+    container.append(empty);
+    return;
+  }
+  const units = report?.matrix?.units ?? [];
+  const table = document.createElement("table");
+  table.className = "tier-matrix";
+  const head = document.createElement("tr");
+  head.append(headerCell("Tier"));
+  for (const unit of units) {
+    head.append(headerCell(unit === "." ? "/" : unit));
+  }
+  head.append(headerCell("Files"), headerCell("Lines"));
+  table.append(head);
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    tr.dataset.role = "tier-row";
+    tr.dataset.tier = row.tier;
+    if (filter !== "all" && filter === row.tier) {
+      tr.classList.add("is-selected");
+    }
+    const name = document.createElement("th");
+    name.textContent = row.label;
+    tr.append(name);
+    for (const cell of row.cells) {
+      tr.append(numberCell(cell.files === 0 ? "\xB7" : String(cell.files), `${cell.lines} line(s)`));
+    }
+    tr.append(numberCell(String(row.files)), numberCell(String(row.lines)));
+    table.append(tr);
+  }
+  container.append(table);
+  const shares = document.createElement("p");
+  shares.className = "tier-shares";
+  shares.dataset.role = "tier-shares";
+  shares.textContent = tierPerTierRows(report).map((entry) => `${entry.label} ${entry.shareLabel}`).join(" \xB7 ");
+  container.append(shares);
+  const directionNote = document.createElement("p");
+  directionNote.className = "overlay-note";
+  directionNote.dataset.role = "tier-directions";
+  directionNote.textContent = tierDirectionLabel(report);
+  container.append(directionNote);
+  for (const entry of report?.directions ?? []) {
+    const item = document.createElement("div");
+    item.className = "tier-direction";
+    item.dataset.role = "tier-direction";
+    item.textContent = `${entry.kind === "upward" ? "upward" : "skip-layer"} \xB7 ${entry.source} \u2192 ${entry.target} (L${entry.line})`;
+    container.append(item);
+  }
+  const calls = tierCallSites(report);
+  if (calls.length > 0) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Calls";
+    container.append(heading);
+    for (const call of calls.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-call";
+      item.dataset.role = "tier-call";
+      item.textContent = `${call.method ?? "CALL"} ${call.target} \xB7 ${call.file}:${call.line}`;
+      container.append(item);
+    }
+  }
+  const endpoints = tierEndpointSites(report);
+  if (endpoints.length > 0) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Endpoints";
+    container.append(heading);
+    for (const endpoint of endpoints.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-endpoint";
+      item.dataset.role = "tier-endpoint";
+      item.textContent = `${endpoint.method} ${endpoint.path} \xB7 ${endpoint.file}`;
+      container.append(item);
+    }
+  }
+  const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
+  if (joined.length > 0) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Trace";
+    container.append(heading);
+    for (const entry of joined.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-trace";
+      item.dataset.role = "tier-trace";
+      item.textContent = `${entry.call.file}:${entry.call.line} \u2192 ${entry.endpoint.method} ${entry.endpoint.path} (${entry.endpoint.file})`;
+      container.append(item);
+    }
+  }
+  const tables = tierTables(report);
+  if (tables.length > 0) {
+    const heading = document.createElement("h4");
+    heading.textContent = "Tables";
+    container.append(heading);
+    for (const entry of tables.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-table";
+      item.dataset.role = "tier-table";
+      item.textContent = `${entry.table} \xB7 ${entry.count} reference(s)`;
+      container.append(item);
+      const trace = tierTableTrace(report, entry.table);
+      if (trace.length > 0) {
+        const caption = document.createElement("div");
+        caption.className = "tier-table-trace";
+        caption.dataset.role = "tier-table-trace";
+        caption.textContent = trace.map((row) => `${row.file} (${row.tier}${row.unit === "." ? "" : `, ${row.unit}`})`).join(" \xB7 ");
+        container.append(caption);
+      }
+    }
+  }
+}
+
 // ui/strabo-settings.js
 var SETTINGS_KEY = "strabo.settings.v1";
 var THEMES = ["system", "dark", "light"];
@@ -6298,7 +6593,7 @@ async function scan({ refresh = false } = {}) {
     }
     if (state.overlay !== "none") {
       await applyOverlay(generation);
-    } else {
+    } else if (state.tier === "off") {
       renderOverlayPanel(elements.overlayPanel, "", null);
     }
     refreshDock();
@@ -6374,6 +6669,7 @@ var tierReportCache = { generation: -1, report: null };
 async function applyTierLens() {
   if (state.tier === "off" || !current || current.system || current.prefixLength !== void 0) {
     view.applyTier(null);
+    view.applyTierDirections(null);
     return;
   }
   const generation = state.renderedGeneration;
@@ -6391,9 +6687,12 @@ async function applyTierLens() {
   }
   if (!current || state.tier === "off" || state.renderedGeneration !== generation) {
     view.applyTier(null);
+    view.applyTierDirections(null);
     return;
   }
   view.applyTier(tierOfFile(tierReportCache.report), state.tier === "all" ? "all" : state.tier);
+  view.applyTierDirections(tierDirectionClasses(tierReportCache.report));
+  renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
 }
 function selectNode(id) {
   if (!current) {

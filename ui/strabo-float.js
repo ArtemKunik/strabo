@@ -281,7 +281,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       if (hidden !== lastHidden) {
         lastHidden = hidden;
         renderDock();
-        if (!hidden) flashChip(config.key);
+        if (!hidden) {
+          // A panel can also be revealed by setting `element.hidden = false` directly (the
+          // Repository passport opens that way on a first visit). It still earns its rail
+          // slot here, instead of sitting at the CSS default in the corner over the toolbar.
+          if (!hasPosition) placeInRail();
+          flashChip(config.key);
+        }
       }
     };
 
