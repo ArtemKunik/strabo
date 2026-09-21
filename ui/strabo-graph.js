@@ -186,7 +186,9 @@ export function buildElements(model) {
     classes: `kind-${node.kind}`,
     data: {
       id: node.id,
-      label: node.label ?? node.id.split('/').pop(),
+      // A block node has no path tail to fall back on, so the server's compressed,
+      // unit-anchored label is preferred before the bare last segment.
+      label: node.label ?? model.directoryLabels?.[node.id] ?? node.id.split('/').pop(),
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position

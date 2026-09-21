@@ -9,6 +9,7 @@ import express from 'express';
 
 import {
   assignUnits,
+  buildDirectoryLabels,
   buildSystemReport,
   buildSystemViewModel,
   classifyPeriphery,
@@ -271,4 +272,17 @@ test('GET /graph?system=1 serves the unit roll-up', async () => {
   };
   assert.equal(model.system, true);
   assert.equal(model.nodes.find((node) => node.id === 'pkg')?.label, 'widgets');
+});
+
+test('buildDirectoryLabels anchors a directory label at its unit', () => {
+  const root = tempDir();
+  write(root, 'service-rust/Cargo.toml', '[package]\nname = "service"\n');
+  write(root, 'service-rust/src/handlers/a.rs', 'pub fn a() {}\n');
+
+  const labels = buildDirectoryLabels(
+    root,
+    ['service-rust/src/handlers/a.rs'],
+    'repo',
+  );
+  assert.equal(labels['service-rust/src/handlers'], 'service \u203a handlers');
 });

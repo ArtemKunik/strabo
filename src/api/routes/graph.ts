@@ -3,6 +3,7 @@ import fs from 'node:fs';
 
 import { buildBlockViewModel } from '../../analysis/blocks.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
+import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
 import { describeRepository } from '../../repository.ts';
@@ -49,22 +50,31 @@ export function createGraphRouter(config: StraboConfig): Router {
         return;
       }
 
+      const files = cached.report.graph.nodes.map((node) => node.id);
+
       const blockDepth = parsePositiveInt(request.query.blockDepth, 5);
       if (blockDepth) {
-        response.json(
-          buildBlockViewModel(
-            cached.report.graph,
-            {
-              depth: blockDepth,
-              prefix: asString(request.query.blockPrefix),
-            },
-            { repository: descriptor, cache },
-          ),
+        const model = buildBlockViewModel(
+          cached.report.graph,
+          {
+            depth: blockDepth,
+            prefix: asString(request.query.blockPrefix),
+          },
+          { repository: descriptor, cache },
         );
+        model.directoryLabels = buildBlockLabels(
+          repository.root,
+          files,
+          repository.name,
+          model.nodes.map((node) => node.id),
+        );
+        response.json(model);
         return;
       }
 
-      response.json(buildViewModel(repository.root, cached.report, descriptor, cache));
+      const model = buildViewModel(repository.root, cached.report, descriptor, cache);
+      model.directoryLabels = buildDirectoryLabels(repository.root, files, repository.name);
+      response.json(model);
     } catch (error) {
       sendError(response, error);
     }

@@ -80,10 +80,16 @@ export function createView(container) {
   let renderedElements = { nodes: [], edges: [] };
 
   function repaintIslands() {
-    islands.paint(islandBounds(islandModel, { visible: islandVisible }), {
-      pan: cy.pan(),
-      zoom: cy.zoom(),
-    });
+    islands.paint(
+      islandBounds(islandModel, {
+        visible: islandVisible,
+        labels: islandModel?.directoryLabels,
+      }),
+      {
+        pan: cy.pan(),
+        zoom: cy.zoom(),
+      },
+    );
   }
 
   const selectHandlers = [];

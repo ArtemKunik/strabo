@@ -51,6 +51,9 @@ export function islandBounds(model, options = {}) {
 
   const padding = options.padding ?? ISLAND_PADDING;
   const visible = options.visible ?? null;
+  // The server may supply a compressed, unit-anchored label per directory; fall back to the
+  // recorded path when it does not.
+  const labels = options.labels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const groups = new Map();
 
@@ -84,7 +87,7 @@ export function islandBounds(model, options = {}) {
   return [...groups.values()]
     .map((group) => ({
       directory: group.directory,
-      label: islandLabel(group.directory),
+      label: labels?.[group.directory] ?? islandLabel(group.directory),
       count: group.count,
       x: group.minX - padding,
       y: group.minY - padding,

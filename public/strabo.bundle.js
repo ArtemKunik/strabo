@@ -228,7 +228,9 @@ function buildElements(model) {
     classes: `kind-${node.kind}`,
     data: {
       id: node.id,
-      label: node.label ?? node.id.split("/").pop(),
+      // A block node has no path tail to fall back on, so the server's compressed,
+      // unit-anchored label is preferred before the bare last segment.
+      label: node.label ?? model.directoryLabels?.[node.id] ?? node.id.split("/").pop(),
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
@@ -431,6 +433,7 @@ function islandBounds(model, options = {}) {
   }
   const padding = options.padding ?? ISLAND_PADDING;
   const visible = options.visible ?? null;
+  const labels = options.labels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const groups = /* @__PURE__ */ new Map();
   for (const node of model.nodes ?? []) {
@@ -460,7 +463,7 @@ function islandBounds(model, options = {}) {
   }
   return [...groups.values()].map((group) => ({
     directory: group.directory,
-    label: islandLabel(group.directory),
+    label: labels?.[group.directory] ?? islandLabel(group.directory),
     count: group.count,
     x: group.minX - padding,
     y: group.minY - padding,
@@ -1115,10 +1118,16 @@ function createView(container) {
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
   function repaintIslands() {
-    islands.paint(islandBounds(islandModel, { visible: islandVisible }), {
-      pan: cy.pan(),
-      zoom: cy.zoom()
-    });
+    islands.paint(
+      islandBounds(islandModel, {
+        visible: islandVisible,
+        labels: islandModel?.directoryLabels
+      }),
+      {
+        pan: cy.pan(),
+        zoom: cy.zoom()
+      }
+    );
   }
   const selectHandlers = [];
   const drillHandlers = [];

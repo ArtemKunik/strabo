@@ -62,13 +62,23 @@ export {
   neighbourhood,
 } from './analysis/analysis.ts';
 export { buildPositions } from './analysis/layout.ts';
-export { blockRegion, topLevelDirectory } from './analysis/directory.ts';
+export {
+  blockRegion,
+  topLevelDirectory,
+  parentDirectory,
+  directoriesOf,
+  compressDirectoryChains,
+  unitAnchoredLabel,
+} from './analysis/directory.ts';
+export type { UnitAnchor } from './analysis/directory.ts';
 export { buildBlockViewModel } from './analysis/blocks.ts';
 export {
   detectUnits,
   assignUnits,
   classifyPeriphery,
   classifyPeripheryAll,
+  buildDirectoryLabels,
+  buildBlockLabels,
 } from './analysis/units.ts';
 export type { SystemUnit, SystemUnitEcosystem, Periphery } from './analysis/units.ts';
 export { buildSystemReport } from './analysis/system.ts';
@@ -107,6 +117,18 @@ export { rankHotspots } from './analysis/hotspots.ts';
 export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
+export { computeQualityScorecard } from './analysis/quality.ts';
+export type {
+  QualityScorecard,
+  QualityPercentile,
+  ModuleQuality,
+  ComplexityMeasures,
+  ShapeMeasures,
+  CentralityMeasures,
+  EvolutionMeasures,
+  ProtectionMeasures,
+  PercentileMeasure,
+} from './analysis/quality.ts';
 export { computeRepositoryPassport } from './analysis/passport.ts';
 export type {
   RepositoryPassport,

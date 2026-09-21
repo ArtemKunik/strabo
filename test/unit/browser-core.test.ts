@@ -404,6 +404,16 @@ test('passportFor reports metrics, imports, and used-by from evidence', () => {
   assert.deepEqual(passport.usedBy.map((entry) => entry.id).sort(), ['src/index.ts']);
 });
 
+test('buildElements labels a block node from the server directoryLabels', () => {
+  const elements = buildElements({
+    nodes: [{ id: 'src/api', kind: 'module', transitiveDependents: 0 }],
+    edges: [],
+    positions: [],
+    directoryLabels: { 'src/api': 'service › api' },
+  });
+  assert.equal(elements.nodes[0].data.label, 'service › api');
+});
+
 test('mapCounts groups by directory and kind for the strip', () => {
   const counts = mapCounts(model);
 

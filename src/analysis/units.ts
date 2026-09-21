@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { toPosix } from '../boundary/repository-root.ts';
+import { compressDirectoryChains, directoriesOf, parentDirectory as directoryParent } from './directory.ts';
 
 /**
  * The build system that names a unit, strongest evidence first.
@@ -115,6 +116,42 @@ export function assignUnits(
     assignment.set(file, match ?? '.');
   }
   return assignment;
+}
+
+/**
+ * Directory labels for the map, keyed by the directory a file sits in.
+ *
+ * Chain compression and unit anchoring are cheap wins that apply to the file map's islands
+ * and to Directories-mode block labels alike: a directory that only hops through one child
+ * drops out, and the surviving tail is anchored at the name its manifest declares. The
+ * repository root stays `.` (the island layer renders it as `/`).
+ */
+export function buildDirectoryLabels(
+  root: string,
+  files: readonly string[],
+  repositoryName: string,
+): Record<string, string> {
+  const units = detectUnits(root, files, repositoryName).map((unit) => ({
+    id: unit.id,
+    name: unit.name,
+  }));
+  const content = new Set(files.map((file) => directoryParent(file)));
+  const labels = compressDirectoryChains(directoriesOf(files), (directory) => content.has(directory), units);
+  return Object.fromEntries(labels);
+}
+
+/** Compress and anchor a set of block ids, where every id is content by definition. */
+export function buildBlockLabels(
+  root: string,
+  files: readonly string[],
+  repositoryName: string,
+  blockIds: readonly string[],
+): Record<string, string> {
+  const units = detectUnits(root, files, repositoryName).map((unit) => ({
+    id: unit.id,
+    name: unit.name,
+  }));
+  return Object.fromEntries(compressDirectoryChains(blockIds, () => true, units));
 }
 
 /** Classify a scanned file as support, with the first rule that matched. */

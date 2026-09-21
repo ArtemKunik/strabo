@@ -24,10 +24,10 @@ record is reported as `unavailable`, never invented.
 | 12 | Frontend foundation | done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off
     `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
-| 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
+| 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay); follow-ups F1-F4 planned (free-function calls, entry detection, table layout) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
 | 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend, and the L0 System mode UI: units, edges, why captions; L2, L7, L8, L9-L13 remain) |
-| 17 | Module quality and change impact | In progress (Q1 done: `use`/`declare` edge roles; Q2-Q8 planned) |
+| 17 | Module quality and change impact | Q1-Q2 done (`use`/`declare` edge roles; percentile scorecard); Q3-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
 
@@ -536,6 +536,46 @@ name sets, `loopScans` / `loopSorts` on the metrics, and the `linear-scan-in-loo
 `sort-in-loop` signals, so a linear scan or sort inside a loop is recorded with the callee
 names.
 
+### Follow-ups
+
+Found on a real Rust test module (`tools/ccterm/src/web_ui/tests_clipboard.rs`): every
+function showed "calls: none" and "called by: no callers", including a `sample_html()`
+helper that the tests call.
+
+- **Free-function calls are dropped in Rust and Kotlin.** Both extractors push a body for
+  call collection only when it has an owner (`if (body && owner)` in `rust.ts` and
+  `kotlin.ts`), so a top-level `fn` / `fun` records no calls and the functions it calls
+  show no callers. Python, TypeScript, and C++ already push every body. The member-access
+  pass is a no-op without an owner, and `collectFunctionCalls` already refuses `Self::x()`
+  when the owner is empty, so the fix is to push free-function bodies too.
+- **Entry points look like dead code.** A function the runtime or a framework invokes has
+  no in-file caller by design: `#[test]` / `#[tokio::test]`, `@Test`, `def test_*`,
+  `it(...)` / `test(...)` bodies, `main` / `#[tokio::main]`, and a function passed by
+  reference (`.route("/x", get(handler))`, `::handler`, `onClick = ::save`). These are
+  recorded as an **entry** of a named kind (`test`, `main`, `handler`, `passed as value at
+  L42`) with the attribute or line as evidence, and "no callers" is reserved for functions
+  with none of these.
+- **Intra-file scope is not visible.** Callers are resolved within the file only, so "no
+  callers" on a `pub` / exported function does not mean unused. The caption says
+  *no callers in this file (cross-file not resolved)* for public functions.
+- **The Functions tab wraps badly.** Long test names, the repeated signature, and six
+  captions per row wrap over three lines. It becomes a table: one row per function, with
+  columns for name, visibility or entry badge, lines, span, complexity, nesting, loops,
+  calls (count), callers (count or entry badge), and signals (chips). Names are truncated
+  in the middle with the full signature in a tooltip and an expandable row. Columns are
+  sortable, and the default order is signal count, then complexity. Clicking a calls or
+  callers count lists the call sites with line links. A summary row gives the function
+  count, total and max complexity, max nesting, and signal count. It keeps roving keyboard
+  navigation and uses the virtualized list for large files.
+
+Slices: **F1** push free-function bodies for call collection in Rust and Kotlin, with unit
+tests where a free helper is called from free functions and from methods. **F2** entry
+detection per extractor language (test attributes and names, `main`, functions passed by
+reference) recorded on the symbol with its evidence, and entry-aware captions. **F3** the
+public/intra-file caption for functions with no callers in the file. **F4** the Functions
+tab as a sortable table with the summary row, jsdom panel tests, and an update to the
+`module-passport.feature` `@functions` scenario.
+
 ## Phase 15 - Optional LLM narrator
 
 An opt-in narrative layer over recorded evidence. **Off by default**, modelled on the
@@ -761,6 +801,8 @@ coverage is the `mod declarations are declare edges` case in `test/unit/rust.tes
 - *Evolution*: churn (commits in 90 days), author count and ownership fragmentation, and
   **co-change partners with no import path** (hidden coupling), from `git log`.
 - *Protection*: tests that reach the module, and the share of its dependents that are tested.
+
+**Q2 (done).** A percentile scorecard in the passport built from the existing measures. `src/analysis/quality.ts` computes per-module complexity (LOC, function count, sum/max decision points, max nesting, signal share), shape (cohesion from member wiring, member count, interface width, depth signal, instability), centrality (direct importers, blast radius, transitive dependencies, cycle membership), evolution (churn, author count, ownership fragmentation, hidden coupling), and protection (test reach, tested dependents share). Each measure is ranked as a repository percentile (0-100). `GET /analysis/quality` serves the scorecard. Unit coverage is `test/unit/quality.test.ts`; acceptance is `test/acceptance/features/module-quality.feature` (`@quality`).
 
 **Smells** are rules over those measures. Each shows the inputs that tripped it and is a
 signal, not a verdict: god module (size, members and importers high, cohesion low), hub

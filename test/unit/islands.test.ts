@@ -41,6 +41,13 @@ test('islandBounds groups by directory and encloses the drawn nodes, not their c
   assert.equal(src.width, 96 + 22 + ISLAND_PADDING * 2);
 });
 
+test('islandBounds prefers a supplied compressed, unit-anchored label', () => {
+  const islands = islandBounds(model(), { labels: { src: 'service › handlers' } });
+  assert.equal(islands.find((island) => island.directory === 'src')?.label, 'service › handlers');
+  // A directory the server did not label keeps its recorded path.
+  assert.equal(islands.find((island) => island.directory === 'ui')?.label, 'ui');
+});
+
 test('islandBounds keeps a one-member directory: a lone file is still a region', () => {
   const ui = islandBounds(model()).find((island) => island.directory === 'ui');
   assert.ok(ui);

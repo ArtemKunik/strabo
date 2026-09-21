@@ -15,6 +15,7 @@ import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
+import { computeQualityScorecard } from '../../analysis/quality.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
@@ -257,6 +258,24 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const baseline = base ? `${base}^` : 'HEAD';
       const cohesion = await computeChangePassport(repository.root, review.files, baseline);
       response.json({ ...review, cohesion });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Quality scorecard: per-module measures ranked as repository percentiles.
+   */
+  router.get('/analysis/quality', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const scorecard = await computeQualityScorecard(
+        cached.report.graph,
+        repository.root,
+        repository.name,
+      );
+      response.json(scorecard);
     } catch (error) {
       sendError(response, error);
     }

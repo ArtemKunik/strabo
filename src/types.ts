@@ -419,6 +419,8 @@ export interface ViewModel {
   cache: ScanCacheMetadata;
   /** True when the model is a build-unit roll-up (Phase 16 System view), not files. */
   system?: boolean;
+  /** Compressed, unit-anchored label per directory, for the islands and block nodes. */
+  directoryLabels?: Record<string, string>;
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */
@@ -429,6 +431,8 @@ export interface BlockViewModel {
   edges: ViewEdge[];
   positions: ViewPosition[];
   cache?: ScanCacheMetadata;
+  /** Compressed, unit-anchored label per block id. */
+  directoryLabels?: Record<string, string>;
 }
 
 export type UnavailableReason =
