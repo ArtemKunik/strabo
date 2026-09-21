@@ -454,12 +454,24 @@ export interface TierDirection {
   specifier: string;
 }
 
+/** One recorded reference to a table, joined to the file's tier and unit. */
+export interface TableTraceEntry {
+  table: string;
+  file: string;
+  tier: Tier;
+  unit: string;
+  line: number;
+  evidence: string;
+}
+
 export interface TierReport {
   files: TierClassification[];
   units: TierUnitReport[];
   matrix: TierMatrix;
   directions: TierDirection[];
   tables: TableReference[];
+  /** The bottom half of the end-to-end trace: a table joined to the files that name it. */
+  tableTrace: TableTraceEntry[];
   summary: Record<Tier, number> & { total: number; mixed: number; unclassified: number };
   skipped: string[];
   /** Files beyond the scan ceiling; not read, so they are not claimed as unclassified. */
@@ -618,12 +630,28 @@ export function buildTierReport(
       (a, b) => a.table.localeCompare(b.table) || a.file.localeCompare(b.file) || a.line - b.line,
     );
 
+  const tableTrace: TableTraceEntry[] = files
+    .flatMap((entry) =>
+      entry.tables.map((reference) => ({
+        table: reference.table,
+        file: entry.file,
+        tier: entry.tier,
+        unit: assignment.get(entry.file) ?? '.',
+        line: reference.line,
+        evidence: reference.evidence,
+      })),
+    )
+    .sort(
+      (a, b) => a.table.localeCompare(b.table) || a.file.localeCompare(b.file) || a.line - b.line,
+    );
+
   return {
     files,
     units: unitReports,
     matrix: { tiers: TIER_ORDER, units: unitIds, cells, perTier },
     directions,
     tables,
+    tableTrace,
     summary: { ...summary, total: files.length, mixed },
     skipped,
     truncated: all.length - selected.length,

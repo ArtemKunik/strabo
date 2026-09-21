@@ -75,6 +75,85 @@ export function tierSummaryRows(report) {
     .sort((a, b) => b.count - a.count || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier));
 }
 
+/**
+ * Matrix rows for the tier × unit panel: one row per tier that has files, with a cell per
+ * unit. Rows keep dependency order; empty rows and empty cells are kept so an absent tier
+ * reads as information rather than disappearing.
+ */
+export function tierMatrixRows(report) {
+  const matrix = report?.matrix;
+  if (!matrix) {
+    return [];
+  }
+  const units = matrix.units ?? [];
+  return (matrix.tiers ?? [])
+    .map((tier) => {
+      const cells = units.map((unit) => {
+        const cell = (matrix.cells ?? []).find((entry) => entry.unit === unit && entry.tier === tier);
+        return { unit, files: cell?.files ?? 0, lines: cell?.lines ?? 0 };
+      });
+      return {
+        tier,
+        label: TIER_LABELS[tier],
+        color: tierColorVar(tier),
+        cells,
+        files: cells.reduce((total, cell) => total + cell.files, 0),
+        lines: cells.reduce((total, cell) => total + cell.lines, 0),
+      };
+    })
+    .filter((row) => row.files > 0);
+}
+
+/** The per-tier shares, largest tier first, for the "Data: 12% of files" caption. */
+export function tierPerTierRows(report) {
+  return (report?.matrix?.perTier ?? [])
+    .slice()
+    .sort((a, b) => b.files - a.files || TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier))
+    .map((entry) => ({
+      tier: entry.tier,
+      label: TIER_LABELS[entry.tier],
+      color: tierColorVar(entry.tier),
+      files: entry.files,
+      lines: entry.lines,
+      fileShare: entry.fileShare,
+      shareLabel: `${Math.round((entry.fileShare ?? 0) * 100)}%`,
+    }));
+}
+
+/** A one-line summary of the wrong-way edges, or an explicit all-clear. */
+export function tierDirectionLabel(report) {
+  const directions = report?.directions ?? [];
+  if (directions.length === 0) {
+    return 'No upward or skip-layer edges recorded.';
+  }
+  const upward = directions.filter((entry) => entry.kind === 'upward').length;
+  const skip = directions.filter((entry) => entry.kind === 'skip-layer').length;
+  return `${upward} upward · ${skip} skip-layer`;
+}
+
+/** The tables a trace can start from, most-referenced first. */
+export function tierTables(report) {
+  const counts = new Map();
+  for (const entry of report?.tables ?? []) {
+    counts.set(entry.table, (counts.get(entry.table) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([table, count]) => ({ table, count }))
+    .sort((a, b) => b.count - a.count || a.table.localeCompare(b.table));
+}
+
+/**
+ * The files that reference a table, each with its tier and unit: the bottom half of the
+ * end-to-end trace. `unavailable` is not invented here; a table with no recorded reference
+ * returns an empty list.
+ */
+export function tierTableTrace(report, table) {
+  return (report?.tableTrace ?? [])
+    .filter((entry) => entry.table === table)
+    .slice()
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+
 /** The one-line caption for the tier filter, or an explicit no-evidence note. */
 export function tierSummaryLabel(report) {
   const total = Number(report?.summary?.total ?? 0);
