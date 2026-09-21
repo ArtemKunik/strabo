@@ -5,6 +5,7 @@ import {
   MAX_DELEGATE_PROMPT,
   MAX_DIAMETER,
   MIN_DIAMETER,
+  SHAPES,
   breadcrumb,
   buildAgentPrompt,
   buildElements,
@@ -14,6 +15,7 @@ import {
   constellationPoints,
   diameter,
   edgeEvidenceFor,
+  edgeStrokeWidth,
   explainClass,
   fieldCard,
   fileWebUrl,
@@ -50,6 +52,7 @@ import {
   tierSummaryLabel,
   tierSummaryRows,
   topLevelDirectory,
+  unitDiameter,
 } from '../../ui/strabo-core.js';
 import {
   functionCallers,
@@ -210,6 +213,17 @@ test('filterNodes matches case-insensitively and returns everything when empty',
 test('graphSummary counts nodes and edges without internal vocabulary', () => {
   assert.equal(graphSummary(model), '3 nodes · 2 edges');
   assert.equal(graphSummary({ nodes: [], edges: [] }), '0 nodes · 0 edges');
+});
+
+test('graphSummary names units at System L0, where the shelves are folded away', () => {
+  const system = {
+    system: true,
+    nodes: [{ id: 'a', kind: 'unit' }, { id: 'b', kind: 'unit' }],
+    edges: [{ source: 'a', target: 'b' }],
+  };
+  assert.equal(graphSummary(system), '2 units · 1 edge');
+  // A drill-down draws files, so it stays a node count.
+  assert.equal(graphSummary({ ...system, systemUnit: 'a' }), '2 nodes · 1 edge');
 });
 
 test('overlayFor maps change impact onto changed and affected nodes', () => {
@@ -389,6 +403,7 @@ test('the reading legend names layers and the outside badge in a drill-down', ()
     'lane = layer',
     'edge = selected file import',
     'badge = files in another unit',
+    'tag = support shelf',
   ]);
 });
 
@@ -445,7 +460,7 @@ test('the reading legend names units and files in system mode', () => {
     'box = build unit',
     'size = files',
     'edge = import between units',
-    'shelf = support files',
+    'support = unit footer',
   ]);
 });
 
@@ -455,7 +470,7 @@ test('a system unit sizes by files and reports its why caption', () => {
     nodes: [
       {
         id: 'crates/api',
-        kind: 'module',
+        kind: 'unit',
         label: 'ledger-api',
         files: 12,
         periphery: 3,
@@ -469,12 +484,45 @@ test('a system unit sizes by files and reports its why caption', () => {
   };
 
   const elements = buildElements(systemModel);
-  assert.equal(elements.nodes[0].data.diameter, diameter(12));
+  assert.equal(elements.nodes[0].classes, 'kind-unit');
+  assert.equal(elements.nodes[0].data.diameter, unitDiameter(12));
 
   const passport = passportFor(systemModel, 'crates/api');
   assert.equal(passport.why, 'crate `ledger-api` (Cargo.toml)');
   assert.ok(passport.metrics.some((metric) => metric.label === 'Files' && metric.value === 12));
   assert.ok(passport.metrics.some((metric) => metric.label === 'Support files' && metric.value === 3));
+});
+
+test('unit and shelf are their own kinds with their own shapes', () => {
+  assert.equal(SHAPES.unit, 'round-rectangle');
+  assert.equal(SHAPES.shelf, 'rectangle');
+  const { nodes } = buildElements({
+    nodes: [
+      { id: 'crates/api', kind: 'unit' },
+      { id: 'crates/api#support', kind: 'shelf' },
+    ],
+    edges: [],
+    positions: [],
+  });
+  assert.deepEqual(nodes.map((node) => node.classes), ['kind-unit', 'kind-shelf']);
+});
+
+test('a unit edge widens with the file count it rolled up', () => {
+  const { edges } = buildElements({
+    nodes: [{ id: 'a', kind: 'unit' }, { id: 'b', kind: 'unit' }],
+    edges: [
+      { source: 'a', target: 'b', kind: 'import', weight: 1, evidence: { line: 1, specifier: 'x', resolution: 'exact' } },
+      { source: 'b', target: 'a', kind: 'import', weight: 40, evidence: { line: 1, specifier: 'y', resolution: 'exact' } },
+    ],
+    positions: [],
+  });
+  assert.equal(edges[0].data.weight, 1);
+  assert.equal(edges[0].data.edgeWidth, edgeStrokeWidth(1));
+  assert.ok(edges[1].data.edgeWidth > edges[0].data.edgeWidth);
+  assert.equal(edges[1].data.edgeWidth, edgeStrokeWidth(40));
+  // A file edge carries no weight and stays the base hairline.
+  assert.equal(edgeStrokeWidth(undefined), 1.2);
+  assert.ok(edgeStrokeWidth(40) <= 4);
 });
 
 test('buildGroupNamingEvidence reports only recorded unit facts', () => {

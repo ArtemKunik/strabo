@@ -4,21 +4,21 @@ import { Then, When } from '@cucumber/cucumber';
 
 When('I request the quality scorecard', async function () {
   this.qualityResponse = await fetch(`${this.baseUrl}/api/strabo/analysis/quality`);
+  // A Response body reads once; parse it here so every assertion reuses the same object.
+  this.qualityBody = await this.qualityResponse.json();
 });
 
 Then('the scorecard has a repository name', async function () {
   assert.equal(this.qualityResponse.ok, true, 'quality endpoint should respond');
-  const body = await this.qualityResponse.json();
-  assert.ok(body.repository, 'repository name should be present');
+  assert.ok(this.qualityBody.repository, 'repository name should be present');
 });
 
 Then('the scorecard lists modules', async function () {
-  const body = await this.qualityResponse.json();
-  assert.ok(body.modules.length > 0, 'modules should be present');
+  assert.ok(this.qualityBody.modules.length > 0, 'modules should be present');
 });
 
 Then('each module has complexity, shape, centrality, evolution, and protection measures', async function () {
-  const body = await this.qualityResponse.json();
+  const body = this.qualityBody;
   for (const mod of body.modules) {
     assert.ok(mod.complexity, 'complexity should be present');
     assert.ok(mod.shape, 'shape should be present');
@@ -29,7 +29,7 @@ Then('each module has complexity, shape, centrality, evolution, and protection m
 });
 
 Then('each measure group has percentiles for every measure', async function () {
-  const body = await this.qualityResponse.json();
+  const body = this.qualityBody;
   for (const group of ['complexity', 'shape', 'centrality', 'evolution', 'protection']) {
     const entries = Object.entries(body.percentiles[group]);
     assert.ok(entries.length > 0, `${group} should have percentiles`);
@@ -40,7 +40,7 @@ Then('each measure group has percentiles for every measure', async function () {
 });
 
 Then('every percentile is between 0 and 100', async function () {
-  const body = await this.qualityResponse.json();
+  const body = this.qualityBody;
   for (const group of Object.values(body.percentiles)) {
     for (const p of Object.values(group)) {
       assert.ok(p.percentile >= 0 && p.percentile <= 100, 'percentile should be 0-100');
@@ -50,10 +50,11 @@ Then('every percentile is between 0 and 100', async function () {
 
 When('I request the repository smells', async function () {
   this.smellsResponse = await fetch(`${this.baseUrl}/api/strabo/analysis/smells`);
+  this.smellsBody = await this.smellsResponse.json();
 });
 
 Then('each module reports composite scores in 0-100', async function () {
-  const body = await this.qualityResponse.json();
+  const body = this.qualityBody;
   for (const mod of body.modules) {
     for (const key of ['complexity', 'churn', 'hotspot', 'blastRadius', 'testReach', 'risk']) {
       const value = mod.scores?.[key];
@@ -64,7 +65,7 @@ Then('each module reports composite scores in 0-100', async function () {
 });
 
 Then('each module reports a hotspot and a risk', async function () {
-  const body = await this.qualityResponse.json();
+  const body = this.qualityBody;
   for (const mod of body.modules) {
     assert.equal(typeof mod.scores.hotspot, 'number', 'hotspot should be a number');
     assert.equal(typeof mod.scores.risk, 'number', 'risk should be a number');
@@ -73,13 +74,13 @@ Then('each module reports a hotspot and a risk', async function () {
 
 Then('the smells report lists files with a rule summary', async function () {
   assert.equal(this.smellsResponse.ok, true, 'smells endpoint should respond');
-  const body = await this.smellsResponse.json();
+  const body = this.smellsBody;
   assert.ok(Array.isArray(body.files), 'files should be an array');
   assert.ok(body.summary && typeof body.summary === 'object', 'summary should be present');
 });
 
 Then('each smell names a rule and its inputs', async function () {
-  const body = await this.smellsResponse.json();
+  const body = this.smellsBody;
   for (const entry of body.files) {
     assert.ok(entry.file, 'each entry should name a file');
     for (const smell of entry.smells) {

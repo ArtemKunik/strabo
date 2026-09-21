@@ -1,0 +1,141 @@
+/**
+ * The class-toggling lenses the map applies on top of a render.
+ *
+ * Each function clears its own classes and reapplies them, so lenses compose: the review
+ * overlay, the cross-repo ring, the text filter, and the tier lens can be on screen at
+ * once without clearing each other. These touch a live Cytoscape instance; the pure
+ * overlay *data* logic lives in `strabo-overlays.js`.
+ */
+
+import { TIER_ORDER } from './strabo-core.js';
+import { OVERLAY_CLASSES } from './strabo-graph-classes.js';
+
+/**
+ * Dim everything outside `ids`; pass null to clear.
+ *
+ * An edge is only part of the focus when both ends are: an edge crossing out of the
+ * neighbourhood is the boundary, not the structure being read.
+ */
+export function dimOutside(cy, ids) {
+  const keep = ids ? new Set(ids) : null;
+  cy.batch(() => {
+    cy.elements().removeClass('dimmed');
+    if (keep) {
+      cy.nodes().forEach((node) => {
+        if (!keep.has(node.id())) node.addClass('dimmed');
+      });
+      cy.edges().forEach((edge) => {
+        const inside = keep.has(edge.source().id()) && keep.has(edge.target().id());
+        if (!inside) edge.addClass('dimmed');
+      });
+    }
+  });
+}
+
+/** Annotate nodes from a review analysis. Pass null to clear. */
+export function overlayNodes(cy, classesByNode) {
+  cy.batch(() => {
+    cy.nodes().removeClass(OVERLAY_CLASSES.join(' '));
+    for (const [id, className] of classesByNode ?? []) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.addClass(className);
+    }
+  });
+}
+
+/**
+ * Ring the nodes that take part in a recorded cross-repo interaction. Pass null to clear.
+ *
+ * This is separate from the review overlay because it is driven by the workspace report,
+ * not by a graph analysis, and the two can be on screen at once.
+ */
+export function ringCrossRepo(cy, ids) {
+  cy.batch(() => {
+    cy.nodes().removeClass('ov-cross-repo');
+    for (const id of ids ?? []) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.addClass('ov-cross-repo');
+    }
+  });
+}
+
+/** Hide nodes that do not match; returns the id set that stayed visible (null for all). */
+export function filterNodes(cy, ids) {
+  const keep = ids ? new Set(ids) : null;
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      const visible = !keep || keep.has(node.id());
+      node.toggleClass('filtered-out', !visible);
+    });
+  });
+  return keep;
+}
+
+/**
+ * Colour nodes by tier and optionally hide every other tier.
+ *
+ * `tierByFile` is a file → tier map, or null to clear the lens. A tier of `all` colours
+ * without filtering. `tier-hidden` is separate from the text filter's `filtered-out`, so
+ * the two filters compose instead of clearing each other.
+ */
+export function applyTier(cy, tierByFile, filterTier = 'all') {
+  const enabled = tierByFile instanceof Map;
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      for (const tier of TIER_ORDER) {
+        node.removeClass(`tier-${tier}`);
+      }
+      if (!enabled) {
+        node.removeClass('tier-hidden');
+        continue;
+      }
+      const tier = tierByFile.get(node.id());
+      if (tier) {
+        node.addClass(`tier-${tier}`);
+      }
+      const keep = filterTier === 'all' || tier === filterTier;
+      node.toggleClass('tier-hidden', !keep);
+    }
+  });
+}
+
+/**
+ * Mark the files and edges in a wrong-way dependency. Pass null to clear.
+ *
+ * `byNode` maps a file to its classes and `edges` names the endpoints to mark. Upward
+ * and skip-layer use different classes, so the two differ by border/line shape, not hue.
+ */
+export function applyTierDirections(cy, directions) {
+  const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
+  const edges = Array.isArray(directions?.edges) ? directions.edges : [];
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      node.removeClass('tier-upward');
+      node.removeClass('tier-skip');
+    }
+    for (const edge of cy.edges()) {
+      edge.removeClass('edge-tier-upward');
+      edge.removeClass('edge-tier-skip');
+    }
+    if (!nodes) {
+      return;
+    }
+    for (const [id, classes] of nodes) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) {
+        for (const cls of classes) {
+          node.addClass(cls);
+        }
+      }
+    }
+    for (const direction of edges) {
+      const cls = direction.kind === 'upward' ? 'edge-tier-upward' : 'edge-tier-skip';
+      cy.edges()
+        .filter(
+          (edge) =>
+            edge.data('source') === direction.source && edge.data('target') === direction.target,
+        )
+        .addClass(cls);
+    }
+  });
+}

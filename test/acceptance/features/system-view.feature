@@ -9,7 +9,7 @@ Feature: System view
     And I open the Strabo UI
 
   @units
-  Scenario: The System view draws units and a support shelf
+  Scenario: The System view draws units and their shelf footer
     When I switch to system detail
     Then the System view draws the unit "block-repo"
     And the System view draws a support shelf for "block-repo"
@@ -53,6 +53,18 @@ Feature: System view
     And I open the unit "crates/alpha"
     And I select the file "crates/alpha/src/main.rs"
     Then only the selected file's in-unit edges are drawn
+
+  @single-unit
+  Scenario: A single-unit repository opens at its layers
+    Given I open the single-unit fixture repository
+    When I switch to system detail
+    Then the single unit opens at its layers
+
+  @unit-hover
+  Scenario: A unit hover shows unit facts, not blast radius
+    Given I open the polyglot fixture repository
+    When I switch to system detail
+    Then the unit hover for "crates/alpha" shows unit facts
 
   @outside
   Scenario: Outside links appear only after the action

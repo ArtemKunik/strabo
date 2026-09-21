@@ -99,6 +99,10 @@ function createVirtualList({
 var API_PATH = "/api/strabo";
 var MIN_DIAMETER = 22;
 var MAX_DIAMETER = 62;
+var MIN_UNIT_DIAMETER = 48;
+var MAX_UNIT_DIAMETER = 130;
+var MIN_SHELF_DIAMETER = 26;
+var MAX_SHELF_DIAMETER = 64;
 var SHAPES = {
   module: "round-rectangle",
   test: "diamond",
@@ -108,7 +112,10 @@ var SHAPES = {
   queue: "rectangle",
   table: "barrel",
   entity: "round-tag",
-  schema: "round-diamond"
+  schema: "round-diamond",
+  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
+  unit: "round-rectangle",
+  shelf: "rectangle"
 };
 function hash(value) {
   let result = 0;
@@ -152,6 +159,22 @@ function passportFor(model, id) {
   if (typeof node.periphery === "number" && node.periphery > 0) {
     metrics.push({ label: "Support files", value: node.periphery });
   }
+  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
+  if (card) {
+    metrics.push(
+      { label: "Lines", value: card.loc },
+      { label: "Layers", value: card.layers.length },
+      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
+      { label: "Depends on units", value: card.dependsOn },
+      { label: "Used by units", value: card.usedBy }
+    );
+    if (card.hotspots !== null) {
+      metrics.push({ label: "Hotspots", value: card.hotspots });
+    }
+  }
+  if (node.shelf) {
+    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
+  }
   return {
     id: node.id,
     kind: node.kind,
@@ -190,11 +213,17 @@ function readingLegend(model) {
       "box = unit frame",
       "lane = layer",
       "edge = selected file import",
-      "badge = files in another unit"
+      "badge = files in another unit",
+      "tag = support shelf"
     ];
   }
   if (model?.system) {
-    return ["box = build unit", "size = files", "edge = import between units", "shelf = support files"];
+    return [
+      "box = build unit",
+      "size = files",
+      "edge = import between units",
+      "support = unit footer"
+    ];
   }
   return ["size = dependents", "island = directory", "diamond = test", "star = entry"];
 }
@@ -216,9 +245,63 @@ function shortcutSheet() {
     { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
   ];
 }
+function unitHoverFacts(model, id) {
+  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
+  if (!card) {
+    return null;
+  }
+  return {
+    title: `${card.ecosystem} package \`${card.name}\``,
+    rows: [
+      `${card.files} files`,
+      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
+      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
+      `why: ${card.manifest ?? card.why}`
+    ]
+  };
+}
+function shelfHoverText(shelf) {
+  if (!shelf) {
+    return "support files";
+  }
+  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
+  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
+  return `${tests}, ${scripts}: folded support`;
+}
+function withUnitHotspots(cards, report) {
+  const list = cards ?? [];
+  const byPrefix = list.map((card) => card.id).sort((a, b) => b.length - a.length);
+  const counts = new Map(list.map((card) => [card.id, 0]));
+  for (const spot of report?.hotspots ?? []) {
+    const owner = byPrefix.find(
+      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
+    );
+    if (owner !== void 0) {
+      counts.set(owner, (counts.get(owner) ?? 0) + 1);
+    }
+  }
+  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
+}
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
+function edgeStrokeWidth(weight) {
+  const count = Number.isFinite(weight) && weight > 0 ? weight : 1;
+  return Math.min(4, 1.2 + Math.log2(count) * 0.9);
+}
+function unitDiameter(files) {
+  const scaled = Math.sqrt(Math.max(0, files ?? 0)) * 7 + MIN_UNIT_DIAMETER;
+  return Math.max(MIN_UNIT_DIAMETER, Math.min(MAX_UNIT_DIAMETER, Math.round(scaled)));
+}
+function shelfDiameter(files) {
+  const scaled = Math.sqrt(Math.max(0, files ?? 0)) * 8 + MIN_SHELF_DIAMETER;
+  return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
+}
+function nodeDiameter(node) {
+  if (node?.kind === "unit") return unitDiameter(node.files ?? node.size);
+  if (node?.kind === "shelf") return shelfDiameter(node.files);
+  return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 function buildGraphQuery(state2, options = {}) {
   const params = new URLSearchParams();
@@ -266,9 +349,10 @@ function buildElements(model) {
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
       // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
-      // its component count instead of blast radius.
-      diameter: diameter(node.size ?? node.files ?? node.transitiveDependents),
-      hub: hubs.has(node.id)
+      // its component count instead of blast radius; the hub ring is reserved for files,
+      // so a unit's only outline is selection (L18).
+      diameter: nodeDiameter(node),
+      hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf"
     },
     position: positionOf(positions.get(node.id))
   }));
@@ -281,6 +365,9 @@ function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      // A System-view unit edge rolls up a file count; the stroke widens with it.
+      weight: edge.weight ?? 1,
+      edgeWidth: edgeStrokeWidth(edge.weight),
       evidenceLine: edge.evidence?.line,
       evidenceSpecifier: edge.evidence?.specifier,
       // In a System drill-down, `unit` edges are hidden until their file is selected;
@@ -294,19 +381,19 @@ function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
 }
 function diffElements(previous = [], next = []) {
-  const before = new Map(previous.map((element) => [element.data.id, element]));
+  const before = new Map(previous.map((element2) => [element2.data.id, element2]));
   const added = [];
   const updated = [];
-  for (const element of next) {
-    const id = element.data.id;
+  for (const element2 of next) {
+    const id = element2.data.id;
     const prior = before.get(id);
     if (!prior) {
-      added.push(element);
+      added.push(element2);
       continue;
     }
     before.delete(id);
-    if (elementSignature(prior) !== elementSignature(element)) {
-      updated.push({ before: prior, after: element });
+    if (elementSignature(prior) !== elementSignature(element2)) {
+      updated.push({ before: prior, after: element2 });
     }
   }
   return { added, removed: [...before.keys()], updated };
@@ -317,11 +404,11 @@ function diffGraph(previous = { nodes: [], edges: [] }, next = { nodes: [], edge
     edges: diffElements(previous.edges, next.edges)
   };
 }
-function elementSignature(element) {
+function elementSignature(element2) {
   return JSON.stringify({
-    classes: element.classes ?? "",
-    data: element.data,
-    position: element.position ?? null
+    classes: element2.classes ?? "",
+    data: element2.data,
+    position: element2.position ?? null
   });
 }
 function adjacency(model) {
@@ -455,9 +542,11 @@ var RESOLUTION_LABELS = {
   "subpath-import": "package subpath"
 };
 function graphSummary(model) {
-  const nodes = (model.nodes ?? []).length;
-  const edges = (model.edges ?? []).length;
-  return `${nodes} nodes \xB7 ${edges} edges`;
+  const nodes = (model?.nodes ?? []).length;
+  const edges = (model?.edges ?? []).length;
+  const nodeWord = model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
+  const edgeWord = edges === 1 ? "edge" : "edges";
+  return `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
 }
 
 // ui/strabo-islands.js
@@ -1327,7 +1416,506 @@ function buildAgentPrompt({ agent, repository, target }) {
 \u2026(truncated)` : prompt;
 }
 
-// ui/strabo-view.js
+// ui/strabo-unit-cards.js
+function formatCount(value) {
+  const number = Math.max(0, Math.round(Number(value) || 0));
+  if (number < 1e3) {
+    return String(number);
+  }
+  const thousands = number / 1e3;
+  return `${thousands >= 100 ? Math.round(thousands) : thousands.toFixed(1).replace(/\.0$/, "")}k`;
+}
+function layerBars(layers) {
+  const max = Math.max(1, ...(layers ?? []).map((layer) => layer.files));
+  return (layers ?? []).map((layer) => ({
+    name: layer.name,
+    files: layer.files,
+    ratio: layer.files / max
+  }));
+}
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== void 0) {
+    node.textContent = text;
+  }
+  return node;
+}
+function shelfCategories(shelf) {
+  return [
+    ["test", "tests"],
+    ["script", "scripts"],
+    ["generated", "generated"],
+    ["fixture", "fixtures"]
+  ].filter(([key]) => shelf[key] > 0);
+}
+function unitCardElement(card, options = {}) {
+  const root = element("article", "unit-card");
+  root.dataset.unit = card.id;
+  const head = element("header", "unit-card-head");
+  head.append(element("span", "unit-card-name", card.name));
+  if (card.role) {
+    head.append(element("span", "unit-card-role", card.role));
+  }
+  head.append(element("span", "unit-card-eco", card.ecosystem));
+  root.append(head);
+  if (card.manifest) {
+    root.append(element("div", "unit-card-why", `why: ${card.manifest}`));
+  }
+  const stats = element("div", "unit-card-stats");
+  stats.append(element("span", "unit-stat", `${formatCount(card.files)} files`));
+  stats.append(element("span", "unit-stat", `${formatCount(card.loc)} lines`));
+  const languages = Object.keys(card.languages ?? {}).length;
+  stats.append(element("span", "unit-stat", `${languages} lang${languages === 1 ? "" : "s"}`));
+  root.append(stats);
+  const layers = element("div", "unit-card-layers");
+  for (const bar of layerBars(card.layers)) {
+    const row = element("div", "unit-layer");
+    row.append(element("span", "unit-layer-name", bar.name));
+    const track = element("span", "unit-layer-track");
+    const fill = element("span", "unit-layer-bar");
+    fill.style.width = `${Math.round(bar.ratio * 100)}%`;
+    track.append(fill);
+    row.append(track, element("span", "unit-layer-count", String(bar.files)));
+    layers.append(row);
+  }
+  if (card.layers?.length) {
+    root.append(layers);
+  }
+  const reach = element("div", "unit-card-reach");
+  const hotspots = card.hotspots === null || card.hotspots === void 0 ? "\u2014" : String(card.hotspots);
+  const share = card.testReach?.total ? `${Math.round(card.testReach.reached / card.testReach.total * 100)}%` : "0%";
+  reach.append(
+    element("span", "unit-stat", `hotspots ${hotspots}`),
+    element("span", "unit-stat", `test reach ${share}`)
+  );
+  root.append(reach);
+  if (card.shelf?.total > 0) {
+    const strip = element("button", "unit-shelf");
+    strip.type = "button";
+    const parts = [];
+    if (card.shelf.test) parts.push(`${card.shelf.test} test${card.shelf.test === 1 ? "" : "s"}`);
+    if (card.shelf.script) parts.push(`${card.shelf.script} script${card.shelf.script === 1 ? "" : "s"}`);
+    strip.textContent = `support: ${parts.length ? parts.join(" \xB7 ") : `${card.shelf.total} files`}`;
+    strip.setAttribute("aria-expanded", String(Boolean(options.expanded)));
+    const more = element("div", "unit-shelf-more");
+    more.hidden = !options.expanded;
+    for (const [key, label] of shelfCategories(card.shelf)) {
+      more.append(element("div", "unit-shelf-row", `${card.shelf[key]} ${label}`));
+    }
+    strip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      more.hidden = !more.hidden;
+      strip.setAttribute("aria-expanded", String(!more.hidden));
+    });
+    root.append(strip, more);
+  }
+  return root;
+}
+
+// ui/strabo-island-layer.js
+var SVG_NS = "http://www.w3.org/2000/svg";
+var LABEL_BASELINE_GAP = 6;
+var LABEL_MIN_TOP = 12;
+function createIslandLayer(container) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.classList.add("island-layer");
+  svg.setAttribute("aria-hidden", "true");
+  const plates = document.createElementNS(SVG_NS, "g");
+  const labels = document.createElementNS(SVG_NS, "g");
+  svg.append(plates, labels);
+  container.prepend(svg);
+  const tooltip = document.createElement("div");
+  tooltip.className = "island-tooltip";
+  tooltip.hidden = true;
+  container.appendChild(tooltip);
+  let boxes = [];
+  function hideTooltip2() {
+    if (!tooltip.hidden) {
+      tooltip.hidden = true;
+    }
+  }
+  container.addEventListener("pointermove", (event) => {
+    const bounds = container.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const hit = islandHit(boxes, x, y);
+    if (!hit) {
+      hideTooltip2();
+      return;
+    }
+    tooltip.textContent = islandTooltipText(hit);
+    tooltip.hidden = false;
+    tooltip.style.left = `${x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  });
+  container.addEventListener("pointerleave", hideTooltip2);
+  return {
+    /** Draw `islands` (model coordinates) under the given viewport transform. */
+    paint(islands, viewport) {
+      hideTooltip2();
+      sync(plates, "rect", islands.length);
+      sync(labels, "text", islands.length);
+      boxes = [];
+      islands.forEach((island, index) => {
+        const box = projectIsland(island, viewport);
+        const rect = plates.childNodes[index];
+        rect.setAttribute("x", String(box.x));
+        rect.setAttribute("y", String(box.y));
+        rect.setAttribute("width", String(Math.max(0, box.width)));
+        rect.setAttribute("height", String(Math.max(0, box.height)));
+        rect.setAttribute("class", "island-plate");
+        const label = labels.childNodes[index];
+        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : "";
+        label.setAttribute("class", text ? "island-label" : "island-label is-hidden");
+        label.setAttribute("x", String(box.x + LABEL_INSET));
+        const above = box.y - LABEL_BASELINE_GAP;
+        label.setAttribute("y", String(above >= LABEL_MIN_TOP ? above : box.y + 16));
+        if (label.textContent !== text) {
+          label.textContent = text;
+        }
+        boxes.push({
+          ...box,
+          directory: island.directory,
+          label: island.label,
+          count: island.count,
+          trimmed: text !== island.label
+        });
+      });
+    }
+  };
+}
+function sync(parent, tag, count) {
+  while (parent.childNodes.length > count) {
+    parent.removeChild(parent.lastChild);
+  }
+  while (parent.childNodes.length < count) {
+    parent.appendChild(document.createElementNS(SVG_NS, tag));
+  }
+}
+
+// ui/strabo-theme.js
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function graphTheme() {
+  return {
+    ink: cssVar("--graph-ink"),
+    inkOutline: cssVar("--graph-ink-outline"),
+    nodeFill: cssVar("--node-fill"),
+    nodeLine: cssVar("--node-line"),
+    edge: cssVar("--graph-edge"),
+    edgeAccent: cssVar("--graph-edge-accent"),
+    edgeSelected: cssVar("--graph-edge-selected"),
+    hub: cssVar("--graph-hub"),
+    selected: cssVar("--graph-selected"),
+    changed: cssVar("--graph-changed"),
+    affected: cssVar("--graph-affected"),
+    cycle: cssVar("--graph-cycle"),
+    unreached: cssVar("--graph-unreached"),
+    tier: Object.fromEntries(
+      TIER_ORDER.filter((tier) => tier !== "unclassified").map((tier) => [tier, cssVar(`--tier-${tier}`)])
+    ),
+    tierUnclassified: cssVar("--series-other")
+  };
+}
+
+// ui/strabo-labels.js
+var LABEL_DEVICE_PX = 11;
+var HUB_LABEL_DEVICE_PX = 12;
+function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return devicePx / safeZoom;
+}
+var LABEL_DETAIL_ZOOM = 0.65;
+var labelsVisible = true;
+function setLabelsVisible(cy, visible) {
+  labelsVisible = Boolean(visible);
+  applyLabelBudget(cy, true);
+}
+function rescaleLabels(cy) {
+  const zoom = cy.zoom();
+  const last = cy.scratch("_straboLabelZoom");
+  if (typeof last === "number" && Math.abs(zoom - last) < last * 0.02) {
+    return;
+  }
+  cy.scratch("_straboLabelZoom", zoom);
+  cy.style().update();
+}
+function applyLabelBudget(cy, force = false) {
+  if (!labelsVisible) {
+    if (!force && cy.scratch("_straboLabelHidden") === true) {
+      return;
+    }
+    cy.scratch("_straboLabelHidden", true);
+    cy.batch(() => cy.nodes().addClass("label-hidden"));
+    return;
+  }
+  if (cy.scratch("_straboLabelHidden") === true) {
+    cy.scratch("_straboLabelHidden", false);
+    force = true;
+  }
+  const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
+  if (!force && detailed === cy.scratch("_straboLabelDetail")) {
+    return;
+  }
+  cy.scratch("_straboLabelDetail", detailed);
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      const show = detailed || node.data("hub") || node.selected();
+      node.toggleClass("label-hidden", !show);
+    });
+  });
+}
+
+// ui/strabo-stylesheet.js
+function stylesheet() {
+  const theme = graphTheme();
+  const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
+    selector: `node.kind-${kind}`,
+    style: { shape }
+  }));
+  const tierRules = TIER_ORDER.map((tier) => ({
+    selector: `node.tier-${tier}`,
+    style: {
+      "background-color": tier === "unclassified" ? theme.tierUnclassified : theme.tier[tier]
+    }
+  }));
+  return [
+    {
+      selector: "node",
+      style: {
+        shape: "round-rectangle",
+        // One neutral fill for every node: directory is carried by position (island
+        // plates), and hue on the map is reserved for status. See Phase 13 M1 R3.
+        "background-color": theme.nodeFill,
+        "background-opacity": 1,
+        width: "data(diameter)",
+        height: "data(diameter)",
+        label: "data(label)",
+        // Functions of the live zoom: Cytoscape re-evaluates them on `style().update()`,
+        // which the zoom handler calls. See `LABEL_DEVICE_PX`.
+        "font-size": (ele) => labelFontSize(ele.cy().zoom()),
+        "font-weight": 500,
+        color: theme.ink,
+        "text-valign": "bottom",
+        "text-margin-y": (ele) => 4 / Math.max(1e-4, ele.cy().zoom()),
+        "text-opacity": 1,
+        "text-outline-color": theme.inkOutline,
+        "text-outline-width": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
+        "text-outline-opacity": 0.9,
+        "border-width": 1.5,
+        "border-color": theme.nodeLine,
+        "border-opacity": 1
+      }
+    },
+    ...kindRules,
+    // A System-view unit is a card: a heavier neutral ring reads as a container, and the
+    // selection ring (`node:selected`, below) is the only highlight one takes. Its folded
+    // support shelf is drawn as a muted dashed strip, never a peer box.
+    { selector: "node.kind-unit", style: { "border-width": 2, "border-color": theme.nodeLine, "background-opacity": 1 } },
+    { selector: "node.kind-shelf", style: { "border-width": 1.5, "border-style": "dashed", "border-color": theme.nodeLine, opacity: 0.85 } },
+    // The tier lens colours the fill; the neutral node fill is the default when it is off.
+    ...tierRules,
+    // A unit/shelf draws no canvas label: its card states the name, and the box is left to
+    // the card's header row. Selection is the only outline it earns (L18).
+    { selector: "node.kind-unit, node.kind-shelf", style: { "text-opacity": 0, "border-width": 1.5 } },
+    { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
+    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
+    // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
+    // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
+    // warning ring. The changed/affected pair co-occurs, so its shape differs too.
+    { selector: "node.ov-changed", style: { "border-width": 4, "border-style": "solid", "border-color": theme.changed, "background-opacity": 1 } },
+    { selector: "node.ov-affected", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-cycle", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
+    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
+    { selector: "node.ov-hotspot", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-wide-interface", style: { "border-width": 3, "border-style": "solid", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-pass-through", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
+    { selector: "node.ov-sole-owner", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.cycle, "background-opacity": 1 } },
+    // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
+    // dotted ring that reads as "part of a workspace flow" without entering the status set.
+    { selector: "node.ov-cross-repo", style: { "border-width": 4, "border-style": "dotted", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    // The tier direction check: a wrong-way dependency is a signal, so it rides on the
+    // reserved status scale and differs by shape (double vs dashed), never hue alone.
+    { selector: "node.tier-upward", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
+    { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
+    // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
+    { selector: "node.ov-smell", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.label-hidden", style: { "text-opacity": 0 } },
+    { selector: "node.filtered-out", style: { display: "none" } },
+    { selector: "node.tier-hidden", style: { display: "none" } },
+    { selector: "edge.edge-hidden", style: { display: "none" } },
+    { selector: ".dimmed", style: { opacity: 0.12 } },
+    {
+      selector: "edge",
+      style: {
+        // Straight, not bezier. A bezier is the most expensive edge the renderers
+        // draw: the WebGL path emits a mitre-joined segment strip per edge where a
+        // straight edge is one stretched quad, and the 2D path recomputes control
+        // points on every restyle. The cost buys only the arc that separates a
+        // bidirectional pair, so an import cycle now draws as a single line with a
+        // head at each end rather than two bowed ones.
+        "curve-style": "straight",
+        "target-arrow-shape": "triangle",
+        // A System-view unit edge rolls up a file count, so its stroke carries the weight;
+        // a file edge stays the base hairline. See `edgeStrokeWidth`.
+        width: "data(edgeWidth)",
+        // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the
+        // whole repository was fitted. Non-neighbourhood edges dim on hover (R9).
+        opacity: 1,
+        "line-color": theme.edge,
+        "target-arrow-color": theme.edge,
+        "arrow-scale": 0.9
+      }
+    },
+    { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
+    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
+    { selector: "edge.edge-faded", style: { opacity: 0.1 } },
+    { selector: "edge.dimmed", style: { opacity: 0.05 } },
+    {
+      selector: "edge.edge-selected",
+      style: {
+        width: 2.75,
+        opacity: 1,
+        "line-color": theme.edgeSelected,
+        "target-arrow-color": theme.edgeSelected,
+        "arrow-scale": 1.1,
+        "z-index": 10
+      }
+    },
+    {
+      selector: "edge.hover",
+      style: {
+        width: 2,
+        opacity: 0.9,
+        "line-color": theme.edgeAccent,
+        "target-arrow-color": theme.edgeAccent
+      }
+    }
+  ];
+}
+
+// ui/strabo-renderer-preference.js
+var RENDERER_PREFERENCE_KEY = "strabo:renderer-preference";
+function webglPreferred() {
+  try {
+    return window.localStorage.getItem(RENDERER_PREFERENCE_KEY) === "webgl";
+  } catch {
+    return false;
+  }
+}
+function setWebglPreferred(preferred) {
+  try {
+    if (preferred) {
+      window.localStorage.setItem(RENDERER_PREFERENCE_KEY, "webgl");
+    } else {
+      window.localStorage.removeItem(RENDERER_PREFERENCE_KEY);
+    }
+  } catch {
+  }
+}
+function webglRequested() {
+  try {
+    const param = new URL(window.location.href).searchParams.get("renderer");
+    if (param === "webgl") {
+      setWebglPreferred(true);
+      return true;
+    }
+    if (param === "canvas") {
+      setWebglPreferred(false);
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return webglPreferred();
+}
+var WEBGL_REFUSED = "strabo:webgl-refused";
+function webglRefused() {
+  try {
+    return window.sessionStorage.getItem(WEBGL_REFUSED) === "1";
+  } catch {
+    return false;
+  }
+}
+function reloadWithoutWebGL(error) {
+  console.warn("Strabo: WebGL rendering failed to start; reloading on the 2D canvas renderer.", error);
+  try {
+    window.sessionStorage.setItem(WEBGL_REFUSED, "1");
+  } catch {
+    throw error;
+  }
+  window.location.reload();
+  throw error;
+}
+function paintContainerBackground(container) {
+  container.style.backgroundColor = cssVar("--bg-1");
+}
+function retintBackground(cy, container) {
+  const drawing = cy.renderer()?.drawing;
+  if (!drawing) {
+    return;
+  }
+  paintContainerBackground(container);
+  const tuple = containerColourTuple(container);
+  if (tuple) {
+    drawing.bgColor = tuple;
+  }
+}
+function containerColourTuple(container) {
+  const computed = getComputedStyle(container).backgroundColor;
+  const open = computed.indexOf("(");
+  const close = computed.lastIndexOf(")");
+  if (open < 0 || close < open) {
+    return null;
+  }
+  const channels = computed.slice(open + 1, close).split(",").join(" ").split(" ").filter(Boolean).map(Number);
+  const rgb = channels.slice(0, 3);
+  return rgb.length === 3 && rgb.every(Number.isFinite) ? rgb : null;
+}
+function probeWebGL2() {
+  try {
+    if (!window.WebGL2RenderingContext) {
+      return false;
+    }
+    const gl = document.createElement("canvas").getContext("webgl2");
+    if (!gl) {
+      return false;
+    }
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ui/strabo-cytoscape.js
+var MIN_ZOOM = 0.12;
+var MAX_ZOOM = 2.5;
+function createCytoscape(container) {
+  const options = {
+    container,
+    style: stylesheet(),
+    layout: { name: "preset" },
+    wheelSensitivity: 0.2,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM
+  };
+  if (webglRequested() && !webglRefused() && probeWebGL2()) {
+    paintContainerBackground(container);
+    try {
+      return window.cytoscape({ ...options, renderer: { name: "canvas", webgl: true } });
+    } catch (error) {
+      return reloadWithoutWebGL(error);
+    }
+  }
+  return window.cytoscape(options);
+}
+
+// ui/strabo-graph-classes.js
 var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
@@ -1344,20 +1932,18 @@ var RESET_CLASSES = [
   "edge-tier-upward",
   "edge-tier-skip"
 ];
-var labelsVisible = true;
-var LABEL_DETAIL_ZOOM = 0.65;
-var MIN_ZOOM = 0.12;
-var MAX_ZOOM = 2.5;
-var LABEL_DEVICE_PX = 11;
-var HUB_LABEL_DEVICE_PX = 12;
-function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
-  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
-  return devicePx / safeZoom;
-}
+
+// ui/strabo-view.js
 function createView(container) {
   const islands = createIslandLayer(container);
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
+  const cardLayer = document.createElement("div");
+  cardLayer.className = "unit-card-layer";
+  container.appendChild(cardLayer);
+  const cardElements = /* @__PURE__ */ new Map();
+  const cardSignatures = /* @__PURE__ */ new Map();
+  let lastModel = null;
   let islandModel = null;
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
@@ -1386,6 +1972,51 @@ function createView(container) {
       }
     );
   }
+  function repaintCards() {
+    if (cardElements.size === 0) {
+      return;
+    }
+    for (const [id, card] of cardElements) {
+      const node = cy.getElementById(id);
+      if (node.empty() || !node.visible()) {
+        card.hidden = true;
+        continue;
+      }
+      const position = node.renderedPosition();
+      const radius = (Number(node.data("diameter")) || 48) / 2;
+      card.hidden = false;
+      card.style.left = `${position.x}px`;
+      card.style.top = `${position.y + radius + 8}px`;
+    }
+  }
+  function applyUnitCards(model) {
+    const cards = model?.system && !model.systemUnit ? model.unitCards ?? [] : [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const card of cards) {
+      seen.add(card.id);
+      const signature = JSON.stringify(card);
+      if (cardSignatures.get(card.id) === signature) {
+        continue;
+      }
+      const element2 = unitCardElement(card);
+      const existing = cardElements.get(card.id);
+      if (existing) {
+        existing.replaceWith(element2);
+      } else {
+        cardLayer.append(element2);
+      }
+      cardElements.set(card.id, element2);
+      cardSignatures.set(card.id, signature);
+    }
+    for (const [id, element2] of [...cardElements]) {
+      if (!seen.has(id)) {
+        element2.remove();
+        cardElements.delete(id);
+        cardSignatures.delete(id);
+      }
+    }
+    repaintCards();
+  }
   const selectHandlers = [];
   const drillHandlers = [];
   const hoverHandlers = [];
@@ -1399,6 +2030,7 @@ function createView(container) {
   });
   observer.observe(container);
   cy.on("pan zoom resize", repaintIslands);
+  cy.on("pan zoom resize", repaintCards);
   let labelFrame = 0;
   function scheduleLabelRecompute() {
     if (labelFrame) {
@@ -1487,8 +2119,7 @@ function createView(container) {
     },
     /** Show or hide every node label. Islands draw their own layer and are unaffected. */
     setLabelsVisible(visible) {
-      labelsVisible = Boolean(visible);
-      applyLabelBudget(cy, true);
+      setLabelsVisible(cy, visible);
     },
     render(model) {
       const elements2 = buildElements(model);
@@ -1497,7 +2128,12 @@ function createView(container) {
       selectedEdge = null;
       cy.batch(() => {
         cy.elements().unselect().removeClass(RESET_CLASSES.join(" "));
+        const removedNodes = new Set(diff.nodes.removed);
+        const orphaned = cy.edges().filter(
+          (edge) => removedNodes.has(edge.source().id()) || removedNodes.has(edge.target().id())
+        );
         for (const id of diff.edges.removed) cy.getElementById(id).remove();
+        orphaned.remove();
         for (const id of diff.nodes.removed) cy.getElementById(id).remove();
         cy.add(diff.nodes.added);
         cy.add(diff.edges.added);
@@ -1511,12 +2147,18 @@ function createView(container) {
         }
         for (const { after } of diff.edges.updated) {
           const edge = cy.getElementById(after.data.id);
-          if (edge.nonempty()) edge.data(after.data);
+          if (edge.nonempty()) {
+            edge.data(after.data);
+          } else {
+            cy.add(after);
+          }
         }
       });
       islandModel = model;
+      lastModel = model;
       islandVisible = null;
       repaintIslands();
+      applyUnitCards(model);
       applyEdgeFocus();
       applyLabelBudget(cy, true);
       notifyGroup();
@@ -1648,6 +2290,13 @@ function createView(container) {
         }
       });
     },
+    /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */
+    setUnitCards(cards) {
+      if (lastModel) {
+        lastModel = { ...lastModel, unitCards: cards };
+        applyUnitCards(lastModel);
+      }
+    },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
       const collection = cy.collection(
@@ -1696,196 +2345,6 @@ function createView(container) {
     }
   };
 }
-var SVG_NS = "http://www.w3.org/2000/svg";
-var LABEL_BASELINE_GAP = 6;
-var LABEL_MIN_TOP = 12;
-function createIslandLayer(container) {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.classList.add("island-layer");
-  svg.setAttribute("aria-hidden", "true");
-  const plates = document.createElementNS(SVG_NS, "g");
-  const labels = document.createElementNS(SVG_NS, "g");
-  svg.append(plates, labels);
-  container.prepend(svg);
-  const tooltip = document.createElement("div");
-  tooltip.className = "island-tooltip";
-  tooltip.hidden = true;
-  container.appendChild(tooltip);
-  let boxes = [];
-  function hideTooltip2() {
-    if (!tooltip.hidden) {
-      tooltip.hidden = true;
-    }
-  }
-  container.addEventListener("pointermove", (event) => {
-    const bounds = container.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const y = event.clientY - bounds.top;
-    const hit = islandHit(boxes, x, y);
-    if (!hit) {
-      hideTooltip2();
-      return;
-    }
-    tooltip.textContent = islandTooltipText(hit);
-    tooltip.hidden = false;
-    tooltip.style.left = `${x + 14}px`;
-    tooltip.style.top = `${y + 14}px`;
-  });
-  container.addEventListener("pointerleave", hideTooltip2);
-  return {
-    /** Draw `islands` (model coordinates) under the given viewport transform. */
-    paint(islands, viewport) {
-      hideTooltip2();
-      sync(plates, "rect", islands.length);
-      sync(labels, "text", islands.length);
-      boxes = [];
-      islands.forEach((island, index) => {
-        const box = projectIsland(island, viewport);
-        const rect = plates.childNodes[index];
-        rect.setAttribute("x", String(box.x));
-        rect.setAttribute("y", String(box.y));
-        rect.setAttribute("width", String(Math.max(0, box.width)));
-        rect.setAttribute("height", String(Math.max(0, box.height)));
-        rect.setAttribute("class", "island-plate");
-        const label = labels.childNodes[index];
-        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : "";
-        label.setAttribute("class", text ? "island-label" : "island-label is-hidden");
-        label.setAttribute("x", String(box.x + LABEL_INSET));
-        const above = box.y - LABEL_BASELINE_GAP;
-        label.setAttribute("y", String(above >= LABEL_MIN_TOP ? above : box.y + 16));
-        if (label.textContent !== text) {
-          label.textContent = text;
-        }
-        boxes.push({
-          ...box,
-          directory: island.directory,
-          label: island.label,
-          count: island.count,
-          trimmed: text !== island.label
-        });
-      });
-    }
-  };
-}
-function sync(parent, tag, count) {
-  while (parent.childNodes.length > count) {
-    parent.removeChild(parent.lastChild);
-  }
-  while (parent.childNodes.length < count) {
-    parent.appendChild(document.createElementNS(SVG_NS, tag));
-  }
-}
-function createCytoscape(container) {
-  const options = {
-    container,
-    style: stylesheet(),
-    layout: { name: "preset" },
-    wheelSensitivity: 0.2,
-    minZoom: MIN_ZOOM,
-    maxZoom: MAX_ZOOM
-  };
-  if (webglRequested() && !webglRefused() && probeWebGL2()) {
-    paintContainerBackground(container);
-    try {
-      return window.cytoscape({ ...options, renderer: { name: "canvas", webgl: true } });
-    } catch (error) {
-      return reloadWithoutWebGL(error);
-    }
-  }
-  return window.cytoscape(options);
-}
-var RENDERER_PREFERENCE_KEY = "strabo:renderer-preference";
-function webglPreferred() {
-  try {
-    return window.localStorage.getItem(RENDERER_PREFERENCE_KEY) === "webgl";
-  } catch {
-    return false;
-  }
-}
-function setWebglPreferred(preferred) {
-  try {
-    if (preferred) {
-      window.localStorage.setItem(RENDERER_PREFERENCE_KEY, "webgl");
-    } else {
-      window.localStorage.removeItem(RENDERER_PREFERENCE_KEY);
-    }
-  } catch {
-  }
-}
-function webglRequested() {
-  try {
-    const param = new URL(window.location.href).searchParams.get("renderer");
-    if (param === "webgl") {
-      setWebglPreferred(true);
-      return true;
-    }
-    if (param === "canvas") {
-      setWebglPreferred(false);
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  return webglPreferred();
-}
-var WEBGL_REFUSED = "strabo:webgl-refused";
-function webglRefused() {
-  try {
-    return window.sessionStorage.getItem(WEBGL_REFUSED) === "1";
-  } catch {
-    return false;
-  }
-}
-function reloadWithoutWebGL(error) {
-  console.warn("Strabo: WebGL rendering failed to start; reloading on the 2D canvas renderer.", error);
-  try {
-    window.sessionStorage.setItem(WEBGL_REFUSED, "1");
-  } catch {
-    throw error;
-  }
-  window.location.reload();
-  throw error;
-}
-function paintContainerBackground(container) {
-  container.style.backgroundColor = cssVar("--bg-1");
-}
-function retintBackground(cy, container) {
-  const drawing = cy.renderer()?.drawing;
-  if (!drawing) {
-    return;
-  }
-  paintContainerBackground(container);
-  const tuple = containerColourTuple(container);
-  if (tuple) {
-    drawing.bgColor = tuple;
-  }
-}
-function containerColourTuple(container) {
-  const computed = getComputedStyle(container).backgroundColor;
-  const open = computed.indexOf("(");
-  const close = computed.lastIndexOf(")");
-  if (open < 0 || close < open) {
-    return null;
-  }
-  const channels = computed.slice(open + 1, close).split(",").join(" ").split(" ").filter(Boolean).map(Number);
-  const rgb = channels.slice(0, 3);
-  return rgb.length === 3 && rgb.every(Number.isFinite) ? rgb : null;
-}
-function probeWebGL2() {
-  try {
-    if (!window.WebGL2RenderingContext) {
-      return false;
-    }
-    const gl = document.createElement("canvas").getContext("webgl2");
-    if (!gl) {
-      return false;
-    }
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
-  } catch {
-    return false;
-  }
-}
 function fadeEdgesAround(cy, node) {
   cy.batch(() => {
     cy.edges().removeClass("edge-faded");
@@ -1897,180 +2356,6 @@ function fadeEdgesAround(cy, node) {
       if (!incident) edge.addClass("edge-faded");
     });
   });
-}
-function rescaleLabels(cy) {
-  const zoom = cy.zoom();
-  const last = cy.scratch("_straboLabelZoom");
-  if (typeof last === "number" && Math.abs(zoom - last) < last * 0.02) {
-    return;
-  }
-  cy.scratch("_straboLabelZoom", zoom);
-  cy.style().update();
-}
-function applyLabelBudget(cy, force = false) {
-  if (!labelsVisible) {
-    if (!force && cy.scratch("_straboLabelHidden") === true) {
-      return;
-    }
-    cy.scratch("_straboLabelHidden", true);
-    cy.batch(() => cy.nodes().addClass("label-hidden"));
-    return;
-  }
-  if (cy.scratch("_straboLabelHidden") === true) {
-    cy.scratch("_straboLabelHidden", false);
-    force = true;
-  }
-  const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
-  if (!force && detailed === cy.scratch("_straboLabelDetail")) {
-    return;
-  }
-  cy.scratch("_straboLabelDetail", detailed);
-  cy.batch(() => {
-    cy.nodes().forEach((node) => {
-      const show = detailed || node.data("hub") || node.selected();
-      node.toggleClass("label-hidden", !show);
-    });
-  });
-}
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-function graphTheme() {
-  return {
-    ink: cssVar("--graph-ink"),
-    inkOutline: cssVar("--graph-ink-outline"),
-    nodeFill: cssVar("--node-fill"),
-    nodeLine: cssVar("--node-line"),
-    edge: cssVar("--graph-edge"),
-    edgeAccent: cssVar("--graph-edge-accent"),
-    edgeSelected: cssVar("--graph-edge-selected"),
-    hub: cssVar("--graph-hub"),
-    selected: cssVar("--graph-selected"),
-    changed: cssVar("--graph-changed"),
-    affected: cssVar("--graph-affected"),
-    cycle: cssVar("--graph-cycle"),
-    unreached: cssVar("--graph-unreached"),
-    tier: Object.fromEntries(
-      TIER_ORDER.filter((tier) => tier !== "unclassified").map((tier) => [tier, cssVar(`--tier-${tier}`)])
-    ),
-    tierUnclassified: cssVar("--series-other")
-  };
-}
-function stylesheet() {
-  const theme = graphTheme();
-  const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
-    selector: `node.kind-${kind}`,
-    style: { shape }
-  }));
-  const tierRules = TIER_ORDER.map((tier) => ({
-    selector: `node.tier-${tier}`,
-    style: {
-      "background-color": tier === "unclassified" ? theme.tierUnclassified : theme.tier[tier]
-    }
-  }));
-  return [
-    {
-      selector: "node",
-      style: {
-        shape: "round-rectangle",
-        // One neutral fill for every node: directory is carried by position (island
-        // plates), and hue on the map is reserved for status. See Phase 13 M1 R3.
-        "background-color": theme.nodeFill,
-        "background-opacity": 1,
-        width: "data(diameter)",
-        height: "data(diameter)",
-        label: "data(label)",
-        // Functions of the live zoom: Cytoscape re-evaluates them on `style().update()`,
-        // which the zoom handler calls. See `LABEL_DEVICE_PX`.
-        "font-size": (ele) => labelFontSize(ele.cy().zoom()),
-        "font-weight": 500,
-        color: theme.ink,
-        "text-valign": "bottom",
-        "text-margin-y": (ele) => 4 / Math.max(1e-4, ele.cy().zoom()),
-        "text-opacity": 1,
-        "text-outline-color": theme.inkOutline,
-        "text-outline-width": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
-        "text-outline-opacity": 0.9,
-        "border-width": 1.5,
-        "border-color": theme.nodeLine,
-        "border-opacity": 1
-      }
-    },
-    ...kindRules,
-    // The tier lens colours the fill; the neutral node fill is the default when it is off.
-    ...tierRules,
-    { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
-    { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
-    // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
-    // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
-    // warning ring. The changed/affected pair co-occurs, so its shape differs too.
-    { selector: "node.ov-changed", style: { "border-width": 4, "border-style": "solid", "border-color": theme.changed, "background-opacity": 1 } },
-    { selector: "node.ov-affected", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
-    { selector: "node.ov-cycle", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
-    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
-    { selector: "node.ov-hotspot", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
-    { selector: "node.ov-wide-interface", style: { "border-width": 3, "border-style": "solid", "border-color": theme.affected, "background-opacity": 1 } },
-    { selector: "node.ov-pass-through", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
-    { selector: "node.ov-sole-owner", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.cycle, "background-opacity": 1 } },
-    // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
-    // dotted ring that reads as "part of a workspace flow" without entering the status set.
-    { selector: "node.ov-cross-repo", style: { "border-width": 4, "border-style": "dotted", "border-color": theme.edgeAccent, "background-opacity": 1 } },
-    // The tier direction check: a wrong-way dependency is a signal, so it rides on the
-    // reserved status scale and differs by shape (double vs dashed), never hue alone.
-    { selector: "node.tier-upward", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
-    { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
-    // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
-    { selector: "node.ov-smell", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
-    { selector: "node.label-hidden", style: { "text-opacity": 0 } },
-    { selector: "node.filtered-out", style: { display: "none" } },
-    { selector: "node.tier-hidden", style: { display: "none" } },
-    { selector: "edge.edge-hidden", style: { display: "none" } },
-    { selector: ".dimmed", style: { opacity: 0.12 } },
-    {
-      selector: "edge",
-      style: {
-        // Straight, not bezier. A bezier is the most expensive edge the renderers
-        // draw: the WebGL path emits a mitre-joined segment strip per edge where a
-        // straight edge is one stretched quad, and the 2D path recomputes control
-        // points on every restyle. The cost buys only the arc that separates a
-        // bidirectional pair, so an import cycle now draws as a single line with a
-        // head at each end rather than two bowed ones.
-        "curve-style": "straight",
-        "target-arrow-shape": "triangle",
-        width: 1.2,
-        // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the
-        // whole repository was fitted. Non-neighbourhood edges dim on hover (R9).
-        opacity: 1,
-        "line-color": theme.edge,
-        "target-arrow-color": theme.edge,
-        "arrow-scale": 0.9
-      }
-    },
-    { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
-    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
-    { selector: "edge.edge-faded", style: { opacity: 0.1 } },
-    { selector: "edge.dimmed", style: { opacity: 0.05 } },
-    {
-      selector: "edge.edge-selected",
-      style: {
-        width: 2.75,
-        opacity: 1,
-        "line-color": theme.edgeSelected,
-        "target-arrow-color": theme.edgeSelected,
-        "arrow-scale": 1.1,
-        "z-index": 10
-      }
-    },
-    {
-      selector: "edge.hover",
-      style: {
-        width: 2,
-        opacity: 0.9,
-        "line-color": theme.edgeAccent,
-        "target-arrow-color": theme.edgeAccent
-      }
-    }
-  ];
 }
 
 // ui/strabo-delegate.js
@@ -2305,8 +2590,8 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     chip.classList.add("is-flash");
   };
   for (const config of panels) {
-    const element = config.element;
-    if (!element) continue;
+    const element2 = config.element;
+    if (!element2) continue;
     const saved = store2[config.key] ?? {};
     let size = sanitizeSize(saved.size);
     const width = size.width ?? config.width ?? DEFAULT_WIDTH;
@@ -2351,8 +2636,8 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     resizeHandle.title = "Drag to resize";
     header.append(grip, title, spacer, collapseButton, closeButton);
     win.append(header, body, resizeHandle);
-    element.parentNode.insertBefore(win, element);
-    body.append(element);
+    element2.parentNode.insertBefore(win, element2);
+    body.append(element2);
     const fallbackHeight = config.height ?? 260;
     let hasPosition = false;
     const place = (x, y) => {
@@ -2415,10 +2700,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       win.style.zIndex = String(topZ);
     };
     const sync2 = () => {
-      const hidden = element.hidden === true;
+      const hidden = element2.hidden === true;
       win.hidden = hidden;
       if (!hidden && config.titleFrom) {
-        const heading = config.titleFrom(element);
+        const heading = config.titleFrom(element2);
         if (heading) {
           title.textContent = heading;
         }
@@ -2434,7 +2719,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         }
       }
     };
-    new MutationObserver(sync2).observe(element, {
+    new MutationObserver(sync2).observe(element2, {
       attributes: true,
       attributeFilter: ["hidden"],
       childList: true,
@@ -2444,7 +2729,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     const controller = {
       key: config.key,
       window: win,
-      element,
+      element: element2,
       isOpen: () => !win.hidden,
       isCollapsed,
       open() {
@@ -2453,7 +2738,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
           return false;
         }
         config.onOpen?.();
-        element.hidden = false;
+        element2.hidden = false;
         win.hidden = false;
         if (!hasPosition) {
           placeInRail();
@@ -2467,7 +2752,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       close() {
         const hadFocus = win.contains(document.activeElement);
         if (config.onClose) config.onClose();
-        else element.hidden = true;
+        else element2.hidden = true;
         win.hidden = true;
         lastHidden = true;
         renderDock();
@@ -2603,7 +2888,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     win.addEventListener("pointerdown", raise, true);
     win.addEventListener("contextmenu", raise, true);
-    if (!hasPosition && element.hidden !== true) {
+    if (!hasPosition && element2.hidden !== true) {
       placeInRail();
     }
     controllers.push(controller);
@@ -4332,7 +4617,7 @@ var LEGEND_SWATCHES = {
   "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "shelf = support files": "linear-gradient(135deg,var(--wash),var(--node-fill))"
+  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))"
 };
 function renderLegend(container, model) {
   container.replaceChildren();
@@ -4359,7 +4644,7 @@ function renderLegend(container, model) {
     item.className = "legend-item";
     const glyph = document.createElement("span");
     glyph.className = "legend-shape";
-    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : "\u25A3";
+    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : kind === "unit" ? "\u25A4" : kind === "shelf" ? "\u25A5" : "\u25A3";
     item.append(glyph);
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
     container.append(item);
@@ -5387,39 +5672,39 @@ function matches(name, needle) {
 }
 function buildFieldCard(field2, clusterIndex, related) {
   const card = fieldCard(field2);
-  const element = document.createElement("article");
-  element.className = "member-card field-card";
-  element.dataset.member = field2.name;
-  element.dataset.cluster = String(clusterIndex ?? 0);
-  element.dataset.related = related ? [...related].join(" ") : "";
-  element.setAttribute("role", "group");
-  element.setAttribute("aria-label", card.signature);
-  element.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element.append(cardLine("card-signature", card.signature));
+  const element2 = document.createElement("article");
+  element2.className = "member-card field-card";
+  element2.dataset.member = field2.name;
+  element2.dataset.cluster = String(clusterIndex ?? 0);
+  element2.dataset.related = related ? [...related].join(" ") : "";
+  element2.setAttribute("role", "group");
+  element2.setAttribute("aria-label", card.signature);
+  element2.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element2.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element2.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag !== "unconnected") tag.classList.add("is-wired");
-  element.append(tag);
-  element.append(cardLine("card-metrics", card.metrics));
-  return element;
+  element2.append(tag);
+  element2.append(cardLine("card-metrics", card.metrics));
+  return element2;
 }
 function buildMethodCard(method, clusterIndex, related) {
   const card = methodCard(method);
-  const element = document.createElement("article");
-  element.className = "member-card method-card";
-  element.dataset.member = method.name;
-  element.dataset.cluster = String(clusterIndex ?? 0);
-  element.dataset.related = related ? [...related].join(" ") : "";
-  element.setAttribute("role", "group");
-  element.setAttribute("aria-label", card.signature);
-  element.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element.append(cardLine("card-signature", card.signature));
+  const element2 = document.createElement("article");
+  element2.className = "member-card method-card";
+  element2.dataset.member = method.name;
+  element2.dataset.cluster = String(clusterIndex ?? 0);
+  element2.dataset.related = related ? [...related].join(" ") : "";
+  element2.setAttribute("role", "group");
+  element2.setAttribute("aria-label", card.signature);
+  element2.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element2.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element2.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag === "wired") tag.classList.add("is-wired");
-  element.append(tag);
-  element.append(cardLine("card-metrics", card.metrics));
-  return element;
+  element2.append(tag);
+  element2.append(cardLine("card-metrics", card.metrics));
+  return element2;
 }
 function cardLine(className, text) {
   const span = document.createElement("span");
@@ -5778,11 +6063,11 @@ function buildConstellation(memberMap, consumerIds) {
   return section2;
 }
 function svgElement(name, attributes) {
-  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  const element2 = document.createElementNS("http://www.w3.org/2000/svg", name);
   for (const [key, value] of Object.entries(attributes)) {
-    element.setAttribute(key, value);
+    element2.setAttribute(key, value);
   }
-  return element;
+  return element2;
 }
 
 // ui/strabo-tier-panel.js
@@ -6055,11 +6340,11 @@ function button(text, onClick) {
   return control;
 }
 function lockedNote(envVar, what) {
-  const element = document.createElement("span");
-  element.className = "setting-locked";
-  element.textContent = `set by ${envVar}`;
-  element.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
-  return element;
+  const element2 = document.createElement("span");
+  element2.className = "setting-locked";
+  element2.textContent = `set by ${envVar}`;
+  element2.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
+  return element2;
 }
 function narratorSection(handlers = {}) {
   const group = section("Narrator");
@@ -6500,7 +6785,9 @@ var store = createStore({
     /** Whether the selected file's cross-unit links are drawn (L17). */
     showOutside: false,
     /** Target units whose count badge is expanded in place. */
-    expandedUnits: []
+    expandedUnits: [],
+    /** Set once a single-unit repository has auto-opened, so L0 is not re-entered (L19). */
+    systemAutoOpened: false
   },
   member: {
     order: "source",
@@ -6618,6 +6905,7 @@ var elements = {
   inspector: document.getElementById("inspector"),
   strip: document.getElementById("strip"),
   hover: document.getElementById("hover"),
+  systemNote: document.getElementById("system-note"),
   tooltip: document.getElementById("tooltip"),
   graphEmpty: document.getElementById("graph-empty"),
   graphEmptyClear: document.getElementById("graph-empty-clear"),
@@ -6719,6 +7007,11 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     current = model;
+    if (state.mode === "system" && !model.systemUnit && model.systemSingleUnit && !state.systemAutoOpened) {
+      state.systemAutoOpened = true;
+      openUnit(model.systemSingleUnit);
+      return;
+    }
     const restoreFile = state.mode === "system" ? state.unitFile : null;
     selected = null;
     selectedEdgeId = null;
@@ -6757,6 +7050,7 @@ async function scan({ refresh = false } = {}) {
     updateStatusbar(model);
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
+    updateSystemNote(model);
     view.resize();
     fit(view.cy);
     if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
@@ -6771,6 +7065,9 @@ async function scan({ refresh = false } = {}) {
       await applyOverlay(generation);
     } else if (state.tier === "off") {
       renderOverlayPanel(elements.overlayPanel, "", null);
+    }
+    if (state.mode === "system" && !model.systemUnit && (model.unitCards?.length ?? 0) > 0) {
+      enrichUnitCards(generation);
     }
     refreshDock();
   } catch (error) {
@@ -7648,6 +7945,23 @@ async function applyOverlay(generation) {
   });
   refreshDock();
 }
+var unitHotspotCache = null;
+async function enrichUnitCards(generation) {
+  const repository = current?.repository?.root ?? null;
+  if (!current?.unitCards?.length || unitHotspotCache?.repository === repository) {
+    return;
+  }
+  try {
+    const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
+    const report = await request(`/analysis/functions${query}`);
+    if (generation !== scanGeneration || current?.repository?.root !== repository) {
+      return;
+    }
+    unitHotspotCache = { repository, report };
+    view.setUnitCards(withUnitHotspots(current.unitCards, report));
+  } catch {
+  }
+}
 async function loadFolder(path) {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   const result = await request(`/browse${query}`);
@@ -7750,6 +8064,16 @@ function toggleExpandedUnit(id) {
   state.expandedUnits = [...set].sort();
   scan();
 }
+function updateSystemNote(model) {
+  if (!elements.systemNote) {
+    return;
+  }
+  const single = Boolean(model?.system && model.systemUnit && model.systemSingleUnit === model.systemUnit);
+  elements.systemNote.hidden = !single;
+  if (single) {
+    elements.systemNote.textContent = "1 build unit: showing its layers";
+  }
+}
 function updateOutsideButton() {
   if (!elements.tbOutside) {
     return;
@@ -7818,6 +8142,7 @@ elements.forget.addEventListener("click", () => {
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
   state.prefix = "";
+  state.systemAutoOpened = false;
   if (state.mode !== "system") {
     state.systemUnit = null;
     state.systemUnitLabel = null;
@@ -7915,20 +8240,29 @@ function showTooltip(id, clientX, clientY) {
   const node = current.nodes.find((candidate) => candidate.id === id);
   if (!node) return;
   elements.tooltip.replaceChildren();
+  const kind = node.kind ?? "";
+  const unit = kind === "unit" ? unitHoverFacts(current, id) : null;
   const title = document.createElement("div");
   title.className = "tt-title";
-  title.textContent = node.label ?? id;
+  title.textContent = unit ? unit.title : node.label ?? id;
   elements.tooltip.append(title);
-  const row = document.createElement("div");
-  row.className = "tt-row";
-  const kind = document.createElement("span");
-  kind.className = "tt-kind";
-  kind.textContent = node.kind ?? "";
-  row.append(kind);
-  const blast = document.createElement("span");
-  blast.textContent = node.systemUnit && !id.endsWith("#support") ? `blast ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 id ${id}` : `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`;
-  row.append(blast);
-  elements.tooltip.append(row);
+  const rows = unit ? unit.rows : node.shelf ? [shelfHoverText(node.shelf)] : [
+    node.systemUnit && !id.endsWith("#support") ? `blast ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 id ${id}` : `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`
+  ];
+  rows.forEach((text, index) => {
+    const row = document.createElement("div");
+    row.className = "tt-row";
+    if (index === 0 && !unit && !node.shelf) {
+      const chip = document.createElement("span");
+      chip.className = "tt-kind";
+      chip.textContent = kind;
+      row.append(chip);
+    }
+    const value = document.createElement("span");
+    value.textContent = text;
+    row.append(value);
+    elements.tooltip.append(row);
+  });
   elements.tooltip.hidden = false;
   const wrap = elements.tooltip.parentElement.getBoundingClientRect();
   elements.tooltip.style.left = `${Math.min(clientX - wrap.left + 14, wrap.width - 310)}px`;
@@ -7944,8 +8278,15 @@ view.onHover((id, event) => {
     return;
   }
   const node = current?.nodes.find((candidate) => candidate.id === id);
+  const unit = node?.kind === "unit" ? unitHoverFacts(current, id) : null;
   const insideUnit = node?.systemUnit && !id.endsWith("#support");
-  elements.hover.textContent = insideUnit ? `${id} \xB7 blast radius ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 ${node.kind ?? ""}` : `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
+  if (unit) {
+    elements.hover.textContent = `${unit.title} \xB7 ${unit.rows.join(" \xB7 ")}`;
+  } else if (node?.shelf) {
+    elements.hover.textContent = `${id} \xB7 ${shelfHoverText(node.shelf)}`;
+  } else {
+    elements.hover.textContent = insideUnit ? `${id} \xB7 blast radius ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 ${node.kind ?? ""}` : `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
+  }
   if (event?.clientX !== void 0) showTooltip(id, event.clientX, event.clientY);
 });
 elements.tbFocus.addEventListener("click", () => {

@@ -262,14 +262,15 @@ test('buildSystemViewModel rolls units into the graph model the map draws', () =
     [],
   );
   assert.equal(model.positions.length, model.nodes.length);
-  // L14: L0 draws units only — every node is a unit or its support shelf, never a file.
+  // L14/L18: L0 draws units only — every node is a build unit, never a file or a shelf peer.
   assert.ok(
-    model.nodes.every((node) => node.id === 'pkg' || node.id.endsWith('#support') || !node.id.includes('/')),
+    model.nodes.every((node) => node.id === 'pkg' || !node.id.includes('/')),
     `unexpected file node at L0: ${model.nodes.map((node) => node.id).join(', ')}`,
   );
+  assert.ok(model.nodes.every((node) => node.kind === 'unit'));
 });
 
-test('buildSystemViewModel folds support files into one shelf node', () => {
+test('buildSystemViewModel folds support files into the unit card shelf', () => {
   const root = tempDir();
   write(root, 'pkg/package.json', '{ "name": "widgets" }\n');
   const graph = graphOf(
@@ -281,14 +282,85 @@ test('buildSystemViewModel folds support files into one shelf node', () => {
     report,
     { name: 'widgets', root, head: null, dirty: false, gitUrl: null },
     { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+    graph,
   );
 
-  const shelf = model.nodes.find((node) => node.id === 'pkg#support');
-  assert.equal(shelf?.files, 1);
-  assert.match(shelf?.why ?? '', /shelf/);
-  const edge = model.edges.find((candidate) => candidate.target === 'pkg#support');
-  assert.equal(edge?.source, 'pkg');
-  assert.equal((edge as { role?: string })?.role, 'declare');
+  // L21: the shelf is a footer on the unit card, not a peer node with its own edge.
+  assert.equal(model.nodes.some((node) => node.id === 'pkg#support'), false);
+  assert.equal(model.edges.length, 0);
+  const card = model.unitCards?.find((entry) => entry.id === 'pkg');
+  assert.equal(card?.shelf.total, 1);
+  assert.equal(card?.shelf.test, 1);
+  assert.equal(card?.files, 1);
+  // L18: a unit is its own kind, sized by file count, never a file node.
+  assert.equal(model.nodes.find((node) => node.id === 'pkg')?.kind, 'unit');
+});
+
+test('buildSystemViewModel marks a single unit and fills its card facts (L19, L22)', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "solo" }\n');
+  const graph: Graph = {
+    nodes: [
+      { id: 'src/a.ts', kind: 'module', directory: 'src', language: 'typescript', lines: 120 },
+      { id: 'src/b.ts', kind: 'module', directory: 'src', language: 'typescript', lines: 30 },
+      { id: 'src/a.test.ts', kind: 'test', directory: 'src', language: 'typescript', lines: 10 },
+    ],
+    edges: [
+      { source: 'src/a.test.ts', target: 'src/a.ts', kind: 'import', evidence: { line: 1, specifier: 'a', resolution: 'exact' } },
+      { source: 'src/b.ts', target: 'src/a.ts', kind: 'import', evidence: { line: 1, specifier: 'a', resolution: 'exact' } },
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+  const report = buildSystemReport(root, 'solo', graph);
+  const model = buildSystemViewModel(
+    report,
+    { name: 'solo', root, head: null, dirty: false, gitUrl: null },
+    { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+    graph,
+  );
+
+  // L19: one unit lets the browser open it straight at L1.
+  assert.equal(model.systemSingleUnit, '.');
+  assert.ok(model.nodes.every((node) => node.kind === 'unit'));
+  assert.deepEqual(model.hubs, []);
+  const card = model.unitCards?.find((entry) => entry.id === '.');
+  assert.equal(card?.files, 2);
+  assert.equal(card?.loc, 150);
+  assert.deepEqual(card?.languages, { typescript: 2 });
+  assert.equal(card?.testReach.reached, 1);
+  assert.equal(card?.testReach.total, 2);
+  assert.equal(card?.shelf.test, 1);
+  // Hotspots need the function analysis, so the server leaves them for the browser.
+  assert.equal(card?.hotspots, null);
+  assert.ok((card?.layers.length ?? 0) >= 1);
+});
+
+test('buildSystemViewModel keeps the L0 map for an unmanifested single unit', () => {
+  const root = tempDir();
+  const graph = graphOf(['src/a.ts', 'src/b.ts'], [['src/b.ts', 'src/a.ts']]);
+  const report = buildSystemReport(root, 'plain', graph);
+  const model = buildSystemViewModel(
+    report,
+    { name: 'plain', root, head: null, dirty: false, gitUrl: null },
+    { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+    graph,
+  );
+  // A fallback root unit is not a build unit an operator recognises, so no auto-open.
+  assert.equal(report.units.length, 1);
+  assert.equal(model.systemSingleUnit, undefined);
+});
+
+test('buildSystemViewModel leaves a multi-unit repository at L0', () => {
+  const root = tempDir();
+  const graph = twoCrateFixture(root);
+  const report = buildSystemReport(root, 'ledger', graph);
+  const model = buildSystemViewModel(report, unitDescriptor(root), unitCache, graph);
+  assert.equal(model.systemSingleUnit, undefined);
+  assert.equal(model.unitCards?.length, report.units.length);
+  // The rolled-up import count travels as the edge weight, for the stroke.
+  assert.equal(model.edges.length, 1);
+  assert.equal(model.edges[0].weight, 1);
 });
 
 /** Two crates: api imports a file in core, which is the one cross-unit edge. */
@@ -334,9 +406,10 @@ test('buildSystemUnitViewModel opens a unit with its files and collapses the res
   // The open unit's files are drawn...
   assert.ok(model.nodes.some((node) => node.id === 'crates/api/src/http/routes.rs'));
   assert.ok(model.nodes.some((node) => node.id === 'crates/api/src/service/ledger.rs'));
-  // ...the other units are collapsed boxes...
+  // ...the other units are collapsed boxes, still their own kind (L18)...
   const core = model.nodes.find((node) => node.id === 'crates/core');
   assert.equal(core?.collapsed, true);
+  assert.equal(core?.kind, 'unit');
   assert.equal(core?.label, 'ledger-core');
   // ...and the layers travel with the model.
   assert.deepEqual(

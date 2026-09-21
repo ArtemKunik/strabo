@@ -1394,6 +1394,34 @@ button.primary {
   overflow: visible;
 }
 
+/*
+ * The Overlay window is the exception: its virtual list is the scroll container (that is how it
+ * virtualizes), so the list fills the body instead and the body never scrolls. The window's own
+ * max-height keeps the list within the viewport, whether the window is content-sized or resized.
+ */
+.float-window[data-panel='overlay'] .float-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.float-window[data-panel='overlay'] .overlay-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.float-window[data-panel='overlay'] .overlay-panel > :not(.overlay-list) {
+  flex: none;
+}
+
+.float-window[data-panel='overlay'] .overlay-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
 .float-body .timeline-panel {
   padding: 10px 14px;
 }
@@ -3092,4 +3120,143 @@ table.change-metrics td:first-child .link {
 
 .setting-status.is-error {
   color: var(--status-critical);
+}
+/* System-view unit cards (roadmap L21, L22). The card is DOM, anchored under its node,
+   so it carries the facts a canvas box cannot and never defines a colour of its own. */
+.unit-card-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.unit-card {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 210px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+.unit-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.unit-card-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-card-role {
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.unit-card-eco {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.unit-card-why,
+.unit-card-stats,
+.unit-card-reach {
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+.unit-card-why {
+  color: var(--ink-3);
+}
+
+.unit-card-stats,
+.unit-card-reach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unit-card-layers {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.unit-layer {
+  display: grid;
+  grid-template-columns: 56px 1fr 24px;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+
+.unit-layer-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--line-soft);
+}
+
+.unit-layer-bar {
+  display: block;
+  height: 100%;
+  background: var(--node-fill);
+}
+
+.unit-layer-count {
+  text-align: right;
+}
+
+.unit-shelf {
+  width: 100%;
+  margin-top: 6px;
+  padding: 3px 6px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.unit-shelf:hover {
+  color: var(--ink-1);
+}
+
+.unit-shelf-more {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  color: var(--ink-3);
+}
+
+/* The L19 note: a one-unit repository skips the L0 unit map and says so. */
+.system-note {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--veiled-surface);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
 }

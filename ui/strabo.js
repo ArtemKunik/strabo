@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, tierOfFile } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -87,6 +87,8 @@ const store = createStore({
     showOutside: false,
     /** Target units whose count badge is expanded in place. */
     expandedUnits: [],
+    /** Set once a single-unit repository has auto-opened, so L0 is not re-entered (L19). */
+    systemAutoOpened: false,
   },
   member: {
     order: 'source',
@@ -230,6 +232,7 @@ const elements = {
   inspector: document.getElementById('inspector'),
   strip: document.getElementById('strip'),
   hover: document.getElementById('hover'),
+  systemNote: document.getElementById('system-note'),
   tooltip: document.getElementById('tooltip'),
   graphEmpty: document.getElementById('graph-empty'),
   graphEmptyClear: document.getElementById('graph-empty-clear'),
@@ -347,6 +350,18 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     current = model;
+    // L19: with one build unit there is no L0 worth drawing, so open it at its layers. The
+    // flag keeps a later Escape from bouncing straight back into the unit.
+    if (
+      state.mode === 'system' &&
+      !model.systemUnit &&
+      model.systemSingleUnit &&
+      !state.systemAutoOpened
+    ) {
+      state.systemAutoOpened = true;
+      openUnit(model.systemSingleUnit);
+      return;
+    }
     const restoreFile = state.mode === 'system' ? state.unitFile : null;
     selected = null;
     selectedEdgeId = null;
@@ -386,6 +401,7 @@ async function scan({ refresh = false } = {}) {
     updateStatusbar(model);
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
+    updateSystemNote(model);
     view.resize();
     fit(view.cy);
     if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
@@ -401,6 +417,9 @@ async function scan({ refresh = false } = {}) {
       await applyOverlay(generation);
     } else if (state.tier === 'off') {
       renderOverlayPanel(elements.overlayPanel, '', null);
+    }
+    if (state.mode === 'system' && !model.systemUnit && (model.unitCards?.length ?? 0) > 0) {
+      enrichUnitCards(generation);
     }
     refreshDock();
   } catch (error) {
@@ -1475,6 +1494,32 @@ async function applyOverlay(generation) {
   refreshDock();
 }
 
+/**
+ * Fill the unit cards' hotspot counts from the function hotspot report (L22).
+ *
+ * Hotspots need symbol extraction, so the server leaves them null on the graph model; this
+ * joins the same report the hotspot overlay uses, once per repository, and refreshes the
+ * cards only if the view has not moved on.
+ */
+let unitHotspotCache = null;
+async function enrichUnitCards(generation) {
+  const repository = current?.repository?.root ?? null;
+  if (!current?.unitCards?.length || unitHotspotCache?.repository === repository) {
+    return;
+  }
+  try {
+    const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+    const report = await request(`/analysis/functions${query}`);
+    if (generation !== scanGeneration || current?.repository?.root !== repository) {
+      return;
+    }
+    unitHotspotCache = { repository, report };
+    view.setUnitCards(withUnitHotspots(current.unitCards, report));
+  } catch {
+    // The card keeps `hotspots —`; a missing analysis must not fail the map.
+  }
+}
+
 /** Folder selection is a server-side browse bounded by the configured scan ceiling. */
 async function loadFolder(path) {
   const query = path ? `?path=${encodeURIComponent(path)}` : '';
@@ -1598,6 +1643,18 @@ function toggleExpandedUnit(id) {
   scan();
 }
 
+/** The L19 note: a one-unit repository says why it skipped the L0 unit map. */
+function updateSystemNote(model) {
+  if (!elements.systemNote) {
+    return;
+  }
+  const single = Boolean(model?.system && model.systemUnit && model.systemSingleUnit === model.systemUnit);
+  elements.systemNote.hidden = !single;
+  if (single) {
+    elements.systemNote.textContent = '1 build unit: showing its layers';
+  }
+}
+
 /** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
 function updateOutsideButton() {
   if (!elements.tbOutside) {
@@ -1677,6 +1734,8 @@ elements.forget.addEventListener('click', () => {
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
   state.prefix = '';
+  // Entering System mode is a fresh visit: a one-unit repository auto-opens again (L19).
+  state.systemAutoOpened = false;
   if (state.mode !== 'system') {
     state.systemUnit = null;
     state.systemUnitLabel = null;
@@ -1777,23 +1836,36 @@ function showTooltip(id, clientX, clientY) {
   const node = current.nodes.find((candidate) => candidate.id === id);
   if (!node) return;
   elements.tooltip.replaceChildren();
+  const kind = node.kind ?? '';
+  // L20: a unit or shelf reads in unit vocabulary, not as a file with a blast radius.
+  const unit = kind === 'unit' ? unitHoverFacts(current, id) : null;
   const title = document.createElement('div');
   title.className = 'tt-title';
-  title.textContent = node.label ?? id;
+  title.textContent = unit ? unit.title : node.label ?? id;
   elements.tooltip.append(title);
-  const row = document.createElement('div');
-  row.className = 'tt-row';
-  const kind = document.createElement('span');
-  kind.className = 'tt-kind';
-  kind.textContent = node.kind ?? '';
-  row.append(kind);
-  const blast = document.createElement('span');
-  blast.textContent =
-    node.systemUnit && !id.endsWith('#support')
-      ? `blast ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · id ${id}`
-      : `blast ${node.transitiveDependents ?? 0} · id ${id}`;
-  row.append(blast);
-  elements.tooltip.append(row);
+  const rows = unit
+    ? unit.rows
+    : node.shelf
+      ? [shelfHoverText(node.shelf)]
+      : [
+          node.systemUnit && !id.endsWith('#support')
+            ? `blast ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · id ${id}`
+            : `blast ${node.transitiveDependents ?? 0} · id ${id}`,
+        ];
+  rows.forEach((text, index) => {
+    const row = document.createElement('div');
+    row.className = 'tt-row';
+    if (index === 0 && !unit && !node.shelf) {
+      const chip = document.createElement('span');
+      chip.className = 'tt-kind';
+      chip.textContent = kind;
+      row.append(chip);
+    }
+    const value = document.createElement('span');
+    value.textContent = text;
+    row.append(value);
+    elements.tooltip.append(row);
+  });
   elements.tooltip.hidden = false;
   const wrap = elements.tooltip.parentElement.getBoundingClientRect();
   elements.tooltip.style.left = `${Math.min(clientX - wrap.left + 14, wrap.width - 310)}px`;
@@ -1811,10 +1883,17 @@ view.onHover((id, event) => {
     return;
   }
   const node = current?.nodes.find((candidate) => candidate.id === id);
+  const unit = node?.kind === 'unit' ? unitHoverFacts(current, id) : null;
   const insideUnit = node?.systemUnit && !id.endsWith('#support');
-  elements.hover.textContent = insideUnit
-    ? `${id} · blast radius ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · ${node.kind ?? ''}`
-    : `${id} · blast radius ${node?.transitiveDependents ?? 0} · ${node?.kind ?? ''}`;
+  if (unit) {
+    elements.hover.textContent = `${unit.title} · ${unit.rows.join(' · ')}`;
+  } else if (node?.shelf) {
+    elements.hover.textContent = `${id} · ${shelfHoverText(node.shelf)}`;
+  } else {
+    elements.hover.textContent = insideUnit
+      ? `${id} · blast radius ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · ${node.kind ?? ''}`
+      : `${id} · blast radius ${node?.transitiveDependents ?? 0} · ${node?.kind ?? ''}`;
+  }
   if (event?.clientX !== undefined) showTooltip(id, event.clientX, event.clientY);
 });
 

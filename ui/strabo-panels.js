@@ -1492,7 +1492,7 @@ const LEGEND_SWATCHES = {
   'box = build unit': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'size = files': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'edge = import between units': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
-  'shelf = support files': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
+  'support = unit footer': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
 };
 
 export function renderLegend(container, model) {
@@ -1522,7 +1522,18 @@ export function renderLegend(container, model) {
     item.className = 'legend-item';
     const glyph = document.createElement('span');
     glyph.className = 'legend-shape';
-    glyph.textContent = kind === 'test' ? '◆' : kind === 'entry' ? '★' : kind === 'service' ? '⬡' : '▣';
+    glyph.textContent =
+      kind === 'test'
+        ? '◆'
+        : kind === 'entry'
+          ? '★'
+          : kind === 'service'
+            ? '⬡'
+            : kind === 'unit'
+              ? '▤'
+              : kind === 'shelf'
+                ? '▥'
+                : '▣';
     item.append(glyph);
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? 'round-rectangle'})`));
     container.append(item);

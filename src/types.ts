@@ -5,8 +5,8 @@
  * browser app. They are intentionally data-only so they can be serialised over HTTP.
  */
 
-/** The kind of a graph node. */
-export type NodeKind = 'module' | 'test' | 'entry';
+/** The kind of a graph node. `unit` and `shelf` are the System-view roll-ups. */
+export type NodeKind = 'module' | 'test' | 'entry' | 'unit' | 'shelf';
 
 /** A node in the repository graph. `id` is repository-relative and POSIX-normalised. */
 export interface GraphNode {
@@ -408,6 +408,8 @@ export interface ViewNode extends GraphNode {
   outsideDependents?: number;
   /** True for the collapsed boxes of the units that are not open. */
   collapsed?: boolean;
+  /** The shelf a drill-down shelf node folds, for its hover card. */
+  shelf?: UnitShelfFact;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -415,6 +417,12 @@ export interface ViewEdge extends GraphEdge {
   semanticTarget: string;
   /** In a System drill-down, whether the edge stays in the unit or crosses its frame. */
   scope?: 'unit' | 'outside';
+  /**
+   * File-to-file edges rolled into a System-view unit edge. Its stroke widens with the
+   * count, so a unit pair joined by 40 imports reads heavier than one joined by a single
+   * import. Absent or 1 on a file edge.
+   */
+  weight?: number;
 }
 
 export interface ViewPosition {
@@ -437,6 +445,47 @@ export interface OutsideLink {
   targetName: string;
   count: number;
   files: OutsideTargetFile[];
+}
+
+/** One layer inside a build unit, for the unit card's layer bars. */
+export interface UnitLayerFact {
+  name: string;
+  order: number;
+  files: number;
+}
+
+/** The support files folded into a unit's shelf, by category. */
+export interface UnitShelfFact {
+  test: number;
+  script: number;
+  generated: number;
+  fixture: number;
+  total: number;
+}
+
+/**
+ * The facts a System-view unit card shows (L22).
+ *
+ * `hotspots` is left null by the server: the signal count is only known after the
+ * function analysis runs, so the browser fills it from `/analysis/functions`.
+ */
+export interface UnitCard {
+  id: string;
+  name: string;
+  ecosystem: string;
+  manifest: string | null;
+  /** The unit's largest layer name, used as its role in the card header. */
+  role: string | null;
+  files: number;
+  loc: number;
+  languages: Record<string, number>;
+  layers: UnitLayerFact[];
+  shelf: UnitShelfFact;
+  hotspots: number | null;
+  testReach: { reached: number; total: number };
+  dependsOn: number;
+  usedBy: number;
+  why: string;
 }
 
 /** The deterministic, server-computed presentation model. */
@@ -465,6 +514,10 @@ export interface ViewModel {
   outsideLinks?: OutsideLink[];
   /** Unit ids whose badge is expanded in place. */
   expandedUnits?: string[];
+  /** The unit cards drawn over the System L0 map (L22). */
+  unitCards?: UnitCard[];
+  /** The only build unit, so the browser can auto-open it at L1 (L19). */
+  systemSingleUnit?: string;
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */

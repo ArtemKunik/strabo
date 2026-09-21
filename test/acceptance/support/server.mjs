@@ -7,6 +7,7 @@ export const ACCEPTANCE_URL = `http://127.0.0.1:${ACCEPTANCE_PORT}`;
 export const ACCEPTANCE_FIXTURES = path.resolve('test/fixtures');
 export const ACCEPTANCE_ROOT = path.join(ACCEPTANCE_FIXTURES, 'block-repo');
 export const ACCEPTANCE_POLYGLOT_ROOT = path.join(ACCEPTANCE_FIXTURES, 'system-repo');
+export const ACCEPTANCE_SOLO_ROOT = path.join(ACCEPTANCE_FIXTURES, 'solo-repo');
 
 let child = null;
 

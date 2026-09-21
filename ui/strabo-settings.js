@@ -13,7 +13,7 @@
  * when either the preference or the OS asks for it.
  */
 
-import { probeWebGL2, setWebglPreferred, webglPreferred, webglRefused } from './strabo-view.js';
+import { probeWebGL2, setWebglPreferred, webglPreferred, webglRefused } from './strabo-renderer-preference.js';
 import { narratorKeyLabel, narratorModelsLabel, narratorTestLabel } from './strabo-narrator.js';
 
 export const SETTINGS_KEY = 'strabo.settings.v1';

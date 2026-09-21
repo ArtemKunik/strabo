@@ -43,10 +43,12 @@ Feature: Map legibility
 
   @float
   Scenario: A floating panel can be moved and resized, and it survives a reload
-    When I drag the "legend" panel by 40, 30
+    # The legend opens in the right-hand rail, so move it left into open canvas first:
+    # dragging it right would push the resize handle past the viewport edge.
+    When I drag the "legend" panel by -300, 30
     And I resize the "legend" panel by 60, 40
     And I reload the Strabo UI
-    Then the "legend" panel position moved by 40, 30
+    Then the "legend" panel position moved by -300, 30
     And the "legend" panel size grew by 60, 40
 
   @float

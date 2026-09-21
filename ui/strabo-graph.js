@@ -11,6 +11,12 @@ export const API_PATH = '/api/strabo';
 export const MIN_DIAMETER = 22;
 export const MAX_DIAMETER = 62;
 
+/** A System-view unit is a card, not a file dot: bigger floor and ceiling, square-root size. */
+export const MIN_UNIT_DIAMETER = 48;
+export const MAX_UNIT_DIAMETER = 130;
+export const MIN_SHELF_DIAMETER = 26;
+export const MAX_SHELF_DIAMETER = 64;
+
 export const SHAPES = {
   module: 'round-rectangle',
   test: 'diamond',
@@ -21,6 +27,9 @@ export const SHAPES = {
   table: 'barrel',
   entity: 'round-tag',
   schema: 'round-diamond',
+  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
+  unit: 'round-rectangle',
+  shelf: 'rectangle',
 };
 
 export function hash(value) {
@@ -81,6 +90,23 @@ export function passportFor(model, id) {
   }
   if (typeof node.periphery === 'number' && node.periphery > 0) {
     metrics.push({ label: 'Support files', value: node.periphery });
+  }
+  // A unit card carries facts a file does not: its size, layers, reach, and coupling (L22).
+  const card = node.kind === 'unit' ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : undefined;
+  if (card) {
+    metrics.push(
+      { label: 'Lines', value: card.loc },
+      { label: 'Layers', value: card.layers.length },
+      { label: 'Test reach', value: `${card.testReach.reached}/${card.testReach.total}` },
+      { label: 'Depends on units', value: card.dependsOn },
+      { label: 'Used by units', value: card.usedBy },
+    );
+    if (card.hotspots !== null) {
+      metrics.push({ label: 'Hotspots', value: card.hotspots });
+    }
+  }
+  if (node.shelf) {
+    metrics.push({ label: 'Tests', value: node.shelf.test }, { label: 'Scripts', value: node.shelf.script });
   }
 
   return {
@@ -143,10 +169,16 @@ export function readingLegend(model) {
       'lane = layer',
       'edge = selected file import',
       'badge = files in another unit',
+      'tag = support shelf',
     ];
   }
   if (model?.system) {
-    return ['box = build unit', 'size = files', 'edge = import between units', 'shelf = support files'];
+    return [
+      'box = build unit',
+      'size = files',
+      'edge = import between units',
+      'support = unit footer',
+    ];
   }
   return ['size = dependents', 'island = directory', 'diamond = test', 'star = entry'];
 }
@@ -171,10 +203,104 @@ export function shortcutSheet() {
   ];
 }
 
+/** Text for a unit's hover card: unit vocabulary, no blast radius, no `#` ids (L20). */
+export function unitHoverFacts(model, id) {
+  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
+  if (!card) {
+    return null;
+  }
+  return {
+    title: `${card.ecosystem} package \`${card.name}\``,
+    rows: [
+      `${card.files} files`,
+      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? '' : 's'}`,
+      `used by ${card.usedBy} unit${card.usedBy === 1 ? '' : 's'}`,
+      `why: ${card.manifest ?? card.why}`,
+    ],
+  };
+}
+
+/** A shelf's hover card: "74 test files, 6 scripts: folded support" (L20). */
+export function shelfHoverText(shelf) {
+  if (!shelf) {
+    return 'support files';
+  }
+  const tests = `${shelf.test} test file${shelf.test === 1 ? '' : 's'}`;
+  const scripts = `${shelf.script} script${shelf.script === 1 ? '' : 's'}`;
+  return `${tests}, ${scripts}: folded support`;
+}
+
+/** The shelf footer strip caption; empty when the unit folds no support (L21). */
+export function shelfStripText(shelf) {
+  if (!shelf || shelf.total === 0) {
+    return '';
+  }
+  const parts = [];
+  if (shelf.test) parts.push(`${shelf.test} test${shelf.test === 1 ? '' : 's'}`);
+  if (shelf.script) parts.push(`${shelf.script} script${shelf.script === 1 ? '' : 's'}`);
+  if (shelf.generated) parts.push(`${shelf.generated} generated`);
+  if (shelf.fixture) parts.push(`${shelf.fixture} fixture${shelf.fixture === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+
+/**
+ * Fill each card's hotspot count from the function hotspot report (L22).
+ *
+ * Hotspots need the function analysis, so the server leaves them null; the browser joins
+ * the report it already fetches for the hotspot overlay. A hotspot belongs to the longest
+ * unit id that prefixes its file (the root unit `.` is the fallback).
+ */
+export function withUnitHotspots(cards, report) {
+  const list = cards ?? [];
+  const byPrefix = list.map((card) => card.id).sort((a, b) => b.length - a.length);
+  const counts = new Map(list.map((card) => [card.id, 0]));
+  for (const spot of report?.hotspots ?? []) {
+    const owner = byPrefix.find(
+      (id) => id === '.' || spot.file === id || spot.file.startsWith(`${id}/`),
+    );
+    if (owner !== undefined) {
+      counts.set(owner, (counts.get(owner) ?? 0) + 1);
+    }
+  }
+  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
+}
+
 /** Square-root transform keeps leaf nodes visible without one hub consuming the map. */
 export function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
+
+/**
+ * Stroke width for an edge, widening with the recorded import count.
+ *
+ * A System-view edge rolls many file imports into one unit pair, so the count is the
+ * weight: one import is the base hairline and each doubling adds a step, capped so a
+ * heavily-coupled pair cannot draw a bar across the map. A file edge has no weight and
+ * stays the base hairline.
+ */
+export function edgeStrokeWidth(weight) {
+  const count = Number.isFinite(weight) && weight > 0 ? weight : 1;
+  return Math.min(4, 1.2 + Math.log2(count) * 0.9);
+}
+
+/** A unit's area grows with its file count on a square-root scale, with a floor (L18). */
+export function unitDiameter(files) {
+  const scaled = Math.sqrt(Math.max(0, files ?? 0)) * 7 + MIN_UNIT_DIAMETER;
+  return Math.max(MIN_UNIT_DIAMETER, Math.min(MAX_UNIT_DIAMETER, Math.round(scaled)));
+}
+
+/** A shelf tag is deliberately smaller than its unit: it is a footnote, not a component. */
+export function shelfDiameter(files) {
+  const scaled = Math.sqrt(Math.max(0, files ?? 0)) * 8 + MIN_SHELF_DIAMETER;
+  return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
+}
+
+/** The diameter a node draws at: a unit/shelf by file count, a file by blast radius. */
+export function nodeDiameter(node) {
+  if (node?.kind === 'unit') return unitDiameter(node.files ?? node.size);
+  if (node?.kind === 'shelf') return shelfDiameter(node.files);
+  return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 
 /**
@@ -232,9 +358,10 @@ export function buildElements(model) {
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
       // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
-      // its component count instead of blast radius.
-      diameter: diameter(node.size ?? node.files ?? node.transitiveDependents),
-      hub: hubs.has(node.id),
+      // its component count instead of blast radius; the hub ring is reserved for files,
+      // so a unit's only outline is selection (L18).
+      diameter: nodeDiameter(node),
+      hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
     },
     position: positionOf(positions.get(node.id)),
   }));
@@ -248,6 +375,9 @@ export function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      // A System-view unit edge rolls up a file count; the stroke widens with it.
+      weight: edge.weight ?? 1,
+      edgeWidth: edgeStrokeWidth(edge.weight),
       evidenceLine: edge.evidence?.line,
       evidenceSpecifier: edge.evidence?.specifier,
       // In a System drill-down, `unit` edges are hidden until their file is selected;
@@ -468,7 +598,18 @@ const RESOLUTION_LABELS = {
  * Diagnostics panel; the header states what the map holds and stops there.
  */
 export function graphSummary(model) {
-  const nodes = (model.nodes ?? []).length;
-  const edges = (model.edges ?? []).length;
-  return `${nodes} nodes · ${edges} edges`;
+  const nodes = (model?.nodes ?? []).length;
+  const edges = (model?.edges ?? []).length;
+  // A System L0 map is units, not files; the drill-down and the file map are nodes. Naming
+  // the unit is what stops "45 nodes" reading as if the shelves were still peers.
+  const nodeWord =
+    model?.system && !model?.systemUnit
+      ? nodes === 1
+        ? 'unit'
+        : 'units'
+      : nodes === 1
+        ? 'node'
+        : 'nodes';
+  const edgeWord = edges === 1 ? 'edge' : 'edges';
+  return `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
 }

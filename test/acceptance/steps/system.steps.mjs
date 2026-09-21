@@ -2,32 +2,41 @@ import assert from 'node:assert/strict';
 
 import { Given, Then, When } from '@cucumber/cucumber';
 
-import { ACCEPTANCE_POLYGLOT_ROOT } from '../support/server.mjs';
+import { ACCEPTANCE_POLYGLOT_ROOT, ACCEPTANCE_SOLO_ROOT } from '../support/server.mjs';
 
-Given('I open the polyglot fixture repository', async function () {
-  const response = await fetch(`${this.baseUrl}/api/strabo/repositories`, {
+/** Register a fixture root, select it by name, and close the first-visit passport. */
+async function openFixture(context, root, label) {
+  const response = await fetch(`${context.baseUrl}/api/strabo/repositories`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ root: ACCEPTANCE_POLYGLOT_ROOT }),
+    body: JSON.stringify({ root }),
   });
-  assert.equal(response.ok, true, 'the polyglot fixture should be accepted inside the scan ceiling');
-  await this.page.goto(this.baseUrl);
-  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, {
+  assert.equal(response.ok, true, 'the fixture should be accepted inside the scan ceiling');
+  await context.page.goto(context.baseUrl);
+  await context.page.waitForFunction(() => window.straboTest?.model() != null, undefined, {
     timeout: 20_000,
   });
-  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
-  await this.page.selectOption('#repository', { label: 'system-repo' });
-  await this.page.waitForFunction(
+  const before = await context.page.evaluate(() => window.straboTest.renderedGeneration());
+  await context.page.selectOption('#repository', { label });
+  await context.page.waitForFunction(
     (generation) => window.straboTest.renderedGeneration() > generation,
     before,
     { timeout: 20_000 },
   );
   // The first-visit Repository passport floats over the canvas; close it so node clicks land.
-  await this.page.evaluate(() => {
+  await context.page.evaluate(() => {
     for (const controller of window.straboTest?.floatingWindows?.() ?? []) {
       if (controller.isOpen?.()) controller.toggle();
     }
   });
+}
+
+Given('I open the polyglot fixture repository', async function () {
+  await openFixture(this, ACCEPTANCE_POLYGLOT_ROOT, 'system-repo');
+});
+
+Given('I open the single-unit fixture repository', async function () {
+  await openFixture(this, ACCEPTANCE_SOLO_ROOT, 'solo-repo');
 });
 
 When('I switch to system detail', async function () {
@@ -58,15 +67,16 @@ Then('the System view draws the unit {string}', async function (name) {
 });
 
 Then('the System view draws a support shelf for {string}', async function (name) {
+  // L21: the shelf is a footer strip on the unit card, not a peer node.
   await this.page.waitForFunction(
-    (label) => {
+    (id) => {
       const model = window.straboTest?.model();
-      return Boolean(
-        model?.system &&
-          model.nodes.some(
-            (node) => node.id.endsWith('#support') && node.label === `${label} support`,
-          ),
-      );
+      const unit = model?.nodes.find((node) => node.id === id);
+      if (!model?.system || !unit || !(unit.periphery > 0)) {
+        return false;
+      }
+      const card = document.querySelector(`.unit-card[data-unit="${id}"]`);
+      return Boolean(card && card.querySelector('.unit-shelf')?.textContent.includes('support'));
     },
     name,
     { timeout: 15_000 },
@@ -76,7 +86,40 @@ Then('the System view draws a support shelf for {string}', async function (name)
 Then('the System legend names build units', async function () {
   const text = (await this.page.textContent('#legend')) ?? '';
   assert.match(text, /build unit/);
-  assert.match(text, /support files/);
+  assert.match(text, /unit footer/);
+});
+
+Then('the single unit opens at its layers', async function () {
+  await this.page.waitForFunction(
+    () => {
+      const model = window.straboTest?.model();
+      return Boolean(model?.system && model.systemUnit != null && !model.systemUnit.includes('#'));
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const note = (await this.page.textContent('#system-note')) ?? '';
+  assert.match(note, /1 build unit/);
+});
+
+Then('the unit hover for {string} shows unit facts', async function (id) {
+  await this.page.waitForFunction(
+    (unitId) => window.straboTest?.model()?.nodes.some((node) => node.id === unitId),
+    id,
+    { timeout: 15_000 },
+  );
+  await this.page.evaluate((unitId) => {
+    window.straboTest?.cy.getElementById(unitId).trigger('mouseover');
+  }, id);
+  await this.page.waitForFunction(
+    () => (document.getElementById('hover')?.textContent ?? '').includes('depends on'),
+    undefined,
+    { timeout: 15_000 },
+  );
+  const text = (await this.page.textContent('#hover')) ?? '';
+  assert.match(text, /package/);
+  assert.match(text, /depends on/);
+  assert.doesNotMatch(text, /blast radius/);
 });
 
 When('I select the root unit node', async function () {
@@ -101,20 +144,16 @@ Then('the System view draws units only', async function () {
     const response = await fetch(`/api/strabo/analysis/system${query}`);
     return response.json();
   });
-  const expected = [];
-  for (const unit of report.units) {
-    expected.push(unit.id);
-    if (unit.periphery > 0) {
-      expected.push(unit.id === '.' ? '#support' : `${unit.id}#support`);
-    }
-  }
+  // L21: the shelf is folded into its unit card, so L0 draws exactly the units.
+  const expected = report.units.map((unit) => unit.id);
   await this.page.waitForFunction(
     (ids) => {
       const model = window.straboTest?.model();
       return Boolean(
         model?.system === true &&
           !model.systemUnit &&
-          model.nodes.every((node) => ids.includes(node.id)),
+          model.nodes.length === ids.length &&
+          model.nodes.every((node) => ids.includes(node.id) && node.kind === 'unit'),
       );
     },
     expected,

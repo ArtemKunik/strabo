@@ -67,7 +67,7 @@ export function createGraphRouter(config: StraboConfig): Router {
             return;
           }
         }
-        response.json(buildSystemViewModel(report, descriptor, cache));
+        response.json(buildSystemViewModel(report, descriptor, cache, cached.report.graph));
         return;
       }
 

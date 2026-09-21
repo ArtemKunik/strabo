@@ -1,7 +1,8 @@
 import { buildAdjacency, computeGraphMetrics, rankHubs } from '../analysis/analysis.ts';
+import { computeTestReachByFile } from '../analysis/coverage.ts';
 import { buildPositions } from '../analysis/layout.ts';
 import type { SystemReport } from '../analysis/system.ts';
-import type { OutsideLink } from '../types.ts';
+import type { OutsideLink, UnitCard, UnitShelfFact } from '../types.ts';
 
 import { toPosix } from '../boundary/repository-root.ts';
 import type {
@@ -76,73 +77,38 @@ export function buildSystemViewModel(
   system: SystemReport,
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
+  sourceGraph?: Graph,
 ): ViewModel {
-  const shelfCounts = new Map<string, number>();
-  for (const entry of system.periphery) {
-    shelfCounts.set(entry.unit, (shelfCounts.get(entry.unit) ?? 0) + 1);
-  }
-  const shelves = system.units
-    .filter((unit) => (shelfCounts.get(unit.id) ?? 0) > 0)
-    .map((unit) => ({
-      id: shelfId(unit.id),
-      unit: unit.id,
-      name: unit.name,
-      // Drawn in the unit's own directory block, so the shelf sits beside its unit.
-      directory: unit.parent ?? '.',
-      label: `${unit.name} support`,
-      count: shelfCounts.get(unit.id) ?? 0,
-    }));
-
   const graph: Graph = {
-    nodes: [
-      ...system.units.map((unit) => ({
-        id: unit.id,
-        kind: 'module' as const,
-        directory: unit.parent ?? '.',
-        label: unit.name,
-      })),
-      ...shelves.map((shelf) => ({
-        id: shelf.id,
-        kind: 'module' as const,
-        directory: shelf.directory,
-        label: shelf.label,
-      })),
-    ],
-    edges: [
-      ...system.edges.map((edge): GraphEdge => ({
-        source: edge.source,
-        target: edge.target,
-        kind: 'import',
-        evidence: {
-          line: 1,
-          specifier: edge.weight > 1 ? `${edge.samples[0] ?? 'import'} (+${edge.weight - 1})` : edge.samples[0] ?? 'import',
-          resolution: 'exact',
-        },
-      })),
-      // The shelf belongs to its unit; `declare` keeps it out of blast radius and metrics.
-      ...shelves.map(
-        (shelf): GraphEdge => ({
-          source: shelf.unit,
-          target: shelf.id,
-          kind: 'import',
-          role: 'declare',
-          evidence: { line: 1, specifier: 'support', resolution: 'exact' },
-        }),
-      ),
-    ],
+    nodes: system.units.map((unit) => ({
+      id: unit.id,
+      kind: 'unit' as const,
+      directory: unit.parent ?? '.',
+      label: unit.name,
+    })),
+    edges: system.edges.map((edge): GraphEdge => ({
+      source: edge.source,
+      target: edge.target,
+      kind: 'import',
+      evidence: {
+        line: 1,
+        specifier: edge.weight > 1 ? `${edge.samples[0] ?? 'import'} (+${edge.weight - 1})` : edge.samples[0] ?? 'import',
+        resolution: 'exact',
+      },
+    })),
     diagnostics: [],
     excluded: [],
   };
 
   const metrics = computeGraphMetrics(graph, buildAdjacency(graph));
   const positions = buildPositions(graph);
-  const hubs = rankHubs(metrics);
+  // Units are cards, not files: the hub ring is reserved for files, so a unit never
+  // takes the thick outline a central file earns. Selection is its only outline (L18).
+  const hubs: string[] = [];
   const byId = new Map(system.units.map((unit) => [unit.id, unit]));
-  const shelfById = new Map(shelves.map((shelf) => [shelf.id, shelf]));
 
   const nodes: ViewNode[] = graph.nodes.map((node) => {
     const unit = byId.get(node.id);
-    const shelf = shelfById.get(node.id);
     return {
       ...node,
       workspacePath: node.id,
@@ -150,23 +116,26 @@ export function buildSystemViewModel(
       fanOut: metrics.fanOut.get(node.id) ?? 0,
       transitiveDependencies: metrics.transitiveDependencies.get(node.id) ?? 0,
       transitiveDependents: metrics.transitiveDependents.get(node.id) ?? 0,
-      size: unit?.files ?? shelf?.count ?? 0,
-      files: unit?.files ?? shelf?.count ?? 0,
-      periphery: unit?.periphery ?? shelf?.count ?? 0,
-      why:
-        unit?.why ??
-        (shelf
-          ? `tests, scripts, generated, and fixtures folded into one shelf for ${shelf.name}`
-          : undefined),
+      size: unit?.files ?? 0,
+      files: unit?.files ?? 0,
+      periphery: unit?.periphery ?? 0,
+      why: unit?.why,
     };
   });
 
+  // The rolled-up report is the source of the weight: the graph edge dropped it when the
+  // unit pair was built from `system.edges`.
+  const weightByPair = new Map(
+    system.edges.map((edge) => [`${edge.source}\u0000${edge.target}`, edge.weight]),
+  );
   const edges: ViewEdge[] = graph.edges.map((edge) => ({
     ...edge,
     semanticSource: edge.source,
     semanticTarget: edge.target,
+    weight: weightByPair.get(`${edge.source}\u0000${edge.target}`) ?? 1,
   }));
 
+  const single = singleUnitId(system);
   return {
     repository,
     nodes,
@@ -177,7 +146,103 @@ export function buildSystemViewModel(
     excluded: [],
     cache,
     system: true,
+    unitCards: buildUnitCards(system, sourceGraph),
+    ...(single ? { systemSingleUnit: single } : {}),
   };
+}
+
+/**
+ * The unit a repository with only one *manifest-declared* unit auto-opens at L1 (L19).
+ *
+ * A folder with no manifest still rolls up to a fallback root unit, but that is not a build
+ * unit an operator recognises, so it keeps the L0 map rather than skipping the overview.
+ */
+function singleUnitId(system: SystemReport): string | null {
+  if (system.units.length !== 1) {
+    return null;
+  }
+  const only = system.units[0];
+  return only && only.manifest ? only.id : null;
+}
+
+/**
+ * The facts each System-view unit card shows (L22).
+ *
+ * Everything is derived from the report plus the file graph the report was rolled up from.
+ * Hotspots are the one exception: the signal count needs the function analysis, so the
+ * server leaves it null for the browser to fill.
+ */
+function buildUnitCards(system: SystemReport, sourceGraph?: Graph): UnitCard[] {
+  const linesOf = new Map<string, number>();
+  const languageOf = new Map<string, string>();
+  for (const node of sourceGraph?.nodes ?? []) {
+    if (typeof node.lines === 'number') {
+      linesOf.set(node.id, node.lines);
+    }
+    if (node.language) {
+      languageOf.set(node.id, node.language);
+    }
+  }
+  const reached = sourceGraph ? computeTestReachByFile(sourceGraph) : new Map<string, string[]>();
+
+  const membersOf = new Map<string, string[]>();
+  const layersOf = new Map<string, { name: string; order: number; files: number }[]>();
+  for (const layer of system.layers) {
+    membersOf.set(layer.unit, [...(membersOf.get(layer.unit) ?? []), ...layer.files]);
+    layersOf.set(layer.unit, [
+      ...(layersOf.get(layer.unit) ?? []),
+      { name: layer.name, order: layer.order, files: layer.files.length },
+    ]);
+  }
+  const shelfOf = new Map<string, UnitShelfFact>();
+  for (const entry of system.periphery) {
+    const shelf = shelfOf.get(entry.unit) ?? { test: 0, script: 0, generated: 0, fixture: 0, total: 0 };
+    shelf[entry.category] += 1;
+    shelf.total += 1;
+    shelfOf.set(entry.unit, shelf);
+  }
+  const dependsOn = new Map<string, number>();
+  const usedBy = new Map<string, number>();
+  for (const edge of system.edges) {
+    dependsOn.set(edge.source, (dependsOn.get(edge.source) ?? 0) + 1);
+    usedBy.set(edge.target, (usedBy.get(edge.target) ?? 0) + 1);
+  }
+
+  return system.units.map((unit) => {
+    const members = membersOf.get(unit.id) ?? [];
+    const languages: Record<string, number> = {};
+    let loc = 0;
+    let reachedCount = 0;
+    for (const file of members) {
+      loc += linesOf.get(file) ?? 0;
+      const language = languageOf.get(file) ?? 'other';
+      languages[language] = (languages[language] ?? 0) + 1;
+      if (reached.has(file)) {
+        reachedCount += 1;
+      }
+    }
+    const layers = (layersOf.get(unit.id) ?? [])
+      .slice()
+      .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    const role = layers.slice().sort((a, b) => b.files - a.files || a.name.localeCompare(b.name))[0]?.name ?? null;
+    return {
+      id: unit.id,
+      name: unit.name,
+      ecosystem: unit.ecosystem,
+      manifest: unit.manifest,
+      role,
+      files: unit.files,
+      loc,
+      languages,
+      layers,
+      shelf: shelfOf.get(unit.id) ?? { test: 0, script: 0, generated: 0, fixture: 0, total: 0 },
+      hotspots: null,
+      testReach: { reached: reachedCount, total: members.length },
+      dependsOn: dependsOn.get(unit.id) ?? 0,
+      usedBy: usedBy.get(unit.id) ?? 0,
+      why: unit.why,
+    };
+  });
 }
 
 export interface SystemUnitViewOptions {
@@ -289,7 +354,7 @@ export function buildSystemUnitViewModel(
   if (shelfCount > 0) {
     nodes.push({
       id: shelfId(unitId),
-      kind: 'module' as const,
+      kind: 'shelf' as const,
       directory: unit.parent ?? '.',
       label: `${unit.name} support`,
       workspacePath: shelfId(unitId),
@@ -301,6 +366,7 @@ export function buildSystemUnitViewModel(
       periphery: shelfCount,
       why: `tests, scripts, generated, and fixtures folded into one shelf for ${unit.name}`,
       systemUnit: unitId,
+      shelf: shelfFactFor(system, unitId),
     });
   }
   for (const other of system.units) {
@@ -309,7 +375,7 @@ export function buildSystemUnitViewModel(
     }
     nodes.push({
       id: other.id,
-      kind: 'module' as const,
+      kind: 'unit' as const,
       directory: other.parent ?? '.',
       label: other.name,
       workspacePath: other.id,
@@ -445,7 +511,22 @@ export function buildSystemUnitViewModel(
     systemCommunities: unitCommunities,
     outsideLinks,
     expandedUnits: [...expanded],
+    unitCards: buildUnitCards(system, graph),
+    ...(singleUnitId(system) ? { systemSingleUnit: unitId } : {}),
   };
+}
+
+/** The support files one unit's shelf folds, by category (L22). */
+function shelfFactFor(system: SystemReport, unitId: string): UnitShelfFact {
+  const shelf: UnitShelfFact = { test: 0, script: 0, generated: 0, fixture: 0, total: 0 };
+  for (const entry of system.periphery) {
+    if (entry.unit !== unitId) {
+      continue;
+    }
+    shelf[entry.category] += 1;
+    shelf.total += 1;
+  }
+  return shelf;
 }
 
 /** The unit a file belongs to: the layer that lists it, else the root. */
