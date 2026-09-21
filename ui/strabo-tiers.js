@@ -131,6 +131,30 @@ export function tierDirectionLabel(report) {
   return `${upward} upward · ${skip} skip-layer`;
 }
 
+/**
+ * The classes the direction check puts on the map.
+ *
+ * Both endpoints of a wrong-way edge are marked (the source for making the call, the target
+ * for taking it), and the edge itself is returned so the view can style it. `upward` and
+ * `skip-layer` are different classes, so the two read apart by shape, not hue alone.
+ */
+export function tierDirectionClasses(report) {
+  const byNode = new Map();
+  const edges = [];
+  for (const entry of report?.directions ?? []) {
+    const nodeClass = entry.kind === 'upward' ? 'tier-upward' : 'tier-skip';
+    byNode.set(entry.source, [...(byNode.get(entry.source) ?? []), nodeClass]);
+    byNode.set(entry.target, [...(byNode.get(entry.target) ?? []), nodeClass]);
+    edges.push({
+      source: entry.source,
+      target: entry.target,
+      kind: entry.kind,
+      line: entry.line,
+    });
+  }
+  return { byNode, edges };
+}
+
 /** The tables a trace can start from, most-referenced first. */
 export function tierTables(report) {
   const counts = new Map();

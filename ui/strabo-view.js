@@ -36,6 +36,10 @@ const RESET_CLASSES = [
   'label-hidden',
   'filtered-out',
   'tier-hidden',
+  'tier-upward',
+  'tier-skip',
+  'edge-tier-upward',
+  'edge-tier-skip',
 ];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
@@ -335,6 +339,43 @@ export function createView(container) {
           }
           const keep = filterTier === 'all' || tier === filterTier;
           node.toggleClass('tier-hidden', !keep);
+        }
+      });
+    },
+    /**
+     * Mark the files and edges in a wrong-way dependency. Pass null to clear.
+     *
+     * `byNode` maps a file to its classes and `edges` names the endpoints to mark. Upward
+     * and skip-layer use different classes, so the two differ by border/line shape, not hue.
+     */
+    applyTierDirections(directions) {
+      const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
+      const edges = Array.isArray(directions?.edges) ? directions.edges : [];
+      cy.batch(() => {
+        for (const node of cy.nodes()) {
+          node.removeClass('tier-upward');
+          node.removeClass('tier-skip');
+        }
+        for (const edge of cy.edges()) {
+          edge.removeClass('edge-tier-upward');
+          edge.removeClass('edge-tier-skip');
+        }
+        if (!nodes) {
+          return;
+        }
+        for (const [id, classes] of nodes) {
+          const node = cy.getElementById(id);
+          if (node.nonempty()) {
+            for (const cls of classes) {
+              node.addClass(cls);
+            }
+          }
+        }
+        for (const direction of edges) {
+          const cls = direction.kind === 'upward' ? 'edge-tier-upward' : 'edge-tier-skip';
+          cy.edges()
+            .filter((edge) => edge.data('source') === direction.source && edge.data('target') === direction.target)
+            .addClass(cls);
         }
       });
     },
@@ -894,6 +935,10 @@ function stylesheet() {
     // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
     // dotted ring that reads as "part of a workspace flow" without entering the status set.
     { selector: 'node.ov-cross-repo', style: { 'border-width': 4, 'border-style': 'dotted', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    // The tier direction check: a wrong-way dependency is a signal, so it rides on the
+    // reserved status scale and differs by shape (double vs dashed), never hue alone.
+    { selector: 'node.tier-upward', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
+    { selector: 'node.tier-skip', style: { 'border-width': 3, 'border-style': 'dashed', 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
@@ -918,6 +963,8 @@ function stylesheet() {
         'arrow-scale': 0.9,
       },
     },
+    { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
+    { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
     { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {

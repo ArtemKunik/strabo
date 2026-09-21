@@ -35,6 +35,7 @@ import {
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
+import { tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
   buildGroupNamingEvidence,
@@ -466,6 +467,7 @@ let tierReportCache = { generation: -1, report: null };
 async function applyTierLens() {
   if (state.tier === 'off' || !current || current.system || current.prefixLength !== undefined) {
     view.applyTier(null);
+    view.applyTierDirections(null);
     return;
   }
   const generation = state.renderedGeneration;
@@ -483,9 +485,11 @@ async function applyTierLens() {
   }
   if (!current || state.tier === 'off' || state.renderedGeneration !== generation) {
     view.applyTier(null);
+    view.applyTierDirections(null);
     return;
   }
   view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
+  view.applyTierDirections(tierDirectionClasses(tierReportCache.report));
   renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
 }
 

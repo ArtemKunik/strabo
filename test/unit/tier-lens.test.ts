@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import {
+  tierDirectionClasses,
   tierDirectionLabel,
   tierMatrixRows,
   tierPerTierRows,
@@ -80,6 +81,40 @@ test('the tier matrix helpers render rows, shares, and the direction caption', (
 
   // the handler depends on the data file: upper tier -> lower tier, the expected direction.
   assert.equal(tierDirectionLabel(tiers), 'No upward or skip-layer edges recorded.');
+});
+
+function wrongWayReport() {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "web" }\n');
+  write(root, 'src/api/orders.ts', 'export const orders = 1;\n');
+  write(root, 'src/data/store.ts', "import { orders } from '../api/orders';\nexport const store = orders;\n");
+
+  return buildTierReport(root, 'web', {
+    nodes: [{ id: 'src/api/orders.ts' }, { id: 'src/data/store.ts' }],
+    edges: [
+      {
+        source: 'src/data/store.ts',
+        target: 'src/api/orders.ts',
+        evidence: { line: 1, specifier: '../api/orders' },
+      },
+    ],
+  });
+}
+
+test('tierDirectionClasses marks both ends and the edge of a wrong-way dependency', () => {
+  const tiers = wrongWayReport();
+  assert.ok(tiers.directions.some((entry) => entry.kind === 'upward'));
+
+  const { byNode, edges } = tierDirectionClasses(tiers);
+  assert.deepEqual(byNode.get('src/data/store.ts'), ['tier-upward']);
+  assert.deepEqual(byNode.get('src/api/orders.ts'), ['tier-upward']);
+  assert.equal(edges[0].kind, 'upward');
+  assert.equal(edges[0].source, 'src/data/store.ts');
+  assert.equal(edges[0].target, 'src/api/orders.ts');
+
+  const empty = tierDirectionClasses(null);
+  assert.equal(empty.byNode.size, 0);
+  assert.deepEqual(empty.edges, []);
 });
 
 test('the tier table helpers list tables and their trace rows', () => {
