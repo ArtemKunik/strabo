@@ -26,7 +26,7 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay); follow-ups F1-F4 planned (free-function calls, entry detection, table layout) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend, and the L0 System mode UI: units, edges, why captions; L2, L7, L8, L9-L13 remain) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L0 System mode UI with support shelf, L1, L2, L3-L6 backend; L7, L8, L9-L13 remain) |
 | 17 | Module quality and change impact | Q1-Q2 done (`use`/`declare` edge roles; percentile scorecard); Q3-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -694,11 +694,17 @@ file map renders — a node per unit labelled by its manifest name and sized by 
 count, with the recorded import edges — served at `GET /graph?system=1`; the mode select
 gains a **System** option, the legend reads "box = build unit · size = files · edge =
 import", the inspector shows the unit's "why grouped" caption plus its file and support
-counts, islands are suppressed, and the strip lists units. Unit coverage is the added cases
-in `test/unit/system.test.ts`, `test/unit/browser-core.test.ts`, and
-`test/unit/islands.test.ts`. Still to do: L2 chain compression / unit-anchored labels, L7
-`strabo.groups.yml`, L8 narrator group naming, the support-shelf drawing, the
-`system-view.feature` acceptance scenario with its polyglot fixture, and the tier lens.
+counts, islands are suppressed, and the strip lists units. Each unit's tests, scripts,
+generated code, and fixtures fold into one **support shelf** node beside it, joined by a
+`declare` edge so it never counts toward blast radius. Unit coverage is the added cases in
+`test/unit/system.test.ts`, `test/unit/browser-core.test.ts`, and
+`test/unit/islands.test.ts`. **L2 (done)** `compressDirectoryChains` drops an empty
+single-child hop and anchors the surviving tail at the unit root, so `service-rust/src/handlers`
+reads as `service › handlers`; the graph route attaches `directoryLabels` to file and block
+models, and islands and block nodes prefer them. The acceptance scenario is
+`test/acceptance/features/system-view.feature` (`@system`), run against the fixture
+repository. Still to do: L7 `strabo.groups.yml`, L8 narrator group naming, a polyglot
+fixture for the acceptance scenario, and the tier lens.
 
 ### Tier lens
 
