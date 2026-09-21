@@ -9,6 +9,7 @@ import { computeFileHealth } from '../../analysis/file-health.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
+import { buildTierReport } from '../../analysis/tiers.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
@@ -120,6 +121,20 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(buildSystemReport(repository.root, repository.name, cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The tier lens: each file's role (frontend, API, data, …) from its strongest evidence,
+   * rolled up per build unit with the unit's role. Files with no evidence stay unclassified.
+   */
+  router.get('/analysis/tiers', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json(buildTierReport(repository.root, repository.name, cached.report.graph));
     } catch (error) {
       sendError(response, error);
     }

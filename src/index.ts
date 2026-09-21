@@ -87,6 +87,24 @@ export {
 } from './analysis/units.ts';
 export type { SystemUnit, SystemUnitEcosystem, Periphery, DeclaredGroup } from './analysis/units.ts';
 export { buildSystemReport } from './analysis/system.ts';
+export {
+  classifyTierContent,
+  classifyTiers,
+  readDeclaredTiers,
+  buildTierReport,
+  unitRole,
+  MAX_TIER_FILES,
+} from './analysis/tiers.ts';
+export type {
+  Tier,
+  TierStrength,
+  TierEvidence,
+  TierClassification,
+  DeclaredTier,
+  UnitRole,
+  TierUnitReport,
+  TierReport,
+} from './analysis/tiers.ts';
 export type {
   SystemReport,
   SystemNode,
