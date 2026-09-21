@@ -27,7 +27,14 @@ export type Tier =
   | 'unclassified';
 
 /** How strong the evidence for a tier is, strongest first. */
-export type TierStrength = 'declared' | 'framework' | 'annotation' | 'file-kind' | 'path-token';
+export type TierStrength =
+  | 'declared'
+  | 'framework'
+  | 'annotation'
+  | 'endpoint'
+  | 'file-kind'
+  | 'path-token'
+  | 'graph';
 
 /** The order a mixed file's primary tier is chosen in: the upper layer wins. */
 const TIER_ORDER: Tier[] = [
@@ -60,11 +67,13 @@ export function tierRank(tier: Tier): number | null {
 }
 
 const STRENGTH_RANK: Record<TierStrength, number> = {
-  framework: 4,
-  annotation: 3,
+  declared: 6,
+  framework: 5,
+  annotation: 4,
+  endpoint: 3,
   'file-kind': 2,
   'path-token': 1,
-  declared: 5,
+  graph: 0,
 };
 
 export interface TierEvidence {
@@ -120,7 +129,7 @@ const FRAMEWORK_RULES: Partial<Record<Language, Rule[]>> = {
     { tier: 'api', pattern: words(['express', 'fastify', 'koa', 'nestjs', '@nestjs', 'hapi', 'hono']) },
     { tier: 'frontend', pattern: words(['react', 'react-dom', 'next', 'nuxt', 'vue', 'svelte', 'angular', '@angular', 'solid-js', 'preact']) },
     { tier: 'data', pattern: words(['prisma', '@prisma', 'typeorm', 'sequelize', 'mongoose', 'knex', 'drizzle-orm', 'better-sqlite3', 'pg', 'mysql2']) },
-    { tier: 'integration', pattern: words(['axios', 'node-fetch', 'got', 'undici', 'kafkajs', 'amqplib', 'ioredis']) },
+    { tier: 'integration', pattern: words(['axios', 'node-fetch', 'got', 'undici', 'fetch', 'kafkajs', 'amqplib', 'ioredis']) },
   ],
   rust: [
     { tier: 'api', pattern: words(['axum', 'actix-web', 'actix_web', 'rocket', 'warp', 'poem', 'tide']) },
@@ -153,6 +162,12 @@ const FRAMEWORK_RULES: Partial<Record<Language, Rule[]>> = {
     { tier: 'data', pattern: words(['gorm.io', 'database/sql', 'sqlx', 'ent', 'mongo-driver']) },
     { tier: 'integration', pattern: words(['go-redis', 'segmentio/kafka-go', 'streadway/amqp', 'nats.go']) },
   ],
+  cpp: [
+    { tier: 'frontend', pattern: words(['QtWidgets', 'QtQuick', 'QtQml', 'qml', 'wxWidgets', 'gtkmm', 'QtGui']) },
+    { tier: 'api', pattern: words(['crow', 'httplib', 'drogon', 'pistache', 'oatpp', 'restinio', 'cpprestsdk', 'grpc++']) },
+    { tier: 'data', pattern: words(['sqlite3', 'libpqxx', 'pqxx', 'mysql++', 'mysqlx', 'bsoncxx', 'mongocxx', 'rocksdb', 'sqlpp11']) },
+    { tier: 'integration', pattern: words(['curl', 'cpr', 'boost/asio', 'boost/beast', 'grpc', 'zeromq']) },
+  ],
 };
 
 /** Annotations and macros per language, next-strongest evidence. */
@@ -180,26 +195,87 @@ const ANNOTATION_RULES: Partial<Record<Language, Rule[]>> = {
   ],
 };
 
+/**
+ * Recorded route declarations: a call that names an HTTP verb and a path literal is an
+ * endpoint this file serves. This is lexical like the call extractor, so the path literal
+ * keeps an ordinary `map.get('/key')` out; a route whose path is dynamic records nothing.
+ */
+const ROUTE_RULES: Partial<Record<Language, Rule[]>> = {
+  js: [
+    {
+      tier: 'api',
+      pattern: /(?:^|[^\w.])(?:app|router|server|api|route|routes)\s*\.\s*(?:get|post|put|patch|delete|options|head|all)\s*\(\s*['"`]\//,
+    },
+  ],
+  go: [
+    {
+      tier: 'api',
+      pattern: /(?:HandleFunc|Handle|GET|POST|PUT|PATCH|DELETE)\s*\(\s*["`]\/[^"`]*["`]\s*,/,
+    },
+  ],
+};
+
+/** A test path or suffix, kept out of the file-name conventions below. */
+function isTestFile(file: string): boolean {
+  return /(^|\/)(tests?|__tests__|specs?)\//i.test(file) || /\.(test|spec)\.[^/]+$/i.test(file);
+}
+
 /** File kinds: path and extension, stronger than a bare token but weaker than a framework. */
 const FILE_KIND_RULES: Array<{ tier: Tier; test: (file: string) => boolean; detail: string }> = [
   { tier: 'data', test: (file) => /\.sql$/i.test(file) || /(^|\/)migrations?\//i.test(file), detail: 'SQL or a migration' },
   { tier: 'data', test: (file) => /\.proto$/i.test(file), detail: 'a protobuf schema' },
+  { tier: 'frontend', test: (file) => /\.(html?|css|scss|sass|less|vue|svelte)$/i.test(file), detail: 'a markup or stylesheet file' },
+  { tier: 'api', test: (file) => /(^|\/)(openapi|swagger)[\w.-]*\.(json|ya?ml)$/i.test(file), detail: 'an OpenAPI document' },
   { tier: 'infra', test: (file) => /(^|\/)(dockerfile|docker-compose\.ya?ml)$/i.test(file), detail: 'a container definition' },
   { tier: 'infra', test: (file) => /(^|\/)(k8s|kubernetes|helm|charts|terraform)\//i.test(file) || /\.tf$/i.test(file), detail: 'infrastructure as code' },
+  { tier: 'infra', test: (file) => /(^|\/)(\.editorconfig|\.gitignore|\.gitattributes|\.npmrc|\.nvmrc|\.dockerignore|\.env(?:\.[\w-]+)?)$/i.test(file), detail: 'a repository config file' },
   { tier: 'build', test: (file) => /(^|\/)\.github\/workflows\//i.test(file), detail: 'a CI workflow' },
-  { tier: 'build', test: (file) => /(^|\/)(makefile|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|pom\.xml|cargo\.toml|go\.mod|pyproject\.toml)$/i.test(file) || /\.csproj$/i.test(file), detail: 'a build manifest' },
-  { tier: 'tests', test: (file) => /(^|\/)(tests?|__tests__|specs?)\//i.test(file) || /\.(test|spec)\.[^/]+$/i.test(file), detail: 'a test path or suffix' },
+  { tier: 'build', test: (file) => /(^|\/)(makefile|build\.gradle(\.kts)?|settings\.gradle(\.kts)?|pom\.xml|cargo\.toml|go\.mod|pyproject\.toml|package\.json)$/i.test(file) || /(^|\/)tsconfig(?:\.[\w-]+)?\.json$/i.test(file) || /\.csproj$/i.test(file), detail: 'a build manifest' },
+  { tier: 'tests', test: isTestFile, detail: 'a test path or suffix' },
+];
+
+/**
+ * File-name conventions: a dotted or camel-case role word the file is named by
+ * (`orders.controller.ts`, `UserRepository.java`). Weaker than a path kind, so a test
+ * suffix still wins, but it catches the naming a framework's scaffolder produces.
+ */
+const FILENAME_RULES: Array<{ tier: Tier; pattern: RegExp; detail: string }> = [
+  {
+    tier: 'api',
+    pattern: /(^|\/)[\w.-]*\.(?:controller|router|routers|route|handler|handlers|resolver|middleware|endpoint)\.|[a-z0-9](?:Controller|Router|Handler|Resolver|Middleware|Endpoint)\.[^/]+$/i,
+    detail: 'a controller or handler file name',
+  },
+  {
+    tier: 'frontend',
+    pattern: /(^|\/)[\w.-]*\.(?:component|page|screen|view|widget)\.|[a-z0-9](?:Component|Page|Screen|Widget)\.[^/]+$/i,
+    detail: 'a component or page file name',
+  },
+  {
+    tier: 'domain',
+    pattern: /(^|\/)[\w.-]*\.(?:service|usecase|use-case|interactor|manager|policy)\.|[a-z0-9](?:Service|UseCase|Interactor|Manager|Policy)\.[^/]+$/i,
+    detail: 'a service or use-case file name',
+  },
+  {
+    tier: 'data',
+    pattern: /(^|\/)[\w.-]*\.(?:repository|repo|dao|entity|model|schema|migration|store)\.|[a-z0-9](?:Repository|Dao|Entity|Model|Schema)\.[^/]+$/i,
+    detail: 'a repository or entity file name',
+  },
+  {
+    tier: 'integration',
+    pattern: /(^|\/)[\w.-]*\.(?:client|adapter|gateway|provider|connector|transport)\.|[a-z0-9](?:Client|Adapter|Gateway|Provider|Connector)\.[^/]+$/i,
+    detail: 'a client or adapter file name',
+  },
 ];
 
 /** Path tokens, the weakest evidence, used only when nothing stronger matched. */
 const PATH_TOKEN_RULES: Array<{ tier: Tier; tokens: string[] }> = [
-  { tier: 'frontend', tokens: ['ui', 'screen', 'screens', 'components', 'pages', 'views', 'widgets', 'compose'] },
-  { tier: 'api', tokens: ['handlers', 'handler', 'routes', 'router', 'controllers', 'controller', 'endpoints', 'api'] },
-  { tier: 'domain', tokens: ['domain', 'services', 'service', 'usecase', 'usecases', 'interactors', 'logic'] },
-  { tier: 'data', tokens: ['data', 'repository', 'repositories', 'dao', 'db', 'database', 'models', 'entities', 'persistence'] },
-  { tier: 'integration', tokens: ['clients', 'client', 'integrations', 'integration', 'gateway', 'adapters', 'adapter'] },
-  { tier: 'infra', tokens: ['infra', 'config', 'deployment', 'deploy'] },
-  { tier: 'build', tokens: ['scripts', 'script', 'tools', 'tool', 'build', 'ci'] },
+  { tier: 'frontend', tokens: ['ui', 'screen', 'screens', 'component', 'components', 'pages', 'views', 'widgets', 'hooks', 'compose'] },
+  { tier: 'api', tokens: ['handlers', 'handler', 'routes', 'router', 'controllers', 'controller', 'endpoints', 'api', 'server', 'graphql', 'rest'] },
+  { tier: 'domain', tokens: ['domain', 'services', 'service', 'usecase', 'usecases', 'interactors', 'logic', 'core', 'engine', 'parser', 'parsers', 'rules'] },
+  { tier: 'data', tokens: ['data', 'repository', 'repositories', 'dao', 'db', 'database', 'models', 'entities', 'persistence', 'store', 'stores', 'cache', 'caches', 'schema', 'schemas'] },
+  { tier: 'integration', tokens: ['clients', 'client', 'integrations', 'integration', 'gateway', 'adapters', 'adapter', 'external', 'remote', 'sdk'] },
+  { tier: 'infra', tokens: ['infra', 'config', 'configs', 'settings', 'deployment', 'deploy', 'ops'] },
+  { tier: 'build', tokens: ['scripts', 'script', 'tools', 'tool', 'build', 'ci', 'bin', 'release', 'tasks'] },
 ];
 
 /** Classify one file from its recorded content and path, with the evidence behind it. */
@@ -243,9 +319,22 @@ export function classifyTierContent(
       evidence.push({ tier: rule.tier, strength: 'annotation', detail: `annotation ${hit[0].trim()}` });
     }
   }
+  for (const rule of ROUTE_RULES[language] ?? []) {
+    const hit = rule.pattern.exec(content);
+    if (hit) {
+      evidence.push({ tier: rule.tier, strength: 'endpoint', detail: `declares route ${hit[0].trim()}` });
+    }
+  }
   for (const rule of FILE_KIND_RULES) {
     if (rule.test(file)) {
       evidence.push({ tier: rule.tier, strength: 'file-kind', detail: rule.detail });
+    }
+  }
+  if (!isTestFile(file)) {
+    for (const rule of FILENAME_RULES) {
+      if (rule.pattern.test(file)) {
+        evidence.push({ tier: rule.tier, strength: 'file-kind', detail: rule.detail });
+      }
     }
   }
   if (evidence.length === 0) {
@@ -534,6 +623,92 @@ function emptyTierCounts(): Record<Tier, number> {
   };
 }
 
+/** The layer tiers a neighbour may lend; support categories (tests, build, infra) do not. */
+const PROPAGATABLE_TIERS: readonly Tier[] = ['frontend', 'api', 'domain', 'data', 'integration'];
+
+/** Classified neighbours a file needs before the graph is allowed to vote on its tier. */
+const MIN_NEIGHBOUR_VOTES = 2;
+
+/**
+ * Give an unclassified file the tier its recorded neighbours agree on.
+ *
+ * Only import edges are read (a call edge parallels an import), and only the layer tiers
+ * vote: a module imported by many tests or build scripts is not itself a test or a script.
+ * The winner must be a strict majority of at least two classified neighbours, so one edge
+ * never forces a tier and the result stays evidence, not a guess.
+ */
+export function propagateTiers(
+  files: readonly TierClassification[],
+  edges: readonly { source: string; target: string; kind?: string }[],
+): TierClassification[] {
+  const present = new Set(files.map((entry) => entry.file));
+  const seed = new Map<string, Tier>();
+  for (const entry of files) {
+    if (PROPAGATABLE_TIERS.includes(entry.tier)) {
+      seed.set(entry.file, entry.tier);
+    }
+  }
+  if (seed.size === 0) {
+    return [...files];
+  }
+
+  const links = new Map<string, Set<string>>();
+  const link = (from: string, to: string): void => {
+    const set = links.get(from) ?? new Set<string>();
+    set.add(to);
+    links.set(from, set);
+  };
+  for (const edge of edges) {
+    if (edge.kind === 'call' || edge.source === edge.target) {
+      continue;
+    }
+    if (!present.has(edge.source) || !present.has(edge.target)) {
+      continue;
+    }
+    link(edge.source, edge.target);
+    link(edge.target, edge.source);
+  }
+
+  return files.map((entry) => {
+    if (entry.tier !== 'unclassified') {
+      return entry;
+    }
+    const votes = new Map<Tier, number>();
+    let total = 0;
+    for (const neighbour of links.get(entry.file) ?? []) {
+      const tier = seed.get(neighbour);
+      if (!tier) {
+        continue;
+      }
+      total += 1;
+      votes.set(tier, (votes.get(tier) ?? 0) + 1);
+    }
+    if (total < MIN_NEIGHBOUR_VOTES) {
+      return entry;
+    }
+    const top = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!top) {
+      return entry;
+    }
+    const [tier, count] = top;
+    if (count * 2 <= total) {
+      return entry;
+    }
+    return {
+      ...entry,
+      tier,
+      evidence: [
+        ...entry.evidence,
+        {
+          tier,
+          strength: 'graph',
+          detail: `${count} of ${total} recorded neighbours are ${tier}`,
+        },
+      ],
+    };
+  });
+}
+
 /** Classify a repository's files and roll the result up per build unit. */
 export function buildTierReport(
   root: string,
@@ -551,7 +726,9 @@ export function buildTierReport(
   const all = graph.nodes.map((node) => node.id).sort();
   const selected = all.slice(0, MAX_TIER_FILES);
   const declared = readDeclaredTiers(root);
-  const { files, skipped } = classifyTiers(root, selected, declared);
+  const classified = classifyTiers(root, selected, declared);
+  const files = propagateTiers(classified.files, graph.edges ?? []);
+  const { skipped } = classified;
   const tierOf = new Map(files.map((entry) => [entry.file, entry.tier]));
 
   const units = detectUnits(root, selected, repositoryName);
@@ -795,12 +972,20 @@ function languageOf(file: string): Language {
   return 'other';
 }
 
-/** The import-ish lines of a file, joined, so a framework token is matched in an import. */
+/**
+ * The import-ish lines of a file, joined, so a framework token is matched in an import.
+ *
+ * A line is kept when it starts with an import keyword or when it calls `require(...)`
+ * anywhere, so a CommonJS `const express = require('express')` is read like an ESM import
+ * rather than missed by the line-start test.
+ */
 function importText(content: string): string {
   return content
     .split(/\r?\n/)
-    .filter((line) =>
-      /^\s*(?:import|export|use|using|from|require|package|#include)\b/.test(line),
+    .filter(
+      (line) =>
+        /^\s*(?:import|export|use|using|from|require|package|#include)\b/.test(line) ||
+        /\brequire\s*\(/.test(line),
     )
     .join('\n');
 }

@@ -1,0 +1,41 @@
+# Tier declarations for this repository, read by the tier lens (/analysis/tiers).
+#
+# A declared tier overrides the tier derived from imports, annotations, recorded routes,
+# file kinds, and path tokens, and is reported as `declared` evidence. Globs are POSIX and
+# `**` matches any depth. The first matching entry wins, so put specific globs first.
+tiers:
+  - tier: frontend
+    globs:
+      - "ui/**"
+  - tier: api
+    globs:
+      - "src/api/**"
+      - "src/server.ts"
+      - "src/index.ts"
+  - tier: integration
+    globs:
+      - "src/integrations/**"
+      - "src/narrator/**"
+      - "src/risk/**"
+  - tier: data
+    globs:
+      - "src/cache/**"
+      - "src/state/**"
+      - "src/repository.ts"
+  - tier: infra
+    globs:
+      - "src/config.ts"
+  - tier: build
+    globs:
+      - "scripts/**"
+      - "bin/**"
+  - tier: domain
+    globs:
+      - "src/analysis/**"
+      - "src/boundary/**"
+      - "src/resolve/**"
+      - "src/scan/**"
+      - "src/view/**"
+      - "src/workspace/**"
+      - "src/cli.ts"
+      - "src/types.ts"

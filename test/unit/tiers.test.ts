@@ -86,6 +86,9 @@ test('classifyTierContent reads file kinds', () => {
   assert.equal(classifyTierContent('infra/main.tf', '').tier, 'infra');
   assert.equal(classifyTierContent('.github/workflows/ci.yml', '').tier, 'build');
   assert.equal(classifyTierContent('Cargo.toml', '').tier, 'build');
+  assert.equal(classifyTierContent('package.json', '').tier, 'build');
+  assert.equal(classifyTierContent('.editorconfig', '').tier, 'infra');
+  assert.equal(classifyTierContent('public/index.html', '').tier, 'frontend');
   assert.equal(classifyTierContent('src/feature.test.ts', '').tier, 'tests');
 });
 
@@ -106,6 +109,39 @@ test('classifyTierContent leaves a file with no evidence unclassified', () => {
   const result = classifyTierContent('src/thing.ts', 'const value = 1;\n');
   assert.equal(result.tier, 'unclassified');
   assert.deepEqual(result.evidence, []);
+});
+
+test('classifyTierContent reads a CommonJS require as framework evidence', () => {
+  assert.equal(
+    classifyTierContent('src/app.js', "const express = require('express');\n").tier,
+    'api',
+  );
+});
+
+test('classifyTierContent reads a route declaration as an endpoint', () => {
+  const result = classifyTierContent(
+    'src/kernel/thing.ts',
+    "app.get('/health', (req, res) => res.send('ok'));\n",
+  );
+  assert.equal(result.tier, 'api');
+  assert.ok(result.evidence.some((entry) => entry.strength === 'endpoint'));
+});
+
+test('classifyTierContent reads C++ framework imports', () => {
+  assert.equal(classifyTierContent('src/web/main.cpp', '#include <httplib.h>\n').tier, 'api');
+  assert.equal(classifyTierContent('src/store/main.cpp', '#include <sqlite3.h>\n').tier, 'data');
+});
+
+test('classifyTierContent reads an OpenAPI document as API', () => {
+  assert.equal(classifyTierContent('docs/openapi.yaml', '').tier, 'api');
+  assert.equal(classifyTierContent('docs/swagger.json', '').tier, 'api');
+});
+
+test('classifyTierContent reads a file-name convention, and a test suffix still wins', () => {
+  assert.equal(classifyTierContent('src/orders.controller.ts', 'export const x = 1;').tier, 'api');
+  assert.equal(classifyTierContent('src/UserRepository.java', 'class UserRepository {}').tier, 'data');
+  assert.equal(classifyTierContent('src/PaymentClient.cs', 'class PaymentClient {}').tier, 'integration');
+  assert.equal(classifyTierContent('src/orders.controller.test.ts', '').tier, 'tests');
 });
 
 test('a declared tier overrides the derived one and says so', () => {
@@ -236,6 +272,72 @@ test('buildTierReport builds the tier matrix and flags wrong-way edges', () => {
   const kinds = report.directions.map((entry) => entry.kind).sort();
   assert.deepEqual(kinds, ['skip-layer', 'upward']);
   assert.equal(report.directions.find((entry) => entry.kind === 'upward')?.target, 'src/handlers/orders.ts');
+});
+
+test('propagateTiers gives an unclassified file its neighbours majority tier', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "core" }\n');
+  write(root, 'src/api/server.ts', "import express from 'express';\nexport const a = 1;\n");
+  write(root, 'src/api/routes.ts', "import express from 'express';\nexport const b = 1;\n");
+  write(root, 'src/kernel/thing.ts', 'export const thing = 1;\n');
+
+  const report = buildTierReport(root, 'core', {
+    nodes: [
+      { id: 'src/api/server.ts' },
+      { id: 'src/api/routes.ts' },
+      { id: 'src/kernel/thing.ts' },
+    ],
+    edges: [
+      { source: 'src/api/server.ts', target: 'src/kernel/thing.ts' },
+      { source: 'src/api/routes.ts', target: 'src/kernel/thing.ts' },
+    ],
+  });
+
+  const thing = report.files.find((entry) => entry.file === 'src/kernel/thing.ts');
+  assert.equal(thing?.tier, 'api');
+  assert.equal(thing?.evidence.at(-1)?.strength, 'graph');
+});
+
+test('propagateTiers needs more than one classified neighbour', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "core" }\n');
+  write(root, 'src/api/server.ts', "import express from 'express';\n");
+  write(root, 'src/kernel/thing.ts', 'export const thing = 1;\n');
+
+  const report = buildTierReport(root, 'core', {
+    nodes: [{ id: 'src/api/server.ts' }, { id: 'src/kernel/thing.ts' }],
+    edges: [{ source: 'src/api/server.ts', target: 'src/kernel/thing.ts' }],
+  });
+
+  assert.equal(
+    report.files.find((entry) => entry.file === 'src/kernel/thing.ts')?.tier,
+    'unclassified',
+  );
+});
+
+test('propagateTiers does not lend a support tier', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "core" }\n');
+  write(root, 'test/api.test.ts', 'export const a = 1;\n');
+  write(root, 'test/helper.test.ts', 'export const b = 1;\n');
+  write(root, 'src/kernel/thing.ts', 'export const thing = 1;\n');
+
+  const report = buildTierReport(root, 'core', {
+    nodes: [
+      { id: 'test/api.test.ts' },
+      { id: 'test/helper.test.ts' },
+      { id: 'src/kernel/thing.ts' },
+    ],
+    edges: [
+      { source: 'test/api.test.ts', target: 'src/kernel/thing.ts' },
+      { source: 'test/helper.test.ts', target: 'src/kernel/thing.ts' },
+    ],
+  });
+
+  assert.equal(
+    report.files.find((entry) => entry.file === 'src/kernel/thing.ts')?.tier,
+    'unclassified',
+  );
 });
 
 test('unitRole reads the unit from its files and entry shape', () => {
