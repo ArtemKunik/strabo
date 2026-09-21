@@ -148,6 +148,16 @@ export function renderInspector(container, model, id, handlers = {}) {
   }
   container.append(cards);
 
+  // A System-view unit has no members or functions to tab through; its one extra
+  // affordance is the opt-in narrator, which may name the group but never change it.
+  if (model.system) {
+    const narrator = document.createElement('div');
+    narrator.className = 'system-narrator';
+    appendNarratorBlock(narrator, handlers, { id: 'narrate-group', label: 'Name group' });
+    container.append(narrator);
+    return;
+  }
+
   const tabs = document.createElement('div');
   tabs.className = 'inspector-tabs';
   tabs.setAttribute('role', 'tablist');
@@ -412,48 +422,57 @@ export function renderFunctions(container, result, handlers = {}) {
   }
   container.append(list);
 
-  if (handlers.onNarrate) {
-    const block = document.createElement('div');
-    block.className = 'narrator-block';
+  appendNarratorBlock(container, handlers, { id: 'narrate-functions', label: 'Narrate' });
+}
 
-    const note = document.createElement('p');
-    note.className = 'narrator-note';
-    note.textContent = narratorStatusLabel(handlers.narratorStatus);
-    block.append(note);
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.id = 'narrate-functions';
-    button.className = 'narrator-button';
-    button.textContent = 'Narrate';
-    block.append(button);
-
-    const reply = document.createElement('div');
-    reply.className = 'narrator-reply';
-    reply.dataset.role = 'narrative';
-    block.append(reply);
-
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      reply.replaceChildren('Asking the narrator…');
-      try {
-        const narrated = await handlers.onNarrate();
-        reply.replaceChildren(narratorReplyLabel(narrated));
-        if (narrated?.available === true) {
-          const attribution = document.createElement('p');
-          attribution.className = 'narrator-attribution';
-          attribution.textContent = NARRATOR_ATTRIBUTION;
-          reply.append(attribution);
-        }
-      } catch (error) {
-        reply.replaceChildren(`Narrator unavailable: ${error.message}`);
-      } finally {
-        button.disabled = false;
-      }
-    });
-
-    container.append(block);
+/**
+ * The opt-in narrator affordance: a status line, a button, and a reply under the
+ * model-generated attribution. Shared by the Functions tab and a System-view unit.
+ */
+function appendNarratorBlock(container, handlers, { id, label }) {
+  if (!handlers.onNarrate) {
+    return;
   }
+  const block = document.createElement('div');
+  block.className = 'narrator-block';
+
+  const note = document.createElement('p');
+  note.className = 'narrator-note';
+  note.textContent = narratorStatusLabel(handlers.narratorStatus);
+  block.append(note);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = id;
+  button.className = 'narrator-button';
+  button.textContent = label;
+  block.append(button);
+
+  const reply = document.createElement('div');
+  reply.className = 'narrator-reply';
+  reply.dataset.role = 'narrative';
+  block.append(reply);
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    reply.replaceChildren('Asking the narrator…');
+    try {
+      const narrated = await handlers.onNarrate();
+      reply.replaceChildren(narratorReplyLabel(narrated));
+      if (narrated?.available === true) {
+        const attribution = document.createElement('p');
+        attribution.className = 'narrator-attribution';
+        attribution.textContent = NARRATOR_ATTRIBUTION;
+        reply.append(attribution);
+      }
+    } catch (error) {
+      reply.replaceChildren(`Narrator unavailable: ${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  container.append(block);
 }
 
 function workspaceHeading(text, count) {

@@ -2342,6 +2342,32 @@ function narratorReplyLabel(reply) {
   const detail = reply?.detail ? ` \u2014 ${reply.detail}` : "";
   return `Narrator unavailable: ${reason}${detail}`;
 }
+var GROUP_NAMING_INSTRUCTION = "Propose one short name and a one-line purpose for this build unit, using only the recorded evidence. Do not create, merge, or split groups, and do not claim relationships the evidence does not show.";
+function buildGroupNamingEvidence(model, id) {
+  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return "No unit is recorded for this selection.";
+  }
+  const edges = model?.edges ?? [];
+  const imports = edges.filter((edge) => edge.source === id).map((edge) => {
+    const targetNode = (model.nodes ?? []).find((candidate) => candidate.id === edge.target);
+    return targetNode?.label ?? edge.target;
+  });
+  const usedBy = edges.filter((edge) => edge.target === id).map((edge) => {
+    const sourceNode = (model.nodes ?? []).find((candidate) => candidate.id === edge.source);
+    return sourceNode?.label ?? edge.source;
+  });
+  const lines = [
+    `Unit: ${node.label ?? id}`,
+    `Directory: ${id}`,
+    `Grouped by: ${node.why ?? "not recorded"}`,
+    `Component files: ${node.files ?? "not recorded"}`,
+    `Support files folded into its shelf: ${node.periphery ?? 0}`,
+    `Recorded imports: ${imports.length > 0 ? imports.join(", ") : "none recorded"}`,
+    `Recorded used-by: ${usedBy.length > 0 ? usedBy.join(", ") : "none recorded"}`
+  ];
+  return lines.join("\n");
+}
 function buildNarratorEvidence(result) {
   const report = result?.functions;
   if (!report || report.available === false || !Array.isArray(report.functions) || report.functions.length === 0) {
@@ -2768,6 +2794,13 @@ function renderInspector(container, model, id, handlers = {}) {
     cards.append(card);
   }
   container.append(cards);
+  if (model.system) {
+    const narrator = document.createElement("div");
+    narrator.className = "system-narrator";
+    appendNarratorBlock(narrator, handlers, { id: "narrate-group", label: "Name group" });
+    container.append(narrator);
+    return;
+  }
   const tabs = document.createElement("div");
   tabs.className = "inspector-tabs";
   tabs.setAttribute("role", "tablist");
@@ -2989,43 +3022,47 @@ function renderFunctions(container, result, handlers = {}) {
     list.append(item);
   }
   container.append(list);
-  if (handlers.onNarrate) {
-    const block = document.createElement("div");
-    block.className = "narrator-block";
-    const note2 = document.createElement("p");
-    note2.className = "narrator-note";
-    note2.textContent = narratorStatusLabel(handlers.narratorStatus);
-    block.append(note2);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.id = "narrate-functions";
-    button.className = "narrator-button";
-    button.textContent = "Narrate";
-    block.append(button);
-    const reply = document.createElement("div");
-    reply.className = "narrator-reply";
-    reply.dataset.role = "narrative";
-    block.append(reply);
-    button.addEventListener("click", async () => {
-      button.disabled = true;
-      reply.replaceChildren("Asking the narrator\u2026");
-      try {
-        const narrated = await handlers.onNarrate();
-        reply.replaceChildren(narratorReplyLabel(narrated));
-        if (narrated?.available === true) {
-          const attribution = document.createElement("p");
-          attribution.className = "narrator-attribution";
-          attribution.textContent = NARRATOR_ATTRIBUTION;
-          reply.append(attribution);
-        }
-      } catch (error) {
-        reply.replaceChildren(`Narrator unavailable: ${error.message}`);
-      } finally {
-        button.disabled = false;
-      }
-    });
-    container.append(block);
+  appendNarratorBlock(container, handlers, { id: "narrate-functions", label: "Narrate" });
+}
+function appendNarratorBlock(container, handlers, { id, label }) {
+  if (!handlers.onNarrate) {
+    return;
   }
+  const block = document.createElement("div");
+  block.className = "narrator-block";
+  const note2 = document.createElement("p");
+  note2.className = "narrator-note";
+  note2.textContent = narratorStatusLabel(handlers.narratorStatus);
+  block.append(note2);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = id;
+  button.className = "narrator-button";
+  button.textContent = label;
+  block.append(button);
+  const reply = document.createElement("div");
+  reply.className = "narrator-reply";
+  reply.dataset.role = "narrative";
+  block.append(reply);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    reply.replaceChildren("Asking the narrator\u2026");
+    try {
+      const narrated = await handlers.onNarrate();
+      reply.replaceChildren(narratorReplyLabel(narrated));
+      if (narrated?.available === true) {
+        const attribution = document.createElement("p");
+        attribution.className = "narrator-attribution";
+        attribution.textContent = NARRATOR_ATTRIBUTION;
+        reply.append(attribution);
+      }
+    } catch (error) {
+      reply.replaceChildren(`Narrator unavailable: ${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  container.append(block);
 }
 function workspaceHeading(text, count) {
   const heading = document.createElement("h4");
@@ -5483,9 +5520,13 @@ function selectNode(id) {
       openMemberMap(target).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
       });
-    }
+    },
+    // A System-view unit may ask the opt-in narrator to name its group.
+    ...current?.system ? { narratorStatus, onNarrate: () => narrateGroup(id) } : {}
   });
-  loadMembers(id);
+  if (!current?.system) {
+    loadMembers(id);
+  }
   refreshDock();
 }
 async function loadMembers(id) {
@@ -5529,6 +5570,24 @@ async function fetchNarratorStatus() {
   } catch {
     return { configured: false, reason: "not-configured" };
   }
+}
+async function narrateGroup(id) {
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      instruction: GROUP_NAMING_INSTRUCTION,
+      evidence: buildGroupNamingEvidence(current, id)
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
 }
 async function narrateFile(result) {
   const response = await fetch(`${API_PATH}/narrator`, {

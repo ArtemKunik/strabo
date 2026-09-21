@@ -1,8 +1,9 @@
 import type { Graph } from '../types.ts';
 import {
-  assignUnits,
+  applyDeclaredGroups,
   classifyPeriphery,
   detectUnits,
+  readDeclaredGroups,
   type Periphery,
   type SystemUnit,
   type SystemUnitEcosystem,
@@ -20,6 +21,10 @@ export interface SystemNode {
   files: number;
   /** Files folded into the support shelf for this unit. */
   periphery: number;
+  /** True when `strabo.groups.yml` declared the group rather than a manifest. */
+  declared?: boolean;
+  /** Derived units whose files this declared group took over. */
+  overrides?: string[];
 }
 
 /** One recorded relationship between units. */
@@ -84,8 +89,8 @@ export interface SystemReport {
  */
 export function buildSystemReport(root: string, repositoryName: string, graph: Graph): SystemReport {
   const files = graph.nodes.map((node) => node.id);
-  const units = detectUnits(root, files, repositoryName);
-  const assignment = assignUnits(files, units);
+  const derived = detectUnits(root, files, repositoryName);
+  const { units, assignment } = applyDeclaredGroups(derived, files, readDeclaredGroups(root));
   const kindOf = new Map(graph.nodes.map((node) => [node.id, node.kind]));
 
   const periphery: SystemPeriphery[] = [];
@@ -110,6 +115,8 @@ export function buildSystemReport(root: string, repositoryName: string, graph: G
     why: unit.why,
     files: componentFiles.get(unit.id)?.length ?? 0,
     periphery: periphery.filter((entry) => assignment.get(entry.file) === unit.id).length,
+    declared: unit.declared,
+    overrides: unit.overrides,
   }));
 
   const edges = aggregateEdges(graph, assignment, unitById, componentFiles);

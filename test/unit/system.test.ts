@@ -15,6 +15,7 @@ import {
   classifyPeriphery,
   createStraboRouter,
   detectUnits,
+  readDeclaredGroups,
 } from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
@@ -294,6 +295,39 @@ test('GET /graph?system=1 serves the unit roll-up', async () => {
   };
   assert.equal(model.system, true);
   assert.equal(model.nodes.find((node) => node.id === 'pkg')?.label, 'widgets');
+});
+
+test('readDeclaredGroups reads name/globs and ignores a malformed entry', () => {
+  const root = tempDir();
+  write(
+    root,
+    'strabo.groups.yml',
+    ['groups:', '  - name: Billing', '    globs:', '      - src/billing/**', '  - name: Bad', ''].join('\n'),
+  );
+
+  assert.deepEqual(readDeclaredGroups(root), [{ name: 'Billing', globs: ['src/billing/**'] }]);
+});
+
+test('buildSystemReport lets a declared group override the derived units', () => {
+  const root = tempDir();
+  write(root, 'Cargo.toml', '[package]\nname = "monorepo"\n');
+  write(
+    root,
+    'strabo.groups.yml',
+    ['groups:', '  - name: Billing', '    globs: ["src/**"]'].join('\n'),
+  );
+
+  const graph = graphOf(['src/billing/invoice.ts', 'auth/login.ts'], []);
+  const report = buildSystemReport(root, 'monorepo', graph);
+
+  const billing = report.units.find((unit) => unit.id === 'Billing');
+  assert.equal(billing?.declared, true);
+  assert.equal(billing?.files, 1);
+  assert.match(billing?.why ?? '', /declared group/);
+  // The file the root unit would have owned is reported as taken over.
+  assert.deepEqual(billing?.overrides, ['.']);
+  // The root unit keeps the file the declared glob did not claim.
+  assert.equal(report.units.find((unit) => unit.id === '.')?.files, 1);
 });
 
 test('buildDirectoryLabels anchors a directory label at its unit', () => {

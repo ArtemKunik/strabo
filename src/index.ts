@@ -79,8 +79,11 @@ export {
   classifyPeripheryAll,
   buildDirectoryLabels,
   buildBlockLabels,
+  readDeclaredGroups,
+  applyDeclaredGroups,
+  DECLARED_GROUPS_FILE,
 } from './analysis/units.ts';
-export type { SystemUnit, SystemUnitEcosystem, Periphery } from './analysis/units.ts';
+export type { SystemUnit, SystemUnitEcosystem, Periphery, DeclaredGroup } from './analysis/units.ts';
 export { buildSystemReport } from './analysis/system.ts';
 export type {
   SystemReport,

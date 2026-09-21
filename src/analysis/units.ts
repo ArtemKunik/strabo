@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { parse as parseYaml } from 'yaml';
 
 import { toPosix } from '../boundary/repository-root.ts';
 import { compressDirectoryChains, directoriesOf, parentDirectory as directoryParent } from './directory.ts';
@@ -19,7 +20,8 @@ export type SystemUnitEcosystem =
   | 'dotnet'
   | 'python'
   | 'go'
-  | 'root';
+  | 'root'
+  | 'declared';
 
 /** One build unit: a manifest's directory, and the name it declares. */
 export interface SystemUnit {
@@ -34,7 +36,20 @@ export interface SystemUnit {
   parent: string | null;
   /** A one-line reason the unit exists, for the "why grouped" caption. */
   why: string;
+  /** True when `strabo.groups.yml` declared the group rather than a manifest. */
+  declared?: boolean;
+  /** Derived units whose files this declared group took over. */
+  overrides?: string[];
 }
+
+/** A group the operator declared in `strabo.groups.yml`. */
+export interface DeclaredGroup {
+  name: string;
+  globs: string[];
+}
+
+/** The file name the operator uses to declare groups at the repository root. */
+export const DECLARED_GROUPS_FILE = 'strabo.groups.yml';
 
 /** A file the scan kept that is support rather than a system component. */
 export interface Periphery {
@@ -152,6 +167,127 @@ export function buildBlockLabels(
     name: unit.name,
   }));
   return Object.fromEntries(compressDirectoryChains(blockIds, () => true, units));
+}
+
+/**
+ * Read declared groups from `strabo.groups.yml` at the repository root.
+ *
+ * The shape is a `groups` list of `{ name, globs }`. A malformed file, a missing name, or a
+ * group with no globs is ignored rather than inventing a group; a declared group is exempt
+ * from `evidence over speculation` because the operator stated it.
+ */
+export function readDeclaredGroups(root: string): DeclaredGroup[] {
+  const content = readIfPresent(root, DECLARED_GROUPS_FILE);
+  if (content === null) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(content);
+  } catch {
+    return [];
+  }
+  const groups = (parsed as { groups?: unknown } | null)?.groups;
+  if (!Array.isArray(groups)) {
+    return [];
+  }
+  const found: DeclaredGroup[] = [];
+  for (const entry of groups) {
+    const record = entry as { name?: unknown; globs?: unknown };
+    const name = typeof record.name === 'string' ? record.name.trim() : '';
+    const globs = Array.isArray(record.globs)
+      ? record.globs.filter((glob): glob is string => typeof glob === 'string' && glob.trim() !== '')
+      : [];
+    if (name === '' || globs.length === 0) {
+      continue;
+    }
+    found.push({ name, globs });
+  }
+  return found;
+}
+
+/** A declared group's files override the manifest units that would have claimed them. */
+export function applyDeclaredGroups(
+  derived: readonly SystemUnit[],
+  files: readonly string[],
+  groups: readonly DeclaredGroup[],
+): { units: SystemUnit[]; assignment: Map<string, string> } {
+  if (groups.length === 0) {
+    return { units: [...derived], assignment: assignUnits(files, derived) };
+  }
+
+  const base = assignUnits(files, derived);
+  const matchers = groups.map((group) => ({
+    group,
+    patterns: group.globs.map((glob) => globToRegExp(glob)),
+  }));
+  const declaredUnits: SystemUnit[] = [];
+  const assignment = new Map<string, string>();
+
+  for (const file of files) {
+    const match = matchers.find((entry) => entry.patterns.some((pattern) => pattern.test(file)));
+    if (match) {
+      assignment.set(file, match.group.name);
+    } else {
+      assignment.set(file, base.get(file) ?? '.');
+    }
+  }
+
+  for (const { group } of matchers) {
+    const members = files.filter((file) => assignment.get(file) === group.name);
+    if (members.length === 0) {
+      continue;
+    }
+    const takenFrom = [
+      ...new Set(members.map((file) => base.get(file) ?? '.').filter((id) => id !== group.name)),
+    ].sort();
+    declaredUnits.push({
+      id: group.name,
+      name: group.name,
+      ecosystem: 'declared',
+      manifest: DECLARED_GROUPS_FILE,
+      parent: null,
+      declared: true,
+      overrides: takenFrom.length > 0 ? takenFrom : undefined,
+      why: `declared group \`${group.name}\` (${DECLARED_GROUPS_FILE})`,
+    });
+  }
+
+  // Derived units keep only the files the declared groups did not claim.
+  const derivedKept = derived
+    .map((unit) => ({ ...unit }))
+    .filter((unit) => files.some((file) => assignment.get(file) === unit.id));
+  return { units: [...declaredUnits, ...derivedKept], assignment };
+}
+
+/** A glob with `**` (any depth), `*` (one segment), and `?` (one character). */
+function globToRegExp(glob: string): RegExp {
+  const pattern = glob.replace(/\\/g, '/');
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const character = pattern[index] as string;
+    if (character === '*') {
+      if (pattern[index + 1] === '*') {
+        // `**/` also matches zero directories, so `src/**` matches `src/a.ts`.
+        if (pattern[index + 2] === '/') {
+          source += '(?:.*/)?';
+          index += 2;
+        } else {
+          source += '.*';
+          index += 1;
+        }
+      } else {
+        source += '[^/]*';
+      }
+    } else if (character === '?') {
+      source += '[^/]';
+    } else if ('\\^$.|+()[]{}'.includes(character)) {
+      source += `\\${character}`;
+    } else {
+      source += character;
+    }
+  }
+  return new RegExp(`^${source}$`);
 }
 
 /** Classify a scanned file as support, with the first rule that matched. */

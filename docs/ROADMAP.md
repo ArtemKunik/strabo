@@ -26,8 +26,8 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay); follow-ups F1-F4 planned (free-function calls, entry detection, table layout) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L0 System mode UI with support shelf, L1, L2, L3-L6 backend; L7, L8, L9-L13 remain) |
-| 17 | Module quality and change impact | Q1-Q2 done (`use`/`declare` edge roles; percentile scorecard); Q3-Q8 planned |
+| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; the tier lens L9-L13 remains) |
+| 17 | Module quality and change impact | Q1-Q3 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping with before → after metric/signal deltas); Q4-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
 
@@ -703,8 +703,15 @@ single-child hop and anchors the surviving tail at the unit root, so `service-ru
 reads as `service › handlers`; the graph route attaches `directoryLabels` to file and block
 models, and islands and block nodes prefer them. The acceptance scenario is
 `test/acceptance/features/system-view.feature` (`@system`), run against the fixture
-repository. Still to do: L7 `strabo.groups.yml`, L8 narrator group naming, a polyglot
-fixture for the acceptance scenario, and the tier lens.
+repository. **L7 (done)** `strabo.groups.yml` declared groups: `readDeclaredGroups` reads a
+`groups` list of `{ name, globs }`, `applyDeclaredGroups` gives a matched file to its declared
+group instead of the manifest unit, and the unit reports the derived units it took over
+(`overrides`). A malformed file or a nameless/glob-less group is ignored rather than invented.
+**L8 (done)** narrator group naming: select a unit in System view and **Name group** posts the
+unit's recorded facts (`buildGroupNamingEvidence`) with an instruction that the narrator may
+only name and describe, never create, merge, or split a group; the reply renders under the
+Phase 15 model-generated attribution. Still to do: a polyglot fixture for the acceptance
+scenario and the tier lens.
 
 ### Tier lens
 
@@ -809,6 +816,8 @@ coverage is the `mod declarations are declare edges` case in `test/unit/rust.tes
 - *Protection*: tests that reach the module, and the share of its dependents that are tested.
 
 **Q2 (done).** A percentile scorecard in the passport built from the existing measures. `src/analysis/quality.ts` computes per-module complexity (LOC, function count, sum/max decision points, max nesting, signal share), shape (cohesion from member wiring, member count, interface width, depth signal, instability), centrality (direct importers, blast radius, transitive dependencies, cycle membership), evolution (churn, author count, ownership fragmentation, hidden coupling), and protection (test reach, tested dependents share). Each measure is ranked as a repository percentile (0-100). `GET /analysis/quality` serves the scorecard. Unit coverage is `test/unit/quality.test.ts`; acceptance is `test/acceptance/features/module-quality.feature` (`@quality`).
+
+**Q3 (done).** Hunk → function mapping and per-function metric/signal deltas in the change passport. `computeFunctionChanges` maps `git diff -U0` hunks onto recorded function spans by comparing before/after function extractions. For each touched function, the passport reports `decisionPointsBefore`/`After`, `nestingBefore`/`After`, `signalsBefore`/`After`, `signalIntroduced`, `signalResolved`, and `linesBefore`/`After`. The `CohesionChange.functions` field carries the `FunctionChange[]`. Unit coverage is the new case in `test/unit/change-passport.test.ts`.
 
 **Smells** are rules over those measures. Each shows the inputs that tripped it and is a
 signal, not a verdict: god module (size, members and importers high, cohesion low), hub

@@ -34,7 +34,11 @@ import {
   renderWorkspace,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
-import { buildNarratorEvidence } from './strabo-narrator.js';
+import {
+  GROUP_NAMING_INSTRUCTION,
+  buildGroupNamingEvidence,
+  buildNarratorEvidence,
+} from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
 import { crossRepoNodeIds } from './strabo-workspace.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
@@ -486,8 +490,14 @@ function selectNode(id) {
         elements.status.textContent = `Error: ${error.message}`;
       });
     },
+    // A System-view unit may ask the opt-in narrator to name its group.
+    ...(current?.system
+      ? { narratorStatus, onNarrate: () => narrateGroup(id) }
+      : {}),
   });
-  loadMembers(id);
+  if (!current?.system) {
+    loadMembers(id);
+  }
   refreshDock();
 }
 
@@ -539,6 +549,31 @@ async function fetchNarratorStatus() {
   } catch {
     return { configured: false, reason: 'not-configured' };
   }
+}
+
+/**
+ * Ask the narrator to propose a name and purpose for one System-view unit.
+ *
+ * Only the unit's recorded facts are sent; the reply is narrative and never creates, merges,
+ * or splits a group.
+ */
+async function narrateGroup(id) {
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      instruction: GROUP_NAMING_INSTRUCTION,
+      evidence: buildGroupNamingEvidence(current, id),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
 }
 
 /**

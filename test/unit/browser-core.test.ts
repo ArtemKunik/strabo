@@ -54,6 +54,8 @@ import {
   functionSignals,
 } from '../../ui/strabo-functions.js';
 import {
+  GROUP_NAMING_INSTRUCTION,
+  buildGroupNamingEvidence,
   buildNarratorEvidence,
   narratorReplyLabel,
   narratorStatusLabel,
@@ -367,6 +369,24 @@ test('a system unit sizes by files and reports its why caption', () => {
   assert.equal(passport.why, 'crate `ledger-api` (Cargo.toml)');
   assert.ok(passport.metrics.some((metric) => metric.label === 'Files' && metric.value === 12));
   assert.ok(passport.metrics.some((metric) => metric.label === 'Support files' && metric.value === 3));
+});
+
+test('buildGroupNamingEvidence reports only recorded unit facts', () => {
+  const systemModel = {
+    system: true,
+    nodes: [
+      { id: 'crates/api', label: 'ledger-api', files: 4, periphery: 2, why: 'crate `ledger-api` (Cargo.toml)' },
+      { id: 'crates/core', label: 'ledger-core' },
+    ],
+    edges: [{ source: 'crates/api', target: 'crates/core', evidence: { specifier: 'ledger-core' } }],
+  };
+  const evidence = buildGroupNamingEvidence(systemModel, 'crates/api');
+  assert.match(evidence, /Unit: ledger-api/);
+  assert.match(evidence, /Grouped by: crate `ledger-api`/);
+  assert.match(evidence, /Component files: 4/);
+  assert.match(evidence, /Support files folded into its shelf: 2/);
+  assert.match(evidence, /Recorded imports: ledger-core/);
+  assert.match(GROUP_NAMING_INSTRUCTION, /do not create, merge, or split/i);
 });
 
 test('mapCounts lists units in system mode', () => {
