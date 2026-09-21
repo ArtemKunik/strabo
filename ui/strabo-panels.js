@@ -87,6 +87,14 @@ export function renderInspector(container, model, id, handlers = {}) {
   path.textContent = node?.workspacePath ?? id;
   container.append(path);
 
+  // A System-view unit says why it is grouped, so the caption is evidence, not decoration.
+  if (passport.why) {
+    const why = document.createElement('p');
+    why.className = 'passport-why';
+    why.textContent = `Grouped by: ${passport.why}`;
+    container.append(why);
+  }
+
   const actions = document.createElement('div');
   actions.className = 'inspector-actions';
   if (handlers.onOpenWorkspace) {
@@ -939,6 +947,9 @@ const LEGEND_SWATCHES = {
   'island = directory': 'linear-gradient(135deg,var(--island-fill),var(--node-fill))',
   'diamond = test': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'hover = blast radius': 'linear-gradient(135deg,var(--ink-3),var(--accent))',
+  'box = build unit': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'size = files': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'edge = import between units': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
 };
 
 export function renderLegend(container, model) {
@@ -946,7 +957,7 @@ export function renderLegend(container, model) {
 
   const guide = document.createElement('div');
   guide.className = 'legend-guide';
-  for (const text of readingLegend()) {
+  for (const text of readingLegend(model)) {
     const item = document.createElement('span');
     item.className = 'legend-item';
     const swatch = document.createElement('span');

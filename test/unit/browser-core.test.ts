@@ -326,6 +326,63 @@ test('the reading legend names position, not colour, as the directory encoding',
   assert.deepEqual(readingLegend(), ['size = dependents', 'island = directory', 'diamond = test', 'star = entry']);
 });
 
+test('buildGraphQuery sends system=1 in system mode', () => {
+  const query = buildGraphQuery({ repository: '/demo', mode: 'system', depth: 1, prefix: '' });
+  assert.ok(query.includes('system=1'));
+  assert.ok(!query.includes('blockDepth'));
+});
+
+test('the reading legend names units and files in system mode', () => {
+  assert.deepEqual(readingLegend({ system: true }), [
+    'box = build unit',
+    'size = files',
+    'edge = import between units',
+  ]);
+});
+
+test('a system unit sizes by files and reports its why caption', () => {
+  const systemModel = {
+    system: true,
+    nodes: [
+      {
+        id: 'crates/api',
+        kind: 'module',
+        label: 'ledger-api',
+        files: 12,
+        periphery: 3,
+        transitiveDependents: 2,
+        transitiveDependencies: 1,
+        why: 'crate `ledger-api` (Cargo.toml)',
+      },
+    ],
+    edges: [],
+    positions: [{ id: 'crates/api', x: 0, y: 0 }],
+  };
+
+  const elements = buildElements(systemModel);
+  assert.equal(elements.nodes[0].data.diameter, diameter(12));
+
+  const passport = passportFor(systemModel, 'crates/api');
+  assert.equal(passport.why, 'crate `ledger-api` (Cargo.toml)');
+  assert.ok(passport.metrics.some((metric) => metric.label === 'Files' && metric.value === 12));
+  assert.ok(passport.metrics.some((metric) => metric.label === 'Support files' && metric.value === 3));
+});
+
+test('mapCounts lists units in system mode', () => {
+  const counts = mapCounts({
+    system: true,
+    nodes: [
+      { id: 'crates/api', kind: 'module' },
+      { id: 'crates/core', kind: 'module' },
+    ],
+  });
+  assert.equal(counts.modules, 2);
+  assert.deepEqual(
+    counts.entries.map((entry) => entry.label),
+    ['crates/api', 'crates/core'],
+  );
+});
+
 test('shortcutSheet carries the gestures the legend no longer mixes in', () => {
   const keys = shortcutSheet().map((entry) => entry.keys);
   assert.ok(keys.includes('?'));

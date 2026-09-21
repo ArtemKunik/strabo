@@ -425,6 +425,29 @@ button.primary {
   display: none;
 }
 
+/*
+ * The hover caption for a plate whose label had to be trimmed. It sits outside the SVG
+ * layer so the layer can stay `overflow: hidden`, takes no pointer events, and reports the
+ * full directory path the plate shortened.
+ */
+.island-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: 420px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--veiled-surface);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-1);
+}
+
 .graph-toolbar {
   position: absolute;
   top: 10px;
@@ -771,6 +794,14 @@ button.primary {
   font-size: 11px;
   font-family: var(--font-mono);
   word-break: break-all;
+}
+
+/* A System-view unit's "why grouped" caption: secondary, but readable prose. */
+.passport-why {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .passport-metrics {

@@ -796,6 +796,14 @@ button.primary {
   word-break: break-all;
 }
 
+/* A System-view unit's "why grouped" caption: secondary, but readable prose. */
+.passport-why {
+  margin: 0 0 10px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .passport-metrics {
   display: grid;
   grid-template-columns: auto 1fr;

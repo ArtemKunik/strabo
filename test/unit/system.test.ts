@@ -10,6 +10,7 @@ import express from 'express';
 import {
   assignUnits,
   buildSystemReport,
+  buildSystemViewModel,
   classifyPeriphery,
   createStraboRouter,
   detectUnits,
@@ -216,4 +217,58 @@ test('GET /analysis/system serves units and their edges', async () => {
   };
   assert.equal(report.units.find((unit) => unit.id === 'pkg')?.name, 'widgets');
   assert.equal(report.summary.units, report.units.length);
+});
+
+test('buildSystemViewModel rolls units into the graph model the map draws', () => {
+  const root = tempDir();
+  write(root, 'pkg/package.json', '{ "name": "widgets" }\n');
+  const graph = graphOf(
+    ['pkg/src/components/list.ts', 'pkg/src/components/row.ts'],
+    [['pkg/src/components/list.ts', 'pkg/src/components/row.ts']],
+  );
+  const report = buildSystemReport(root, 'widgets', graph);
+  const model = buildSystemViewModel(
+    report,
+    { name: 'widgets', root, head: null, dirty: false, gitUrl: null },
+    { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+  );
+
+  assert.equal(model.system, true);
+  const pkg = model.nodes.find((node) => node.id === 'pkg');
+  assert.equal(pkg?.label, 'widgets');
+  assert.equal(pkg?.files, 2);
+  assert.match(pkg?.why ?? '', /widgets/);
+  assert.deepEqual(
+    model.edges.map((edge) => `${edge.source}->${edge.target}`),
+    [],
+  );
+  assert.equal(model.positions.length, model.nodes.length);
+});
+
+test('GET /graph?system=1 serves the unit roll-up', async () => {
+  const root = tempDir();
+  write(root, 'pkg/package.json', '{ "name": "widgets" }\n');
+  write(root, 'pkg/src/components/list.ts', "import { Row } from './row.ts';\nexport const List = Row;\n");
+  write(root, 'pkg/src/components/row.ts', 'export const Row = 1;\n');
+
+  const host = express();
+  host.use(express.json());
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/graph?system=1`);
+  assert.equal(response.status, 200);
+  const model = (await response.json()) as {
+    system?: boolean;
+    nodes: Array<{ id: string; name?: string; files?: number; label?: string }>;
+  };
+  assert.equal(model.system, true);
+  assert.equal(model.nodes.find((node) => node.id === 'pkg')?.label, 'widgets');
 });

@@ -58,23 +58,34 @@ export function passportFor(model, id) {
     .filter((edge) => edge.target === id)
     .map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
 
+  const metrics = [
+    { label: 'Direct importers', value: usedBy.length },
+    { label: 'Blast radius', value: node.transitiveDependents ?? 0 },
+    { label: 'Direct imports', value: imports.length },
+    { label: 'Depends on (all)', value: node.transitiveDependencies ?? 0 },
+  ];
+  // A System-view unit carries its component and shelf counts where a file carries none.
+  if (typeof node.files === 'number') {
+    metrics.push({ label: 'Files', value: node.files });
+  }
+  if (typeof node.periphery === 'number' && node.periphery > 0) {
+    metrics.push({ label: 'Support files', value: node.periphery });
+  }
+
   return {
     id: node.id,
     kind: node.kind,
-    metrics: [
-      { label: 'Direct importers', value: usedBy.length },
-      { label: 'Blast radius', value: node.transitiveDependents ?? 0 },
-      { label: 'Direct imports', value: imports.length },
-      { label: 'Depends on (all)', value: node.transitiveDependencies ?? 0 },
-    ],
+    // The "why grouped" caption a System-view unit carries; absent on file nodes.
+    why: node.why,
+    metrics,
     imports,
     usedBy,
   };
 }
 
-/** Counts for the tests / components strip, in either file or block mode. */
+/** Counts for the tests / components strip, in file, block, or system mode. */
 export function mapCounts(model) {
-  const isBlock = model.prefixLength !== undefined;
+  const isBlock = model.prefixLength !== undefined || model.system === true;
   const byKey = new Map();
   let tests = 0;
   let modules = 0;
@@ -107,7 +118,10 @@ export function mapCounts(model) {
  * Keyboard gestures moved to the shortcut sheet (`?`), so this box states only what the
  * drawing encodes and how to read it.
  */
-export function readingLegend() {
+export function readingLegend(model) {
+  if (model?.system) {
+    return ['box = build unit', 'size = files', 'edge = import between units'];
+  }
   return ['size = dependents', 'island = directory', 'diamond = test', 'star = entry'];
 }
 
@@ -150,7 +164,9 @@ export function buildGraphQuery(state, options = {}) {
   if (options.refresh) {
     params.set('refresh', '1');
   }
-  if (state.mode === 'block') {
+  if (state.mode === 'system') {
+    params.set('system', '1');
+  } else if (state.mode === 'block') {
     params.set('blockDepth', String(state.depth ?? 1));
     if (state.prefix) {
       params.set('blockPrefix', state.prefix);
@@ -174,8 +190,9 @@ export function buildElements(model) {
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
-      // (the island plates), never by hue. See Phase 13 M1.
-      diameter: diameter(node.transitiveDependents),
+      // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
+      // its component count instead of blast radius.
+      diameter: diameter(node.size ?? node.files ?? node.transitiveDependents),
       hub: hubs.has(node.id),
     },
     position: positionOf(positions.get(node.id)),

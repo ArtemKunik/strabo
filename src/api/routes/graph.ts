@@ -2,11 +2,12 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { buildBlockViewModel } from '../../analysis/blocks.ts';
+import { buildSystemReport } from '../../analysis/system.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
-import { buildViewModel } from '../../view/view-model.ts';
+import { buildSystemViewModel, buildViewModel } from '../../view/view-model.ts';
 import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 
 /**
@@ -39,6 +40,14 @@ export function createGraphRouter(config: StraboConfig): Router {
         generatedAt: cached.report.scannedAt,
         stale: cached.stale,
       };
+
+      // The System view rolls the file graph up into build units; it takes precedence over
+      // any block-depth parameters a stale URL still carries.
+      if (parseBoolean(request.query.system)) {
+        const report = buildSystemReport(repository.root, repository.name, cached.report.graph);
+        response.json(buildSystemViewModel(report, descriptor, cache));
+        return;
+      }
 
       const blockDepth = parsePositiveInt(request.query.blockDepth, 5);
       if (blockDepth) {

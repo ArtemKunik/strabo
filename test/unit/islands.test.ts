@@ -83,6 +83,12 @@ test('islands do not apply to block mode, where a node is already a directory', 
   assert.deepEqual(islandBounds(blocks), []);
 });
 
+test('islands do not apply to the System view, where a node is already a unit', () => {
+  const system = { ...model(), system: true };
+  assert.equal(islandsApply(system), false);
+  assert.deepEqual(islandBounds(system), []);
+});
+
 test('islandLabel shows the scanner root marker as a path', () => {
   assert.equal(islandLabel('.'), '/');
   assert.equal(islandLabel('src/analysis'), 'src/analysis');

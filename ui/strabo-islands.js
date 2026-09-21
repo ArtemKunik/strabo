@@ -30,7 +30,7 @@ export function islandLabel(directory) {
  * whole map, which says nothing. Islands are a file-mode affordance.
  */
 export function islandsApply(model) {
-  return Boolean(model) && model.prefixLength === undefined;
+  return Boolean(model) && model.prefixLength === undefined && model.system !== true;
 }
 
 /**

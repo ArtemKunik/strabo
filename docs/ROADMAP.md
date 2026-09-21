@@ -26,8 +26,9 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend: `units.ts`, `system.ts`, layers, communities, `GET /analysis/system`; L2, L7, L8, L9-L13 and the System/tier UI remain) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend, and the L0 System mode UI: units, edges, why captions; L2, L7, L8, L9-L13 remain) |
 | 17 | Module quality and change impact | In progress (Q1 done: `use`/`declare` edge roles; Q2-Q8 planned) |
+| 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -647,9 +648,17 @@ support files (tests, scripts, generated, fixtures) with the rule that tripped.
 them with sample specifiers, assigns layers inside each unit (a per-ecosystem path-token
 table names them, recorded import depth orders them, and tokenless files land by depth),
 and detects communities inside a layer with a deterministic greedy-modularity pass and its
-internal-edge ratio. `GET /analysis/system` serves the report. Unit coverage is
-`test/unit/system.test.ts`. Still to do: L2 chain compression / unit-anchored labels, L7
-`strabo.groups.yml`, L8 narrator group naming, the System mode UI at L0, and the tier lens.
+internal-edge ratio. `GET /analysis/system` serves the report. **L0 (done)** the System mode:
+`buildSystemViewModel` (`src/view/view-model.ts`) turns the report into the same shape the
+file map renders — a node per unit labelled by its manifest name and sized by its component
+count, with the recorded import edges — served at `GET /graph?system=1`; the mode select
+gains a **System** option, the legend reads "box = build unit · size = files · edge =
+import", the inspector shows the unit's "why grouped" caption plus its file and support
+counts, islands are suppressed, and the strip lists units. Unit coverage is the added cases
+in `test/unit/system.test.ts`, `test/unit/browser-core.test.ts`, and
+`test/unit/islands.test.ts`. Still to do: L2 chain compression / unit-anchored labels, L7
+`strabo.groups.yml`, L8 narrator group naming, the support-shelf drawing, the
+`system-view.feature` acceptance scenario with its polyglot fixture, and the tier lens.
 
 ### Tier lens
 
@@ -796,6 +805,63 @@ quadrant. **Q7** smell rules with their tripping inputs, plus a repository-wide 
 overlay. **Q8** the pending-change risk summary and the tests to run. Acceptance:
 `test/acceptance/features/module-quality.feature`, with a Rust fixture that proves `mod`
 declarations no longer inflate blast radius.
+
+## Phase 18 - Scan and analysis performance
+
+Measure first, fix algorithms in TypeScript second, and consider a native core only if
+parsing still dominates after that. The rest of the product stays in TypeScript behind the
+existing `Graph` interface either way.
+
+Likely hot spots:
+
+- **Transitive metrics** (`computeGraphMetrics`, `src/analysis/analysis.ts`) run one
+  depth-first traversal per node in each direction: O(N·(N+E)), about 10⁹ steps at 10k
+  files and 50k edges. The function's own comment already names the follow-up: condense
+  strongly connected components, then compute reachability as `Uint32Array` bitsets in
+  reverse topological order, where a cycle's members share one set. Keep the DFS as the
+  fallback when the bitset allocation (components² / 8 bytes) would exceed a memory
+  budget. Expect 10–100× with no new dependency.
+- **Repeated whole-graph work**: `computeGraphMetrics` and `buildAdjacency` are called from
+  several analyses (e.g. `computeFileHealth` recomputes the whole graph's metrics to answer
+  for one file). Memoise them per graph fingerprint and use-edge role, so a passport or
+  overlay request reads cached metrics instead of recomputing them.
+- **Parsing** uses `web-tree-sitter` (WASM) on one thread, with synchronous sequential
+  reads (`src/scan/scan.ts`). Add a `worker_threads` pool sized to the cores, where each
+  worker loads the grammars once, and a per-file parse/extract cache keyed by content hash,
+  so a rescan re-parses only changed files.
+- **Git history** for Phase 17 (churn, co-change): stream `git log --numstat` over a
+  bounded window, cap the files per commit counted for co-change (a mass rename or format
+  commit is skipped and reported), and cache by HEAD.
+- **Communities** for Phase 16: a JS Leiden/Louvain implementation is adequate at 10k
+  nodes. It runs per unit/layer rather than on the whole graph.
+
+**Native core (conditional).** If parsing still dominates after the pool and cache, a Rust
+scanner core (`ignore` crate walk, native tree-sitter, `rayon` parallelism, shipped via
+napi-rs) covering walk + parse + extract + resolve could give another 5–20× on large
+monorepos and make a watch mode practical. Its costs decide it, not its speed:
+
+- Prebuilt binaries per platform (win/mac/linux × x64/arm64), which the Phase 6 clean-install
+  check must cover, with the WASM path kept as the fallback when no binary matches.
+- The per-language rule packs (symbols, function metrics, signals, member access) must be
+  ported, not split across two languages.
+- Contributors need a Rust toolchain.
+
+A graph kernel compiled to WASM (reachability, communities) avoids the binary problem but
+gains little over a good bitset implementation, so it is not planned.
+
+Slices: **P1** a benchmark harness (`npm run bench`) that reports walk, read, parse,
+extract, resolve, metrics, and analysis times, cold and warm, on the fixtures and on an
+operator-supplied repository, with results recorded so regressions show. **P2**
+condensation + bitset reachability for transitive dependents and dependencies, with the DFS
+fallback and equivalence tests against it. **P3** per-fingerprint memoisation of adjacency
+and graph metrics across analyses. **P4** asynchronous reads and a `worker_threads`
+parse/extract pool, with deterministic output order. **P5** a content-hash parse/extract
+cache in the cache directory, invalidated by grammar and extractor version. **P6** bounded,
+cached git-history mining for Phase 17. **P7** decision point: re-run P1 on a large
+monorepo (target 50k files). Only if parsing is still the largest share, spike the Rust
+core for one language behind the same `Graph` output and compare. Acceptance: the P1
+benchmark shows each slice's gain, and the graph output is unchanged byte for byte (except
+timing metadata) before and after P2-P5.
 
 ## Phase 6 - Release readiness
 

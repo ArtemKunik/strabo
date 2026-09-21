@@ -386,6 +386,14 @@ export interface ViewNode extends GraphNode {
   fanOut: number;
   transitiveDependencies: number;
   transitiveDependents: number;
+  /** Box size for a System-view unit (component files); defaults to blast radius. */
+  size?: number;
+  /** Component files in a System-view unit. */
+  files?: number;
+  /** Support files folded into a System-view unit's shelf. */
+  periphery?: number;
+  /** The "why grouped" caption for a System-view unit. */
+  why?: string;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -409,6 +417,8 @@ export interface ViewModel {
   diagnostics: Diagnostic[];
   excluded: Exclusion[];
   cache: ScanCacheMetadata;
+  /** True when the model is a build-unit roll-up (Phase 16 System view), not files. */
+  system?: boolean;
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */

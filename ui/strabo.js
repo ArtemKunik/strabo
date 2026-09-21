@@ -111,7 +111,7 @@ function readViewPrefs(repository) {
       return null;
     }
     const prefs = {};
-    if (parsed.mode === 'block' || parsed.mode === 'file') {
+    if (parsed.mode === 'block' || parsed.mode === 'file' || parsed.mode === 'system') {
       prefs.mode = parsed.mode;
     }
     if (typeof parsed.overlay === 'string' && parsed.overlay !== '') {
@@ -750,7 +750,7 @@ function syncUrl() {
       }
     };
     set('repository', state.repository ?? '');
-    set('mode', state.mode === 'file' ? 'file' : '');
+    set('mode', state.mode === 'file' ? 'file' : state.mode === 'system' ? 'system' : '');
     set('node', store.get().ui.node ?? '');
     set('panel', store.get().ui.memberOpen ? 'member-map' : '');
     if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -770,7 +770,7 @@ function applyUrl() {
     state.repository = repository;
   }
   const mode = params.get('mode');
-  if (mode === 'file' || mode === 'block') {
+  if (mode === 'file' || mode === 'block' || mode === 'system') {
     state.mode = mode;
     elements.detail.value = mode;
   }
@@ -1291,8 +1291,11 @@ async function forgetRepository() {
   }
 }
 
-/** Double-click drills in block mode; in file mode it opens the file. */
+/** Double-click drills in block mode, opens the file in file mode, and is inert for units. */
 function onDrill(id) {
+  if (state.mode === 'system') {
+    return;
+  }
   if (state.mode === 'block') {
     state.prefix = id;
     state.filter = '';
@@ -1722,7 +1725,11 @@ function viewDelegateTarget(detail) {
       current ? graphSummary(current) : 'No scan loaded.',
       state.filter ? `active filter: ${state.filter}` : 'no active filter',
       state.overlay !== 'none' ? `active review: ${state.overlay}` : 'no active review overlay',
-      state.mode === 'block' ? `directory view${state.prefix ? ` at ${state.prefix}` : ''}` : 'file view',
+      state.mode === 'block'
+        ? `directory view${state.prefix ? ` at ${state.prefix}` : ''}`
+        : state.mode === 'system'
+          ? 'system view'
+          : 'file view',
     ],
   };
 }

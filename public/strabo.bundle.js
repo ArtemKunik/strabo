@@ -130,21 +130,30 @@ function passportFor(model, id) {
   const edges = model.edges ?? [];
   const imports = edges.filter((edge) => edge.source === id).map((edge) => ({ id: edge.target, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
   const usedBy = edges.filter((edge) => edge.target === id).map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
+  const metrics = [
+    { label: "Direct importers", value: usedBy.length },
+    { label: "Blast radius", value: node.transitiveDependents ?? 0 },
+    { label: "Direct imports", value: imports.length },
+    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0 }
+  ];
+  if (typeof node.files === "number") {
+    metrics.push({ label: "Files", value: node.files });
+  }
+  if (typeof node.periphery === "number" && node.periphery > 0) {
+    metrics.push({ label: "Support files", value: node.periphery });
+  }
   return {
     id: node.id,
     kind: node.kind,
-    metrics: [
-      { label: "Direct importers", value: usedBy.length },
-      { label: "Blast radius", value: node.transitiveDependents ?? 0 },
-      { label: "Direct imports", value: imports.length },
-      { label: "Depends on (all)", value: node.transitiveDependencies ?? 0 }
-    ],
+    // The "why grouped" caption a System-view unit carries; absent on file nodes.
+    why: node.why,
+    metrics,
     imports,
     usedBy
   };
 }
 function mapCounts(model) {
-  const isBlock = model.prefixLength !== void 0;
+  const isBlock = model.prefixLength !== void 0 || model.system === true;
   const byKey = /* @__PURE__ */ new Map();
   let tests = 0;
   let modules = 0;
@@ -165,7 +174,10 @@ function mapCounts(model) {
   }));
   return { tests, modules, entries };
 }
-function readingLegend() {
+function readingLegend(model) {
+  if (model?.system) {
+    return ["box = build unit", "size = files", "edge = import between units"];
+  }
   return ["size = dependents", "island = directory", "diamond = test", "star = entry"];
 }
 function shortcutSheet() {
@@ -197,7 +209,9 @@ function buildGraphQuery(state2, options = {}) {
   if (options.refresh) {
     params.set("refresh", "1");
   }
-  if (state2.mode === "block") {
+  if (state2.mode === "system") {
+    params.set("system", "1");
+  } else if (state2.mode === "block") {
     params.set("blockDepth", String(state2.depth ?? 1));
     if (state2.prefix) {
       params.set("blockPrefix", state2.prefix);
@@ -218,8 +232,9 @@ function buildElements(model) {
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
-      // (the island plates), never by hue. See Phase 13 M1.
-      diameter: diameter(node.transitiveDependents),
+      // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
+      // its component count instead of blast radius.
+      diameter: diameter(node.size ?? node.files ?? node.transitiveDependents),
       hub: hubs.has(node.id)
     },
     position: positionOf(positions.get(node.id))
@@ -408,7 +423,7 @@ function islandLabel(directory) {
   return directory === "." ? "/" : directory;
 }
 function islandsApply(model) {
-  return Boolean(model) && model.prefixLength === void 0;
+  return Boolean(model) && model.prefixLength === void 0 && model.system !== true;
 }
 function islandBounds(model, options = {}) {
   if (!islandsApply(model)) {
@@ -468,6 +483,29 @@ var LABEL_MIN_WIDTH = 64;
 var LABEL_MIN_HEIGHT = 28;
 function islandLabelFits(projected) {
   return projected.width >= LABEL_MIN_WIDTH && projected.height >= LABEL_MIN_HEIGHT;
+}
+function islandHit(boxes, x, y) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const box of boxes) {
+    if (!box.trimmed) {
+      continue;
+    }
+    if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
+      continue;
+    }
+    const area = box.width * box.height;
+    if (area < bestArea) {
+      best = box;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+function islandTooltipText(box) {
+  const label = box.label ?? islandLabel(box.directory ?? ".");
+  const count = box.count ?? 0;
+  return count > 1 ? `${label} \xB7 ${count} files` : label;
 }
 var LABEL_INSET = 10;
 var LABEL_CHAR_WIDTH = 6.6;
@@ -1328,11 +1366,38 @@ function createIslandLayer(container) {
   const labels = document.createElementNS(SVG_NS, "g");
   svg.append(plates, labels);
   container.prepend(svg);
+  const tooltip = document.createElement("div");
+  tooltip.className = "island-tooltip";
+  tooltip.hidden = true;
+  container.appendChild(tooltip);
+  let boxes = [];
+  function hideTooltip2() {
+    if (!tooltip.hidden) {
+      tooltip.hidden = true;
+    }
+  }
+  container.addEventListener("pointermove", (event) => {
+    const bounds = container.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const hit = islandHit(boxes, x, y);
+    if (!hit) {
+      hideTooltip2();
+      return;
+    }
+    tooltip.textContent = islandTooltipText(hit);
+    tooltip.hidden = false;
+    tooltip.style.left = `${x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  });
+  container.addEventListener("pointerleave", hideTooltip2);
   return {
     /** Draw `islands` (model coordinates) under the given viewport transform. */
     paint(islands, viewport) {
+      hideTooltip2();
       sync(plates, "rect", islands.length);
       sync(labels, "text", islands.length);
+      boxes = [];
       islands.forEach((island, index) => {
         const box = projectIsland(island, viewport);
         const rect = plates.childNodes[index];
@@ -1350,6 +1415,13 @@ function createIslandLayer(container) {
         if (label.textContent !== text) {
           label.textContent = text;
         }
+        boxes.push({
+          ...box,
+          directory: island.directory,
+          label: island.label,
+          count: island.count,
+          trimmed: text !== island.label
+        });
       });
     }
   };
@@ -2629,6 +2701,12 @@ function renderInspector(container, model, id, handlers = {}) {
   path.className = "passport-path";
   path.textContent = node?.workspacePath ?? id;
   container.append(path);
+  if (passport.why) {
+    const why = document.createElement("p");
+    why.className = "passport-why";
+    why.textContent = `Grouped by: ${passport.why}`;
+    container.append(why);
+  }
   const actions = document.createElement("div");
   actions.className = "inspector-actions";
   if (handlers.onOpenWorkspace) {
@@ -3335,13 +3413,16 @@ var LEGEND_SWATCHES = {
   "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
   "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))"
+  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
+  "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))"
 };
 function renderLegend(container, model) {
   container.replaceChildren();
   const guide = document.createElement("div");
   guide.className = "legend-guide";
-  for (const text of readingLegend()) {
+  for (const text of readingLegend(model)) {
     const item = document.createElement("span");
     item.className = "legend-item";
     const swatch = document.createElement("span");
@@ -5071,7 +5152,7 @@ function readViewPrefs(repository) {
       return null;
     }
     const prefs = {};
-    if (parsed.mode === "block" || parsed.mode === "file") {
+    if (parsed.mode === "block" || parsed.mode === "file" || parsed.mode === "system") {
       prefs.mode = parsed.mode;
     }
     if (typeof parsed.overlay === "string" && parsed.overlay !== "") {
@@ -5613,7 +5694,7 @@ function syncUrl() {
       }
     };
     set("repository", state.repository ?? "");
-    set("mode", state.mode === "file" ? "file" : "");
+    set("mode", state.mode === "file" ? "file" : state.mode === "system" ? "system" : "");
     set("node", store.get().ui.node ?? "");
     set("panel", store.get().ui.memberOpen ? "member-map" : "");
     if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -5630,7 +5711,7 @@ function applyUrl() {
     state.repository = repository;
   }
   const mode = params.get("mode");
-  if (mode === "file" || mode === "block") {
+  if (mode === "file" || mode === "block" || mode === "system") {
     state.mode = mode;
     elements.detail.value = mode;
   }
@@ -6058,6 +6139,9 @@ async function forgetRepository() {
   }
 }
 function onDrill(id) {
+  if (state.mode === "system") {
+    return;
+  }
   if (state.mode === "block") {
     state.prefix = id;
     state.filter = "";
@@ -6430,7 +6514,7 @@ function viewDelegateTarget(detail) {
       current ? graphSummary(current) : "No scan loaded.",
       state.filter ? `active filter: ${state.filter}` : "no active filter",
       state.overlay !== "none" ? `active review: ${state.overlay}` : "no active review overlay",
-      state.mode === "block" ? `directory view${state.prefix ? ` at ${state.prefix}` : ""}` : "file view"
+      state.mode === "block" ? `directory view${state.prefix ? ` at ${state.prefix}` : ""}` : state.mode === "system" ? "system view" : "file view"
     ]
   };
 }
