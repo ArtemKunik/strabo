@@ -93,3 +93,24 @@ test('buildPositions is deterministic for equivalent graph input', async () => {
   const graph = await loadGraph();
   assert.deepEqual(buildPositions(graph), buildPositions(graph));
 });
+
+test('buildAdjacency leaves declare edges out of blast radius unless asked', () => {
+  const nodes = ['src/lib.rs', 'src/a.rs', 'src/b.rs', 'app/main.rs'].map((id) => ({
+    id,
+    kind: 'module' as const,
+    directory: id.slice(0, id.lastIndexOf('/')),
+  }));
+  const edges = [
+    { source: 'src/lib.rs', target: 'src/a.rs', kind: 'namespace' as const, evidence: { line: 1, specifier: 'mod a', resolution: 'exact' as const }, role: 'declare' as const },
+    { source: 'src/lib.rs', target: 'src/b.rs', kind: 'namespace' as const, evidence: { line: 2, specifier: 'mod b', resolution: 'exact' as const }, role: 'declare' as const },
+    { source: 'app/main.rs', target: 'src/lib.rs', kind: 'import' as const, evidence: { line: 1, specifier: 'crate::a::A', resolution: 'module-tree' as const }, role: 'use' as const },
+  ];
+  const graph = { nodes, edges, diagnostics: [], excluded: [] };
+
+  const counted = computeGraphMetrics(graph, buildAdjacency(graph));
+  // `mod a;` alone does not make the crate root a dependent of a.rs.
+  assert.equal(counted.transitiveDependents.get('src/a.rs'), 0);
+
+  const withDeclare = computeGraphMetrics(graph, buildAdjacency(graph, { includeDeclare: true }));
+  assert.equal(withDeclare.transitiveDependents.get('src/a.rs'), 2);
+});

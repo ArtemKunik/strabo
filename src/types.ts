@@ -63,6 +63,13 @@ export interface GraphEdge {
   target: string;
   kind: EdgeKind;
   evidence: EdgeEvidence;
+  /**
+   * Whether the edge is a real dependency (`use`) or only a declaration of the module tree
+   * (`declare`): a Rust `mod x;`, a Python `__init__.py` re-export, or a TypeScript barrel
+   * `index.ts` re-export. A `declare` edge is drawn but never counted, so it cannot inflate
+   * blast radius or impact. Absent means `use`.
+   */
+  role?: 'use' | 'declare';
 }
 
 /** A fact Strabo could not turn into an edge. Diagnostics are evidence, not errors. */

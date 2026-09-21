@@ -27,7 +27,7 @@ record is reported as `unavailable`, never invented.
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
 | 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend: `units.ts`, `system.ts`, layers, communities, `GET /analysis/system`; L2, L7, L8, L9-L13 and the System/tier UI remain) |
-| 17 | Module quality and change impact | Planned (Q1-Q8) |
+| 17 | Module quality and change impact | In progress (Q1 done: `use`/`declare` edge roles; Q2-Q8 planned) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -732,6 +732,14 @@ radius is inflated (a file with 2 importers reporting a blast radius of 39). Edg
 kind: `use` (a real dependency) or `declare` (Rust `mod`, Python `__init__` re-exports, TS
 barrel `index.ts`). Blast radius and impact follow `use` edges only. `declare` edges are
 still shown but not counted.
+
+**Q1 (done).** `GraphEdge.role` is `use` or `declare`; the Rust resolver marks a `mod x;`
+edge `declare`, the Python resolver marks every edge out of a `__init__.py` `declare`, and
+the JS/TS scan marks a re-export out of a barrel `index.*` `declare`. `buildAdjacency` leaves
+`declare` edges out of adjacency (blast radius, metrics, impact, coverage, and cycles all
+read through it), with `{ includeDeclare: true }` as the opt-in for every drawn edge. Unit
+coverage is the `mod declarations are declare edges` case in `test/unit/rust.test.ts` and the
+`buildAdjacency` case in `test/unit/analysis.test.ts`.
 
 **Measures**, each shown as a repository percentile plus its raw value:
 

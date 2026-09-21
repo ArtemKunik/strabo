@@ -232,7 +232,15 @@ export function resolvePython(facts: readonly PythonFileFacts[]): PythonResoluti
       return;
     }
     seen.add(key);
-    edges.push({ source, target, kind: 'import', evidence: { line, specifier, resolution } });
+    // A package's `__init__.py` re-exports its submodules and members; the edge declares the
+    // package layout rather than depending on the target's contents.
+    edges.push({
+      source,
+      target,
+      kind: 'import',
+      evidence: { line, specifier, resolution },
+      role: isPackageInit(source) ? 'declare' : 'use',
+    });
   };
 
   /** Resolve a module name to its one file, reporting an ambiguous claim instead of guessing. */

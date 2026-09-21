@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { buildAdjacency } from '../../src/analysis/analysis.ts';
 import {
   expandUse,
   extractRustFacts,
@@ -122,6 +123,26 @@ test('scanRepository resolves inline crate-relative paths to files', async () =>
   const resolved = new Set(report.graph.edges.map((edge) => `${edge.source}->${edge.target}`));
 
   assert.ok(resolved.has('src/api/response.rs->src/api/request.rs'));
+});
+
+test('mod declarations are declare edges and are not counted as dependencies', async () => {
+  const report = await scanRepository(fixture);
+  const modEdge = report.graph.edges.find(
+    (edge) => edge.source === 'src/main.rs' && edge.target === 'src/api/mod.rs',
+  );
+  assert.equal(modEdge?.role, 'declare');
+
+  const useEdge = report.graph.edges.find((edge) =>
+    edge.evidence.specifier.includes('crate::api::Request'),
+  );
+  assert.equal(useEdge?.role, 'use');
+
+  const counted = buildAdjacency(report.graph);
+  assert.ok(!(counted.forward.get('src/main.rs') ?? []).includes('src/api/mod.rs'));
+  assert.ok((counted.forward.get('src/main.rs') ?? []).includes('src/api/request.rs'));
+  // The explicit opt-in still sees every drawn edge.
+  const all = buildAdjacency(report.graph, { includeDeclare: true });
+  assert.ok((all.forward.get('src/main.rs') ?? []).includes('src/api/mod.rs'));
 });
 
 test('Rust edges are deterministic across scans', async () => {

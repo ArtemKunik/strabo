@@ -52,6 +52,10 @@ export function scanJsTsEdges(
     }
 
     for (const match of collectReferences(content)) {
+      // A barrel re-export (`index.ts`) only forwards names; it declares the module graph
+      // rather than depending on the target's contents, so it is drawn but not counted.
+      const role: GraphEdge['role'] =
+        match.kind === 're-export' && isBarrelFile(file) ? 'declare' : 'use';
       // `./` and `../` resolve against the importer; `/`-rooted specifiers are
       // bundler root-relative and belong to the alias layer below.
       if (isDotRelative(match.specifier)) {
@@ -62,6 +66,7 @@ export function scanJsTsEdges(
             target: resolved.target,
             kind: match.kind,
             evidence: resolved.evidence,
+            role,
           });
           continue;
         }
@@ -73,6 +78,7 @@ export function scanJsTsEdges(
             target: claim.resolved.target,
             kind: match.kind,
             evidence: claim.resolved.evidence,
+            role,
           });
           continue;
         }
@@ -166,6 +172,14 @@ function collectReferences(content: string): Reference[] {
 
 function isDotRelative(specifier: string): boolean {
   return specifier.startsWith('.');
+}
+
+/** A barrel file (`index.ts`, `index.js`, …) whose re-exports only forward names. */
+function isBarrelFile(file: string): boolean {
+  const base = file.slice(file.lastIndexOf('/') + 1);
+  const dot = base.lastIndexOf('.');
+  const stem = dot === -1 ? base : base.slice(0, dot);
+  return stem === 'index';
 }
 
 function isRootRelative(specifier: string): boolean {

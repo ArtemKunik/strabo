@@ -5,8 +5,15 @@ export interface Adjacency {
   backward: Map<string, string[]>;
 }
 
-/** Build forward (source -> targets) and backward (target -> sources) adjacency maps. */
-export function buildAdjacency(graph: Graph): Adjacency {
+/**
+ * Build forward (source -> targets) and backward (target -> sources) adjacency maps.
+ *
+ * A `declare` edge (Rust `mod`, a Python `__init__` or TypeScript barrel re-export) only
+ * describes the module tree, so it is left out of adjacency. Metrics, impact, coverage, and
+ * cycles all read through this map, so leaving it here is what keeps a declaration from
+ * inflating blast radius. Pass `{ includeDeclare: true }` to count every drawn edge.
+ */
+export function buildAdjacency(graph: Graph, options: { includeDeclare?: boolean } = {}): Adjacency {
   const forward = new Map<string, string[]>();
   const backward = new Map<string, string[]>();
   for (const node of graph.nodes) {
@@ -15,6 +22,9 @@ export function buildAdjacency(graph: Graph): Adjacency {
   }
   for (const edge of graph.edges) {
     if (edge.source === edge.target) {
+      continue;
+    }
+    if (!options.includeDeclare && edge.role === 'declare') {
       continue;
     }
     forward.get(edge.source)?.push(edge.target);
