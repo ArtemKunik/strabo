@@ -10,8 +10,7 @@ const MAX_BYTES = 2 * 1024 * 1024;
 /**
  * Source extensions whose language declares DTOs this pass can read.
  *
- * SQL is absent: a table is not a data-transfer object with a stable cross-repo id. C++ is
- * absent too: a `struct` is not reliably a DTO, and guessing would invent contracts.
+ * SQL is absent: a table is not a data-transfer object with a stable cross-repo id.
  */
 const SOURCE_EXTENSIONS = new Set([
   '.ts',
@@ -28,6 +27,13 @@ const SOURCE_EXTENSIONS = new Set([
   '.java',
   '.cs',
   '.rs',
+  '.cpp',
+  '.cc',
+  '.cxx',
+  '.hpp',
+  '.hh',
+  '.hxx',
+  '.h',
 ]);
 
 /**
@@ -37,8 +43,9 @@ const SOURCE_EXTENSIONS = new Set([
  * when the same shape is declared in different languages or packages: a `User` in one
  * repository matches a `User` in another, so `computeContractDrift` can compare them. Only
  * shapes with a clear DTO reading are taken (a `data class`, a `record`, a `@dataclass`, an
- * exported interface); anything ambiguous is skipped rather than guessed at. A file that is
- * too large, has no readable text, or fails to parse contributes nothing.
+ * exported interface, an accessor-shaped Java class, a named-field C++ `struct`); anything
+ * ambiguous is skipped rather than guessed at. A file that is too large, has no readable
+ * text, or fails to parse contributes nothing.
  */
 export function extractLanguageContracts(root: string, repository: string): ContractDefinition[] {
   const contracts: ContractDefinition[] = [];
@@ -110,6 +117,9 @@ function parseSource(repository: string, file: string, content: string): Contrac
   }
   if (extension === '.rs') {
     return parseRust(repository, file, content);
+  }
+  if (['.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.h'].includes(extension)) {
+    return parseCpp(repository, file, content);
   }
   return [];
 }
@@ -273,7 +283,12 @@ function pythonFields(body: Array<{ indent: number; text: string }>): ContractFi
 
 // --- Kotlin ------------------------------------------------------------------
 
-/** The primary-constructor parameters of a `data class`. */
+/**
+ * A `data class`: the primary-constructor parameters plus any `val`/`var` properties in the
+ * class body. Body properties are the schema too when they carry a serialised field, so a
+ * `data class User(val id: Long) { val name: String = "" }` has both. Only depth-zero
+ * property declarations are read; a local `val` inside a method is not a field.
+ */
 function parseKotlin(repository: string, file: string, content: string): ContractDefinition[] {
   const contracts: ContractDefinition[] = [];
   const pattern = /(?:^|\n)[ \t]*(?:@\w+(?:\([^)]*\))?[ \t]+)*data\s+class\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(/g;
@@ -283,7 +298,7 @@ function parseKotlin(repository: string, file: string, content: string): Contrac
     if (params === null) {
       continue;
     }
-    const fields = [];
+    const fields: ContractField[] = [];
     for (const param of splitTopLevel(params, ',')) {
       const hit = /(?:^|\s)(?:val|var)\s+([A-Za-z_]\w*)\s*:\s*(.+?)(\s*=.+)?$/.exec(stripAnnotations(param));
       if (!hit) {
@@ -292,6 +307,17 @@ function parseKotlin(repository: string, file: string, content: string): Contrac
       const type = clean(hit[2] ?? '');
       fields.push({ name: hit[1] ?? '', type, required: !hit[3] && !type.endsWith('?') });
     }
+    const close = enclosedEnd(content, open, '(', ')');
+    if (close !== null) {
+      const bodyOpen = content.indexOf('{', close);
+      const between = bodyOpen === -1 ? '' : content.slice(close + 1, bodyOpen);
+      if (bodyOpen !== -1 && /^\s*(?::[^{}\n]*)?$/.test(between)) {
+        const body = braceBlock(content, bodyOpen);
+        if (body !== null) {
+          fields.push(...kotlinBodyFields(body));
+        }
+      }
+    }
     if (fields.length > 0) {
       contracts.push(define(repository, file, 'kotlin', match[1] ?? '', fields));
     }
@@ -299,13 +325,46 @@ function parseKotlin(repository: string, file: string, content: string): Contrac
   return contracts;
 }
 
+function kotlinBodyFields(body: string): ContractField[] {
+  const fields: ContractField[] = [];
+  let depth = 0;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = stripLineComment(raw).trim();
+    if (line === '') {
+      continue;
+    }
+    if (depth === 0) {
+      const hit =
+        /^(?:(?:private|public|protected|internal|lateinit|const|override)\s+)*(?:val|var)\s+([A-Za-z_]\w*)\s*:\s*(.+?)(\s*=.+)?$/.exec(
+          stripAnnotations(line),
+        );
+      if (hit) {
+        const type = clean(hit[2] ?? '');
+        fields.push({ name: hit[1] ?? '', type, required: !hit[3] && !type.endsWith('?') });
+      }
+    }
+    depth = Math.max(0, depth + countBraces(line));
+  }
+  return fields;
+}
+
 // --- Java --------------------------------------------------------------------
 
-/** Java `record` components. Plain classes are too broad to read as DTOs. */
+/**
+ * Java `record` components, plus POJO classes.
+ *
+ * A POJO is read only when it has a clear accessor shape: at least one instance field, at
+ * least one `get`/`is`/`set` accessor naming a declared field, and no method that is neither
+ * an accessor, a constructor, nor `equals`/`hashCode`/`toString`/`canEqual`. A Lombok
+ * annotation (`@Data`, `@Value`, `@Getter`, `@Setter`, `@Builder`) stands in for the
+ * accessors it generates. `static` members are class state, not part of the transfer shape,
+ * so they are ignored.
+ */
 function parseJava(repository: string, file: string, content: string): ContractDefinition[] {
   const contracts: ContractDefinition[] = [];
-  const pattern = /(?:^|\n)[ \t]*(?:public\s+|protected\s+|private\s+)?record\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(/g;
-  for (const match of content.matchAll(pattern)) {
+  const recordPattern =
+    /(?:^|\n)[ \t]*(?:public\s+|protected\s+|private\s+)?record\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?\s*\(/g;
+  for (const match of content.matchAll(recordPattern)) {
     const open = (match.index ?? 0) + match[0].length - 1;
     const params = parenBlock(content, open);
     if (params === null) {
@@ -316,7 +375,141 @@ function parseJava(repository: string, file: string, content: string): ContractD
       contracts.push(define(repository, file, 'java', match[1] ?? '', fields));
     }
   }
+
+  const classPattern =
+    /(?:^|\n)[ \t]*(?:public\s+|protected\s+|private\s+|static\s+|final\s+|abstract\s+)*class\s+([A-Za-z_]\w*)\s*(?:<[^>]*>)?(?:[^{\n;]*)\{/g;
+  for (const match of content.matchAll(classPattern)) {
+    const name = match[1] ?? '';
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const body = braceBlock(content, open);
+    if (body === null) {
+      continue;
+    }
+    const lines = content.split(/\r?\n/);
+    const keywordAt = (match.index ?? 0) + match[0].indexOf('class');
+    const classLine = content.slice(0, keywordAt).split('\n').length - 1;
+    const fields = javaPojoFields(body, name, lines, classLine);
+    if (fields !== null && fields.length > 0) {
+      contracts.push(define(repository, file, 'java', name, fields));
+    }
+  }
   return contracts;
+}
+
+const JAVA_OBJECT_METHODS = new Set(['equals', 'hashCode', 'toString', 'canEqual']);
+
+function javaPojoFields(
+  body: string,
+  className: string,
+  lines: string[],
+  classLine: number,
+): ContractField[] | null {
+  const fields: ContractField[] = [];
+  const fieldNames = new Set<string>();
+  const accessorTargets: string[] = [];
+  let extraMethods = 0;
+  let depth = 0;
+  for (const raw of body.split(/\r?\n/)) {
+    const line = stripLineComment(raw).trim();
+    if (line === '') {
+      continue;
+    }
+    if (depth === 0 && !line.startsWith('@')) {
+      if (line.includes('(')) {
+        const method = javaMethodName(line);
+        if (method?.name === className) {
+          // A constructor: allowed, and contributes no field.
+        } else if (!method) {
+          extraMethods += 1;
+        } else if (JAVA_OBJECT_METHODS.has(method.name)) {
+          // `equals`/`hashCode`/`toString` are allowed object protocol.
+        } else {
+          const target = javaAccessorTarget(method.name);
+          if (target === null) {
+            extraMethods += 1;
+          } else {
+            accessorTargets.push(target);
+          }
+        }
+      } else {
+        const field = javaField(line);
+        if (field) {
+          fields.push(field);
+          fieldNames.add(field.name);
+        }
+      }
+    }
+    depth = Math.max(0, depth + countBraces(line));
+  }
+
+  const lombok = hasLombokAnnotation(lines, classLine);
+  const matchedAccessor = accessorTargets.some((target) => fieldNames.has(target));
+  if (extraMethods > 0 || !matchedAccessor) {
+    return lombok ? fields : null;
+  }
+  return fields;
+}
+
+function javaMethodName(line: string): { name: string } | null {
+  const hit =
+    /^(?:(?:private|protected|public|static|final|abstract|synchronized|native|default|strictfp)\s+)*(?:[\w<>\[\].,?$]+\s+)?([A-Za-z_]\w*)\s*\(/.exec(
+      line,
+    );
+  return hit ? { name: hit[1] ?? '' } : null;
+}
+
+function javaAccessorTarget(name: string): string | null {
+  if (name.length > 3 && (name.startsWith('get') || name.startsWith('set'))) {
+    return decapitalise(name.slice(3));
+  }
+  if (name.length > 2 && name.startsWith('is')) {
+    return decapitalise(name.slice(2));
+  }
+  return null;
+}
+
+function decapitalise(name: string): string {
+  return name.length > 1 && name[1] === name[1]?.toUpperCase()
+    ? name
+    : name.charAt(0).toLowerCase() + name.slice(1);
+}
+
+function javaField(line: string): ContractField | null {
+  if (!line.endsWith(';')) {
+    return null;
+  }
+  const declared = line.slice(0, -1).trim();
+  if (/\bstatic\b/.test(declared)) {
+    return null;
+  }
+  const hit =
+    /^(?:(?:private|protected|public|final|volatile|transient|synchronized)\s+)*([\w<>\[\].,?$]+)\s+([A-Za-z_]\w*)\s*(?:=\s*.+)?$/.exec(
+      declared,
+    );
+  if (!hit) {
+    return null;
+  }
+  return { name: hit[2] ?? '', type: clean(hit[1] ?? ''), required: true };
+}
+
+function hasLombokAnnotation(lines: string[], classLine: number): boolean {
+  for (let index = classLine - 1; index >= 0; index -= 1) {
+    const line = (lines[index] ?? '').trim();
+    if (line === '') {
+      continue;
+    }
+    if (!line.startsWith('@')) {
+      return false;
+    }
+    if (
+      /^@(?:[\w.]+\.)?(Data|Value|Getter|Setter|Builder|AllArgsConstructor|RequiredArgsConstructor)\b/.test(
+        line,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // --- C# ----------------------------------------------------------------------
@@ -393,6 +586,53 @@ function rustMember(line: string): ContractField | null {
   return { name: hit[1] ?? '', type, required: !/^Option\s*</.test(type) };
 }
 
+// --- C++ ---------------------------------------------------------------------
+
+/**
+ * C++ `struct` declarations with named fields. A struct is the DTO idiom in C++; a method
+ * (`(`) or a nested brace is skipped, and a `static` member is class state rather than part
+ * of the transfer shape. `typedef struct { ... } Point;` has no tag to name it, so it is
+ * skipped rather than given a guessed id.
+ */
+function parseCpp(repository: string, file: string, content: string): ContractDefinition[] {
+  const contracts: ContractDefinition[] = [];
+  const pattern =
+    /(?:^|\n)[ \t]*(?:typedef\s+)?(?:template\s*<[^>]*>\s*)?struct\s+([A-Za-z_]\w*)\s*(?::[^{\n;]*)?\{/g;
+  for (const match of content.matchAll(pattern)) {
+    const open = (match.index ?? 0) + match[0].length - 1;
+    const body = braceBlock(content, open);
+    if (body === null) {
+      continue;
+    }
+    const fields = bracedFields(body, cppMember);
+    if (fields.length > 0) {
+      contracts.push(define(repository, file, 'cpp', match[1] ?? '', fields));
+    }
+  }
+  return contracts;
+}
+
+function cppMember(line: string): ContractField | null {
+  if (line.includes('(') || line.includes('{') || line.includes('}')) {
+    return null;
+  }
+  const declared = line.replace(/;$/, '').trim();
+  if (declared.endsWith(':')) {
+    return null;
+  }
+  const equals = topLevelIndex(declared, '=');
+  const withoutInitializer = (equals === -1 ? declared : declared.slice(0, equals)).trim();
+  const hit = /^(.*?)\s*([A-Za-z_]\w*)$/.exec(withoutInitializer);
+  if (!hit) {
+    return null;
+  }
+  const type = clean(hit[1] ?? '');
+  if (type === '' || /\b(static|friend|typedef|using|template|virtual|operator)\b/.test(type)) {
+    return null;
+  }
+  return { name: hit[2] ?? '', type, required: true };
+}
+
 // --- shared ------------------------------------------------------------------
 
 /**
@@ -429,6 +669,17 @@ function parenBlock(content: string, openIndex: number): string | null {
 }
 
 function enclosed(content: string, openIndex: number, open: string, close: string): string | null {
+  const end = enclosedEnd(content, openIndex, open, close);
+  return end === null ? null : content.slice(openIndex + 1, end);
+}
+
+/** The index of the `close` that matches the `open` at `openIndex`, or null. */
+function enclosedEnd(
+  content: string,
+  openIndex: number,
+  open: string,
+  close: string,
+): number | null {
   if (content[openIndex] !== open) {
     return null;
   }
@@ -440,7 +691,7 @@ function enclosed(content: string, openIndex: number, open: string, close: strin
     } else if (character === close) {
       depth -= 1;
       if (depth === 0) {
-        return content.slice(openIndex + 1, index);
+        return index;
       }
     }
   }

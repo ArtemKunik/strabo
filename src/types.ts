@@ -322,7 +322,8 @@ export interface ContractDefinition {
     | 'kotlin'
     | 'java'
     | 'csharp'
-    | 'rust';
+    | 'rust'
+    | 'cpp';
   /** Repository name. */
   repository: string;
   /** Repository-relative source file. */

@@ -175,6 +175,124 @@ test('extractLanguageContracts reads Rust structs and treats Option as optional'
   assert.equal(contract(contracts, 'Point'), undefined);
 });
 
+test('extractLanguageContracts reads Kotlin body properties beyond the constructor', () => {
+  const root = tempDir();
+  write(
+    root,
+    'User.kt',
+    [
+      'data class User(',
+      '  val id: Long,',
+      ') {',
+      '  val name: String = "anonymous"',
+      '  @SerialName("nick") var nickname: String? = null',
+      '  fun greet(): String {',
+      '    val local = "not a field"',
+      '    return local',
+      '  }',
+      '}',
+    ].join('\n'),
+  );
+
+  const [user] = extractLanguageContracts(root, 'app');
+  assert.deepEqual(
+    user.fields.map((entry) => entry.name),
+    ['id', 'name', 'nickname'],
+  );
+  assert.equal(field(user, 'id').required, true);
+  assert.equal(field(user, 'name').required, false);
+  assert.equal(field(user, 'nickname').required, false);
+  assert.equal(field(user, 'nickname').type, 'String?');
+});
+
+test('extractLanguageContracts reads Java POJOs with accessors and skips service classes', () => {
+  const root = tempDir();
+  write(
+    root,
+    'Address.java',
+    [
+      'public class Address {',
+      '  private String street;',
+      '  private String zip;',
+      '  public Address() {}',
+      '  public String getStreet() { return street; }',
+      '  public void setStreet(String street) { this.street = street; }',
+      '  public String getZip() { return zip; }',
+      '  @Override public String toString() { return street; }',
+      '}',
+    ].join('\n'),
+  );
+  write(
+    root,
+    'Service.java',
+    [
+      'public class Service {',
+      '  private Repository repository;',
+      '  public void run() { repository.save(); }',
+      '}',
+    ].join('\n'),
+  );
+  write(
+    root,
+    'LombokUser.java',
+    [
+      '@Data',
+      'public class LombokUser {',
+      '  private String id;',
+      '  private String name;',
+      '}',
+    ].join('\n'),
+  );
+
+  const contracts = extractLanguageContracts(root, 'api');
+  const address = contract(contracts, 'Address');
+  assert.equal(address.format, 'java');
+  assert.deepEqual(
+    address.fields.map((entry) => entry.name),
+    ['street', 'zip'],
+  );
+  // A class whose only method is not an accessor is not a DTO.
+  assert.equal(contract(contracts, 'Service'), undefined);
+  // A Lombok class has no explicit accessors, so the annotation stands in.
+  assert.deepEqual(
+    contract(contracts, 'LombokUser').fields.map((entry) => entry.name),
+    ['id', 'name'],
+  );
+});
+
+test('extractLanguageContracts reads C++ structs and skips untagged typedef structs', () => {
+  const root = tempDir();
+  write(
+    root,
+    'user.hpp',
+    [
+      'struct User {',
+      '  int id;',
+      '  std::string name = "anonymous";',
+      '  std::vector<int> roles;',
+      '  static int instances;',
+      '  void greet() {}',
+      '};',
+      'typedef struct { int hidden; } Anon;',
+    ].join('\n'),
+  );
+
+  const contracts = extractLanguageContracts(root, 'core');
+  const [user] = contracts;
+  assert.equal(user.id, 'User');
+  assert.equal(user.format, 'cpp');
+  assert.equal(field(user, 'id').type, 'int');
+  assert.equal(field(user, 'name').type, 'std::string');
+  assert.equal(field(user, 'roles').type, 'std::vector<int>');
+  // A static member and a method are not transfer fields.
+  assert.deepEqual(
+    user.fields.map((entry) => entry.name),
+    ['id', 'name', 'roles'],
+  );
+  // An untagged typedef has no stable id, so it is skipped.
+  assert.equal(contract(contracts, 'Anon'), undefined);
+});
+
 test('findSourceFiles prunes generated directories and non-source files', () => {
   const root = tempDir();
   write(root, 'src/app.ts', 'export interface A { x: string }\n');
