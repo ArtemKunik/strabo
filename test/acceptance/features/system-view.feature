@@ -20,3 +20,12 @@ Feature: System view
     When I switch to system detail
     And I select the root unit node
     Then the inspector reports why the unit is grouped
+
+  @polyglot
+  Scenario: A polyglot repository groups into its build units
+    Given I open the polyglot fixture repository
+    When I switch to system detail
+    Then the System view draws the unit "mobile-app"
+    And the System view draws the unit "alpha"
+    And the System view draws the unit "beta"
+    And the System view draws a support shelf for "mobile-app"

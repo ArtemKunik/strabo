@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict';
 
-import { Then, When } from '@cucumber/cucumber';
+import { Given, Then, When } from '@cucumber/cucumber';
+
+import { ACCEPTANCE_POLYGLOT_ROOT } from '../support/server.mjs';
+
+Given('I open the polyglot fixture repository', async function () {
+  const response = await fetch(`${this.baseUrl}/api/strabo/repositories`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ root: ACCEPTANCE_POLYGLOT_ROOT }),
+  });
+  assert.equal(response.ok, true, 'the polyglot fixture should be accepted inside the scan ceiling');
+  await this.page.goto(this.baseUrl);
+  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, {
+    timeout: 20_000,
+  });
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.page.selectOption('#repository', { label: 'system-repo' });
+  await this.page.waitForFunction(
+    (generation) => window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 20_000 },
+  );
+});
 
 When('I switch to system detail', async function () {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());

@@ -4,13 +4,15 @@ import path from 'node:path';
 
 export const ACCEPTANCE_PORT = 3131;
 export const ACCEPTANCE_URL = `http://127.0.0.1:${ACCEPTANCE_PORT}`;
-export const ACCEPTANCE_ROOT = path.resolve('test/fixtures/block-repo');
+export const ACCEPTANCE_FIXTURES = path.resolve('test/fixtures');
+export const ACCEPTANCE_ROOT = path.join(ACCEPTANCE_FIXTURES, 'block-repo');
+export const ACCEPTANCE_POLYGLOT_ROOT = path.join(ACCEPTANCE_FIXTURES, 'system-repo');
 
 let child = null;
 
 /** Start the standalone server against the acceptance fixture on a dedicated port. */
 export async function startServer() {
-  const fixtures = path.resolve('test/fixtures');
+  const fixtures = ACCEPTANCE_FIXTURES;
   const root = ACCEPTANCE_ROOT;
   const cacheDir = path.resolve('test/acceptance/reports/cache');
   // A fresh state dir per run keeps the remembered-repositories list deterministic.

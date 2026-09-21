@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
@@ -16,9 +17,17 @@ import {
   createStraboRouter,
   detectUnits,
   readDeclaredGroups,
+  scanRepository,
 } from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
+
+const fixtureRepo = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'fixtures',
+  'system-repo',
+);
 
 const created: string[] = [];
 const servers: Array<ReturnType<typeof express.application.listen>> = [];
@@ -27,8 +36,14 @@ after(() => {
   for (const server of servers) {
     server.close();
   }
+  // Teardown is best-effort: Windows can hold a handle on a just-closed listener's temp
+  // root, and a cleanup failure must not be reported as a failing test.
   for (const directory of created) {
-    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // The OS will reclaim the temp directory.
+    }
   }
 });
 
@@ -328,6 +343,21 @@ test('buildSystemReport lets a declared group override the derived units', () =>
   assert.deepEqual(billing?.overrides, ['.']);
   // The root unit keeps the file the declared glob did not claim.
   assert.equal(report.units.find((unit) => unit.id === '.')?.files, 1);
+});
+
+test('the polyglot fixture detects a Gradle app, two Cargo crates, and a script shelf', async () => {
+  const graph = (await scanRepository(fixtureRepo)).graph;
+  const report = buildSystemReport(fixtureRepo, 'system-repo', graph);
+
+  const names = report.units.map((unit) => unit.name);
+  assert.ok(names.includes('mobile-app'), `expected mobile-app in ${names.join(', ')}`);
+  assert.ok(names.includes('alpha'), `expected alpha in ${names.join(', ')}`);
+  assert.ok(names.includes('beta'), `expected beta in ${names.join(', ')}`);
+  // The root Gradle unit owns the scripts/ folder, so its shelf holds the script.
+  assert.ok(
+    report.periphery.some((entry) => entry.category === 'script' && entry.unit === '.'),
+    'the script should fold into the root unit shelf',
+  );
 });
 
 test('buildDirectoryLabels anchors a directory label at its unit', () => {
