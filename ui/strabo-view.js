@@ -85,8 +85,25 @@ export function createView(container) {
   observer.observe(container);
 
   // Islands are drawn in the same transform as the nodes, so every viewport change has to
-  // carry them along or the plates slide off the regions they name.
+  // carry them along or the plates slide off the regions they name. This stays synchronous:
+  // deferring it a frame would let the plates trail the nodes during a drag.
   cy.on('pan zoom resize', repaintIslands);
+
+  // A trackpad pinch or a momentum wheel can fire several `zoom` events inside one frame,
+  // and the label work below is the expensive half of the handler — `rescaleLabels` can
+  // restyle every element. Collapse a burst to the one recompute the frame will actually
+  // paint. Callers that change the elements themselves still force the walk synchronously.
+  let labelFrame = 0;
+  function scheduleLabelRecompute() {
+    if (labelFrame) {
+      return;
+    }
+    labelFrame = requestAnimationFrame(() => {
+      labelFrame = 0;
+      rescaleLabels(cy);
+      applyLabelBudget(cy);
+    });
+  }
 
   cy.on('tap', 'node', (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
@@ -105,10 +122,7 @@ export function createView(container) {
       for (const handler of edgeHandlers) handler(null);
     }
   });
-  cy.on('zoom', () => {
-    rescaleLabels(cy);
-    applyLabelBudget(cy);
-  });
+  cy.on('zoom', scheduleLabelRecompute);
   cy.on('cxttap', 'node', (event) => {
     for (const handler of contextHandlers) {
       handler({ kind: 'node', id: event.target.id() }, event.originalEvent);
@@ -173,6 +187,7 @@ export function createView(container) {
     /** Re-read the CSS theme variables and restyle the canvas after a theme switch. */
     applyTheme() {
       cy.style().fromJson(stylesheet()).update();
+      retintBackground(cy, container);
     },
     /** Show or hide every node label. Islands draw their own layer and are unaffected. */
     setLabelsVisible(visible) {
@@ -396,7 +411,7 @@ function createCytoscape(container) {
     // background colour and never consults the stylesheet. Unset, it blends against
     // white, fringing every arrowhead on this dark theme. Set it before the renderer
     // reads it; the 2D path never looks at this, so it stays unset by default.
-    container.style.backgroundColor = surfaceColour(container);
+    paintContainerBackground(container);
     try {
       return window.cytoscape({ ...options, renderer: { name: 'canvas', webgl: true } });
     } catch (error) {
@@ -476,6 +491,69 @@ function surfaceColour(container) {
   }
   const token = getComputedStyle(document.documentElement).getPropertyValue('--bg-1').trim();
   return token || '#10141a';
+}
+
+/**
+ * Write the theme's surface onto the container as an inline colour.
+ *
+ * `surfaceColour` prefers the container's *own* background, and this is what sets it, so
+ * clear it first: on a re-theme it would otherwise read back the colour it wrote last
+ * time and the token would never be consulted again.
+ */
+function paintContainerBackground(container) {
+  container.style.backgroundColor = '';
+  container.style.backgroundColor = surfaceColour(container);
+}
+
+/**
+ * Move the WebGL renderer onto the new theme's background.
+ *
+ * `initWebgl` reads the container background exactly once and keeps it as an `[r, g, b]`
+ * tuple on the drawing instance; the stylesheet never feeds it. Restyling alone therefore
+ * leaves arrow tips blending against the *previous* theme — the fringing
+ * `paintContainerBackground` exists to prevent at startup, arriving later instead. The
+ * tuple is read per draw call, so assigning it is enough: no atlas rebuild, and the next
+ * frame carries it.
+ *
+ * The 2D renderer has no `drawing`, and never consults the inline colour, so this is a
+ * no-op there.
+ */
+function retintBackground(cy, container) {
+  const drawing = cy.renderer()?.drawing;
+  if (!drawing) {
+    return;
+  }
+  paintContainerBackground(container);
+  const tuple = containerColourTuple(container);
+  if (tuple) {
+    drawing.bgColor = tuple;
+  }
+}
+
+/**
+ * The container's background as the `[r, g, b]` tuple Cytoscape stores.
+ *
+ * Read back through `getComputedStyle` rather than parsed from the token, because that
+ * normalises whatever the theme used — hex, `rgb()`, a colour name — to one `rgb()` form.
+ */
+function containerColourTuple(container) {
+  const computed = getComputedStyle(container).backgroundColor;
+  const open = computed.indexOf('(');
+  const close = computed.lastIndexOf(')');
+  if (open < 0 || close < open) {
+    return null;
+  }
+  // Browsers return either `rgb(r, g, b)` or the space-separated `rgb(r g b / a)` form,
+  // so accept both separators and keep the first three channels.
+  const channels = computed
+    .slice(open + 1, close)
+    .split(',')
+    .join(' ')
+    .split(' ')
+    .filter(Boolean)
+    .map(Number);
+  const rgb = channels.slice(0, 3);
+  return rgb.length === 3 && rgb.every(Number.isFinite) ? rgb : null;
 }
 
 /** Probe a real WebGL2 context, then release it so it does not count against the
@@ -651,7 +729,13 @@ function stylesheet() {
     {
       selector: 'edge',
       style: {
-        'curve-style': 'bezier',
+        // Straight, not bezier. A bezier is the most expensive edge the renderers
+        // draw: the WebGL path emits a mitre-joined segment strip per edge where a
+        // straight edge is one stretched quad, and the 2D path recomputes control
+        // points on every restyle. The cost buys only the arc that separates a
+        // bidirectional pair, so an import cycle now draws as a single line with a
+        // head at each end rather than two bowed ones.
+        'curve-style': 'straight',
         'target-arrow-shape': 'triangle',
         width: 1.2,
         // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the

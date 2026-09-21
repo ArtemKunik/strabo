@@ -959,6 +959,17 @@ function createView(container) {
   });
   observer.observe(container);
   cy.on("pan zoom resize", repaintIslands);
+  let labelFrame = 0;
+  function scheduleLabelRecompute() {
+    if (labelFrame) {
+      return;
+    }
+    labelFrame = requestAnimationFrame(() => {
+      labelFrame = 0;
+      rescaleLabels(cy);
+      applyLabelBudget(cy);
+    });
+  }
   cy.on("tap", "node", (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
     applyLabelBudget(cy, true);
@@ -976,10 +987,7 @@ function createView(container) {
       for (const handler of edgeHandlers) handler(null);
     }
   });
-  cy.on("zoom", () => {
-    rescaleLabels(cy);
-    applyLabelBudget(cy);
-  });
+  cy.on("zoom", scheduleLabelRecompute);
   cy.on("cxttap", "node", (event) => {
     for (const handler of contextHandlers) {
       handler({ kind: "node", id: event.target.id() }, event.originalEvent);
@@ -1035,6 +1043,7 @@ function createView(container) {
     /** Re-read the CSS theme variables and restyle the canvas after a theme switch. */
     applyTheme() {
       cy.style().fromJson(stylesheet()).update();
+      retintBackground(cy, container);
     },
     /** Show or hide every node label. Islands draw their own layer and are unaffected. */
     setLabelsVisible(visible) {
@@ -1196,7 +1205,7 @@ function createCytoscape(container) {
     maxZoom: MAX_ZOOM
   };
   if (webglRequested() && !webglRefused() && probeWebGL2()) {
-    container.style.backgroundColor = surfaceColour(container);
+    paintContainerBackground(container);
     try {
       return window.cytoscape({ ...options, renderer: { name: "canvas", webgl: true } });
     } catch (error) {
@@ -1247,6 +1256,32 @@ function surfaceColour(container) {
   }
   const token = getComputedStyle(document.documentElement).getPropertyValue("--bg-1").trim();
   return token || "#10141a";
+}
+function paintContainerBackground(container) {
+  container.style.backgroundColor = "";
+  container.style.backgroundColor = surfaceColour(container);
+}
+function retintBackground(cy, container) {
+  const drawing = cy.renderer()?.drawing;
+  if (!drawing) {
+    return;
+  }
+  paintContainerBackground(container);
+  const tuple = containerColourTuple(container);
+  if (tuple) {
+    drawing.bgColor = tuple;
+  }
+}
+function containerColourTuple(container) {
+  const computed = getComputedStyle(container).backgroundColor;
+  const open = computed.indexOf("(");
+  const close = computed.lastIndexOf(")");
+  if (open < 0 || close < open) {
+    return null;
+  }
+  const channels = computed.slice(open + 1, close).split(",").join(" ").split(" ").filter(Boolean).map(Number);
+  const rgb = channels.slice(0, 3);
+  return rgb.length === 3 && rgb.every(Number.isFinite) ? rgb : null;
 }
 function probeWebGL2() {
   try {
@@ -1384,7 +1419,13 @@ function stylesheet() {
     {
       selector: "edge",
       style: {
-        "curve-style": "bezier",
+        // Straight, not bezier. A bezier is the most expensive edge the renderers
+        // draw: the WebGL path emits a mitre-joined segment strip per edge where a
+        // straight edge is one stretched quad, and the 2D path recomputes control
+        // points on every restyle. The cost buys only the arc that separates a
+        // bidirectional pair, so an import cycle now draws as a single line with a
+        // head at each end rather than two bowed ones.
+        "curve-style": "straight",
         "target-arrow-shape": "triangle",
         width: 1.2,
         // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the
