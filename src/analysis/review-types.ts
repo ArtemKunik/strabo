@@ -35,6 +35,71 @@ export interface ReviewFile {
   inGraph: boolean;
 }
 
+/** A metric or signal change on one function. */
+export interface FunctionChange {
+  /** The function name. */
+  name: string;
+  /** Enclosing type, or empty for a module function. */
+  owner: string;
+  /** 1-based line of the function declaration. */
+  line: number;
+  /** Decision points before the change; null when the base cannot be read. */
+  decisionPointsBefore: number | null;
+  /** Decision points after the change; null when the reviewed copy cannot be read. */
+  decisionPointsAfter: number | null;
+  /** Max nesting depth before. */
+  nestingBefore: number | null;
+  /** Max nesting depth after. */
+  nestingAfter: number | null;
+  /** Signals present before the change. */
+  signalsBefore: string[];
+  /** Signals present after the change. */
+  signalsAfter: string[];
+  /** True when a new signal was introduced. */
+  signalIntroduced: boolean;
+  /** True when an existing signal was resolved. */
+  signalResolved: boolean;
+  /** Body line count; null when the function has no body. */
+  linesBefore: number | null;
+  linesAfter: number | null;
+}
+
+/** A symbol added, removed, or with a changed signature. */
+export interface SymbolChange {
+  /** The symbol name. */
+  name: string;
+  /** Enclosing type, or empty for a module-level symbol. */
+  owner: string;
+  /** What happened to the symbol. */
+  change: 'added' | 'removed' | 'changed-signature' | 'unchanged';
+  /** The type signature before; null when added or no type recorded. */
+  typeBefore: string | null;
+  /** The type signature after; null when removed or no type recorded. */
+  typeAfter: string | null;
+  /** Parameters before; null when not recorded. */
+  parametersBefore: number | null;
+  /** Parameters after; null when not recorded. */
+  parametersAfter: number | null;
+}
+
+/** The public surface diff for one changed file, per extractor language. */
+export interface PublicSurfaceChange {
+  /** The language of the extractor used. */
+  language: string;
+  /** Symbols added, removed, or with changed signatures. */
+  symbols: SymbolChange[];
+}
+
+/** Tiered impact of a change on the dependency graph. */
+export interface TieredImpact {
+  /** Importers whose recorded specifier names a changed symbol — definite impact. */
+  definite: string[];
+  /** Other direct importers — possible impact. */
+  possible: string[];
+  /** The transitive set over use edges — reachable impact. */
+  reachable: string[];
+}
+
 /** Cohesion of one changed file on each side of the review, from recorded member wiring. */
 export interface CohesionChange {
   path: string;
@@ -47,6 +112,12 @@ export interface CohesionChange {
   after: number | null;
   /** Why a side is missing, stated rather than left to imply a zero. */
   note: string;
+  /** Functions touched by the change, with before → after metrics and signals. */
+  functions: FunctionChange[];
+  /** Public surface diff (exported/pub symbols added, removed, changed). */
+  publicSurface: PublicSurfaceChange[];
+  /** Tiered impact: definite (specifier names a changed symbol), possible (other direct importers), reachable (transitive). */
+  impact: TieredImpact | null;
 }
 
 /** Cohesion before and after a change, from the member wiring the symbol extractor records. */

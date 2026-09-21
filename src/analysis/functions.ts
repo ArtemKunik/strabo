@@ -1,4 +1,5 @@
 import type { CodeSymbol, FunctionCall, FunctionMetrics } from '../scan/languages/symbols.ts';
+import type { FunctionEntryMark } from '../scan/languages/entry.ts';
 import { computeSignals, type FunctionSignal } from './signals.ts';
 
 /** One recorded call made by a function, inside the same file. */
@@ -27,6 +28,8 @@ export interface FunctionEntry {
   calls: FunctionCallSite[];
   /** Functions in this file that call this one, as `Owner.name` or `name`. */
   callers: string[];
+  /** Why the function runs without an in-file caller, with its evidence. */
+  entry?: FunctionEntryMark;
   /** Deterministic cost signals from the recorded metrics. */
   signals: FunctionSignal[];
 }
@@ -63,12 +66,18 @@ export function buildFunctions(
     metrics: symbol.metrics,
     calls: callsOf(symbol, calls),
     callers: callersOf(symbol, methods, calls),
+    ...(symbol.entry ? { entry: symbol.entry } : {}),
     signals: computeSignals(symbol),
   }));
 
-  // Busiest first; source order breaks ties, and signatures without a body sort last.
+  // Worst signals first, then busiest; source order breaks ties, and signatures
+  // without a body sort last.
   functions.sort(
-    (a, b) => complexity(b) - complexity(a) || a.line - b.line || a.name.localeCompare(b.name),
+    (a, b) =>
+      b.signals.length - a.signals.length ||
+      complexity(b) - complexity(a) ||
+      a.line - b.line ||
+      a.name.localeCompare(b.name),
   );
 
   return { file, available: true, functions };

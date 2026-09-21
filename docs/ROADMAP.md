@@ -24,10 +24,10 @@ record is reported as `unavailable`, never invented.
 | 12 | Frontend foundation | done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off
     `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
-| 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay); follow-ups F1-F4 planned (free-function calls, entry detection, table layout) |
-| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; the tier lens L9-L13 remains) |
-| 17 | Module quality and change impact | Q1-Q3 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping with before → after metric/signal deltas); Q4-Q8 planned |
+| 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
+| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 planned (in-app narrator setup) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; system drill-down L14-L17 and the tier lens L9-L13 remain) |
+| 17 | Module quality and change impact | Q1-Q4 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact); Q5-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
 
@@ -568,13 +568,37 @@ helper that the tests call.
   count, total and max complexity, max nesting, and signal count. It keeps roving keyboard
   navigation and uses the virtualized list for large files.
 
-Slices: **F1** push free-function bodies for call collection in Rust and Kotlin, with unit
-tests where a free helper is called from free functions and from methods. **F2** entry
-detection per extractor language (test attributes and names, `main`, functions passed by
-reference) recorded on the symbol with its evidence, and entry-aware captions. **F3** the
-public/intra-file caption for functions with no callers in the file. **F4** the Functions
-tab as a sortable table with the summary row, jsdom panel tests, and an update to the
-`module-passport.feature` `@functions` scenario.
+Slices: **F1 (done)** free-function bodies are pushed for call collection in Rust and
+Kotlin (`if (body && owner)` → `if (body)`): the member-access pass is a no-op without an
+owner and `collectFunctionCalls` already refuses `Self::x()` with an empty owner, so the
+push is safe. Unit tests cover a free helper called from free functions and from methods.
+**F2 (done)** entry detection per extractor language, recorded on the symbol with its
+evidence (`CodeSymbol.entry`: `test` / `main` / `handler` / `passed-as-value`):
+`#[test]` / `#[tokio::test]`, `@Test`, `[Test]` / `[Fact]` / `[Theory]` / `[TestMethod]`,
+and test-bearing decorators above the declaration; `main` / `Main` / `#[tokio::main]` by
+name; `it(...)` / `test(...)` / `describe(...)` bodies in TypeScript (threaded through the
+visitor, so inline and named callbacks alike carry the call as evidence, and a named
+function handed to `it`/`test`/`describe` is a test entry too); and functions passed by
+reference (`::name`, `get(name)` and sibling wrappers, `.route(..., name)`, `+= name`)
+with the passing line as evidence. Captions are entry-aware: an entry keeps its badge
+instead of "no callers". Shared helper `src/scan/languages/entry.ts`
+(`markEntries`, `isTestFrameworkCall`, `testBodyEvidence`); unit coverage is
+`test/unit/function-entries.test.ts`. **F3 (done)** the public/intra-file caption:
+a public function with no callers in the file says *no callers in this file (cross-file
+not resolved)*, since callers resolve within the file only. **F4 (done)** the Functions
+tab as a sortable table (`renderFunctionTable` in `ui/strabo-panels.js`, pure helpers in
+`ui/strabo-functions.js`): one row per function with columns for name, visibility or
+entry badge, lines, span, complexity, nesting, loops, calls (count), callers (count or
+entry badge), and signals (chips); names truncate in the middle with the full signature
+as a tooltip and an expandable row; columns sort on click with signal count then
+complexity as the default order (the same order `buildFunctions` now serves); clicking a
+calls or callers count expands the row and lists the call sites with line links, and a
+call-site button jumps to the callee's own row; a summary line gives the function count,
+total and max complexity, max nesting, and signal count. Rows keep roving keyboard
+navigation, and files above 100 functions render through the virtualized list with the
+detail underneath. jsdom coverage is the `renderFunctions` cases in
+`test/unit/panels.test.ts`, and the `module-passport.feature` `@functions` scenario
+asserts the summary, the sortable columns, and the expandable detail.
 
 ## Phase 15 - Optional LLM narrator
 
@@ -611,6 +635,60 @@ evidence (`buildNarratorEvidence`) and the captions (`narratorStatusLabel`,
 "model-generated narrative — not recorded evidence" attribution, and an unconfigured narrator
 says so instead of failing. A browser scenario (`module-passport.feature` `@narrator`) asserts
 the inert path; it needs no endpoint, so it also proves nothing is contacted when unset.
+
+### Follow-ups: in-app narrator setup
+
+The narrator can be configured only through environment variables
+(`STRABO_NARRATOR_ENDPOINT`, `_MODEL`, `_KEY_ENV`, `_BUDGET`, `_SEND_SOURCE`, plus the
+key in yet another variable), and an unconfigured narrator shows two overlapping lines
+("Narrator is not configured…" and "Narrator unavailable: not-configured") next to a
+Narrate button that only fails. The operator should be able to set it up from the UI.
+
+- **Settings → Narrator section**, persisted through the existing settings store
+  (`src/state/settings-store.ts`) alongside the scan ceiling and risk toggles:
+  - *Provider preset*: Local · Ollama, Local · LM Studio, OpenAI, Anthropic, OpenRouter,
+    Custom. A preset fills the endpoint and suggests models, and every field stays
+    editable.
+  - *Model* with **Fetch models**, which lists the provider's models where it exposes a
+    model list, so a model id is picked rather than typed.
+  - *API key source*: none (local endpoints), an environment variable by name (the panel
+    shows whether it is set, never its value), or a key stored on this machine. The key
+    field is write-only: the browser never receives a key back, only *set* / *found* /
+    *missing*. A stored key lives in the state directory with owner-only permissions and
+    is never logged, cached, or audited. It is the first secret Strabo writes to disk, so
+    the slice includes a security review.
+  - *Send source* toggle, with a caption saying that only recorded facts are sent while it
+    is off, and the *request budget* per session.
+  - **Test connection**: a minimal prompt that reports latency and the model that replied,
+    or the problem in plain words (*401: key rejected*, *model not found: try Fetch
+    models*, *remote endpoints need https*), reusing `resolveNarratorConfig` reasons and
+    the provider error.
+- **Environment still wins.** A value set by an environment variable shows as locked, with
+  *set by STRABO_NARRATOR_MODEL*, so a managed deployment cannot be overridden from the
+  browser.
+- **Endpoint changes cannot redirect the key.** Changing the endpoint host clears the
+  stored key and the env-var binding, and the key must be confirmed again for the new
+  host. Settings writes are accepted only from the page's own origin, and the
+  https-or-loopback rule is unchanged.
+- **One clear call to action where it is off.** The two lines become one: *Narrator is off
+  · Set up →*, which opens Settings at the Narrator section. Narrate and Name group stay
+  disabled, with that reason as their tooltip, instead of being clickable and failing. A
+  configured but failing narrator shows the Test connection wording.
+- **Provider wire formats.** The client sends an OpenAI-style `messages` body. The
+  Anthropic preset uses Anthropic's OpenAI-compatible endpoint if the current docs confirm
+  it fits, and otherwise gets a small adapter for the native Messages API. The same
+  applies to any other preset whose API is not OpenAI-compatible.
+
+Slices: **N1** persisted narrator settings (endpoint, model, key source, send-source,
+budget) merged under the environment, with locked-by-environment reporting in
+`GET /narrator`. **N2** the Settings → Narrator section with presets, Fetch models, and the
+write-only key field (env-var name or stored key), plus the host-change key reset and
+same-origin check. **N3** Test connection with plain-language errors. **N4** the single
+*Narrator is off · Set up →* call to action and disabled Narrate / Name group with their
+reason. **N5** the Anthropic preset (compatible endpoint or native adapter), decided
+against current provider docs. Acceptance: `module-passport.feature` `@narrator` gains
+"set up from Settings against a loopback stub" and "changing the host clears the key"
+scenarios, and still proves nothing is contacted while unset.
 
 ## Phase 16 - Logical grouping (System view) and tier lens
 
@@ -710,8 +788,49 @@ group instead of the manifest unit, and the unit reports the derived units it to
 **L8 (done)** narrator group naming: select a unit in System view and **Name group** posts the
 unit's recorded facts (`buildGroupNamingEvidence`) with an instruction that the narrator may
 only name and describe, never create, merge, or split a group; the reply renders under the
-Phase 15 model-generated attribution. Still to do: a polyglot fixture for the acceptance
-scenario and the tier lens.
+Phase 15 model-generated attribution. The `@polyglot` scenario runs against
+`test/fixtures/system-repo` (a Gradle app, two Cargo crates, a scripts folder), so the unit
+detection is exercised in the browser as well as in unit tests. Still to do: the tier lens.
+
+### System drill-down
+
+System mode should stay at the unit level until the operator chooses a unit. The whole
+file map is exactly the noise this phase exists to remove, so files are never drawn at L0,
+and cross-unit file edges are shown only when asked for.
+
+- **L0 draws units only.** No file nodes, no directory islands, and the strip lists units
+  rather than top-level directories. A screenshot of System mode on SmartPositionAssistant
+  still showed the directory islands and the directory strip, so check first that the mode
+  actually renders the `?system=1` model, not the file model, after a mode switch and after
+  a reload (a stale bundle or a server that has not been restarted can also cause it).
+- **Selecting a unit opens it.** Double-click, or Enter on the focused unit (today
+  `onDrill` is inert in System mode), shows that unit's files inside its frame, laid out
+  by the unit's layers (swim lanes) and communities, with the other units collapsed to
+  boxes around it. The breadcrumb reads *System › server-rust*, and Escape or the
+  breadcrumb goes back to L0. The support shelf stays folded unless opened.
+- **Selecting a file draws its relationships inside the unit.** Only the selected file's
+  import edges to and from files in the same unit are drawn, with direction and the import
+  line as evidence. The rest of the unit is dimmed, not hidden, so position stays stable.
+- **Cross-unit relationships are an explicit action.** Nothing crosses the unit frame by
+  default. A **Show outside links** action (in the inspector and the canvas toolbar, with a
+  shortcut) adds the selected file's edges to other units. Each crossing edge ends at the
+  target unit's box with a count badge (e.g. *3 files in daemon-rust*), and expanding the
+  badge reveals those files in place. HTTP/service-call and contract edges use the same
+  action and carry their endpoint label. The toggle persists per session and is part of
+  the deep link.
+- **Impact follows the same scope.** Trace impact and blast radius at L1 report the in-unit
+  count first and the outside count separately (*12 in server-rust · 27 outside*), and the
+  outside part is drawn only with the action above.
+
+Slices: **L14** L0 renders units only (no file nodes, islands, or directory strip), with a
+regression test for the mode switch and reload. **L15** unit drill-down: open a unit
+(double-click / Enter), its files laid out by layer and community, other units collapsed,
+breadcrumb and Escape back, deep link `mode=system&unit=`. **L16** in-unit file selection:
+draw the selected file's edges within the unit and dim the rest. **L17** **Show outside
+links**: cross-unit edges to target-unit boxes with count badges, expand-in-place, HTTP and
+contract edges, and split impact counts. Acceptance: `system-view.feature` gains scenarios
+for "no files at L0", "open a unit", "file edges stay inside the unit", and "outside links
+appear only after the action".
 
 ### Tier lens
 
@@ -818,6 +937,8 @@ coverage is the `mod declarations are declare edges` case in `test/unit/rust.tes
 **Q2 (done).** A percentile scorecard in the passport built from the existing measures. `src/analysis/quality.ts` computes per-module complexity (LOC, function count, sum/max decision points, max nesting, signal share), shape (cohesion from member wiring, member count, interface width, depth signal, instability), centrality (direct importers, blast radius, transitive dependencies, cycle membership), evolution (churn, author count, ownership fragmentation, hidden coupling), and protection (test reach, tested dependents share). Each measure is ranked as a repository percentile (0-100). `GET /analysis/quality` serves the scorecard. Unit coverage is `test/unit/quality.test.ts`; acceptance is `test/acceptance/features/module-quality.feature` (`@quality`).
 
 **Q3 (done).** Hunk → function mapping and per-function metric/signal deltas in the change passport. `computeFunctionChanges` maps `git diff -U0` hunks onto recorded function spans by comparing before/after function extractions. For each touched function, the passport reports `decisionPointsBefore`/`After`, `nestingBefore`/`After`, `signalsBefore`/`After`, `signalIntroduced`, `signalResolved`, and `linesBefore`/`After`. The `CohesionChange.functions` field carries the `FunctionChange[]`. Unit coverage is the new case in `test/unit/change-passport.test.ts`.
+
+**Q4 (done).** Public-surface diff and tiered impact in the change passport. `computePublicSurfaceDiff` extracts exported/pub symbols from before/after content per extractor language, compares their type signatures and parameters, and reports added/removed/changed-signature symbols. `computeTieredImpact` classifies importers into **definite** (recorded specifier names a changed symbol), **possible** (other direct importers), and **reachable** (transitive set over use edges). `CohesionChange.publicSurface` carries `PublicSurfaceChange[]` and `CohesionChange.impact` carries `TieredImpact`. Unit coverage is in `test/unit/change-passport.test.ts`.
 
 **Smells** are rules over those measures. Each shows the inputs that tripped it and is a
 signal, not a verdict: god module (size, members and importers high, cohesion low), hub

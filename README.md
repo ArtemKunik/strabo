@@ -391,15 +391,23 @@ imports, depends-on (all), plus Imports and Used by with source evidence and an
 `Open in Workspace` action. Dependencies, Dependents, Members, and Functions are separate
 tabs so a large file does not push its member list off screen.
 
-The **Functions** tab lists every function and method with its signature, source span,
-decision-point count (a cyclomatic proxy), nesting depth, loop count, and whether it calls
-itself, plus the calls that resolve inside the same file. A language without a symbol
-extractor reports that extraction is not implemented, and a function whose body was not read
-shows `signature only` rather than a fabricated zero. The same recorded metrics drive
-deterministic cost signals (nested loops, a linear scan or sort inside a loop, deep nesting,
-high complexity, long body, many parameters, recursion); the **Function hotspots** review
-overlay ranks the functions that trip at least one and marks the files that carry them. Each
-signal names the recorded value and threshold, so it points at evidence rather than a verdict.
+The **Functions** tab is a sortable table with one row per function and a summary line
+(function count, total and max complexity, max nesting, signal count). Columns cover name,
+visibility or entry badge, lines, span, complexity, nesting, loops, calls (count), callers
+(count or entry badge), and signals (chips); the default order is signal count, then
+complexity. A function the runtime or a framework invokes — a test, `main`, a handler, or
+a function passed by reference — carries an **entry** badge with the attribute or line that
+proved it, instead of reading as dead code with "no callers". Callers resolve within the
+file only, so a public function with none says *no callers in this file (cross-file not
+resolved)*. Expanding a row shows the full signature, the recorded metrics, and every call
+site with its line, and a call site jumps to the callee's own row. A language without a
+symbol extractor reports that extraction is not implemented, and a function whose body was
+not read shows `signature only` rather than a fabricated zero. The same recorded metrics
+drive deterministic cost signals (nested loops, a linear scan or sort inside a loop, deep
+nesting, high complexity, long body, many parameters, recursion); the **Function hotspots**
+review overlay ranks the functions that trip at least one and marks the files that carry
+them. Each signal names the recorded value and threshold, so it points at evidence rather
+than a verdict.
 
 Selecting an edge opens **Edge evidence**: the relationship kind, the recorded specifier and
 line, and how the import resolved (`module tree`, `alias`, and so on). Unrecorded fields read

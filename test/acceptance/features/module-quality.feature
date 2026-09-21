@@ -21,3 +21,30 @@ Feature: Module quality scorecard
     When I request the quality scorecard
     Then every percentile is between 0 and 100
     And the percentile values match the raw measure values
+
+@change-passport
+Scenario: The change passport includes per-function metric and signal deltas
+     Given the Strabo server is running against a Kotlin fixture repository
+     And I open the Strabo UI
+     When I request the change passport for the modified Kotlin file
+     Then the change passport includes function changes
+     And each function change reports decision points before and after
+     And each function change reports signals before and after
+
+@change-passport
+Scenario: The change passport includes public-surface diff
+     Given the Strabo server is running against a repository with a modified Python file
+     And I open the Strabo UI
+     When I request the change passport for the modified Python file
+     Then the change passport includes public-surface changes
+     And each public-surface change reports the extractor language
+     And each public-surface change reports added, removed, or changed-signature symbols
+
+@change-passport
+Scenario: The change passport includes tiered impact
+     Given the Strabo server is running against a repository where a changed file is imported by another module
+     When I request the change passport for the modified file
+     Then the change passport includes tiered impact
+     And the tiered impact reports definite importers whose specifier names a changed symbol
+     And the tiered impact reports possible direct importers
+     And the tiered impact reports reachable importers transitively

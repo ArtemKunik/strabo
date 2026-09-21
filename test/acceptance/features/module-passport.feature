@@ -37,6 +37,7 @@ Feature: Module Passport
     And I select the "main.ts" node
     Then the inspector lists functions including "main"
     And the inspector reports body metrics for a listed function
+    And the inspector shows a functions summary with a sortable table
 
   @narrator
   Scenario: The narrator is offered but stays inert without configuration

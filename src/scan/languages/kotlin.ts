@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { markEntries } from './entry.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import { addNamespacePrefixes, looksInternal } from './namespace.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
@@ -414,7 +415,9 @@ export async function extractKotlinSymbols(
             method.metrics = collectFunctionMetrics(body, method.line, KOTLIN_FUNCTION_RULES);
           }
           symbols.push(method);
-          if (body && owner) {
+          // Top-level `fun` records calls too: without an owner the member-access
+          // pass is a no-op and type-qualified receivers are refused, so this is safe.
+          if (body) {
             methodBodies.push({ owner, method: method.name, body, scope: node });
           }
           return;
@@ -451,6 +454,7 @@ export async function extractKotlinSymbols(
       collectFunctionCalls(entry.body, declared, typeNames, entry.owner, entry.method, KOTLIN_CALLS),
     );
     markRecursive(symbols, calls);
+    markEntries(symbols, content);
 
     symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
     return { symbols, diagnostics, accesses, calls };

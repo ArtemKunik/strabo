@@ -44,6 +44,8 @@ export type {
 } from './scan/languages/symbols.ts';
 export { collectFunctionMetrics } from './scan/languages/function-metrics.ts';
 export type { FunctionRules } from './scan/languages/function-metrics.ts';
+export { markEntries, isTestFrameworkCall, testBodyEvidence } from './scan/languages/entry.ts';
+export type { EntryKind, FunctionEntryMark } from './scan/languages/entry.ts';
 export { SYMBOL_EXTRACTORS, symbolExtractorFor } from './scan/languages/registry.ts';
 export type { SymbolExtractor, SymbolContext } from './scan/languages/registry.ts';
 export { collectRelatedSources } from './analysis/related-sources.ts';
@@ -105,7 +107,7 @@ export {
 } from './analysis/review.ts';
 export type { ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
 export { computeChangePassport } from './analysis/change-passport.ts';
-export type { ChangePassport, CohesionChange } from './analysis/change-passport.ts';
+export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';

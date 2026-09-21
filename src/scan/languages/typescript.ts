@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic } from '../../types.ts';
+import { isTestFrameworkCall, markEntries, testBodyEvidence, type FunctionEntryMark } from './entry.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
@@ -104,8 +105,11 @@ export async function extractTypeScriptSymbols(
       ownerFields.add(field.name);
     };
 
-    const addMethod = (method: CodeSymbol, value: Node): void => {
+    const addMethod = (method: CodeSymbol, value: Node, entry?: FunctionEntryMark): void => {
       const body = value.childForFieldName('body');
+      if (entry && !method.entry) {
+        method.entry = entry;
+      }
       if (body) {
         method.metrics = collectFunctionMetrics(body, method.line, TYPESCRIPT_FUNCTION_RULES);
         methodBodies.push({ owner: method.owner, method: method.name, body, scope: value });
@@ -143,7 +147,27 @@ export async function extractTypeScriptSymbols(
       }
     };
 
-    const visit = (node: Node, owner: string): void => {
+    const visit = (node: Node, owner: string, testContext: { name: string; line: number } | null = null): void => {
+      // A function defined inside `it(...)` / `test(...)` / `describe(...)` runs only
+      // because the framework invokes it, so it is a test entry with the call as evidence.
+      if (node.type === 'call_expression') {
+        const fn = node.childForFieldName('function');
+        let callee: string | null = null;
+        if (fn?.type === 'identifier') {
+          callee = fn.text;
+        } else if (fn?.type === 'member_expression') {
+          const object = fn.childForFieldName('object');
+          if (object?.type === 'identifier') {
+            callee = object.text;
+          }
+        }
+        if (callee && isTestFrameworkCall(callee)) {
+          testContext = { name: callee.split('.')[0] as string, line: node.startPosition.row + 1 };
+        }
+      }
+      const testEntry = (): FunctionEntryMark | undefined =>
+        testContext ? testBodyEvidence(testContext.name, testContext.line) : undefined;
+
       if (TYPE_DECLARATIONS.has(node.type) || node.type === 'class') {
         const name = node.childForFieldName('name')?.text;
         if (name) {
@@ -157,7 +181,7 @@ export async function extractTypeScriptSymbols(
         }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
         for (const child of node.namedChildren) {
-          visit(child, nextOwner);
+          visit(child, nextOwner, testContext);
         }
         return;
       }
@@ -169,7 +193,7 @@ export async function extractTypeScriptSymbols(
         const name = nameNode?.type === 'identifier' ? nameNode.text : undefined;
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
         for (const child of node.namedChildren) {
-          visit(child, nextOwner);
+          visit(child, nextOwner, testContext);
         }
         return;
       }
@@ -188,6 +212,7 @@ export async function extractTypeScriptSymbols(
               line: node.startPosition.row + 1,
             },
             node,
+            testEntry(),
           );
         }
         return;
@@ -224,6 +249,7 @@ export async function extractTypeScriptSymbols(
               line: node.startPosition.row + 1,
             },
             node,
+            testEntry(),
           );
           if (name === 'constructor') {
             addParameterProperties(node.childForFieldName('parameters'), methodOwner);
@@ -287,6 +313,7 @@ export async function extractTypeScriptSymbols(
                 line: declarator.startPosition.row + 1,
               },
               value,
+              testEntry(),
             );
           } else {
             addField({
@@ -304,7 +331,7 @@ export async function extractTypeScriptSymbols(
       }
 
       for (const child of node.namedChildren) {
-        visit(child, owner);
+        visit(child, owner, testContext);
       }
     };
 
@@ -337,6 +364,7 @@ export async function extractTypeScriptSymbols(
       collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, TYPESCRIPT_CALLS),
     );
     markRecursive(symbols, calls);
+    markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });

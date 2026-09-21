@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, EdgeEvidence, GraphEdge } from '../../types.ts';
+import { markEntries } from './entry.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import { addNamespacePrefixes, looksInternal } from './namespace.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
@@ -509,6 +510,7 @@ export async function extractJavaSymbols(
       collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, JAVA_CALLS),
     );
     markRecursive(symbols, calls);
+    markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });

@@ -1,6 +1,7 @@
 import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, GraphEdge } from '../../types.ts';
+import { markEntries } from './entry.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
@@ -695,7 +696,9 @@ export async function extractRustSymbols(
             symbol.metrics = collectFunctionMetrics(body, symbol.line, RUST_FUNCTION_RULES);
           }
           symbols.push(symbol);
-          if (body && owner) {
+          // Free functions record calls too: without an owner the member-access pass
+          // is a no-op and `Self::x()` is refused, so pushing is always safe.
+          if (body) {
             methodBodies.push({ owner, method: name, body, scope: node });
           }
         }
@@ -736,6 +739,7 @@ export async function extractRustSymbols(
       collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, RUST_CALLS),
     );
     markRecursive(symbols, calls);
+    markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
   });

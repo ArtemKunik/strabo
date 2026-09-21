@@ -29,6 +29,12 @@ export interface CodeSymbol {
    * to that file. Absent for a member declared in the file being extracted.
    */
   declaredIn?: string;
+  /**
+   * Why the function is reachable without an in-file caller (`test`, `main`,
+   * `handler`, `passed-as-value`), with the attribute or line as evidence.
+   * Absent for ordinary functions; "no callers" is then the honest caption.
+   */
+  entry?: import('./entry.ts').FunctionEntryMark;
   /** Body measurements for a function or method; absent for data members and signatures. */
   metrics?: FunctionMetrics;
 }

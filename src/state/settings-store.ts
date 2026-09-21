@@ -17,6 +17,19 @@ export interface PersistedSettings {
   riskOnline: boolean | null;
   /** Whether the ceiling may be widened at runtime, or null for the startup value. */
   allowCeilingWidening: boolean | null;
+  /** The narrator chat-completions endpoint set from Settings, or null for the env value. */
+  narratorEndpoint: string | null;
+  /** The narrator model set from Settings, or null for the env value. */
+  narratorModel: string | null;
+  /**
+   * Name of the environment variable holding the narrator key, or null for "stored key
+   * or none". Never the key itself.
+   */
+  narratorKeyEnv: string | null;
+  /** Whether recorded source is sent as well as evidence, or null for the env value. */
+  narratorSendSource: boolean | null;
+  /** Maximum narrated requests per session, or null for the env/default value. */
+  narratorBudget: number | null;
 }
 
 export interface SettingsStore {
@@ -35,6 +48,11 @@ const NO_OVERRIDES: PersistedSettings = {
   scanCeiling: null,
   riskOnline: null,
   allowCeilingWidening: null,
+  narratorEndpoint: null,
+  narratorModel: null,
+  narratorKeyEnv: null,
+  narratorSendSource: null,
+  narratorBudget: null,
 };
 
 /** Path of the persisted server settings. Exposed for diagnostics and tests. */
@@ -54,6 +72,10 @@ function nullableBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
+function nullableBudget(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
 function readStore(file: string): StoreFile {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<StoreFile>;
@@ -65,6 +87,11 @@ function readStore(file: string): StoreFile {
       scanCeiling: nullableString(parsed.scanCeiling),
       riskOnline: nullableBoolean(parsed.riskOnline),
       allowCeilingWidening: nullableBoolean(parsed.allowCeilingWidening),
+      narratorEndpoint: nullableString(parsed.narratorEndpoint),
+      narratorModel: nullableString(parsed.narratorModel),
+      narratorKeyEnv: nullableString(parsed.narratorKeyEnv),
+      narratorSendSource: nullableBoolean(parsed.narratorSendSource),
+      narratorBudget: nullableBudget(parsed.narratorBudget),
     };
   } catch {
     // A missing or corrupt file means "no overrides", never an error.

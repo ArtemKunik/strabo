@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 
 import type { NarratorConfig } from '../types.ts';
 import { fingerprint as gitFingerprint } from '../cache/graph-cache.ts';
-import { resolveNarratorConfig, type NarratorUnavailableReason } from './config.ts';
+import {
+  isLoopbackHost,
+  resolveNarratorConfig,
+  type NarratorUnavailableReason,
+} from './config.ts';
 
 export const NARRATOR_PROMPT_VERSION = 'narrator-1';
 export const NARRATOR_MAX_EVIDENCE_CHARS = 20_000;
@@ -93,9 +97,21 @@ export interface NarratorClient {
 
 export interface NarratorClientOptions {
   config?: NarratorConfig;
+  /**
+   * Live config provider for the Settings-driven narrator. When supplied it is read on
+   * every `status()` / `narrate()` call, so a `/settings` update takes effect without a
+   * restart. Budget, cache, and audit stay per-process across config changes.
+   */
+  configProvider?: () => NarratorConfig | undefined;
   /** Repository root, used for the git fingerprint that keys the cache. */
   root: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Resolve the API key for `apiKeyEnv`. Defaults to reading `env`. The server passes a
+   * provider that falls back to the stored on-machine key for the current host, so a
+   * loopback preset can run with key source "none" and a remote preset with a stored key.
+   */
+  keyProvider?: (apiKeyEnv: string) => string | undefined;
   fetchImpl?: FetchLike;
   fingerprint?: (root: string) => Promise<string | null>;
   cache?: NarratorCache;
@@ -165,7 +181,6 @@ function extractNarrative(body: unknown): string {
  * audit are per-process.
  */
 export function createNarratorClient(options: NarratorClientOptions): NarratorClient {
-  const resolution = resolveNarratorConfig(options.config);
   const env = options.env ?? process.env;
   const cache = options.cache ?? createMemoryNarratorCache();
   const fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
@@ -173,6 +188,9 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
   const now = options.now ?? (() => new Date());
   const resolveFingerprint = options.fingerprint ?? gitFingerprint;
   const maxRuns = options.maxRuns ?? 50;
+  const readConfig = options.configProvider ?? (() => options.config);
+  const readKey =
+    options.keyProvider ?? ((apiKeyEnv: string) => env[apiKeyEnv]?.trim() || undefined);
 
   const runs: NarratorAuditEntry[] = [];
   let used = 0;
@@ -187,6 +205,7 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
   };
 
   const status = (): NarratorStatus => {
+    const resolution = resolveNarratorConfig(readConfig());
     if (!resolution.configured) {
       return {
         configured: false,
@@ -205,6 +224,7 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
   };
 
   const narrate = async (request: NarratorRequest): Promise<NarratorReply> => {
+    const resolution = resolveNarratorConfig(readConfig());
     if (!resolution.configured) {
       return {
         available: false,
@@ -212,8 +232,9 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
         ...(resolution.detail ? { detail: resolution.detail } : {}),
       };
     }
-    const apiKey = env[resolution.apiKeyEnv]?.trim();
-    if (!apiKey) {
+    const apiKey = readKey(resolution.apiKeyEnv);
+    const loopback = isLoopbackHost(new URL(resolution.endpoint).hostname);
+    if (!apiKey && !loopback) {
       return {
         available: false,
         reason: 'not-authenticated',
@@ -265,7 +286,7 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${apiKey}`,
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
           model: resolution.model,

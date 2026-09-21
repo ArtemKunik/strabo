@@ -2302,6 +2302,31 @@ function functionMetrics(entry) {
   }
   return parts.join(" \xB7 ");
 }
+function functionEntryBadge(entry) {
+  const mark = entry?.entry;
+  if (!mark) {
+    return "";
+  }
+  return `entry: ${mark.kind} (${mark.evidence})`;
+}
+function isPublicVisibility(visibility) {
+  const value = String(visibility ?? "").toLowerCase();
+  return value === "public" || value === "crate" || value.startsWith("pub") || value === "export";
+}
+function functionSummary(report) {
+  const functions = report?.functions ?? [];
+  let totalComplexity = 0;
+  let maxComplexity = 0;
+  let maxNesting = 0;
+  let signalCount = 0;
+  for (const entry of functions) {
+    totalComplexity += entry?.metrics?.decisionPoints ?? 0;
+    maxComplexity = Math.max(maxComplexity, entry?.metrics?.decisionPoints ?? 0);
+    maxNesting = Math.max(maxNesting, entry?.metrics?.maxNestingDepth ?? 0);
+    signalCount += entry?.signals?.length ?? 0;
+  }
+  return `${functions.length} function${functions.length === 1 ? "" : "s"} \xB7 total complexity ${totalComplexity} \xB7 max complexity ${maxComplexity} \xB7 max nesting ${maxNesting} \xB7 ${signalCount} signal${signalCount === 1 ? "" : "s"}`;
+}
 function functionCalls(entry) {
   const calls = entry?.calls ?? [];
   if (calls.length === 0) {
@@ -2311,10 +2336,17 @@ function functionCalls(entry) {
 }
 function functionCallers(entry) {
   const callers = entry?.callers ?? [];
-  if (callers.length === 0) {
-    return "no callers recorded in this file";
+  const badge = functionEntryBadge(entry);
+  if (callers.length > 0) {
+    return badge ? `${callers.join(", ")} \xB7 ${badge}` : callers.join(", ");
   }
-  return callers.join(", ");
+  if (badge) {
+    return badge;
+  }
+  if (isPublicVisibility(entry?.visibility)) {
+    return "no callers in this file (cross-file not resolved)";
+  }
+  return "no callers recorded in this file";
 }
 function functionSignals(entry) {
   const signals = entry?.signals ?? [];
@@ -2990,39 +3022,406 @@ function renderFunctions(container, result, handlers = {}) {
     container.append(note2);
     return;
   }
-  const list = document.createElement("ul");
-  list.className = "function-list";
-  for (const entry of report.functions) {
-    const item = document.createElement("li");
-    item.className = "function-entry";
-    const name = document.createElement("div");
-    name.className = "function-name";
-    name.textContent = functionLabel(entry);
-    item.append(name);
-    const signature = document.createElement("code");
-    signature.className = "function-signature";
-    signature.textContent = functionSignature(entry);
-    item.append(signature);
-    const metrics = document.createElement("div");
-    metrics.className = "function-metrics";
-    metrics.textContent = functionMetrics(entry);
-    item.append(metrics);
-    const calls = document.createElement("div");
-    calls.className = "function-calls";
-    calls.textContent = `calls: ${functionCalls(entry)}`;
-    item.append(calls);
-    const callers = document.createElement("div");
-    callers.className = "function-callers";
-    callers.textContent = `called by: ${functionCallers(entry)}`;
-    item.append(callers);
-    const signals = document.createElement("div");
-    signals.className = "function-signals";
-    signals.textContent = `signals: ${functionSignals(entry)}`;
-    item.append(signals);
-    list.append(item);
+  const summary = document.createElement("p");
+  summary.className = "function-summary";
+  summary.textContent = functionSummary(report);
+  container.append(summary);
+  if (report.functions.length > FUNCTION_TABLE_VIRTUALIZE_AT) {
+    container.append(renderFunctionTableVirtual(report));
+  } else {
+    container.append(renderFunctionTable(report));
   }
-  container.append(list);
   appendNarratorBlock(container, handlers, { id: "narrate-functions", label: "Narrate" });
+}
+var FUNCTION_TABLE_VIRTUALIZE_AT = 100;
+var FUNCTION_COLUMNS = [
+  { key: "name", label: "Function" },
+  { key: "entry", label: "Visibility / entry" },
+  { key: "lines", label: "Lines", numeric: true },
+  { key: "span", label: "Span" },
+  { key: "complexity", label: "Complexity", numeric: true },
+  { key: "nesting", label: "Nesting", numeric: true },
+  { key: "loops", label: "Loops", numeric: true },
+  { key: "calls", label: "Calls", numeric: true },
+  { key: "callers", label: "Callers" },
+  { key: "signals", label: "Signals", numeric: true }
+];
+function truncateMiddle(text, max = 30) {
+  if (text.length <= max) {
+    return text;
+  }
+  const keep = Math.max(1, Math.floor((max - 1) / 2));
+  return `${text.slice(0, keep)}\u2026${text.slice(text.length - keep)}`;
+}
+function functionSortValue(entry, key) {
+  switch (key) {
+    case "name":
+      return functionLabel(entry).toLowerCase();
+    case "entry":
+      return entry?.entry ? `${entry.entry.kind} ${entry.entry.evidence}`.toLowerCase() : String(entry?.visibility ?? "").toLowerCase();
+    case "lines":
+      return entry?.metrics?.lines ?? -1;
+    case "span":
+      return entry?.line ?? 0;
+    case "complexity":
+      return entry?.metrics?.decisionPoints ?? -1;
+    case "nesting":
+      return entry?.metrics?.maxNestingDepth ?? -1;
+    case "loops":
+      return entry?.metrics?.loops ?? -1;
+    case "calls":
+      return entry?.calls?.length ?? 0;
+    case "callers":
+      return entry?.callers?.length ?? 0;
+    case "signals":
+      return entry?.signals?.length ?? 0;
+    default:
+      return 0;
+  }
+}
+function compareFunctionEntries(a, b, key, dir) {
+  const first = functionSortValue(a, key);
+  const second = functionSortValue(b, key);
+  const order = typeof first === "string" || typeof second === "string" ? String(first).localeCompare(String(second)) : first - second;
+  if (order !== 0) {
+    return dir === "desc" ? -order : order;
+  }
+  return (b?.signals?.length ?? 0) - (a?.signals?.length ?? 0) || (b?.metrics?.decisionPoints ?? -1) - (a?.metrics?.decisionPoints ?? -1) || (a?.line ?? 0) - (b?.line ?? 0) || String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
+}
+function functionDetailContent(entry, onJump) {
+  const detail = document.createElement("div");
+  detail.className = "function-detail-content";
+  const signature = document.createElement("code");
+  signature.className = "function-signature";
+  signature.textContent = functionSignature(entry);
+  signature.title = functionSignature(entry);
+  detail.append(signature);
+  const metrics = document.createElement("div");
+  metrics.className = "function-metrics";
+  metrics.textContent = functionMetrics(entry);
+  detail.append(metrics);
+  const calls = document.createElement("div");
+  calls.className = "function-calls";
+  calls.append(document.createTextNode("calls: "));
+  if ((entry?.calls ?? []).length === 0) {
+    calls.append(document.createTextNode(functionCalls(entry)));
+  } else {
+    for (const [index, call] of (entry.calls ?? []).entries()) {
+      if (index > 0) {
+        calls.append(document.createTextNode(", "));
+      }
+      const jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "link function-callsite";
+      jump.dataset.callee = call.name;
+      jump.dataset.line = String(call.line);
+      jump.title = `Show ${call.name} (line ${call.line})`;
+      jump.textContent = `${call.name} (L${call.line})`;
+      jump.addEventListener("click", () => onJump(call.name));
+      calls.append(jump);
+    }
+  }
+  detail.append(calls);
+  const callers = document.createElement("div");
+  callers.className = "function-callers";
+  callers.textContent = `called by: ${functionCallers(entry)}`;
+  detail.append(callers);
+  const signals = document.createElement("div");
+  signals.className = "function-signals";
+  signals.textContent = `signals: ${functionSignals(entry)}`;
+  detail.append(signals);
+  return detail;
+}
+function signalChips(entry) {
+  const signals = entry?.signals ?? [];
+  if (signals.length === 0) {
+    const none = document.createElement("span");
+    none.className = "function-none";
+    none.title = "no cost signals";
+    none.textContent = "\u2014";
+    return none;
+  }
+  const chips = document.createElement("span");
+  chips.className = "signal-chips";
+  for (const signal of signals) {
+    const chip = document.createElement("span");
+    chip.className = "signal-chip";
+    chip.title = `${signal.kind} (${signal.detail})`;
+    chip.textContent = signal.kind;
+    chips.append(chip);
+    chips.append(document.createTextNode(" "));
+  }
+  return chips;
+}
+function jumpToFunctionRow(root, name) {
+  const rows = [...root.querySelectorAll(".function-row")];
+  const target = rows.find((row) => row.dataset.function === name);
+  if (!target) {
+    return;
+  }
+  const toggle = target.querySelector("[data-expand]");
+  if (toggle?.getAttribute("aria-expanded") === "false") {
+    toggle.click();
+  }
+  const focusable = target.querySelector(".function-name");
+  focusable?.focus();
+  if (typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ block: "nearest" });
+  }
+}
+function wireFunctionRoving(tbody) {
+  const names = () => [...tbody.querySelectorAll(".function-name")];
+  tbody.addEventListener("keydown", (event) => {
+    const current2 = names().indexOf(document.activeElement);
+    if (current2 === -1) {
+      return;
+    }
+    const next = rovingIndex(current2, names().length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    names().forEach((button, position) => {
+      button.tabIndex = position === next ? 0 : -1;
+    });
+    names()[next]?.focus();
+  });
+}
+function functionTableHead(entries, sort, onSort) {
+  const thead = document.createElement("thead");
+  const row = document.createElement("tr");
+  for (const column of FUNCTION_COLUMNS) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "function-sort";
+    button.dataset.sort = column.key;
+    const active = sort.key === column.key;
+    button.setAttribute("aria-label", `Sort by ${column.label}`);
+    button.textContent = `${column.label}${active ? sort.dir === "desc" ? " \u25BC" : " \u25B2" : ""}`;
+    if (active) {
+      cell.setAttribute("aria-sort", sort.dir === "desc" ? "descending" : "ascending");
+    }
+    button.addEventListener("click", () => onSort(column.key));
+    cell.append(button);
+    row.append(cell);
+  }
+  thead.append(row);
+  return thead;
+}
+function functionTableRow(entry, onJump) {
+  const row = document.createElement("tr");
+  row.className = "function-row";
+  row.dataset.function = entry?.name ?? "";
+  const nameCell = document.createElement("td");
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "function-name link";
+  name.dataset.expand = "true";
+  name.textContent = truncateMiddle(functionLabel(entry));
+  name.title = functionSignature(entry);
+  name.tabIndex = 0;
+  name.setAttribute("aria-expanded", "false");
+  nameCell.append(name);
+  row.append(nameCell);
+  const entryCell = document.createElement("td");
+  const badge = functionEntryBadge(entry);
+  entryCell.className = "function-entry-cell";
+  entryCell.textContent = badge || (entry?.visibility ?? "");
+  entryCell.title = badge || (entry?.visibility ?? "");
+  row.append(entryCell);
+  const linesCell = document.createElement("td");
+  linesCell.textContent = entry?.metrics ? String(entry.metrics.lines) : "\u2014";
+  linesCell.title = entry?.metrics ? `${entry.metrics.lines} lines` : "signature only; no body recorded";
+  row.append(linesCell);
+  const spanCell = document.createElement("td");
+  spanCell.textContent = entry?.metrics ? `L${entry.line}-${entry.metrics.endLine}` : "\u2014";
+  row.append(spanCell);
+  const complexityCell = document.createElement("td");
+  complexityCell.textContent = entry?.metrics ? String(entry.metrics.decisionPoints) : "\u2014";
+  row.append(complexityCell);
+  const nestingCell = document.createElement("td");
+  nestingCell.textContent = entry?.metrics ? String(entry.metrics.maxNestingDepth) : "\u2014";
+  row.append(nestingCell);
+  const loopsCell = document.createElement("td");
+  loopsCell.textContent = entry?.metrics ? String(entry.metrics.loops) : "\u2014";
+  row.append(loopsCell);
+  const callsCell = document.createElement("td");
+  if ((entry?.calls ?? []).length === 0) {
+    callsCell.textContent = "\u2014";
+    callsCell.title = functionCalls(entry);
+  } else {
+    const count = document.createElement("button");
+    count.type = "button";
+    count.className = "link function-count";
+    count.dataset.expand = "true";
+    count.textContent = String(entry.calls.length);
+    count.title = functionCalls(entry);
+    count.setAttribute("aria-label", `${entry.calls.length} same-file calls: ${functionCalls(entry)}`);
+    callsCell.append(count);
+  }
+  row.append(callsCell);
+  const callersCell = document.createElement("td");
+  if ((entry?.callers ?? []).length > 0) {
+    const count = document.createElement("button");
+    count.type = "button";
+    count.className = "link function-count";
+    count.dataset.expand = "true";
+    count.textContent = String(entry.callers.length);
+    count.title = functionCallers(entry);
+    count.setAttribute("aria-label", `${entry.callers.length} callers: ${functionCallers(entry)}`);
+    callersCell.append(count);
+  } else {
+    callersCell.textContent = badge || functionCallers(entry);
+    callersCell.title = functionCallers(entry);
+  }
+  row.append(callersCell);
+  const signalsCell = document.createElement("td");
+  signalsCell.append(signalChips(entry));
+  row.append(signalsCell);
+  const detailRow = document.createElement("tr");
+  detailRow.className = "function-detail";
+  detailRow.hidden = true;
+  const detailCell = document.createElement("td");
+  detailCell.colSpan = FUNCTION_COLUMNS.length;
+  detailCell.append(functionDetailContent(entry, (name2) => jumpToFunctionRow(row.closest("table, .function-table-virtual") ?? document, name2)));
+  detailRow.append(detailCell);
+  const toggle = () => {
+    const open = detailRow.hidden;
+    detailRow.hidden = !open;
+    for (const control of row.querySelectorAll("[data-expand]")) {
+      control.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+  };
+  for (const control of row.querySelectorAll("[data-expand]")) {
+    control.addEventListener("click", toggle);
+  }
+  const fragment = document.createDocumentFragment();
+  fragment.append(row, detailRow);
+  return fragment;
+}
+function renderFunctionTable(report) {
+  const table = document.createElement("table");
+  table.className = "function-table";
+  let sort = { key: "signals", dir: "desc" };
+  const draw = () => {
+    for (const old of [...table.children]) {
+      old.remove();
+    }
+    table.append(functionTableHead(report.functions, sort, (key) => {
+      if (sort.key === key) {
+        sort.dir = sort.dir === "desc" ? "asc" : "desc";
+      } else {
+        sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
+      }
+      draw();
+    }));
+    const tbody = document.createElement("tbody");
+    const ordered = [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
+    for (const entry of ordered) {
+      tbody.append(functionTableRow(entry, (name) => jumpToFunctionRow(table, name)));
+    }
+    wireFunctionRoving(tbody);
+    tbody.querySelectorAll(".function-name").forEach((button, position) => {
+      button.tabIndex = position === 0 ? 0 : -1;
+    });
+    table.append(tbody);
+  };
+  draw();
+  return table;
+}
+function renderFunctionTableVirtual(report) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "function-table-virtual";
+  let sort = { key: "signals", dir: "desc" };
+  const header = document.createElement("div");
+  header.className = "function-virtual-head";
+  wrapper.append(header);
+  const list = createVirtualList({
+    rowHeight: 30,
+    overscan: 8,
+    className: "function-virtual-list",
+    renderRow: (entry) => {
+      const row = document.createElement("div");
+      row.className = "function-row function-virtual-row";
+      row.dataset.function = entry?.name ?? "";
+      row.setAttribute("role", "button");
+      row.tabIndex = -1;
+      const name = document.createElement("span");
+      name.className = "function-name";
+      name.textContent = truncateMiddle(functionLabel(entry));
+      name.title = functionSignature(entry);
+      row.append(name);
+      const badge = functionEntryBadge(entry);
+      const meta = document.createElement("span");
+      meta.className = "function-virtual-meta";
+      const signals = entry?.signals?.length ?? 0;
+      const complexity = entry?.metrics?.decisionPoints ?? "\u2014";
+      meta.textContent = `${badge || (entry?.visibility ?? "")} \xB7 complexity ${complexity} \xB7 ${signals} signal${signals === 1 ? "" : "s"}`;
+      row.append(meta);
+      return row;
+    }
+  });
+  wrapper.append(list.element);
+  const detail = document.createElement("div");
+  detail.className = "function-virtual-detail";
+  detail.textContent = "Select a function for its signature, metrics, and call sites.";
+  wrapper.append(detail);
+  const select = (entry) => {
+    detail.replaceChildren(functionDetailContent(entry, (name) => {
+      const ordered = orderedEntries();
+      const target = ordered.find((candidate) => candidate?.name === name);
+      if (target) {
+        select(target);
+      }
+    }));
+    for (const row of list.element.querySelectorAll(".function-row")) {
+      row.classList.toggle("selected", row.dataset.function === entry?.name);
+    }
+  };
+  const orderedEntries = () => [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
+  const draw = () => {
+    header.replaceChildren(
+      functionTableHead(report.functions, sort, (key) => {
+        if (sort.key === key) {
+          sort.dir = sort.dir === "desc" ? "asc" : "desc";
+        } else {
+          sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
+        }
+        draw();
+      })
+    );
+    list.setItems(orderedEntries());
+    list.refresh();
+  };
+  list.element.addEventListener("click", (event) => {
+    const row = event.target.closest?.(".function-row");
+    const entry = orderedEntries().find((candidate) => candidate?.name === row?.dataset.function);
+    if (entry) {
+      select(entry);
+    }
+  });
+  list.element.addEventListener("keydown", (event) => {
+    const rows = [...list.element.querySelectorAll(".function-row")];
+    const current2 = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
+    const next = rovingIndex(Math.max(0, current2), rows.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    const entry = orderedEntries()[next];
+    if (entry) {
+      select(entry);
+    }
+    rows[next]?.focus?.();
+  });
+  draw();
+  const first = orderedEntries()[0];
+  if (first) {
+    select(first);
+  }
+  return wrapper;
 }
 function appendNarratorBlock(container, handlers, { id, label }) {
   if (!handlers.onNarrate) {

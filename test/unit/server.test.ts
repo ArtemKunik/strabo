@@ -12,6 +12,7 @@ import { createStraboRouter } from '../../src/index.ts';
 import { createStraboServer } from '../../src/index.ts';
 import { createRepositoryStore } from '../../src/index.ts';
 import type { StraboConfig } from '../../src/index.ts';
+import { createSettingsStore } from '../../src/state/settings-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');
@@ -192,7 +193,21 @@ test('the repository store refuses a path outside the scan ceiling', async () =>
   const store = createRepositoryStore({ file });
   const host = express();
   host.use(express.json());
-  host.use('/api/strabo', createStraboRouter(config, store));
+  // A fresh config and a no-override settings store: `createStraboRouter` overlays persisted
+  // settings onto the config it is given, so a shared config would carry a widened ceiling
+  // from another test and this boundary could not be asserted.
+  const isolated: StraboConfig = {
+    workspaceRoot: path.join(fixtures, 'block-repo'),
+    scanCeiling: fixtures,
+  };
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      isolated,
+      store,
+      createSettingsStore({ file: path.join(os.tmpdir(), `${path.basename(file)}.settings.json`) }),
+    ),
+  );
   const base = await listen(host);
 
   const response = await fetch(`${base}/api/strabo/repositories`, {

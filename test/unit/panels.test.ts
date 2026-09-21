@@ -22,6 +22,7 @@ globalThis.ResizeObserver = class {
 const {
   renderDiagnostics,
   renderFolderList,
+  renderFunctions,
   renderLegend,
   renderOverlayPanel,
   renderShortcuts,
@@ -193,4 +194,127 @@ test('createVirtualList renders a window and redraws on scroll', () => {
 
   assert.deepEqual(visible(), ['9', '10', '11', '12', '13', '14', '15']);
   assert.equal(list.element.querySelector('.test-list-window').style.transform, 'translateY(180px)');
+});
+
+const functionFixture = (name, overrides = {}) => ({
+  name,
+  owner: '',
+  visibility: 'public',
+  line: 1,
+  metrics: {
+    endLine: 5,
+    lines: 5,
+    statementCount: 3,
+    decisionPoints: 1,
+    maxNestingDepth: 0,
+    loopNestingDepth: 0,
+    loops: 0,
+    loopScans: [],
+    loopSorts: [],
+    recursive: false,
+  },
+  calls: [],
+  callers: [],
+  signals: [],
+  ...overrides,
+});
+
+const functionsResult = (functions) => ({
+  available: true,
+  functions: { file: 'sample.rs', available: true, functions },
+});
+
+test('renderFunctions shows a summary row and one table row per function', () => {
+  const target = container();
+  renderFunctions(
+    target,
+    functionsResult([
+      functionFixture('helper', { visibility: 'public' }),
+      functionFixture('renders', {
+        visibility: 'private',
+        entry: { kind: 'test', evidence: '#[test]' },
+        calls: [{ name: 'helper', kind: 'bare', line: 6 }],
+        signals: [{ kind: 'nested-loops', line: 5, detail: 'loop nesting 2 (threshold 2)' }],
+      }),
+    ]),
+    {},
+  );
+
+  assert.match(target.textContent, /Functions \(2\)/);
+  assert.match(
+    target.textContent,
+    /2 functions · total complexity 2 · max complexity 1 · max nesting 0 · 1 signal/,
+  );
+
+  const rows = [...target.querySelectorAll('.function-row')];
+  assert.equal(rows.length, 2);
+  // Worst signals first.
+  assert.match(rows[0].textContent, /renders/);
+  assert.match(rows[0].textContent, /entry: test \(#\[test\]\)/);
+  assert.match(rows[0].querySelector('.function-name').title, /renders/);
+  assert.match(rows[1].textContent, /no callers in this file \(cross-file not resolved\)/);
+
+  const chips = [...target.querySelectorAll('.signal-chip')];
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].textContent, 'nested-loops');
+});
+
+test('renderFunctions sorts columns on click and expands rows for call sites', () => {
+  const target = container();
+  renderFunctions(
+    target,
+    functionsResult([
+      functionFixture('zebra', { metrics: { ...functionFixture('z').metrics, decisionPoints: 1 } }),
+      functionFixture('alpha', { metrics: { ...functionFixture('a').metrics, decisionPoints: 9 } }),
+    ]),
+    {},
+  );
+
+  const names = () => [...target.querySelectorAll('.function-row .function-name')].map((b) => b.textContent);
+  // Default: signal count (tied) then complexity, so alpha first.
+  assert.deepEqual(names(), ['alpha', 'zebra']);
+
+  const nameHeader = [...target.querySelectorAll('.function-sort')].find(
+    (button) => button.dataset.sort === 'name',
+  );
+  nameHeader.dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.deepEqual(names(), ['alpha', 'zebra']);
+  // Clicking again reverses the direction.
+  nameHeader.dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.deepEqual(names(), ['zebra', 'alpha']);
+
+  // Expanding a row reveals the signature and the call sites with lines.
+  const withCalls = container();
+  renderFunctions(
+    withCalls,
+    functionsResult([
+      functionFixture('caller', { calls: [{ name: 'helper', kind: 'bare', line: 6 }] }),
+      functionFixture('helper'),
+    ]),
+    {},
+  );
+  const callerRow = [...withCalls.querySelectorAll('.function-row')].find((row) =>
+    row.textContent.includes('caller'),
+  );
+  const detail = callerRow.nextElementSibling;
+  assert.equal(detail.hidden, true);
+  callerRow.querySelector('.function-count').dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.equal(detail.hidden, false);
+  assert.match(detail.textContent, /complexity 1/);
+  const site = detail.querySelector('.function-callsite');
+  assert.equal(site.textContent, 'helper (L6)');
+  assert.equal(site.dataset.line, '6');
+});
+
+test('renderFunctions virtualizes large files and keeps the summary', () => {
+  const target = container();
+  const functions = Array.from({ length: 120 }, (_, index) =>
+    functionFixture(`fn${String(index).padStart(3, '0')}`),
+  );
+  renderFunctions(target, functionsResult(functions), {});
+
+  assert.match(target.textContent, /120 functions/);
+  const rows = [...target.querySelectorAll('.function-virtual-row')];
+  assert.ok(rows.length > 0 && rows.length < 120, `expected a window of rows, got ${rows.length}`);
+  assert.match(target.querySelector('.function-virtual-detail').textContent, /fn000/);
 });

@@ -929,6 +929,130 @@ button.primary {
   margin-top: 2px;
 }
 
+.function-summary {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 4px 0 6px;
+}
+
+.function-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.function-table th,
+.function-table td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.function-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink-1);
+  cursor: pointer;
+}
+
+.function-sort:hover {
+  color: var(--accent);
+}
+
+.function-table th[aria-sort] .function-sort {
+  color: var(--accent);
+}
+
+.function-count {
+  font-family: var(--font-mono);
+}
+
+.function-entry-cell {
+  color: var(--ink-3);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.signal-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.signal-chip {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--ink-1);
+  background: var(--wash);
+}
+
+.function-detail td {
+  background: var(--wash);
+}
+
+.function-detail-content {
+  display: grid;
+  gap: 2px;
+  padding: 4px 2px;
+}
+
+.function-callsite {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.function-table-virtual {
+  display: grid;
+  gap: 6px;
+}
+
+.function-virtual-head table {
+  width: 100%;
+}
+
+.function-virtual-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.function-virtual-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.function-virtual-row.selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.function-virtual-meta {
+  color: var(--ink-3);
+  font-size: 11px;
+  text-align: right;
+}
+
+.function-virtual-detail {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .narrator-block {
   margin-top: 10px;
   border-top: 1px solid var(--line);

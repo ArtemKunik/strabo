@@ -9,6 +9,7 @@ import express from 'express';
 
 import { computeRepositoryPassport, createStraboRouter, detectEntryPoints, scanRepository } from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
+import { createSettingsStore } from '../../src/state/settings-store.ts';
 
 const created: string[] = [];
 const servers: Array<ReturnType<typeof express.application.listen>> = [];
@@ -160,7 +161,16 @@ test('GET /analysis/passport serves the scan-derived passport', async () => {
 
   const host = express();
   host.use(express.json());
-  host.use('/api/strabo', createStraboRouter({ workspaceRoot: root, scanCeiling: root }));
+  // A settings store with no persisted overrides, so an operator's saved ceiling cannot
+  // narrow the temp root out from under the request.
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
   const base = await new Promise<string>((resolve) => {
     const server = host.listen(0, '127.0.0.1', () => {
       servers.push(server);

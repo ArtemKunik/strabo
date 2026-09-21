@@ -256,7 +256,7 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       // The baseline matches the review's own comparison: HEAD for the working tree, and
       // the first parent for a commit (which `^` names for a merge and fails on the root).
       const baseline = base ? `${base}^` : 'HEAD';
-      const cohesion = await computeChangePassport(repository.root, review.files, baseline);
+      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph);
       response.json({ ...review, cohesion });
     } catch (error) {
       sendError(response, error);

@@ -182,6 +182,37 @@ Then('the inspector reports body metrics for a listed function', async function 
   assert.match(text, /nesting \d+/);
 });
 
+Then('the inspector shows a functions summary with a sortable table', async function () {
+  await this.page.waitForSelector('#inspector .function-summary', { timeout: 15_000 });
+  const summary = (await this.page.textContent('#inspector .function-summary')) ?? '';
+  assert.match(summary, /functions? · total complexity \d+ · max complexity \d+/);
+
+  const headers = await this.page.locator('#inspector .function-table th .function-sort').all();
+  assert.ok(headers.length >= 10, `expected the sortable columns, got ${headers.length}`);
+
+  // Sorting by name reorders the rows when there is more than one to order.
+  const before = await this.page.locator('#inspector .function-row .function-name').allTextContents();
+  await this.page.locator('#inspector .function-sort[data-sort="name"]').click();
+  if (before.length > 1) {
+    await this.page.waitForFunction(
+      (previous) => {
+        const names = [...document.querySelectorAll('#inspector .function-row .function-name')].map(
+          (button) => button.textContent,
+        );
+        return names.length > 0 && names.join() !== previous.join();
+      },
+      before,
+      { timeout: 15_000 },
+    );
+  }
+
+  // Expanding the first row reveals the recorded signature and call sites.
+  await this.page.locator('#inspector .function-row .function-name').first().click();
+  await this.page.waitForSelector('#inspector .function-detail:not([hidden])', { timeout: 15_000 });
+  const detail = (await this.page.textContent('#inspector .function-detail:not([hidden])')) ?? '';
+  assert.match(detail, /calls: /);
+});
+
 Then('the inspector offers the narrator and reports it is not configured', async function () {
   await this.openInspectorTab('functions');
   await this.page.waitForSelector('#inspector .narrator-note', { timeout: 15_000 });
