@@ -6,6 +6,22 @@ import { ACCEPTANCE_ROOT } from '../support/server.mjs';
 
 const CACHE_STATUS = /cache:\s*(memory|disk|miss|refreshed)/;
 
+/**
+ * Click a canvas-toolbar action that may live in the "More actions" overflow menu.
+ *
+ * Timeline, review, and risk moved behind `#tb-overflow`; open the menu when the target
+ * is not already visible so the step keeps working regardless of the toolbar width.
+ */
+async function clickToolbarAction(page, id) {
+  if (!(await page.locator(`#${id}`).isVisible())) {
+    await page.click('#tb-overflow');
+    await page.waitForFunction(() => document.getElementById('tb-overflow-menu')?.hidden === false, undefined, {
+      timeout: 5_000,
+    });
+  }
+  await page.click(`#${id}`);
+}
+
 Given('the Strabo server is running against the fixture repository', async function () {
   const response = await fetch(`${this.baseUrl}/api/strabo/health`);
   assert.equal(response.ok, true, 'health endpoint should respond');
@@ -245,7 +261,7 @@ Then('the overlay panel lists health axes', async function () {
 });
 
 When('I open the timeline', async function () {
-  await this.page.click('#tb-timeline');
+  await clickToolbarAction(this.page, 'tb-timeline');
   await this.page.waitForFunction(
     () =>
       !document.getElementById('timeline-panel').hidden &&
@@ -280,7 +296,7 @@ Then('the overlay panel reports changed files', async function () {
 });
 
 When('I open the working-tree review', async function () {
-  await this.page.click('#tb-review');
+  await clickToolbarAction(this.page, 'tb-review');
   await this.page.waitForFunction(
     () => {
       const panel = document.getElementById('review-panel');
