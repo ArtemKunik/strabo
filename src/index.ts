@@ -45,7 +45,8 @@ export type {
 export { collectFunctionMetrics } from './scan/languages/function-metrics.ts';
 export type { FunctionRules } from './scan/languages/function-metrics.ts';
 export { SYMBOL_EXTRACTORS, symbolExtractorFor } from './scan/languages/registry.ts';
-export type { SymbolExtractor } from './scan/languages/registry.ts';
+export type { SymbolExtractor, SymbolContext } from './scan/languages/registry.ts';
+export { collectRelatedSources } from './analysis/related-sources.ts';
 export { addNamespacePrefixes, namespaceDepth, looksInternal } from './scan/languages/namespace.ts';
 export { classifyExclusion, looksMinified } from './scan/exclusions.ts';
 

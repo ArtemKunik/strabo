@@ -4,8 +4,11 @@ import type { CodeSymbol, MemberAccess } from '../scan/languages/symbols.ts';
  * The Member map for one file: declared members grouped by type, plus data-flow panels
  * derived only from field references the scan recorded inside this file.
  *
- * Nothing is inferred across files. When no field access was recorded, `dataFlow` reports
- * `available: false` rather than showing empty panels that imply there is no wiring.
+ * Nothing is inferred. A member declared in another file appears only when the scan
+ * recorded an edge to it — a C++ implementation borrows the fields its own header declares,
+ * and each carries `declaredIn` so the map says where it came from. When no field access was
+ * recorded, `dataFlow` reports `available: false` rather than showing empty panels that
+ * imply there is no wiring.
  */
 export interface MemberMapField {
   name: string;
@@ -13,6 +16,8 @@ export interface MemberMapField {
   type?: string;
   mutable?: boolean;
   line: number;
+  /** The file that declares the field, when that is not the file being mapped. */
+  declaredIn?: string;
   /** Distinct methods in this file that read or write the field. */
   reads: number;
   writes: number;
@@ -135,6 +140,7 @@ function buildType(
     type: member.type,
     mutable: member.mutable,
     line: member.line,
+    declaredIn: member.declaredIn,
     reads: countMethods(ownAccesses, member.name, 'read'),
     writes: countMethods(ownAccesses, member.name, 'write'),
   }));
