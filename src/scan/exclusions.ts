@@ -10,7 +10,9 @@ const GENERATED_DIRS = new Set([
   'coverage',
   'vendor',
   'third_party',
-  'bin',
+  // `obj` is .NET build output, but `bin` is kept: a JS `bin/` launcher is authored
+  // source (and a .NET `bin/` holds no source extensions anyway), so excluding it
+  // would hide the package's own entry point from the scan.
   'obj',
 ]);
 

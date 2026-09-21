@@ -30,6 +30,21 @@ test('readEnv ignores flags when looking for the path argument', () => {
   assert.equal(env.root, path.resolve('from-env'));
 });
 
+test('readEnv binds loopback unless STRABO_HOST or --host says otherwise', () => {
+  assert.equal(readEnv({}).host, '127.0.0.1');
+  assert.equal(readEnv({ STRABO_HOST: '0.0.0.0' }).host, '0.0.0.0');
+  assert.equal(readEnv({}, ['--host', '0.0.0.0']).host, '0.0.0.0');
+  assert.equal(readEnv({}, ['--host=0.0.0.0']).host, '0.0.0.0');
+  // A flag without a value leaves the default in force rather than binding nothing.
+  assert.equal(readEnv({}, ['--host']).host, '127.0.0.1');
+});
+
+test('readEnv enables widening only from the environment or a CLI flag, never a request', () => {
+  assert.equal(readEnv({}).allowCeilingWidening, false);
+  assert.equal(readEnv({ STRABO_ALLOW_CEILING_WIDENING: '1' }).allowCeilingWidening, true);
+  assert.equal(readEnv({}, ['--allow-ceiling-widening']).allowCeilingWidening, true);
+});
+
 test('readEnv ignores the host arguments unless they are passed in', () => {
   const env = readEnv({ STRABO_ROOT: 'from-env' });
 

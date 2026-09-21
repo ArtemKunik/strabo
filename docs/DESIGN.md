@@ -32,8 +32,14 @@ prevents path traversal and prevents host-wide scans by default.
 
 The environment variable `STRABO_SCAN_CEILING` only ever *narrows* what the server may
 read. Widening the boundary at runtime through `PUT /api/strabo/settings` is refused unless
-the process was started with `STRABO_ALLOW_CEILING_WIDENING`, so the default process cannot
-grow its own read boundary.
+the process was started with `STRABO_ALLOW_CEILING_WIDENING=1` (or `--allow-ceiling-widening`).
+The permission itself is startup-only: a request body carrying `allowCeilingWidening` is
+refused with `400`, and a persisted flag from an older version is ignored, so a request can
+never grant itself a wider boundary — not directly, and not by surviving a restart.
+
+The standalone server binds `127.0.0.1` by default (`STRABO_HOST` / `--host` overrides it).
+API routes additionally refuse a `Host` header that names anything other than the server
+itself, so a malicious page cannot reach the server through DNS rebinding.
 
 ## Architecture
 
@@ -74,8 +80,10 @@ source file:
 - `pom.xml` — `<mainClass>`, resolved from the class name to its `.java`/`.kt` file.
 
 An extensionless target is tried with common source extensions and an `index.*` fallback.
-A declared target absent from the graph (a `dist/` bundle, for example) is not invented as
-an entry point.
+A manifest target naming build output resolves back to source through the `tsconfig.json`
+`outDir` → `rootDir` mapping (`dist/index.js` → `src/index.ts`, with a `dist/` → `src/`
+convention when no tsconfig names one). A declared target with no scanned source behind it
+is not invented as an entry point.
 
 ## Parsers
 

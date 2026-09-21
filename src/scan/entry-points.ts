@@ -8,8 +8,11 @@ import { toPosix } from '../boundary/repository-root.ts';
  *
  * Entry points are read from `package.json` (`main`, `bin`, `exports`), `Cargo.toml`
  * (`[[bin]]`, `[lib]`, and the `src/main.rs` convention), and `pom.xml` (`<mainClass>`).
- * A declared target only becomes an entry point when it resolves to a scanned source file,
- * so a `dist/` bundle absent from the graph is not invented as one.
+ * A declared target only becomes an entry point when it resolves to a scanned source
+ * file — directly, or through the `tsconfig.json` `outDir` → `rootDir` mapping when the
+ * manifest names build output (`dist/index.js` → `src/index.ts`). Build output itself
+ * is excluded from the scan, so without the mapping a TypeScript package would report
+ * no entry points at all.
  */
 export interface EntryPoint {
   /** Repository-relative, POSIX-normalised source file. */
@@ -58,7 +61,7 @@ export function detectEntryPoints(root: string, files: readonly string[]): Entry
 
     const pkg = read('package.json');
     if (pkg !== null) {
-      for (const entry of packageEntries(pkg, directory, sourceSet)) {
+      for (const entry of packageEntries(pkg, directory, sourceSet, (name) => read(name))) {
         add(entry.file, entry.reason, source('package.json'));
       }
     }
@@ -105,6 +108,7 @@ function packageEntries(
   content: string,
   directory: string,
   sourceSet: Set<string>,
+  readFile: (name: string) => string | null,
 ): DeclaredEntry[] {
   let parsed: Record<string, unknown>;
   try {
@@ -113,8 +117,16 @@ function packageEntries(
     return [];
   }
   const entries: DeclaredEntry[] = [];
-  const resolve = (target: unknown) =>
-    typeof target === 'string' ? matchSource(sourceSet, directory, target) : null;
+  const resolve = (target: unknown) => {
+    if (typeof target !== 'string') {
+      return null;
+    }
+    const direct = matchSource(sourceSet, directory, target);
+    if (direct) {
+      return direct;
+    }
+    return matchBuildOutput(sourceSet, directory, target, readFile);
+  };
 
   entries.push({ file: resolve(parsed.main), reason: 'package.json main' });
 
@@ -249,4 +261,121 @@ function matchSource(sourceSet: Set<string>, directory: string, target: string):
     }
   }
   return null;
+}
+
+/** Conventional build-output directories tried when no tsconfig names one. */
+const CONVENTIONAL_OUTPUT_DIRS = ['dist', 'build', 'out', 'lib'];
+
+/** Emitted extensions stripped before the source-extension fallbacks are tried. */
+const EMIT_EXTENSIONS = ['.d.mts', '.d.cts', '.d.ts', '.mjs', '.cjs', '.jsx', '.js'];
+
+/**
+ * Resolve a manifest target that names build output back to authored source.
+ *
+ * `dist/index.js` is excluded from the scan by design, so it can never resolve
+ * directly. The `tsconfig.json` beside the manifest says where the sources live
+ * (`outDir` → `rootDir`); without one, the `dist/` → `src/` convention is tried.
+ * Only a file the scan actually retained is returned — the mapping proposes, the
+ * source set disposes, so nothing is invented.
+ */
+function matchBuildOutput(
+  sourceSet: Set<string>,
+  directory: string,
+  target: string,
+  readFile: (name: string) => string | null,
+): string | null {
+  const cleaned = target.trim().replace(/\\/g, '/').replace(/^\.?\//, '');
+  if (!cleaned) {
+    return null;
+  }
+  const mappings = outputMappings(readFile);
+  for (const [outDir, rootDir] of mappings) {
+    const prefix = `${outDir}/`;
+    if (!cleaned.startsWith(prefix) && cleaned !== outDir) {
+      continue;
+    }
+    const rest = cleaned === outDir ? '' : cleaned.slice(prefix.length);
+    const withoutEmit = stripEmitExtension(rest);
+    for (const candidate of rootDir ? [`${rootDir}/${withoutEmit}`, withoutEmit] : [`src/${withoutEmit}`, withoutEmit]) {
+      const hit = matchSource(sourceSet, directory, candidate);
+      if (hit) {
+        return hit;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The `outDir` → `rootDir` pairs for one manifest directory: the tsconfig pair when
+ * one is declared, then the conventional `dist/build/out/lib` → `src` fallbacks.
+ * Malformed configs are ignored rather than fatal; a missing tsconfig still leaves
+ * the conventions.
+ */
+function outputMappings(readFile: (name: string) => string | null): Array<[string, string | null]> {
+  const mappings: Array<[string, string | null]> = [];
+  const seen = new Set<string>();
+  const push = (outDir: string, rootDir: string | null): void => {
+    const key = `${outDir}\u0000${rootDir ?? ''}`;
+    if (outDir && !seen.has(key)) {
+      seen.add(key);
+      mappings.push([outDir, rootDir]);
+    }
+  };
+  const tsconfig = readTsConfig(readFile('tsconfig.json'));
+  if (tsconfig?.outDir) {
+    push(tsconfig.outDir, tsconfig.rootDir ?? null);
+  }
+  for (const conventional of CONVENTIONAL_OUTPUT_DIRS) {
+    push(conventional, 'src');
+  }
+  return mappings;
+}
+
+function stripEmitExtension(rest: string): string {
+  for (const extension of EMIT_EXTENSIONS) {
+    if (rest.endsWith(extension) && rest.length > extension.length) {
+      return rest.slice(0, -extension.length);
+    }
+  }
+  return rest;
+}
+
+/** Read `outDir`/`rootDir` from a tsconfig, tolerating comments and malformed JSON. */
+function readTsConfig(content: string | null): { outDir?: string; rootDir?: string } | null {
+  if (!content) {
+    return null;
+  }
+  const parsed = parseJsonRelaxed(content);
+  const options = parsed?.compilerOptions;
+  if (!options || typeof options !== 'object') {
+    // A config without compilerOptions still counts as "no mapping declared".
+    return parsed ? {} : null;
+  }
+  const record = options as Record<string, unknown>;
+  const clean = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+    const trimmed = value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
+    return trimmed || undefined;
+  };
+  return { outDir: clean(record.outDir), rootDir: clean(record.rootDir) };
+}
+
+/** Parse JSON with `//` and `/* *\/` comments stripped; null when unparseable. */
+function parseJsonRelaxed(content: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    // Fall through to the comment-stripped attempt.
+  }
+  try {
+    const stripped = content
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    return JSON.parse(stripped) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }

@@ -34,8 +34,6 @@ import {
   renderWorkspace,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
-import { renderTierPanel } from './strabo-tier-panel.js';
-import { tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
   buildGroupNamingEvidence,
@@ -77,6 +75,16 @@ const store = createStore({
     pathMode: false,
     pathFrom: null,
     renderedGeneration: 0,
+    /** The open build unit in a System drill-down, or null at L0. */
+    systemUnit: null,
+    /** The open unit's declared name, for the breadcrumb. */
+    systemUnitLabel: null,
+    /** The file whose in-unit edges are drawn, or null. */
+    unitFile: null,
+    /** Whether the selected file's cross-unit links are drawn (L17). */
+    showOutside: false,
+    /** Target units whose count badge is expanded in place. */
+    expandedUnits: [],
   },
   member: {
     order: 'source',
@@ -229,6 +237,7 @@ const elements = {
   zoomFit: document.getElementById('zoom-fit'),
   tbFocus: document.getElementById('tb-focus'),
   tbImpact: document.getElementById('tb-impact'),
+  tbOutside: document.getElementById('tb-outside'),
   tbPath: document.getElementById('tb-path'),
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbTimeline: document.getElementById('tb-timeline'),
@@ -336,12 +345,22 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     current = model;
+    const restoreFile = state.mode === 'system' ? state.unitFile : null;
     selected = null;
     selectedEdgeId = null;
     selectedCommitHash = null;
     state.renderedGeneration = generation;
+    if (model.systemUnit) {
+      state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
+    } else if (state.mode === 'system') {
+      // A drill-down the server could not resolve (or an L0 response) leaves no open unit.
+      state.systemUnit = null;
+      state.systemUnitLabel = null;
+      state.unitFile = null;
+    }
     store.set('ui', { node: null });
     view.render(model);
+    view.focusFile(null);
     applyFilterToView();
     applyTierLens();
     renderLegend(elements.legend, model);
@@ -352,9 +371,14 @@ async function scan({ refresh = false } = {}) {
     });
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
+      if (state.mode === 'system') {
+        if (!prefix) closeUnit();
+        return;
+      }
       state.prefix = prefix;
       scan();
     });
+    updateOutsideButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -362,12 +386,18 @@ async function scan({ refresh = false } = {}) {
     updateEmptyState();
     view.resize();
     fit(view.cy);
+    if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
+      // A toggle (e.g. outside links) refetches; keep the file it acted on selected.
+      if (generation === scanGeneration) {
+        selectNode(restoreFile);
+      }
+    }
     if (shouldShowHint()) {
       elements.graphHint.hidden = false;
     }
     if (state.overlay !== 'none') {
       await applyOverlay(generation);
-    } else if (state.tier === 'off') {
+    } else {
       renderOverlayPanel(elements.overlayPanel, '', null);
     }
     refreshDock();
@@ -467,7 +497,6 @@ let tierReportCache = { generation: -1, report: null };
 async function applyTierLens() {
   if (state.tier === 'off' || !current || current.system || current.prefixLength !== undefined) {
     view.applyTier(null);
-    view.applyTierDirections(null);
     return;
   }
   const generation = state.renderedGeneration;
@@ -485,12 +514,9 @@ async function applyTierLens() {
   }
   if (!current || state.tier === 'off' || state.renderedGeneration !== generation) {
     view.applyTier(null);
-    view.applyTierDirections(null);
     return;
   }
   view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
-  view.applyTierDirections(tierDirectionClasses(tierReportCache.report));
-  renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
 }
 
 function selectNode(id) {
@@ -525,6 +551,12 @@ function selectNode(id) {
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   view.highlight(neighbourhood(current, id));
+  const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith('#support')) {
+    // L16: a file inside the open unit draws its own in-unit edges.
+    state.unitFile = id;
+    view.focusFile(id);
+  }
   renderInspector(elements.inspector, current, id, {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
@@ -535,8 +567,16 @@ function selectNode(id) {
       });
     },
     // A System-view unit may ask the opt-in narrator to name its group.
-    ...(current?.system
-      ? { narratorStatus, onNarrate: () => narrateGroup(id) }
+    ...(current?.system && !current?.systemUnit
+      ? { narratorStatus, onNarrate: () => narrateGroup(id), onOpenNarratorSettings: openNarratorSettings }
+      : {}),
+    // Inside a unit, the selected file may show its cross-unit links (L17).
+    ...(current?.systemUnit
+      ? {
+          outsideShown: state.showOutside,
+          onShowOutside: () => toggleOutsideLinks(),
+          onExpandUnit: (unit) => toggleExpandedUnit(unit),
+        }
       : {}),
   });
   if (!current?.system) {
@@ -582,6 +622,7 @@ function functionsHandlers(result) {
   return {
     narratorStatus,
     onNarrate: () => narrateFile(result),
+    onOpenNarratorSettings: openNarratorSettings,
   };
 }
 
@@ -589,7 +630,14 @@ function functionsHandlers(result) {
 async function fetchNarratorStatus() {
   try {
     const response = await fetch(`${API_PATH}/narrator`);
-    return response.ok ? await response.json() : { configured: false, reason: 'not-configured' };
+    if (!response.ok) {
+      return { configured: false, reason: 'not-configured' };
+    }
+    const body = await response.json();
+    if (Array.isArray(body?.presets) && body.presets.length > 0) {
+      narratorPresets = body.presets;
+    }
+    return body;
   } catch {
     return { configured: false, reason: 'not-configured' };
   }
@@ -648,6 +696,8 @@ function clearSelection() {
   state.pathFrom = null;
   state.pathMode = false;
   elements.tbPath.classList.remove('active');
+  state.unitFile = null;
+  view.focusFile(null);
   elements.hover.textContent = '';
   hideTooltip();
   view.highlight(null);
@@ -830,6 +880,8 @@ function syncUrl() {
     };
     set('repository', state.repository ?? '');
     set('mode', state.mode === 'file' ? 'file' : state.mode === 'system' ? 'system' : '');
+    set('unit', state.mode === 'system' ? state.systemUnit ?? '' : '');
+    set('outside', state.mode === 'system' && state.showOutside ? '1' : '');
     set('node', store.get().ui.node ?? '');
     set('panel', store.get().ui.memberOpen ? 'member-map' : '');
     if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -853,6 +905,10 @@ function applyUrl() {
     state.mode = mode;
     elements.detail.value = mode;
   }
+  // A System deep link may name the open unit and the outside-links toggle.
+  state.systemUnit = mode === 'system' ? params.get('unit') : null;
+  state.systemUnitLabel = state.systemUnit;
+  state.showOutside = mode === 'system' && params.get('outside') === '1';
   return params;
 }
 
@@ -898,8 +954,22 @@ document.addEventListener('keydown', (event) => {
       applyFilterToView();
       return;
     }
+    // Escape inside an open unit goes back to the L0 unit map.
+    if (state.mode === 'system' && state.systemUnit && !inField) {
+      closeUnit();
+      return;
+    }
     if (!inField) clearSelection();
     return;
+  }
+  if (event.key === 'Enter' && !inField && state.mode === 'system' && selected) {
+    const node = current?.nodes.find((candidate) => candidate.id === selected);
+    if (node && !node.systemUnit) {
+      // Enter opens the focused unit, matching a double-click.
+      event.preventDefault();
+      openUnit(selected);
+      return;
+    }
   }
   if (event.key === '?' && !inField) {
     event.preventDefault();
@@ -910,6 +980,7 @@ document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'f' && selected) focus(view.cy, selected);
   else if (key === 'i') elements.tbImpact.click();
+  else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 't') elements.tbTimeline.click();
@@ -1036,12 +1107,22 @@ async function toggleRisk() {
 let serverSettings = null;
 let settingsStatus = '';
 let settingsStatusError = false;
+/** Provider presets for the Narrator section, from `/narrator`. */
+let narratorPresets = [];
+/** Transient Narrator-section UI state (key mode, fetched models, last test result). */
+let narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
 
 function renderSettingsView() {
   if (!elements.settingsPanel) return;
   renderSettings(elements.settingsPanel, {
     prefs: clientPrefs,
     server: serverSettings,
+    presets: narratorPresets,
+    narratorState: narratorUiState,
+    onNarratorState: (patch) => {
+      narratorUiState = { ...narratorUiState, ...patch };
+      renderSettingsView();
+    },
     status: settingsStatus || null,
     statusError: settingsStatusError,
     onPref: (key, value) => {
@@ -1052,10 +1133,61 @@ function renderSettingsView() {
     },
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
-    onToggleWidening: (value) =>
-      saveServerSettings({ allowCeilingWidening: value }, 'Ceiling widening updated.'),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
+    onNarratorChange: (patch) =>
+      saveServerSettings({ narrator: patch }, 'Narrator updated.').then(() => refreshNarratorStatus()),
+    onFetchModels: async ({ endpoint, model }) => {
+      const params = new URLSearchParams();
+      if (endpoint) params.set('endpoint', endpoint);
+      if (model) params.set('model', model);
+      const response = await fetch(`${API_PATH}/narrator/models?${params.toString()}`);
+      const body = await response.json().catch(() => ({}));
+      return response.ok ? body : { models: [], error: body.error ?? `Could not list models (${response.status}).` };
+    },
+    onTestConnection: async ({ endpoint, model }) => {
+      const response = await fetch(`${API_PATH}/narrator/test`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ endpoint, model }),
+      });
+      return response.json().catch(() => ({ ok: false, reason: 'provider-error', detail: 'no response' }));
+    },
+    onStoreKey: async (key) => {
+      const response = await fetch(`${API_PATH}/narrator/key`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `Could not store the key (${response.status}).`);
+      }
+      settingsStatus = 'Key stored for this host.';
+      settingsStatusError = false;
+      await refreshNarratorSettings();
+      renderSettingsView();
+      return body;
+    },
+    onClearKey: async () => {
+      await fetch(`${API_PATH}/narrator/key`, { method: 'DELETE' }).catch(() => {});
+      await refreshNarratorSettings();
+      renderSettingsView();
+    },
   });
+}
+
+/** Re-read `/settings` so the Narrator section reflects a server change. */
+async function refreshNarratorSettings() {
+  try {
+    serverSettings = await request('/settings');
+  } catch {
+    // Keep the previous view; a failed refresh is not worth an error banner.
+  }
+}
+
+/** Re-read `/narrator` and refresh the Functions-tab affordance after a settings change. */
+async function refreshNarratorStatus() {
+  narratorStatus = await fetchNarratorStatus();
 }
 
 /** Write one server setting, then re-render; failures are shown in the panel, not thrown. */
@@ -1094,6 +1226,10 @@ async function openSettings() {
   renderSettingsView();
   try {
     serverSettings = await request('/settings');
+    // Presets arrive with the narrator status; fetch once if the Functions tab never did.
+    if (narratorPresets.length === 0) {
+      narratorStatus = await fetchNarratorStatus();
+    }
   } catch (error) {
     settingsStatus = error.message;
     settingsStatusError = true;
@@ -1370,9 +1506,88 @@ async function forgetRepository() {
   }
 }
 
-/** Double-click drills in block mode, opens the file in file mode, and is inert for units. */
+/** Open one build unit in System mode, showing its files inside their layers. */
+function openUnit(id) {
+  if (state.mode !== 'system') {
+    return;
+  }
+  const node = current?.nodes.find((candidate) => candidate.id === id);
+  state.systemUnit = id;
+  state.systemUnitLabel = node?.label ?? id;
+  state.unitFile = null;
+  state.showOutside = false;
+  state.expandedUnits = [];
+  scan();
+}
+
+/** Leave a unit back to the L0 unit map. */
+function closeUnit() {
+  state.systemUnit = null;
+  state.systemUnitLabel = null;
+  state.unitFile = null;
+  state.showOutside = false;
+  state.expandedUnits = [];
+  scan();
+}
+
+/**
+ * Draw or hide the selected file's cross-unit links (L17).
+ *
+ * Nothing crosses the unit frame until this is asked for; the choice is part of the deep
+ * link and is refetched with the selected file so the links end at their target unit boxes.
+ */
+function toggleOutsideLinks() {
+  if (state.mode !== 'system' || !state.systemUnit) {
+    return;
+  }
+  if (!state.unitFile) {
+    elements.hover.textContent = 'Select a file inside the unit before showing outside links.';
+    return;
+  }
+  state.showOutside = !state.showOutside;
+  state.expandedUnits = [];
+  updateOutsideButton();
+  scan();
+}
+
+/** Expand or fold a target unit's badge, revealing the files it holds in place. */
+function toggleExpandedUnit(id) {
+  const set = new Set(state.expandedUnits ?? []);
+  if (set.has(id)) {
+    set.delete(id);
+  } else {
+    set.add(id);
+  }
+  state.expandedUnits = [...set].sort();
+  scan();
+}
+
+/** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
+function updateOutsideButton() {
+  if (!elements.tbOutside) {
+    return;
+  }
+  const shown = state.mode === 'system' && Boolean(state.systemUnit);
+  elements.tbOutside.hidden = !shown;
+  elements.tbOutside.classList.toggle('active', state.showOutside);
+  elements.tbOutside.setAttribute('aria-pressed', String(state.showOutside));
+}
+
+/**
+ * Double-click drills: opens a block, a System unit, or a file. At System L0 a double-click
+ * opens the unit; inside a unit a double-click on a file opens it in the workspace.
+ */
 function onDrill(id) {
   if (state.mode === 'system') {
+    const node = current?.nodes.find((candidate) => candidate.id === id);
+    if (!node) {
+      return;
+    }
+    if (node.systemUnit) {
+      if (!id.endsWith('#support')) openFile(id);
+      return;
+    }
+    openUnit(id);
     return;
   }
   if (state.mode === 'block') {
@@ -1426,6 +1641,13 @@ elements.forget.addEventListener('click', () => {
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
   state.prefix = '';
+  if (state.mode !== 'system') {
+    state.systemUnit = null;
+    state.systemUnitLabel = null;
+    state.unitFile = null;
+    state.showOutside = false;
+    state.expandedUnits = [];
+  }
   writeViewPrefs();
   scan();
 });
@@ -1530,7 +1752,10 @@ function showTooltip(id, clientX, clientY) {
   kind.textContent = node.kind ?? '';
   row.append(kind);
   const blast = document.createElement('span');
-  blast.textContent = `blast ${node.transitiveDependents ?? 0} · id ${id}`;
+  blast.textContent =
+    node.systemUnit && !id.endsWith('#support')
+      ? `blast ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · id ${id}`
+      : `blast ${node.transitiveDependents ?? 0} · id ${id}`;
   row.append(blast);
   elements.tooltip.append(row);
   elements.tooltip.hidden = false;
@@ -1550,7 +1775,10 @@ view.onHover((id, event) => {
     return;
   }
   const node = current?.nodes.find((candidate) => candidate.id === id);
-  elements.hover.textContent = `${id} · blast radius ${node?.transitiveDependents ?? 0} · ${node?.kind ?? ''}`;
+  const insideUnit = node?.systemUnit && !id.endsWith('#support');
+  elements.hover.textContent = insideUnit
+    ? `${id} · blast radius ${node.inUnitDependents ?? 0} in unit · ${node.outsideDependents ?? 0} outside · ${node.kind ?? ''}`
+    : `${id} · blast radius ${node?.transitiveDependents ?? 0} · ${node?.kind ?? ''}`;
   if (event?.clientX !== undefined) showTooltip(id, event.clientX, event.clientY);
 });
 
@@ -1563,6 +1791,9 @@ elements.tbImpact.addEventListener('click', () => {
   elements.overlay.value = 'impact';
   elements.overlay.dispatchEvent(new Event('change'));
 });
+if (elements.tbOutside) {
+  elements.tbOutside.addEventListener('click', () => toggleOutsideLinks());
+}
 elements.tbPath.addEventListener('click', () => {
   state.pathMode = !state.pathMode;
   state.pathFrom = null;
@@ -1660,6 +1891,23 @@ if (elements.tbOverflow) {
  * the key handler above can call it before `floatingWindows` is assigned. */
 function toggleShortcuts() {
   floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
+}
+
+/** Open Settings at the Narrator section, the one call to action when the narrator is off. */
+function openNarratorSettings() {
+  floatingWindows?.find?.((controller) => controller.key === 'settings')?.open?.();
+  // The panel renders asynchronously; bring the Narrator section into view once it has.
+  const reveal = (attempt = 0) => {
+    const target = elements.settingsPanel?.querySelector('#setting-narrator');
+    if (target) {
+      target.scrollIntoView?.({ block: 'start' });
+      return;
+    }
+    if (attempt < 10) {
+      setTimeout(() => reveal(attempt + 1), 50);
+    }
+  };
+  setTimeout(() => reveal(), 50);
 }
 
 /* ------------------------------------------- Agent delegation (right-click) */
@@ -2195,6 +2443,11 @@ if (window.STRABO_TEST) {
     state,
     select: selectNode,
     drill: onDrill,
+    openUnit,
+    closeUnit,
+    toggleOutsideLinks,
+    toggleExpandedUnit,
+    outsideShown: () => state.showOutside,
     selectEdge,
     model: () => current,
     renderedGeneration: () => state.renderedGeneration,

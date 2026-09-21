@@ -48,6 +48,8 @@ import {
 } from './strabo-functions.js';
 import {
   NARRATOR_ATTRIBUTION,
+  narratorDisabledReason,
+  narratorNeedsSetup,
   narratorReplyLabel,
   narratorStatusLabel,
 } from './strabo-narrator.js';
@@ -153,6 +155,10 @@ export function renderInspector(container, model, id, handlers = {}) {
   // A System-view unit has no members or functions to tab through; its one extra
   // affordance is the opt-in narrator, which may name the group but never change it.
   if (model.system) {
+    if (model.systemUnit) {
+      appendOutsideLinks(container, model, id, node, handlers);
+      return;
+    }
     const narrator = document.createElement('div');
     narrator.className = 'system-narrator';
     appendNarratorBlock(narrator, handlers, { id: 'narrate-group', label: 'Name group' });
@@ -874,6 +880,52 @@ function renderFunctionTableVirtual(report) {
  * The opt-in narrator affordance: a status line, a button, and a reply under the
  * model-generated attribution. Shared by the Functions tab and a System-view unit.
  */
+/**
+ * The outside-links affordance for the selected file in a System drill-down (L17).
+ *
+ * Nothing crossing the unit frame is drawn until the action is taken. Once it is, each
+ * target unit is a badge with its file count; expanding the badge lists the files in place.
+ */
+function appendOutsideLinks(container, model, id, node, handlers) {
+  const isFile = Boolean(node?.systemUnit) && !id.endsWith('#support');
+  const block = document.createElement('div');
+  block.className = 'outside-links';
+
+  if (isFile && handlers.onShowOutside) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'show-outside-links';
+    button.className = handlers.outsideShown ? 'outside-toggle active' : 'outside-toggle';
+    button.setAttribute('aria-pressed', String(Boolean(handlers.outsideShown)));
+    button.textContent = handlers.outsideShown ? 'Hide outside links' : 'Show outside links';
+    button.title = 'Draw this file’s links to other units (O)';
+    button.addEventListener('click', () => handlers.onShowOutside());
+    block.append(button);
+  }
+
+  const links = (model.outsideLinks ?? []).filter((link) => link.file === id);
+  for (const link of links) {
+    const badge = document.createElement('div');
+    badge.className = 'outside-badge';
+    badge.dataset.unit = link.targetUnit;
+    const label = document.createElement('span');
+    label.textContent = `${link.count} file${link.count === 1 ? '' : 's'} in ${link.targetName}`;
+    badge.append(label);
+    badge.append(document.createTextNode(' · '));
+    const expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'link';
+    expand.textContent = 'expand';
+    expand.addEventListener('click', () => handlers.onExpandUnit?.(link.targetUnit));
+    badge.append(expand);
+    block.append(badge);
+  }
+
+  if (isFile || links.length > 0) {
+    container.append(block);
+  }
+}
+
 function appendNarratorBlock(container, handlers, { id, label }) {
   if (!handlers.onNarrate) {
     return;
@@ -886,11 +938,30 @@ function appendNarratorBlock(container, handlers, { id, label }) {
   note.textContent = narratorStatusLabel(handlers.narratorStatus);
   block.append(note);
 
+  // One clear call to action where the narrator is off: the two old lines collapse into a
+  // single "Set up →" that opens Settings at the Narrator section.
+  if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
+    const setup = document.createElement('button');
+    setup.type = 'button';
+    setup.className = 'narrator-setup';
+    setup.dataset.role = 'narrator-setup';
+    setup.textContent = 'Set up →';
+    setup.title = 'Open Settings at the Narrator section';
+    setup.addEventListener('click', () => handlers.onOpenNarratorSettings());
+    block.append(setup);
+  }
+
   const button = document.createElement('button');
   button.type = 'button';
   button.id = id;
   button.className = 'narrator-button';
   button.textContent = label;
+  // Disabled with the reason as its tooltip, instead of clickable and failing.
+  const disabledReason = narratorDisabledReason(handlers.narratorStatus);
+  if (disabledReason) {
+    button.disabled = true;
+    button.title = disabledReason;
+  }
   block.append(button);
 
   const reply = document.createElement('div');
@@ -1165,13 +1236,13 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
       : passportFileList(entryPoints, handlers, (entry) => entry.reason),
   );
 
-  const layers = report.layers ?? [];
-  container.append(passportSection('Top-level directories', layers.length));
+  const directories = report.topDirectories ?? report.layers ?? [];
+  container.append(passportSection('Top-level directories', directories.length));
   container.append(
-    layers.length === 0
+    directories.length === 0
       ? passportNote('No directories recorded.')
       : passportPlainList(
-          layers,
+          directories,
           (entry) => `${entry.directory} · ${entry.files} file(s) · ${entry.incoming} incoming`,
         ),
   );
@@ -1184,8 +1255,11 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
       : passportFileList(
           topFiles,
           handlers,
-          (entry) =>
-            `${entry.fanIn} importer(s) · blast radius ${entry.transitiveDependents} · ${entry.kind}`,
+          (entry) => {
+            const base =
+              `${entry.fanIn} importer(s) · blast radius ${entry.transitiveDependents} · ${entry.kind}`;
+            return entry.reExports > 0 ? `${base} · ${entry.reExports} re-export(s)` : base;
+          },
         ),
   );
 

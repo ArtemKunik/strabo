@@ -96,6 +96,7 @@ When('I close the open panels', async function () {
 });
 
 When('I open the folder dialog', async function () {
+  await this.dismissPassportGreeting();
   await this.page.click('#browse');
   await this.page.waitForFunction(() => document.getElementById('folder-dialog')?.open === true);
   await this.page.waitForFunction(

@@ -65,6 +65,66 @@ export function isSameOriginRequest(request: Request): boolean {
 }
 
 /**
+ * Whether the request's Host header names this server.
+ *
+ * DNS rebinding works by luring a browser to a domain that resolves to 127.0.0.1: the
+ * request then arrives with `Host: attacker.example` (and a matching `Origin`), so a
+ * same-origin check alone passes. Rejecting any Host that is not loopback — or the
+ * explicitly configured interface — closes that path: a rebinding page's Host never
+ * matches, while the operator's own browser sends `127.0.0.1`/`localhost`.
+ *
+ * Requests with no Host header (HTTP/1.0, some non-browser clients) are allowed through:
+ * there is nothing to verify, and curl-style callers are already network-capable.
+ */
+export function isAllowedHost(request: Request, configuredHost?: string): boolean {
+  const raw = request.get('host')?.toLowerCase().trim();
+  if (!raw) {
+    return true;
+  }
+  const hostname = stripPort(raw);
+  if (hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1') {
+    return true;
+  }
+  const configured = configuredHost?.toLowerCase().trim();
+  if (configured && !isWildcardHost(configured)) {
+    if (hostname === stripPort(configured)) {
+      return true;
+    }
+    return false;
+  }
+  if (configured && isWildcardHost(configured)) {
+    // Deliberately exposed: allow direct IP literals (LAN use), still refuse arbitrary
+    // DNS names a rebinding page would carry.
+    return isIpLiteral(hostname);
+  }
+  return false;
+}
+
+/** Split the port off a Host header value, tolerating bracketed IPv6. */
+function stripPort(host: string): string {
+  if (host.startsWith('[')) {
+    const close = host.indexOf(']');
+    return close === -1 ? host : host.slice(1, close);
+  }
+  const colon = host.lastIndexOf(':');
+  // A bare IPv6 literal has several colons and no brackets; leave it whole.
+  if (colon !== -1 && host.indexOf(':') === colon) {
+    return host.slice(0, colon);
+  }
+  return host;
+}
+
+function isWildcardHost(host: string): boolean {
+  return host === '0.0.0.0' || host === '::' || host === '';
+}
+
+function isIpLiteral(host: string): boolean {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    return true;
+  }
+  return host.includes(':');
+}
+/**
  * Map a provider HTTP status to plain words for the Test connection panel.
  *
  * Reuses the `resolveNarratorConfig` reasons where they apply and translates the

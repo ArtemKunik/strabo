@@ -15,17 +15,31 @@ export interface PassportTopFile {
   kind: string;
   fanIn: number;
   fanOut: number;
+  /**
+   * Outgoing `declare` edges (barrel re-exports, Rust `mod`, `__init__` re-exports).
+   * These are left out of adjacency so they never inflate blast radius, but the count
+   * is reported so a barrel file reads as a forwarder rather than a "0 fan-out" leaf.
+   */
+  reExports: number;
   transitiveDependents: number;
   transitiveDependencies: number;
 }
 
-/** A top-level directory roll-up; the coarsest layering the scan can state. */
-export interface PassportLayer {
+/**
+ * A top-level directory roll-up; the coarsest grouping the scan can state.
+ *
+ * Named `topDirectories` rather than `layers` on purpose: the System view already uses
+ * "layer" for depth-derived tiers inside a unit, and sharing the name confused the two.
+ */
+export interface PassportTopDirectory {
   directory: string;
   files: number;
-  /** Direct importers of files in this layer, summed. */
+  /** Direct importers of files in this directory, summed. */
   incoming: number;
 }
+
+/** Deprecated alias of {@link PassportTopDirectory}, kept for API compatibility. */
+export type PassportLayer = PassportTopDirectory;
 
 export interface PassportEntryPoint {
   file: string;
@@ -57,7 +71,7 @@ export interface RepositoryPassport {
   };
   languages: PassportLanguage[];
   entryPoints: PassportEntryPoint[];
-  layers: PassportLayer[];
+  topDirectories: PassportTopDirectory[];
   topFiles: PassportTopFile[];
   cycles: { total: number; largest: PassportCycle[] };
   untested: { total: number; files: string[] };
@@ -103,11 +117,15 @@ export function computeRepositoryPassport(
   const metrics = computeGraphMetrics(graph, buildAdjacency(graph));
   const nodes = graph.nodes;
 
-  const languages = Object.entries(extensionCounts)
-    .map(([extension, files]) => ({
-      language: LANGUAGE_BY_EXTENSION[extension] ?? extension,
-      files,
-    }))
+  // Several extensions share one display language (`.js`/`.mjs`/`.cjs` are all
+  // JavaScript), so totals are summed per language rather than per extension.
+  const filesByLanguage = new Map<string, number>();
+  for (const [extension, files] of Object.entries(extensionCounts)) {
+    const language = LANGUAGE_BY_EXTENSION[extension] ?? extension;
+    filesByLanguage.set(language, (filesByLanguage.get(language) ?? 0) + files);
+  }
+  const languages = [...filesByLanguage.entries()]
+    .map(([language, files]) => ({ language, files }))
     .sort((a, b) => b.files - a.files || a.language.localeCompare(b.language));
 
   const entryPoints = nodes
@@ -117,12 +135,20 @@ export function computeRepositoryPassport(
 
   const layers = layerRollup(nodes, metrics.fanIn);
 
+  const reExportsByFile = new Map<string, number>();
+  for (const edge of graph.edges) {
+    if (edge.role === 'declare' && edge.source !== edge.target) {
+      reExportsByFile.set(edge.source, (reExportsByFile.get(edge.source) ?? 0) + 1);
+    }
+  }
+
   const topFiles = [...nodes]
     .map((node) => ({
       id: node.id,
       kind: node.kind,
       fanIn: metrics.fanIn.get(node.id) ?? 0,
       fanOut: metrics.fanOut.get(node.id) ?? 0,
+      reExports: reExportsByFile.get(node.id) ?? 0,
       transitiveDependents: metrics.transitiveDependents.get(node.id) ?? 0,
       transitiveDependencies: metrics.transitiveDependencies.get(node.id) ?? 0,
     }))
@@ -156,7 +182,7 @@ export function computeRepositoryPassport(
     },
     languages,
     entryPoints,
-    layers,
+    topDirectories: layers,
     topFiles,
     cycles: { total: cycles.length, largest },
     untested: {
@@ -170,7 +196,7 @@ export function computeRepositoryPassport(
 function layerRollup(
   nodes: Graph['nodes'],
   fanIn: Map<string, number>,
-): PassportLayer[] {
+): PassportTopDirectory[] {
   const byDirectory = new Map<string, { files: number; incoming: number }>();
   for (const node of nodes) {
     const directory = node.id.includes('/') ? node.id.slice(0, node.id.indexOf('/')) : '.';

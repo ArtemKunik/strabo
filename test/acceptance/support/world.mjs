@@ -57,9 +57,12 @@ export class StraboWorld extends World {
    * Open one of the inspector's tab panels.
    *
    * The inspector is tabbed, so members and data flow are inert until their tab is
-   * selected; steps that assert on them must activate the tab first.
+   * selected; steps that assert on them must activate the tab first. The first-run
+   * Repository passport greeting floats over the inspector, so it is dismissed first
+   * when open — exactly as an operator would clear it before working.
    */
   async openInspectorTab(key) {
+    await this.dismissPassportGreeting();
     const tab = this.page.locator(`#inspector .inspector-tab[data-tab="${key}"]`);
     await tab.waitFor({ state: 'visible', timeout: 15_000 });
     await tab.click();
@@ -118,6 +121,41 @@ export class StraboWorld extends World {
 
   async waitForModel(predicate) {
     await this.page.waitForFunction(predicate, undefined, { timeout: 15_000 });
+  }
+
+  /**
+   * Dismiss the first-run Repository passport greeting when it is open.
+   *
+   * The greeting appears once per fresh browser profile and floats over the toolbar
+   * and inspector. An operator clears it with "View the map" before working; tests do
+   * the same before clicking past it. The greeting renders after the passport report
+   * arrives, so the first call on a page waits for a late greeting; later calls take
+   * the fast path. When no greeting ever opens this is a bounded wait, not a hang.
+   */
+  async dismissPassportGreeting() {
+    const settled = await this.page
+      .evaluate(() => window.__passportDismissed === true)
+      .catch(() => false);
+    const close = this.page.locator('#close-passport');
+    try {
+      if (settled) {
+        if (await close.isVisible({ timeout: 1_000 })) {
+          await close.click({ timeout: 5_000 });
+        }
+        return;
+      }
+      await close.waitFor({ state: 'visible', timeout: 12_000 });
+      await close.click({ timeout: 5_000 });
+      await this.page
+        .waitForSelector('#passport-panel', { state: 'hidden', timeout: 5_000 })
+        .catch(() => {});
+    } catch {
+      // No greeting open; nothing to dismiss.
+    } finally {
+      await this.page.evaluate(() => {
+        window.__passportDismissed = true;
+      });
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
-import { createSettingsStore, createStraboRouter } from '../../src/index.ts';
+import { createSettingsStore, createStraboRouter, createStraboServer } from '../../src/index.ts';
+import { isAllowedHost } from '../../src/api/http.ts';
 import type { StraboConfig } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -106,7 +108,7 @@ test('PUT /settings refuses to widen the ceiling without the opt-in and changes 
   assert.equal(fixtures, config.scanCeiling);
 });
 
-test('PUT /settings widens the ceiling when allowCeilingWidening is set', async () => {
+test('PUT /settings widens the ceiling when allowCeilingWidening is set at startup', async () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
   tempDirs.push(outside);
   const config = { ...makeConfig(), allowCeilingWidening: true };
@@ -198,7 +200,7 @@ test('PUT /settings toggles the online risk lookup and rejects a non-boolean', a
   assert.equal(bad.status, 400);
 });
 
-test('PUT /settings enables widening at runtime without an environment opt-in', async () => {
+test('PUT /settings refuses the widening flag: it is startup-only, never granted by request', async () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
   tempDirs.push(outside);
   const base = await mount(makeConfig());
@@ -211,20 +213,32 @@ test('PUT /settings enables widening at runtime without an environment opt-in', 
   });
   assert.equal(denied.status, 400);
 
-  const enabled = await fetch(`${base}/api/strabo/settings`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ allowCeilingWidening: true }),
-  });
-  assert.equal(enabled.status, 200);
+  // One request cannot enable the permission, alone or combined with a wider ceiling.
+  for (const body of [
+    { allowCeilingWidening: true },
+    { allowCeilingWidening: true, scanCeiling: outside },
+  ]) {
+    const refused = await fetch(`${base}/api/strabo/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    assert.equal(refused.status, 400);
+  }
 
-  const widened = await fetch(`${base}/api/strabo/settings`, {
+  // The refusals changed nothing: the boundary is still narrow.
+  const stillDenied = await fetch(`${base}/api/strabo/settings`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ scanCeiling: outside }),
   });
-  assert.equal(widened.status, 200);
-  assert.equal(((await widened.json()) as { scanCeiling: string }).scanCeiling, path.resolve(outside));
+  assert.equal(stillDenied.status, 400);
+  const settings = (await (await fetch(`${base}/api/strabo/settings`)).json()) as {
+    scanCeiling: string;
+    allowCeilingWidening: boolean;
+  };
+  assert.equal(settings.scanCeiling, fixtures);
+  assert.equal(settings.allowCeilingWidening, false);
 });
 
 test('persisted settings are re-applied when the server starts again', async () => {
@@ -232,16 +246,14 @@ test('persisted settings are re-applied when the server starts again', async () 
   tempDirs.push(outside);
   const settingsFile = freshSettingsFile();
 
+  // Widening is a startup-only permission, so the persisted ceiling here must stay
+  // inside the startup boundary; the test proves ceiling + risk survive a restart.
+  const inside = path.join(fixtures, 'block-repo');
   const first = await mount(makeConfig(), settingsFile);
   await fetch(`${first}/api/strabo/settings`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ allowCeilingWidening: true }),
-  });
-  await fetch(`${first}/api/strabo/settings`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ scanCeiling: outside, riskOnline: true }),
+    body: JSON.stringify({ scanCeiling: inside, riskOnline: true }),
   });
 
   // A fresh config from the same environment, sharing only the persisted file.
@@ -252,10 +264,34 @@ test('persisted settings are re-applied when the server starts again', async () 
     riskOnline: boolean;
     allowCeilingWidening: boolean;
   };
-  assert.equal(settings.scanCeiling, path.resolve(outside));
+  assert.equal(settings.scanCeiling, path.resolve(inside));
   assert.equal(settings.riskOnline, true);
-  assert.equal(settings.allowCeilingWidening, true);
-  assert.equal(config.scanCeiling, path.resolve(outside));
+  assert.equal(settings.allowCeilingWidening, false);
+  assert.equal(config.scanCeiling, path.resolve(inside));
+});
+
+test('a persisted widening flag from an older version does not reopen the boundary', async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
+  tempDirs.push(outside);
+  const settingsFile = freshSettingsFile();
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify({ version: 1, scanCeiling: null, riskOnline: null, allowCeilingWidening: true }),
+  );
+
+  const config = makeConfig();
+  const base = await mount(config, settingsFile);
+  const settings = (await (await fetch(`${base}/api/strabo/settings`)).json()) as {
+    allowCeilingWidening: boolean;
+  };
+  assert.equal(settings.allowCeilingWidening, false);
+
+  const widened = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: outside }),
+  });
+  assert.equal(widened.status, 400);
 });
 
 test('resetting the ceiling clears the persisted override', async () => {
@@ -275,4 +311,86 @@ test('resetting the ceiling clears the persisted override', async () => {
   const second = await mount(makeConfig(), settingsFile);
   const settings = (await (await fetch(`${second}/api/strabo/settings`)).json()) as { scanCeiling: string };
   assert.equal(settings.scanCeiling, fixtures);
+});
+
+function fakeHostRequest(host: string | undefined): Parameters<typeof isAllowedHost>[0] {
+  return {
+    get: (name: string) => (name.toLowerCase() === 'host' ? host : undefined),
+  } as Parameters<typeof isAllowedHost>[0];
+}
+
+test('isAllowedHost accepts loopback and the configured host, refuses anything else', () => {
+  for (const host of ['127.0.0.1:3000', 'localhost:3000', 'LOCALHOST:3000', '[::1]:3000']) {
+    assert.equal(isAllowedHost(fakeHostRequest(host)), true, host);
+  }
+  assert.equal(isAllowedHost(fakeHostRequest('evil.example:3000')), false);
+  assert.equal(isAllowedHost(fakeHostRequest('192.168.1.5:3000')), false);
+  assert.equal(isAllowedHost(fakeHostRequest(undefined)), true);
+  assert.equal(isAllowedHost(fakeHostRequest('myhost.local:3000'), 'myhost.local'), true);
+  assert.equal(isAllowedHost(fakeHostRequest('evil.example:3000'), 'myhost.local'), false);
+  // Deliberately exposed on every interface: direct IP literals still work, DNS names do not.
+  assert.equal(isAllowedHost(fakeHostRequest('192.168.1.5:3000'), '0.0.0.0'), true);
+  assert.equal(isAllowedHost(fakeHostRequest('evil.example:3000'), '0.0.0.0'), false);
+});
+
+test('the standalone server refuses a rebinding Host before any route runs', async () => {
+  const app = createStraboServer({ workspaceRoot: fixtures, scanCeiling: fixtures });
+  const { port } = await new Promise<AddressInfo>((resolve) => {
+    const server = app.listen(0, '127.0.0.1', () => {
+      servers.push(server);
+      resolve(server.address() as AddressInfo);
+    });
+  });
+
+  // `fetch` treats Host as a forbidden header and cannot spoof it, so the rebinding
+  // requests go over raw HTTP with the attacker's Host on the wire.
+  const rawPut = (host: string, body: unknown): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const payload = JSON.stringify(body);
+      const request = http.request(
+        {
+          host: '127.0.0.1',
+          port,
+          path: '/api/strabo/settings',
+          method: 'PUT',
+          headers: { host, 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
+        },
+        (response) => {
+          response.resume();
+          response.on('end', () => resolve(response.statusCode ?? 0));
+        },
+      );
+      request.on('error', reject);
+      request.end(payload);
+    });
+
+  // The reported attack: enable-then-widen, plus a plain settings write, all under a
+  // rebinding Host. Every one is refused at the gate.
+  for (const body of [
+    { allowCeilingWidening: true, scanCeiling: '/' },
+    { allowCeilingWidening: true },
+    { scanCeiling: '/' },
+  ]) {
+    assert.equal(await rawPut('evil.example', body), 403);
+  }
+
+  const base = `http://127.0.0.1:${port}`;
+  // And the same bodies without the hostile Host fail for the right reason: the flag is
+  // startup-only (400), and widening past the ceiling is refused (400).
+  const flag = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowCeilingWidening: true }),
+  });
+  assert.equal(flag.status, 400);
+  const widen = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: '/' }),
+  });
+  assert.equal(widen.status, 400);
+
+  // Reads under the real Host still work.
+  const health = await fetch(`${base}/api/strabo/health`);
+  assert.equal(health.status, 200);
 });

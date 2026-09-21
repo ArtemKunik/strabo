@@ -6,6 +6,7 @@ export interface CliEnv {
   root: string;
   configPath?: string;
   scanCeiling: string;
+  host: string;
   port: number;
   riskOnline: boolean;
   allowCeilingWidening: boolean;
@@ -37,11 +38,16 @@ export function readEnv(
     root: resolvedRoot,
     configPath: env.STRABO_CONFIG?.trim() || undefined,
     scanCeiling: path.resolve(env.STRABO_SCAN_CEILING?.trim() || resolvedRoot),
+    // The server is an operator tool with full read access inside the ceiling, so it
+    // binds loopback by default and only leaves it when the operator says so twice:
+    // once here, and once past the Host-header check with a matching Host.
+    host: flagValue(argv, 'host') || env.STRABO_HOST?.trim() || '127.0.0.1',
     port: Number.parseInt(env.PORT ?? '3000', 10),
     // Online risk lookup is opt-in: it is the only feature that contacts a third party.
     riskOnline: isEnabled(env.STRABO_RISK),
-    // Runtime ceiling widening is a second opt-in; the environment only ever narrows.
-    allowCeilingWidening: isEnabled(env.STRABO_ALLOW_CEILING_WIDENING),
+    // Runtime ceiling widening is a startup-only opt-in. It is never accepted from a
+    // request, so a request cannot grant itself a wider read boundary.
+    allowCeilingWidening: isEnabled(env.STRABO_ALLOW_CEILING_WIDENING) || hasFlag(argv, 'allow-ceiling-widening'),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // The narrator is a second opt-in provider; without an endpoint and model it is inert.
     narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
@@ -63,6 +69,28 @@ function firstPositional(argv: readonly string[]): string | undefined {
   return value || undefined;
 }
 
+/** A `--name value` or `--name=value` flag; empty means absent. */
+function flagValue(argv: readonly string[], name: string): string | undefined {
+  const prefix = `--${name}=`;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg.startsWith(prefix)) {
+      const value = arg.slice(prefix.length).trim();
+      return value || undefined;
+    }
+    if (arg === `--${name}`) {
+      const value = (argv[index + 1] ?? '').trim();
+      return value.startsWith('-') || !value ? undefined : value;
+    }
+  }
+  return undefined;
+}
+
+/** A bare `--name` switch. */
+function hasFlag(argv: readonly string[], name: string): boolean {
+  return argv.some((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`));
+}
+
 function isEnabled(value: string | undefined): boolean {
   return value === '1' || value?.toLowerCase() === 'online' || value?.toLowerCase() === 'true';
 }
@@ -76,6 +104,7 @@ export function configFromEnv(
     root,
     configPath,
     scanCeiling,
+    host,
     riskOnline,
     allowCeilingWidening,
     deniedLicenses,
@@ -99,6 +128,7 @@ export function configFromEnv(
     workspaceRoot: root,
     configPath,
     scanCeiling,
+    host,
     allowCeilingWidening,
     risk: {
       online: riskOnline,

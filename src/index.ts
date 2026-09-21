@@ -162,12 +162,13 @@ export type {
   RepositoryPassport,
   PassportLanguage,
   PassportTopFile,
+  PassportTopDirectory,
   PassportLayer,
   PassportEntryPoint,
   PassportCycle,
 } from './analysis/passport.ts';
 export { applyPersistedSettings, createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
-export type { StraboSettings } from './api/routes/settings.ts';
+export type { StraboSettings, NarratorSettingsView, SettingsRouterOptions } from './api/routes/settings.ts';
 
 export { readWorkspaceConfig, resolveWorkspaceRepositories } from './workspace/config.ts';
 export type { WorkspaceConfig } from './workspace/config.ts';
@@ -208,6 +209,23 @@ export type {
   NarratorUnavailableReason,
 } from './narrator/config.ts';
 export {
+  NARRATOR_PRESETS,
+  narratorPresetById,
+} from './narrator/presets.ts';
+export type { NarratorPreset } from './narrator/presets.ts';
+export {
+  effectiveNarratorConfig,
+  endpointHostOf,
+  narratorLocks,
+  NARRATOR_ENV_VARS,
+} from './narrator/effective.ts';
+export type { NarratorField, NarratorLocks } from './narrator/effective.ts';
+export {
+  createNarratorKeyStore,
+  narratorKeyPath,
+} from './narrator/key-store.ts';
+export type { NarratorKeyStore, StoredNarratorKey } from './narrator/key-store.ts';
+export {
   createNarratorClient,
   createMemoryNarratorCache,
   buildNarratorPrompt,
@@ -242,6 +260,7 @@ export {
 } from './cache/graph-cache.ts';
 
 export { createStraboRouter } from './api/router.ts';
+export { isAllowedHost, isSameOriginRequest } from './api/http.ts';
 
 export { createStraboServer } from './server.ts';
 

@@ -72,7 +72,8 @@ See [Running Strabo](#running-strabo) to start the server.
 | `STRABO_ROOT`        | Repository root to scan and serve. Overridden by a path argument; defaults to the working directory. |
 | `STRABO_CONFIG`      | Path to a Strabo config file (workspace repositories, catalogue, integrations). |
 | `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root; narrowing it is editable at runtime from **Settings**. |
-| `STRABO_ALLOW_CEILING_WIDENING` | `1`/`true` permits **Settings** to widen `scanCeiling` beyond its startup value. Off by default; the environment ceiling itself only ever narrows. |
+| `STRABO_ALLOW_CEILING_WIDENING` | Startup-only `1`/`true` (or `--allow-ceiling-widening`) permits **Settings** to widen `scanCeiling` beyond its startup value. Off by default; never accepted from a request and never persisted, so a request cannot grant itself a wider boundary. |
+| `STRABO_HOST` | Interface the server binds (`--host` overrides it). Defaults to `127.0.0.1`; set `0.0.0.0` only to expose the server deliberately. |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
@@ -136,16 +137,27 @@ together (the graph stylesheet reads `--graph-*` at runtime). Reduce motion sets
 | ----- | -------- | ------- |
 | `workspaceRoot` | no | The start root the process was launched with. |
 | `scanCeiling` | yes | The boundary every path is resolved through. `null` resets it to the startup value. |
+| `allowCeilingWidening` | no | Startup-only permission, shown read-only. Set it with `STRABO_ALLOW_CEILING_WIDENING` or `--allow-ceiling-widening`. |
 | `riskOnline` | yes | Whether OSV.dev / deps.dev lookups are enabled (`STRABO_RISK`). |
 | `configPath`, `riskDeniedLicenses` | no | The workspace config path and the denied-license policy, shown for reference. |
 
 A ceiling update takes effect immediately for the graph, browse, and repository routes. It
 is process-local: a restart returns to `STRABO_SCAN_CEILING`. **Narrowing** the boundary is
 always allowed. **Widening** it beyond the ceiling in force is refused unless the process
-was started with `STRABO_ALLOW_CEILING_WIDENING`, so a default process cannot grow its own
-read boundary at runtime. Treat the server as an operator tool and do not expose it to
-untrusted users. The requested path must name an existing directory; anything else is
-rejected with `400` and the ceiling is left unchanged.
+was started with `STRABO_ALLOW_CEILING_WIDENING=1` (or `--allow-ceiling-widening`), so a
+default process cannot grow its own read boundary at runtime — not directly, and not by
+persisting the permission, since the flag is never accepted from a request and never
+written to the settings file. A body carrying `allowCeilingWidening` is refused with
+`400`. Treat the server as an operator tool and do not expose it to untrusted users. The
+requested path must name an existing directory; anything else is rejected with `400` and
+the ceiling is left unchanged.
+
+The standalone server binds `127.0.0.1` by default (`STRABO_HOST` / `--host` overrides it;
+`0.0.0.0` listens on every interface and logs a warning saying so). API routes additionally
+refuse a `Host` header that names anything other than the server itself (loopback, or the
+configured interface), so a malicious page cannot reach the server through DNS rebinding:
+a rebinding domain resolves to 127.0.0.1 but arrives with the attacker's Host, which never
+matches.
 
 ## Review overlays
 
@@ -169,15 +181,20 @@ Opening an unfamiliar repository shows a **Repository passport** once, before th
 has reason to trust the map. It is a server-computed summary of the same graph the canvas
 draws (`GET /analysis/passport`), so the two cannot disagree:
 
-- **Languages and size** — source files per language, with file, edge, directory, test,
+- **Languages and size** — source files per language (extensions sharing a language are
+  summed, so `.js` and `.mjs` count once as JavaScript), with file, edge, directory, test,
   diagnostic, and exclusion counts.
 - **Entry points** — the files a manifest declares as starting points, each with the
   declaration that named it (`package.json` `main`/`bin`/`exports`, `Cargo.toml` `[[bin]]`
-  or `src/main.rs`, `pom.xml` `mainClass`). These also carry `kind: "entry"` and a star
-  shape on the map, so the graph has a visible starting point.
-- **Top-level directories** — the coarsest layering, with file and incoming counts.
+  or `src/main.rs`, `pom.xml` `mainClass`). A manifest naming build output resolves back
+  to source through the `tsconfig.json` `outDir` → `rootDir` mapping (`dist/index.js` →
+  `src/index.ts`), so a TypeScript package still reports its entries. These also carry
+  `kind: "entry"` and a star shape on the map, so the graph has a visible starting point.
+- **Top-level directories** — the coarsest grouping, with file and incoming counts. (Deliberately
+  not called "layers": the System view already uses that word for depth-derived tiers.)
 - **Most depended-upon files (by fan-in)** — the ranked text answer to "which files decide
-  this codebase", which a canvas cannot give at a glance.
+  this codebase", which a canvas cannot give at a glance. Barrel files that only re-export
+  show their re-export count alongside, so a forwarder never reads as a "0 fan-out" leaf.
 - **Cycles and used-but-untested modules** — the same evidence the review overlays carry.
 
 Every section comes from the scan; a section with nothing recorded says so rather than

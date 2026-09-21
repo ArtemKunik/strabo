@@ -394,17 +394,47 @@ export interface ViewNode extends GraphNode {
   periphery?: number;
   /** The "why grouped" caption for a System-view unit. */
   why?: string;
+  /** The open unit this file belongs to in a System drill-down. */
+  systemUnit?: string;
+  /** Layer lane of a file inside its open unit. */
+  systemLayer?: string;
+  /** Community of a file inside its layer. */
+  systemCommunity?: string;
+  /** Transitive dependents that stay inside the open unit (L17 split). */
+  inUnitDependents?: number;
+  /** Transitive dependents outside the open unit (L17 split). */
+  outsideDependents?: number;
+  /** True for the collapsed boxes of the units that are not open. */
+  collapsed?: boolean;
 }
 
 export interface ViewEdge extends GraphEdge {
   semanticSource: string;
   semanticTarget: string;
+  /** In a System drill-down, whether the edge stays in the unit or crosses its frame. */
+  scope?: 'unit' | 'outside';
 }
 
 export interface ViewPosition {
   id: string;
   x: number;
   y: number;
+}
+
+/** One file outside the open unit that a selected file reaches, for the count badge. */
+export interface OutsideTargetFile {
+  file: string;
+  specifier: string | null;
+  line: number | null;
+}
+
+/** Cross-unit relationships of one selected file, grouped by target unit. */
+export interface OutsideLink {
+  file: string;
+  targetUnit: string;
+  targetName: string;
+  count: number;
+  files: OutsideTargetFile[];
 }
 
 /** The deterministic, server-computed presentation model. */
@@ -421,6 +451,18 @@ export interface ViewModel {
   system?: boolean;
   /** Compressed, unit-anchored label per directory, for the islands and block nodes. */
   directoryLabels?: Record<string, string>;
+  /** The open unit in a System drill-down; absent at L0. */
+  systemUnit?: string;
+  /** The declared name of the open unit, for the breadcrumb. */
+  systemUnitName?: string;
+  /** Layers of the open unit, in lane order. */
+  systemLayers?: Array<{ unit: string; name: string; order: number; files: string[]; why: string }>;
+  /** Communities of the open unit. */
+  systemCommunities?: Array<{ id: string; unit: string; layer: string; members: string[]; internalRatio: number; why: string }>;
+  /** Cross-unit edges of the selected file, grouped by target unit (L17). */
+  outsideLinks?: OutsideLink[];
+  /** Unit ids whose badge is expanded in place. */
+  expandedUnits?: string[];
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */
@@ -484,11 +526,19 @@ export interface StraboConfig {
   configPath?: string;
   scanCeiling?: string;
   /**
+   * Interface the standalone server binds. Defaults to loopback; set it (via
+   * `STRABO_HOST` / `--host`) only to expose the server deliberately. Embedded hosts
+   * listen themselves and leave this unset.
+   */
+  host?: string;
+  /**
    * Permit `PUT /settings` to widen `scanCeiling` beyond its startup value.
    *
-   * Seeded from `STRABO_ALLOW_CEILING_WIDENING`, but the operator can toggle it at runtime
-   * and the app persists the choice, so the environment is only the initial default. Off by
-   * default, so a fresh process cannot grow its own read boundary without an explicit opt-in.
+   * Startup-only: `STRABO_ALLOW_CEILING_WIDENING` or `--allow-ceiling-widening`. It is
+   * reported by `GET /settings` but never accepted by `PUT /settings` and never read
+   * from the persisted settings, so a request cannot grant itself a wider boundary —
+   * not directly, and not by surviving a restart. Off by default, so a fresh process
+   * cannot grow its own read boundary without an explicit opt-in.
    */
   allowCeilingWidening?: boolean;
   integrations?: StraboIntegrations;

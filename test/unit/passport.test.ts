@@ -61,6 +61,53 @@ test('detectEntryPoints reads package.json main, bin, and exports', () => {
   assert.equal(entries[0]?.source, 'package.json');
 });
 
+test('detectEntryPoints maps build output back to source through tsconfig', () => {
+  const root = tempDir();
+  write(
+    root,
+    'package.json',
+    JSON.stringify({
+      name: 'demo',
+      main: './dist/index.js',
+      exports: { '.': { import: './dist/index.js' }, './server': { import: './dist/server.js' } },
+    }),
+  );
+  write(root, 'tsconfig.json', JSON.stringify({ compilerOptions: { outDir: 'dist', rootDir: 'src' } }));
+  const files = ['src/index.ts', 'src/server.ts', 'src/other.ts'];
+
+  const entries = detectEntryPoints(root, files);
+  // One entry per file: main claims src/index.ts, so the duplicate exports target for
+  // the same file is folded rather than listed twice.
+  assert.deepEqual(
+    entries.map((entry) => [entry.file, entry.reason]),
+    [
+      ['src/index.ts', 'package.json main'],
+      ['src/server.ts', 'package.json exports'],
+    ],
+  );
+});
+
+test('detectEntryPoints falls back to the dist-to-src convention without a tsconfig', () => {
+  const root = tempDir();
+  write(root, 'package.json', JSON.stringify({ name: 'demo', main: './dist/main.js' }));
+  const files = ['src/main.ts'];
+
+  const entries = detectEntryPoints(root, files);
+  assert.deepEqual(
+    entries.map((entry) => [entry.file, entry.reason]),
+    [['src/main.ts', 'package.json main']],
+  );
+});
+
+test('detectEntryPoints never invents a source the scan did not retain', () => {
+  const root = tempDir();
+  write(root, 'package.json', JSON.stringify({ name: 'demo', main: './dist/missing.js' }));
+  write(root, 'tsconfig.json', '{ malformed json // with a comment\n');
+
+  const entries = detectEntryPoints(root, ['src/other.ts']);
+  assert.deepEqual(entries, []);
+});
+
 test('detectEntryPoints resolves a Cargo bin and the src/main.rs convention', () => {
   const root = tempDir();
   write(root, 'Cargo.toml', '[package]\nname = "demo"\n\n[[bin]]\nname = "app"\npath = "src/app.rs"\n');
@@ -147,10 +194,44 @@ test('computeRepositoryPassport ranks top files by fan-in and reports layers, cy
   assert.equal(passport.cycles.total, 1);
   assert.deepEqual(passport.cycles.largest[0]?.members, ['a/index.ts', 'a/util.ts']);
   assert.deepEqual(
-    passport.layers.map((layer) => layer.directory).sort(),
+    passport.topDirectories.map((entry) => entry.directory).sort(),
     ['.', 'a', 'b'],
   );
   assert.ok(passport.untested.files.includes('b/orphan.ts'));
+});
+
+test('computeRepositoryPassport merges extensions that share a language', () => {
+  const graph: Graph = {
+    nodes: [{ id: 'a.js', kind: 'module', directory: '.' }],
+    edges: [],
+    diagnostics: [],
+    excluded: [],
+  };
+  const passport = computeRepositoryPassport('demo', graph, { '.js': 23, '.mjs': 17, '.ts': 5 });
+  assert.deepEqual(passport.languages, [
+    { language: 'JavaScript', files: 40 },
+    { language: 'TypeScript', files: 5 },
+  ]);
+});
+
+test('computeRepositoryPassport counts barrel re-exports without inflating fan-out', () => {
+  const graph: Graph = {
+    nodes: [
+      { id: 'index.ts', kind: 'module', directory: '.' },
+      { id: 'a.ts', kind: 'module', directory: '.' },
+      { id: 'b.ts', kind: 'module', directory: '.' },
+    ],
+    edges: [
+      { source: 'index.ts', target: 'a.ts', kind: 're-export', role: 'declare', evidence: { line: 1, specifier: './a', resolution: 'exact' } },
+      { source: 'index.ts', target: 'b.ts', kind: 're-export', role: 'declare', evidence: { line: 2, specifier: './b', resolution: 'exact' } },
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+  const passport = computeRepositoryPassport('demo', graph, { '.ts': 3 });
+  const barrel = passport.topFiles.find((entry) => entry.id === 'index.ts');
+  assert.equal(barrel?.fanOut, 0);
+  assert.equal(barrel?.reExports, 2);
 });
 
 test('GET /analysis/passport serves the scan-derived passport', async () => {

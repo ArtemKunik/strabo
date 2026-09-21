@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createStraboRouter } from './api/router.ts';
+import { isAllowedHost } from './api/http.ts';
 import type { StraboConfig } from './types.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,18 @@ export function createStraboServer(config: StraboConfig): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+
+  // DNS-rebinding guard: a malicious page can make a browser send requests to an
+  // attacker domain that resolves to 127.0.0.1. Those arrive with the attacker's Host,
+  // so they are refused here — ahead of the static assets and every API route — rather
+  // than letting the page load the app shell or read data.
+  app.use((request, response, next) => {
+    if (!isAllowedHost(request, config.host)) {
+      response.status(403).json({ error: 'requests must address the server by its own host.' });
+      return;
+    }
+    next();
+  });
 
   const assets = publicDirectory();
   app.use('/', express.static(assets));
