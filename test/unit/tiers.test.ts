@@ -13,6 +13,7 @@ import { createSettingsStore } from '../../src/state/settings-store.ts';
 import {
   classifyTierContent,
   classifyTiers,
+  extractTables,
   readDeclaredTiers,
   unitRole,
 } from '../../src/analysis/tiers.ts';
@@ -181,6 +182,60 @@ test('GET /analysis/tiers serves the tier report', async () => {
   const report = (await response.json()) as { summary: { frontend: number; total: number } };
   assert.equal(report.summary.frontend, 1);
   assert.equal(report.summary.total, 1);
+});
+
+test('extractTables reads SQL, ORM, and string-literal tables with their rule', () => {
+  const sql = extractTables('db/schema.sql', 'CREATE TABLE users (id int);\nALTER TABLE orders ADD x int;');
+  assert.deepEqual(
+    sql.map((entry) => [entry.table, entry.evidence]),
+    [
+      ['orders', 'SQL keyword'],
+      ['users', 'SQL keyword'],
+    ],
+  );
+
+  assert.equal(extractTables('M.kt', '@Entity(tableName = "users")').at(0)?.table, 'users');
+  assert.equal(extractTables('m.rs', '#[table(name = "skills")]').at(0)?.table, 'skills');
+  assert.equal(
+    extractTables('db.ts', 'db.query("SELECT * FROM users WHERE id = 1");').at(0)?.table,
+    'users',
+  );
+});
+
+test('buildTierReport builds the tier matrix and flags wrong-way edges', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "web" }\n');
+  write(root, 'src/components/App.tsx', "import { store } from '../data/store';\nexport const App = store;\n");
+  write(root, 'src/data/store.ts', "import { route } from '../handlers/orders';\nexport const store = route;\n");
+  write(root, 'src/handlers/orders.ts', 'export const route = 1;\n');
+
+  const report = buildTierReport(root, 'web', {
+    nodes: [
+      { id: 'src/components/App.tsx' },
+      { id: 'src/data/store.ts' },
+      { id: 'src/handlers/orders.ts' },
+    ],
+    edges: [
+      {
+        source: 'src/components/App.tsx',
+        target: 'src/data/store.ts',
+        evidence: { line: 1, specifier: '../data/store' },
+      },
+      {
+        source: 'src/data/store.ts',
+        target: 'src/handlers/orders.ts',
+        evidence: { line: 1, specifier: '../handlers/orders' },
+      },
+    ],
+  });
+
+  const cell = report.matrix.cells.find((entry) => entry.unit === '.' && entry.tier === 'data');
+  assert.equal(cell?.files, 1);
+  assert.equal(report.matrix.perTier.find((entry) => entry.tier === 'data')?.fileShare, 0.333);
+
+  const kinds = report.directions.map((entry) => entry.kind).sort();
+  assert.deepEqual(kinds, ['skip-layer', 'upward']);
+  assert.equal(report.directions.find((entry) => entry.kind === 'upward')?.target, 'src/handlers/orders.ts');
 });
 
 test('unitRole reads the unit from its files and entry shape', () => {

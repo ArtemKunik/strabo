@@ -40,6 +40,18 @@ const TIER_ORDER: Tier[] = [
   'unclassified',
 ];
 
+/**
+ * Dependency rank for the direction check: a higher rank may depend on a lower one. Tiers
+ * outside this map (infra, build, tests, unclassified) are not part of the layer order.
+ */
+const TIER_RANK: Partial<Record<Tier, number>> = {
+  frontend: 5,
+  api: 4,
+  domain: 3,
+  integration: 2,
+  data: 1,
+};
+
 const STRENGTH_RANK: Record<TierStrength, number> = {
   framework: 4,
   annotation: 3,
@@ -54,12 +66,24 @@ export interface TierEvidence {
   detail: string;
 }
 
+/** One place a data table is named, with the rule that read it. */
+export interface TableReference {
+  table: string;
+  file: string;
+  line: number;
+  evidence: string;
+}
+
 export interface TierClassification {
   file: string;
   tier: Tier;
   /** True when two tiers share the strongest evidence, so no single tier is claimed. */
   mixed: boolean;
   evidence: TierEvidence[];
+  /** Source lines counted directly, the one complexity input this pass records. */
+  lines: number;
+  /** Data tables named in the file, from SQL, ORM annotations, or string-literal SQL. */
+  tables: TableReference[];
 }
 
 export interface DeclaredTier {
@@ -179,6 +203,8 @@ export function classifyTierContent(
 ): TierClassification {
   const language = languageOf(file);
   const evidence: TierEvidence[] = [];
+  const lines = countLines(content);
+  const tables = extractTables(file, content);
 
   const declaredMatch = declared.find((entry) =>
     entry.globs.some((glob) => globToRegExp(glob).test(file)),
@@ -192,6 +218,8 @@ export function classifyTierContent(
       evidence: [
         { tier: declaredMatch.tier, strength: 'declared', detail: `declared in ${DECLARED_GROUPS_FILE}` },
       ],
+      lines,
+      tables,
     };
   }
 
@@ -225,7 +253,7 @@ export function classifyTierContent(
   }
 
   if (evidence.length === 0) {
-    return { file, tier: 'unclassified', mixed: false, evidence: [] };
+    return { file, tier: 'unclassified', mixed: false, evidence: [], lines, tables };
   }
 
   const byTier = new Map<Tier, number>();
@@ -240,7 +268,74 @@ export function classifyTierContent(
     // Two tiers at the same strongest evidence is a mixed file, not a forced choice.
     mixed: top.length > 1,
     evidence,
+    lines,
+    tables,
   };
+}
+
+const RESERVED_TABLES = new Set([
+  'select', 'where', 'set', 'values', 'table', 'from', 'into', 'update', 'join', 'delete',
+  'insert', 'create', 'alter', 'on', 'using', 'as', 'with', 'and', 'or', 'not', 'null',
+  'default', 'primary', 'foreign', 'index', 'if', 'exists', 'inner', 'left', 'right',
+]);
+
+/**
+ * Extract the data tables a file names, each with the rule that read it.
+ *
+ * Lexical and labelled: SQL keywords, ORM annotations/macros, and string-literal SQL. A
+ * query builder that hides the table name, or a dynamic string, records nothing rather than
+ * a guessed table.
+ */
+export function extractTables(file: string, content: string): TableReference[] {
+  const found = new Map<string, TableReference>();
+  const add = (raw: string, index: number, evidence: string): void => {
+    const table = raw.replace(/["'`[\]]/g, '');
+    if (table === '' || RESERVED_TABLES.has(table.toLowerCase())) {
+      return;
+    }
+    const line = lineAt(content, index);
+    found.set(`${table}\u0000${line}\u0000${evidence}`, { table, file, line, evidence });
+  };
+
+  for (const match of content.matchAll(
+    /\b(?:CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE|INSERT\s+INTO|DELETE\s+FROM|UPDATE|JOIN)\s+["'`[]?([A-Za-z_][\w.]*)/gi,
+  )) {
+    add(match[1] ?? '', match.index ?? 0, 'SQL keyword');
+  }
+  for (const match of content.matchAll(
+    /@(?:Table|Entity)\s*\(\s*(?:name|tableName)\s*=\s*["']([^"']+)["']/gi,
+  )) {
+    add(match[1] ?? '', match.index ?? 0, 'ORM annotation');
+  }
+  for (const match of content.matchAll(/#\[table\s*\(\s*name\s*=\s*"([^"]+)"/gi)) {
+    add(match[1] ?? '', match.index ?? 0, 'ORM macro');
+  }
+  for (const match of content.matchAll(
+    /["'`][^"'`]*?\b(?:from|join|into|update)\s+["'`]?([A-Za-z_][\w.]*)[^"'`]*?["'`]/gi,
+  )) {
+    add(match[1] ?? '', match.index ?? 0, 'string-literal SQL');
+  }
+
+  return [...found.values()].sort(
+    (a, b) => a.table.localeCompare(b.table) || a.line - b.line || a.evidence.localeCompare(b.evidence),
+  );
+}
+
+function lineAt(content: string, index: number): number {
+  let line = 1;
+  for (let offset = 0; offset < index && offset < content.length; offset += 1) {
+    if (content[offset] === '\n') {
+      line += 1;
+    }
+  }
+  return line;
+}
+
+function countLines(content: string): number {
+  if (content === '') {
+    return 0;
+  }
+  return content.split(/\r?\n/).length;
 }
 
 /** Classify every file, reading bounded source. Files that cannot be read are unclassified. */
@@ -331,9 +426,40 @@ export interface TierUnitReport {
   tiers: Record<Tier, number>;
 }
 
+/** One cell of the tier × unit matrix: file count and directly counted lines. */
+export interface TierMatrixCell {
+  unit: string;
+  tier: Tier;
+  files: number;
+  lines: number;
+}
+
+export interface TierMatrix {
+  /** Row order: dependency order, frontend on top, unclassified last. */
+  tiers: Tier[];
+  units: string[];
+  cells: TierMatrixCell[];
+  perTier: Array<{ tier: Tier; files: number; lines: number; fileShare: number }>;
+}
+
+/** A recorded dependency that runs the wrong way through the tier order. */
+export interface TierDirection {
+  unit: string;
+  source: string;
+  target: string;
+  sourceTier: Tier;
+  targetTier: Tier;
+  kind: 'upward' | 'skip-layer';
+  line: number;
+  specifier: string;
+}
+
 export interface TierReport {
   files: TierClassification[];
   units: TierUnitReport[];
+  matrix: TierMatrix;
+  directions: TierDirection[];
+  tables: TableReference[];
   summary: Record<Tier, number> & { total: number; mixed: number; unclassified: number };
   skipped: string[];
   /** Files beyond the scan ceiling; not read, so they are not claimed as unclassified. */
@@ -361,7 +487,10 @@ function emptyTierCounts(): Record<Tier, number> {
 export function buildTierReport(
   root: string,
   repositoryName: string,
-  graph: { nodes: Array<{ id: string }> },
+  graph: {
+    nodes: Array<{ id: string }>;
+    edges?: Array<{ source: string; target: string; evidence?: { line: number; specifier: string } }>;
+  },
 ): TierReport {
   const all = graph.nodes.map((node) => node.id).sort();
   const selected = all.slice(0, MAX_TIER_FILES);
@@ -405,9 +534,96 @@ export function buildTierReport(
     })
     .filter((unit) => unit.files > 0);
 
+  const unitIds = [...new Set(assignment.values())].sort();
+  const cellMap = new Map<string, { files: number; lines: number }>();
+  const unitTiers = new Map<string, Set<Tier>>();
+  for (const entry of files) {
+    const unit = assignment.get(entry.file) ?? '.';
+    const key = `${unit}\u0000${entry.tier}`;
+    const cell = cellMap.get(key) ?? { files: 0, lines: 0 };
+    cell.files += 1;
+    cell.lines += entry.lines;
+    cellMap.set(key, cell);
+    const tiers = unitTiers.get(unit) ?? new Set<Tier>();
+    tiers.add(entry.tier);
+    unitTiers.set(unit, tiers);
+  }
+
+  const cells: TierMatrixCell[] = [];
+  for (const tier of TIER_ORDER) {
+    for (const unit of unitIds) {
+      const cell = cellMap.get(`${unit}\u0000${tier}`);
+      if (cell) {
+        cells.push({ unit, tier, files: cell.files, lines: cell.lines });
+      }
+    }
+  }
+  const perTier = TIER_ORDER.map((tier) => {
+    const matching = files.filter((entry) => entry.tier === tier);
+    return {
+      tier,
+      files: matching.length,
+      lines: matching.reduce((total, entry) => total + entry.lines, 0),
+      fileShare: files.length > 0 ? Number((matching.length / files.length).toFixed(3)) : 0,
+    };
+  }).filter((entry) => entry.files > 0);
+
+  const tierOfFile = new Map(files.map((entry) => [entry.file, entry.tier]));
+  const directions: TierDirection[] = [];
+  for (const edge of graph.edges ?? []) {
+    const sourceTier = tierOfFile.get(edge.source);
+    const targetTier = tierOfFile.get(edge.target);
+    if (!sourceTier || !targetTier) {
+      continue;
+    }
+    const unit = assignment.get(edge.source) ?? '.';
+    if ((assignment.get(edge.target) ?? '.') !== unit) {
+      continue;
+    }
+    const sourceRank = TIER_RANK[sourceTier];
+    const targetRank = TIER_RANK[targetTier];
+    if (sourceRank === undefined || targetRank === undefined) {
+      continue;
+    }
+    const base = {
+      unit,
+      source: edge.source,
+      target: edge.target,
+      sourceTier,
+      targetTier,
+      line: edge.evidence?.line ?? 0,
+      specifier: edge.evidence?.specifier ?? '',
+    };
+    if (sourceRank < targetRank) {
+      // A lower tier depends on an upper one: the arrow runs the wrong way.
+      directions.push({ ...base, kind: 'upward' });
+    } else if (sourceRank - targetRank > 1) {
+      const intermediate = [...(unitTiers.get(unit) ?? [])].some((tier) => {
+        const rank = TIER_RANK[tier];
+        return rank !== undefined && rank < sourceRank && rank > targetRank;
+      });
+      // A skip is only a violation when the unit actually has a tier in between to use.
+      if (intermediate) {
+        directions.push({ ...base, kind: 'skip-layer' });
+      }
+    }
+  }
+  directions.sort(
+    (a, b) => a.unit.localeCompare(b.unit) || a.line - b.line || a.source.localeCompare(b.source),
+  );
+
+  const tables = files
+    .flatMap((entry) => entry.tables)
+    .sort(
+      (a, b) => a.table.localeCompare(b.table) || a.file.localeCompare(b.file) || a.line - b.line,
+    );
+
   return {
     files,
     units: unitReports,
+    matrix: { tiers: TIER_ORDER, units: unitIds, cells, perTier },
+    directions,
+    tables,
     summary: { ...summary, total: files.length, mixed },
     skipped,
     truncated: all.length - selected.length,

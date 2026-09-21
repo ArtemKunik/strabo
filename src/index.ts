@@ -104,6 +104,10 @@ export type {
   UnitRole,
   TierUnitReport,
   TierReport,
+  TierMatrix,
+  TierMatrixCell,
+  TierDirection,
+  TableReference,
 } from './analysis/tiers.ts';
 export type {
   SystemReport,
