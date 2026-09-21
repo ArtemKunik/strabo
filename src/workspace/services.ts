@@ -144,12 +144,18 @@ export function extractServiceCalls(root: string): ServiceCall[] {
     if (content === null) {
       continue;
     }
-    calls.push(...callsInFile(file, content));
+    calls.push(...extractCallsFromContent(file, content));
   }
   return dedupeCalls(calls);
 }
 
-function callsInFile(file: string, content: string): ServiceCall[] {
+/**
+ * Record the outbound HTTP calls in one already-read file.
+ *
+ * Shared with the tier trace, which reads each classified file once and must not walk the
+ * tree again to find its calls.
+ */
+export function extractCallsFromContent(file: string, content: string): ServiceCall[] {
   const calls: ServiceCall[] = [];
   const add = (method: string | null, target: string, index: number): void => {
     if (!isServiceTarget(target)) {

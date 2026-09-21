@@ -11,6 +11,17 @@ globalThis.window = window;
 const { renderTierPanel } = await import('../../ui/strabo-tier-panel.js');
 
 function sampleReport() {
+  const call = {
+    file: 'src/api/orders.ts',
+    tier: 'api',
+    unit: '.',
+    line: 3,
+    method: 'GET',
+    target: '/orders',
+    host: null,
+    path: '/orders',
+  };
+  const endpoint = { file: 'openapi.yaml', tier: 'api', unit: '.', method: 'GET', path: '/orders' };
   return {
     files: [],
     units: [{ id: '.', name: 'web', role: 'app', roleEvidence: '', files: 2, tiers: {} }],
@@ -52,6 +63,9 @@ function sampleReport() {
     tableTrace: [
       { table: 'orders', file: 'src/data/store.ts', tier: 'data', unit: '.', line: 2, evidence: 'string-literal SQL' },
     ],
+    calls: [call],
+    endpoints: [endpoint],
+    traces: [{ call, endpoint }],
     summary: {
       frontend: 0,
       api: 1,
@@ -91,6 +105,13 @@ test('renderTierPanel draws the matrix, direction check, and table trace', () =>
 
   const trace = container.querySelector('[data-role="tier-table-trace"]')?.textContent ?? '';
   assert.match(trace, /src\/data\/store\.ts \(data\)/);
+
+  const callRow = container.querySelector('[data-role="tier-call"]')?.textContent ?? '';
+  assert.match(callRow, /GET \/orders · src\/api\/orders\.ts:3/);
+  const endpointRow = container.querySelector('[data-role="tier-endpoint"]')?.textContent ?? '';
+  assert.match(endpointRow, /GET \/orders · openapi\.yaml/);
+  const joined = container.querySelector('[data-role="tier-trace"]')?.textContent ?? '';
+  assert.match(joined, /src\/api\/orders\.ts:3 → GET \/orders \(openapi\.yaml\)/);
 });
 
 test('renderTierPanel says so when nothing was classified', () => {

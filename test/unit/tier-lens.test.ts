@@ -6,12 +6,15 @@ import { after, test } from 'node:test';
 
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import {
+  tierCallSites,
   tierDirectionClasses,
   tierDirectionLabel,
+  tierEndpointSites,
   tierMatrixRows,
   tierPerTierRows,
   tierTableTrace,
   tierTables,
+  tierTraces,
 } from '../../ui/strabo-tiers.js';
 
 const created: string[] = [];
@@ -115,6 +118,37 @@ test('tierDirectionClasses marks both ends and the edge of a wrong-way dependenc
   const empty = tierDirectionClasses(null);
   assert.equal(empty.byNode.size, 0);
   assert.deepEqual(empty.edges, []);
+});
+
+function traceReport() {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "web" }\n');
+  write(
+    root,
+    'openapi.yaml',
+    'openapi: 3.0.0\ninfo:\n  title: t\n  version: "1"\npaths:\n  /orders:\n    get:\n      responses:\n        "200":\n          description: ok\n',
+  );
+  write(root, 'src/api/orders.ts', "export async function load() {\n  return fetch('/orders');\n}\n");
+
+  return buildTierReport(root, 'web', { nodes: [{ id: 'src/api/orders.ts' }], edges: [] });
+}
+
+test('buildTierReport joins a call site to the endpoint it reaches', () => {
+  const tiers = traceReport();
+  assert.equal(tiers.calls.length, 1);
+  assert.equal(tiers.calls[0].method, 'GET');
+  assert.equal(tiers.calls[0].path, '/orders');
+  assert.equal(tiers.calls[0].tier, 'api');
+
+  assert.deepEqual(
+    tiers.endpoints.map((entry) => [entry.file, entry.method, entry.path]),
+    [['openapi.yaml', 'GET', '/orders']],
+  );
+  assert.equal(tiers.traces[0].endpoint?.file, 'openapi.yaml');
+
+  assert.equal(tierCallSites(tiers).length, 1);
+  assert.equal(tierEndpointSites(tiers)[0].path, '/orders');
+  assert.equal(tierTraces(tiers)[0].endpoint?.method, 'GET');
 });
 
 test('the tier table helpers list tables and their trace rows', () => {

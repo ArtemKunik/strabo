@@ -3,6 +3,8 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
 import { toPosix } from '../boundary/repository-root.ts';
+import { isSourceExtension } from '../scan/scan.ts';
+import { extractCallsFromContent, extractServiceEndpoints } from '../workspace/services.ts';
 import { assignUnits, detectUnits, DECLARED_GROUPS_FILE } from './units.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -464,6 +466,33 @@ export interface TableTraceEntry {
   evidence: string;
 }
 
+/** A recorded outbound HTTP call in a classified file, joined to its tier and unit. */
+export interface TierCallSite {
+  file: string;
+  tier: Tier;
+  unit: string;
+  line: number;
+  method: string | null;
+  target: string;
+  host: string | null;
+  path: string | null;
+}
+
+/** A declared HTTP endpoint, joined to the tier and unit of the document that declares it. */
+export interface TierEndpointSite {
+  file: string;
+  tier: Tier;
+  unit: string;
+  method: string;
+  path: string;
+}
+
+/** The top half of the end-to-end trace: a call site and the endpoint it reaches here. */
+export interface TierTrace {
+  call: TierCallSite;
+  endpoint: TierEndpointSite | null;
+}
+
 export interface TierReport {
   files: TierClassification[];
   units: TierUnitReport[];
@@ -472,6 +501,11 @@ export interface TierReport {
   tables: TableReference[];
   /** The bottom half of the end-to-end trace: a table joined to the files that name it. */
   tableTrace: TableTraceEntry[];
+  /** The top half: outbound calls and the endpoints a document in this repository declares. */
+  calls: TierCallSite[];
+  endpoints: TierEndpointSite[];
+  /** A call site joined to the endpoint it reaches here by method and path, when one matches. */
+  traces: TierTrace[];
   summary: Record<Tier, number> & { total: number; mixed: number; unclassified: number };
   skipped: string[];
   /** Files beyond the scan ceiling; not read, so they are not claimed as unclassified. */
@@ -511,7 +545,13 @@ export function buildTierReport(
   const tierOf = new Map(files.map((entry) => [entry.file, entry.tier]));
 
   const units = detectUnits(root, selected, repositoryName);
-  const assignment = assignUnits(selected, units);
+  // Endpoint documents (OpenAPI) are not graph nodes, but they still sit in a unit; assign
+  // them alongside the nodes so a trace's endpoint carries a real unit.
+  const endpointDocs = extractServiceEndpoints(root, repositoryName);
+  const assignment = assignUnits(
+    [...new Set([...selected, ...endpointDocs.map((endpoint) => endpoint.source)])],
+    units,
+  );
   const byUnit = new Map<string, string[]>();
   for (const file of selected) {
     const unit = assignment.get(file) ?? '.';
@@ -546,7 +586,7 @@ export function buildTierReport(
     })
     .filter((unit) => unit.files > 0);
 
-  const unitIds = [...new Set(assignment.values())].sort();
+  const unitIds = [...new Set(selected.map((file) => assignment.get(file) ?? '.'))].sort();
   const cellMap = new Map<string, { files: number; lines: number }>();
   const unitTiers = new Map<string, Set<Tier>>();
   for (const entry of files) {
@@ -645,6 +685,71 @@ export function buildTierReport(
       (a, b) => a.table.localeCompare(b.table) || a.file.localeCompare(b.file) || a.line - b.line,
     );
 
+  // The top half of the trace. Calls are read from the files just classified (a second read,
+  // bounded by the ceiling); endpoints come from the repository's OpenAPI documents, which are
+  // not graph nodes, so their tier is classified from disk.
+  const selectedSet = new Set(selected);
+  const calls: TierCallSite[] = [];
+  for (const file of selected) {
+    if (!isSourceExtension(file)) {
+      continue;
+    }
+    const content = readText(root, file);
+    if (content === null) {
+      continue;
+    }
+    for (const call of extractCallsFromContent(file, content)) {
+      calls.push({
+        file,
+        tier: tierOfFile.get(file) ?? 'unclassified',
+        unit: assignment.get(file) ?? '.',
+        line: call.line,
+        method: call.method,
+        target: call.target,
+        host: call.host,
+        path: call.path,
+      });
+    }
+  }
+  calls.sort(
+    (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.target.localeCompare(b.target),
+  );
+
+  const endpoints: TierEndpointSite[] = endpointDocs
+    .map((endpoint) => {
+      let tier = tierOfFile.get(endpoint.source) ?? 'unclassified';
+      if (!selectedSet.has(endpoint.source)) {
+        const content = readText(root, endpoint.source);
+        if (content !== null) {
+          tier = classifyTierContent(endpoint.source, content, declared).tier;
+        }
+      }
+      return {
+        file: endpoint.source,
+        tier,
+        unit: assignment.get(endpoint.source) ?? '.',
+        method: endpoint.method,
+        path: endpoint.path,
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.file.localeCompare(b.file) || a.method.localeCompare(b.method) || a.path.localeCompare(b.path),
+    );
+
+  const endpointByKey = new Map<string, TierEndpointSite>();
+  for (const endpoint of endpoints) {
+    const key = `${endpoint.method}\u0000${endpoint.path}`;
+    if (!endpointByKey.has(key)) {
+      endpointByKey.set(key, endpoint);
+    }
+  }
+  const traces: TierTrace[] = calls.map((call) => ({
+    call,
+    endpoint:
+      call.method && call.path ? endpointByKey.get(`${call.method}\u0000${call.path}`) ?? null : null,
+  }));
+
   return {
     files,
     units: unitReports,
@@ -652,6 +757,9 @@ export function buildTierReport(
     directions,
     tables,
     tableTrace,
+    calls,
+    endpoints,
+    traces,
     summary: { ...summary, total: files.length, mixed },
     skipped,
     truncated: all.length - selected.length,

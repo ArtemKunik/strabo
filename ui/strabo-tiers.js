@@ -178,6 +178,33 @@ export function tierTableTrace(report, table) {
     .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
+/** The outbound calls a trace can start from, one row per call site, file then line. */
+export function tierCallSites(report) {
+  return (report?.calls ?? [])
+    .slice()
+    .sort(
+      (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.target.localeCompare(b.target),
+    );
+}
+
+/** Declared HTTP endpoints, one row per operation, with the tier and unit of the document. */
+export function tierEndpointSites(report) {
+  return (report?.endpoints ?? [])
+    .slice()
+    .sort(
+      (a, b) =>
+        a.file.localeCompare(b.file) || a.method.localeCompare(b.method) || a.path.localeCompare(b.path),
+    );
+}
+
+/**
+ * The top half of the end-to-end trace: each call site and the endpoint it reaches here, or
+ * `null` when no document in this repository declares it (an outbound call to another repo).
+ */
+export function tierTraces(report) {
+  return (report?.traces ?? []).slice();
+}
+
 /** The one-line caption for the tier filter, or an explicit no-evidence note. */
 export function tierSummaryLabel(report) {
   const total = Number(report?.summary?.total ?? 0);

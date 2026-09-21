@@ -7,12 +7,15 @@
  */
 
 import {
+  tierCallSites,
   tierDirectionLabel,
+  tierEndpointSites,
   tierMatrixRows,
   tierPerTierRows,
+  tierSummaryLabel,
   tierTableTrace,
   tierTables,
-  tierSummaryLabel,
+  tierTraces,
 } from './strabo-tiers.js';
 
 function headerCell(text) {
@@ -100,6 +103,49 @@ export function renderTierPanel(container, report, filter = 'all') {
     item.dataset.role = 'tier-direction';
     item.textContent = `${entry.kind === 'upward' ? 'upward' : 'skip-layer'} · ${entry.source} → ${entry.target} (L${entry.line})`;
     container.append(item);
+  }
+
+  // The top half of the end-to-end trace: outbound call sites and the endpoints declared here.
+  const calls = tierCallSites(report);
+  if (calls.length > 0) {
+    const heading = document.createElement('h4');
+    heading.textContent = 'Calls';
+    container.append(heading);
+    for (const call of calls.slice(0, 20)) {
+      const item = document.createElement('div');
+      item.className = 'tier-call';
+      item.dataset.role = 'tier-call';
+      item.textContent = `${call.method ?? 'CALL'} ${call.target} · ${call.file}:${call.line}`;
+      container.append(item);
+    }
+  }
+
+  const endpoints = tierEndpointSites(report);
+  if (endpoints.length > 0) {
+    const heading = document.createElement('h4');
+    heading.textContent = 'Endpoints';
+    container.append(heading);
+    for (const endpoint of endpoints.slice(0, 20)) {
+      const item = document.createElement('div');
+      item.className = 'tier-endpoint';
+      item.dataset.role = 'tier-endpoint';
+      item.textContent = `${endpoint.method} ${endpoint.path} · ${endpoint.file}`;
+      container.append(item);
+    }
+  }
+
+  const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
+  if (joined.length > 0) {
+    const heading = document.createElement('h4');
+    heading.textContent = 'Trace';
+    container.append(heading);
+    for (const entry of joined.slice(0, 20)) {
+      const item = document.createElement('div');
+      item.className = 'tier-trace';
+      item.dataset.role = 'tier-trace';
+      item.textContent = `${entry.call.file}:${entry.call.line} → ${entry.endpoint.method} ${entry.endpoint.path} (${entry.endpoint.file})`;
+      container.append(item);
+    }
   }
 
   // The table index: the start of the end-to-end trace.
