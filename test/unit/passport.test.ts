@@ -18,7 +18,7 @@ after(() => {
     server.close();
   }
   for (const directory of created) {
-    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });
 

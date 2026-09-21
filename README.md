@@ -406,7 +406,9 @@ rather than an empty list. Where the scan recorded field references inside metho
 `this.x` / `self.x`, or an unshadowed bare name — it also shows **Data flow** panels
 (`Sources / inputs`, `Resources / hubs`, `Transforms`, `Sinks / outputs`) and per-member
 read/write wiring. When nothing was recorded, the panels say so; cross-file access is not
-claimed.
+claimed. For a language that splits a type across files (C++), the one file's extraction
+also reads the headers its recorded include edges name, so a class declared in a header and
+defined in a `.cpp` is reconstructed without searching or guessing a path.
 
 **Member map** opens that file in its own large floating workspace: member cards with
 cluster tags and read/write counts, the four `DATA FLOW` panels behind a read/write divider,
