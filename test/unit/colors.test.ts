@@ -55,6 +55,79 @@ function contrast(a, b) {
   return (high + 0.05) / (low + 0.05);
 }
 
+const COLOR_LITERAL = /#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/;
+
+/** Remove block and line comments so a colour named in prose is not a colour. */
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+test('every colour is defined once: no literals outside a :root block (R10)', () => {
+  const offenders = [];
+  const lines = styles.split(/\r?\n/);
+  let depth = 0;
+  let inRoot = false;
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!inRoot && /^:root\b[^{]*\{/.test(trimmed)) {
+      inRoot = true;
+      depth = 0;
+    }
+    const opens = (line.match(/\{/g) ?? []).length;
+    const closes = (line.match(/\}/g) ?? []).length;
+    if (inRoot) {
+      depth += opens - closes;
+      if (depth <= 0) {
+        inRoot = false;
+      }
+      return;
+    }
+    if (COLOR_LITERAL.test(line)) {
+      offenders.push(`styles.css:${index + 1}: ${trimmed}`);
+    }
+  });
+
+  const uiDir = path.resolve(here, '..', '..', 'ui');
+  for (const file of fs.readdirSync(uiDir).filter((name) => name.endsWith('.js'))) {
+    const source = stripComments(fs.readFileSync(path.join(uiDir, file), 'utf8'));
+    source.split(/\r?\n/).forEach((line, index) => {
+      if (COLOR_LITERAL.test(line)) {
+        offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  }
+
+  assert.deepEqual(offenders, [], `colour literals must live in :root only:\n${offenders.join('\n')}`);
+});
+
+test('one name per value: the alias tokens are removed and the scale survives (R12)', () => {
+  for (const removed of ['--bg', '--panel', '--muted', '--ink', '--mono']) {
+    assert.ok(!dark.has(removed), `${removed} should be removed`);
+    assert.ok(!light.has(removed), `${removed} should be removed`);
+  }
+  for (const kept of ['--bg-1', '--bg-2', '--ink-1', '--ink-3', '--font-mono']) {
+    assert.ok(dark.has(kept), `${kept} should survive`);
+  }
+});
+
+test('alpha comes from a three-step scale and one veiled surface (R13)', () => {
+  for (const token of ['--wash', '--hairline', '--veil', '--veiled-surface']) {
+    assert.ok(dark.has(token), `${token} should be defined`);
+    assert.ok(light.has(token), `${token} should be defined`);
+  }
+  for (const collapsed of [
+    '--chrome',
+    '--chrome-strong',
+    '--chrome-deep',
+    '--chrome-tooltip',
+    '--chrome-bar',
+    '--chrome-float',
+    '--scrim',
+  ]) {
+    assert.ok(!dark.has(collapsed), `${collapsed} should collapse into --veiled-surface/--veil`);
+  }
+});
+
 test('the map carries no directory palette: PALETTE and paletteColor are removed', () => {
   assert.ok(!('PALETTE' in graph), 'PALETTE should no longer be exported');
   assert.ok(!('paletteColor' in graph), 'paletteColor should no longer be exported');

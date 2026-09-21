@@ -9,10 +9,12 @@ Feature: Colour budget
 
   @colors
   Scenario: A changed node and an affected node differ by more than hue
-    When I open the folder dialog
+    When I close the open panels
+    And I open the folder dialog
     And I go up one folder
     And I choose the "timeline-repo" folder
     And I use the selected folder
+    And I close the open panels
     And I switch to file detail
     And I review the working tree through the automation hook
     Then a changed node and an affected node differ by more than hue

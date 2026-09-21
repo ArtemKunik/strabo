@@ -9,7 +9,7 @@ import type {
 } from '../types.ts';
 import { cacheRoot } from './graph-cache.ts';
 
-export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-2';
+export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-3';
 
 /** The per-repository facts that are expensive to recompute and cheap to store. */
 export interface CachedRepoFacts {

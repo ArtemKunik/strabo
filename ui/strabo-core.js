@@ -10,6 +10,8 @@
  * the module that owns the concern.
  */
 
+export * from './strabo-a11y.js';
+export * from './strabo-virtual.js';
 export * from './strabo-graph.js';
 export * from './strabo-islands.js';
 export * from './strabo-links.js';

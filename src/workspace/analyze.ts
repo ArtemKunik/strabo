@@ -11,6 +11,7 @@ import type {
 } from '../types.ts';
 import { computeContractDrift, extractContracts } from './contracts.ts';
 import { readPublishedCoordinate } from './coordinate.ts';
+import { extractLanguageContracts } from './dto.ts';
 import { computeCrossRepoFlows, type RepoFlowFact } from './flows.ts';
 import {
   computeServiceFlows,
@@ -53,7 +54,10 @@ export async function analyzeWorkspace(
     const stored = cache.get(repository.root, cached.fingerprint);
     const facts = stored ?? {
       publishes: readPublishedCoordinate(repository.root),
-      contracts: extractContracts(repository.root, repository.name),
+      contracts: [
+        ...extractContracts(repository.root, repository.name),
+        ...extractLanguageContracts(repository.root, repository.name),
+      ],
       endpoints: extractServiceEndpoints(repository.root, repository.name),
       calls: extractServiceCalls(repository.root),
     };

@@ -235,8 +235,13 @@ by Maven `groupId` prefix. The flow carries the importing file, line, and specif
 publishing manifest. Nothing is inferred from names or proximity, and if two repositories
 claim the same coordinate both flows are emitted rather than one being chosen silently.
 
-**Data contracts** are extracted from Protobuf messages, OpenAPI `components.schemas`, and
-JSON Schema objects, normalised to field name, type, and required-ness. The
+**Data contracts** are extracted from Protobuf messages, OpenAPI `components.schemas`,
+JSON Schema objects, and language-native DTOs — TypeScript interfaces and object type aliases
+(also `.js`), Python `@dataclass`/pydantic/`TypedDict` classes, Kotlin `data class` primary
+constructors, Java and C# `record`s, and Rust structs with named fields — normalised to field
+name, type, and required-ness. A language DTO is keyed by its bare type name, so the same
+shape declared in two repositories matches; only shapes with a clear DTO reading are taken.
+The
 `/api/strabo/workspace/contracts` endpoint returns them alongside **contract drift**: where
 the same contract id is declared by more than one repository, the fields that are missing on
 a side, have a different type, or disagree on required-ness. An identical shared contract is
@@ -254,7 +259,9 @@ returns the declared endpoints and the joined flows.
 
 The **Workspace** panel (dock entry, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the
-cross-repo flows; the contracts; and the drift. A section with nothing recorded says so
+cross-repo flows; the service endpoints and service flows; the contracts; and the drift.
+Opening the panel also rings, on the map, the local files the report records on one side of a
+cross-repo flow. A section with nothing recorded says so
 ("No cross-repo flows recorded.") rather than showing an empty list, and a shared contract
 that matches field-for-field is labelled clean. The panel is read-only and a config error is
 shown in the panel, not thrown.
@@ -434,6 +441,9 @@ npm run acceptance:install   # once: download Chromium
 npm run acceptance    # Cucumber + Playwright, writes an HTML report with screenshots
 npm run test:pack     # release readiness: pack, install in a clean consumer, run shipped code
 ```
+
+The unit suite runs entirely in Node. The DOM panels are covered through jsdom
+(`test/unit/panels.test.ts`), so a panel's model-to-tree transform is asserted without a browser.
 
 `npm run test:pack` builds the real tarball, asserts the published file set (dist, public,
 all four grammar assets, bin, README; no src/test/node_modules), installs it into a fresh

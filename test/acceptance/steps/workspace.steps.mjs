@@ -35,3 +35,13 @@ Then('the workspace panel reports no contracts recorded', async function () {
   const text = (await this.page.textContent('#workspace-panel')) ?? '';
   assert.match(text, /No contracts recorded\./);
 });
+
+Then('the workspace panel reports no service flows', async function () {
+  const text = (await this.page.textContent('#workspace-panel')) ?? '';
+  assert.match(text, /No service flows recorded\./);
+});
+
+Then('the workspace panel reports no service endpoints', async function () {
+  const text = (await this.page.textContent('#workspace-panel')) ?? '';
+  assert.match(text, /No service endpoints recorded\./);
+});

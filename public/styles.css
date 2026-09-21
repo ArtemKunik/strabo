@@ -4,17 +4,20 @@
   --bg-1: #10141a;
   --bg-2: #161c24;
   --bg-3: #1c242f;
-  --panel: #161c24;
   --ink-1: #eef3fa;
   --ink-2: #c3cfdd;
   --ink-3: #8da0b5;
-  --ink: #e7edf5;
-  --muted: #8da0b5;
   --line: #263140;
   --line-soft: #1e2836;
   --accent: #4c9aff;
-  --accent-soft: rgba(76, 154, 255, 0.14);
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
   --accent-ink: #bcd8ff;
+  /* Text on a filled colour that is not an ink token: a filled accent button and the
+     severity badge, whose background is the status scale. */
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  /* The focus ring is the accent: interaction, not status (Phase 12 M4). */
+  --focus-ring: var(--accent);
   /* The status scale: fixed, reserved, never themed, never reused for identity. Hue on
      the map and in panels means status and nothing else (Phase 13 M1 R4). Values are
      chosen to clear 3:1 on both --bg-1 and --bg-2. */
@@ -31,10 +34,16 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-other: #8da0b5;
+  /* Alpha is a scale, not a literal (R13): a wash for subtle fills, a hairline for
+     borders, and a veil for the translucent surfaces above the canvas. */
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(12, 16, 22, 0.72);
+  --veiled-surface: rgba(22, 28, 36, 0.96);
   /* Directory plates: structure, not status, so they stay achromatic and sit just above
      the canvas rather than competing with any node on it. */
-  --island-fill: rgba(255, 255, 255, 0.028);
-  --island-line: rgba(255, 255, 255, 0.07);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
   /* Canvas colours. The Cytoscape stylesheet in strabo-view.js reads these at runtime, so
      the graph follows the theme instead of carrying a second palette in JavaScript. */
   --graph-grid: rgba(255, 255, 255, 0.045);
@@ -49,15 +58,6 @@
   --graph-affected: var(--status-warning);
   --graph-cycle: var(--status-serious);
   --graph-unreached: var(--ink-3);
-  /* Chrome surfaces: the translucent overlays that sit above the canvas. Tokens so the
-     light theme can re-skin them without rewriting each rule. */
-  --chrome: rgba(22, 28, 36, 0.92);
-  --chrome-strong: rgba(22, 28, 36, 0.98);
-  --chrome-deep: rgba(14, 18, 24, 0.94);
-  --chrome-tooltip: rgba(14, 18, 24, 0.96);
-  --chrome-bar: rgba(22, 28, 36, 0.97);
-  --chrome-float: rgba(20, 26, 34, 0.98);
-  --scrim: rgba(12, 16, 22, 0.72);
   --input-bg: #0e1218;
   --radius-s: 6px;
   --radius-m: 8px;
@@ -66,11 +66,9 @@
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.5);
   --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
-  --bg: #10141a;
 }
 
 /*
@@ -84,17 +82,17 @@
   --bg-1: #f4f6fa;
   --bg-2: #ffffff;
   --bg-3: #e9eef5;
-  --panel: #ffffff;
   --ink-1: #16202c;
   --ink-2: #374353;
   --ink-3: #66748a;
-  --ink: #1b2530;
-  --muted: #66748a;
   --line: #d2dae5;
   --line-soft: #e2e8f0;
   --accent: #2f6fd0;
-  --accent-soft: rgba(47, 111, 208, 0.12);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-ink: #1c4f9c;
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  --focus-ring: var(--accent);
   --status-good: #1f9e7c;
   --status-warning: #b9741a;
   --status-serious: #b5562a;
@@ -105,11 +103,14 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-other: #66748a;
-  --island-fill: rgba(20, 40, 70, 0.045);
-  --island-line: rgba(20, 40, 70, 0.14);
+  --wash: rgba(20, 40, 70, 0.05);
+  --hairline: rgba(20, 40, 70, 0.16);
+  --veil: rgba(240, 243, 248, 0.7);
+  --veiled-surface: rgba(255, 255, 255, 0.97);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
   --shadow-1: 0 2px 8px rgba(30, 45, 70, 0.12);
   --shadow-2: 0 10px 30px rgba(30, 45, 70, 0.18);
-  --bg: #f4f6fa;
   --graph-grid: rgba(20, 40, 70, 0.10);
   --graph-ink: #1b2530;
   --graph-ink-outline: #f4f6fa;
@@ -122,13 +123,6 @@
   --graph-affected: var(--status-warning);
   --graph-cycle: var(--status-serious);
   --graph-unreached: var(--ink-3);
-  --chrome: rgba(255, 255, 255, 0.92);
-  --chrome-strong: rgba(255, 255, 255, 0.98);
-  --chrome-deep: rgba(255, 255, 255, 0.95);
-  --chrome-tooltip: rgba(255, 255, 255, 0.97);
-  --chrome-bar: rgba(255, 255, 255, 0.97);
-  --chrome-float: rgba(255, 255, 255, 0.99);
-  --scrim: rgba(240, 243, 248, 0.7);
   --input-bg: #ffffff;
 }
 
@@ -249,7 +243,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .control-label {
@@ -270,12 +264,10 @@ button {
   font: inherit;
 }
 
-.control select:focus-visible,
-.control input:focus-visible,
-button:focus-visible,
-.link:focus-visible,
-.crumb:focus-visible {
-  outline: 2px solid var(--accent);
+/* One focus ring for every interactive element (Phase 12 M4). Keyboard focus is always
+   visible; the pointer does not show it (`:focus-visible`), so the map stays uncluttered. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
@@ -303,7 +295,7 @@ button:disabled {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -337,7 +329,7 @@ button.primary {
 
 .status {
   margin-left: auto;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -350,7 +342,7 @@ button.primary {
   padding: 0 5px;
   border-radius: 999px;
   background: var(--status-warning);
-  color: #111;
+  color: var(--on-warning);
   font-size: 11px;
   font-weight: 700;
   text-align: center;
@@ -358,7 +350,7 @@ button.primary {
 
 .diag-badge.has-errors {
   background: var(--status-critical);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .crumb {
@@ -370,7 +362,7 @@ button.primary {
   content: "/";
   margin-right: 8px;
   margin-left: -4px;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 /* ------------------------------------------------------------------ Workspace */
@@ -444,7 +436,7 @@ button.primary {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--chrome);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-1);
   backdrop-filter: blur(6px);
   max-width: calc(100% - 24px);
@@ -497,7 +489,7 @@ button.primary {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: var(--chrome-strong);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
 }
 
@@ -552,7 +544,7 @@ button.primary {
 
 .graph-hover {
   padding: 2px 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 12px;
   max-width: 300px;
   overflow: hidden;
@@ -568,7 +560,7 @@ button.primary {
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: var(--chrome-tooltip);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
   font-size: var(--text-sm);
   pointer-events: none;
@@ -614,7 +606,7 @@ button.primary {
   height: 30px;
   padding: 0;
   border-radius: 8px;
-  background: var(--chrome);
+  background: var(--veiled-surface);
   font-size: 15px;
   line-height: 1;
 }
@@ -628,7 +620,7 @@ button.primary {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  background: var(--scrim);
+  background: var(--veil);
   z-index: 4;
   text-align: center;
 }
@@ -660,7 +652,7 @@ button.primary {
   padding: 10px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-m);
-  background: var(--chrome-deep);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-1);
   text-align: center;
   pointer-events: none;
@@ -733,14 +725,14 @@ button.primary {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--bg-0);
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 12px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
 .strip-chip:hover {
-  color: var(--ink);
+  color: var(--ink-1);
   border-color: var(--accent);
 }
 
@@ -755,7 +747,7 @@ button.primary {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 6px;
-  color: var(--ink);
+  color: var(--ink-1);
 }
 
 .legend-swatch {
@@ -775,7 +767,7 @@ button.primary {
 
 .passport-path {
   margin: 0 0 8px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-family: var(--font-mono);
   word-break: break-all;
@@ -790,7 +782,7 @@ button.primary {
 }
 
 .passport-metrics dt {
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .passport-metrics dd {
@@ -825,7 +817,7 @@ button.primary {
 }
 
 .unavailable {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-style: italic;
 }
@@ -836,7 +828,7 @@ button.primary {
 
 .member-type-name {
   margin: 4px 0 2px;
-  font-family: var(--mono, monospace);
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -847,7 +839,7 @@ button.primary {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .member-fields,
@@ -860,14 +852,14 @@ button.primary {
 
 .member-field,
 .member-method {
-  font-family: var(--mono, monospace);
+  font-family: var(--font-mono);
   word-break: break-word;
 }
 
 .member-field .wiring,
 .member-method .wiring {
   font-family: system-ui, sans-serif;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
@@ -1017,7 +1009,7 @@ button.primary {
 
 .data-flow .caveat {
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-style: italic;
 }
@@ -1045,7 +1037,7 @@ button.primary {
   max-height: calc(100vh - 116px);
   border: 1px solid var(--line);
   border-radius: var(--radius-l);
-  background: var(--chrome-float);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
   overflow: hidden;
   pointer-events: auto;
@@ -1217,7 +1209,7 @@ button.primary {
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--chrome);
+  background: var(--veiled-surface);
   backdrop-filter: blur(6px);
   box-shadow: var(--shadow-1);
 }
@@ -1231,7 +1223,7 @@ button.primary {
   border: 1px solid transparent;
   border-radius: 999px;
   background: none;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: var(--text-xs);
   white-space: nowrap;
 }
@@ -1258,17 +1250,17 @@ button.primary {
 
 @keyframes dock-chip-flash {
   0% {
-    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0);
+    box-shadow: 0 0 0 0 transparent;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   25% {
-    box-shadow: 0 0 0 3px rgba(76, 154, 255, 0.55);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0);
+    box-shadow: 0 0 0 0 transparent;
     background: var(--accent-soft);
     color: var(--accent-ink);
   }
@@ -1354,10 +1346,11 @@ button.primary {
   margin: 6px 0 0;
   padding-left: 18px;
   overflow: auto;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
-.overlay-panel ul li button {
+.overlay-panel ul li button,
+.overlay-list-row button {
   background: none;
   border: none;
   color: var(--accent);
@@ -1365,19 +1358,35 @@ button.primary {
   font: inherit;
 }
 
+/* Only the visible slice of a long overlay list is in the DOM; the spacer keeps the scrollbar. */
+.overlay-list {
+  max-height: 140px;
+  margin: 6px 0 0;
+  overflow: auto;
+  color: var(--ink-3);
+}
+
+.overlay-list-row {
+  height: 20px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .overlay-panel .overlay-summary {
-  color: var(--ink);
+  color: var(--ink-1);
 }
 
 .overlay-counts {
   margin: 2px 0 0;
-  color: var(--muted);
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
 
 .overlay-empty {
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .overlay-filter {
@@ -1389,14 +1398,6 @@ button.primary {
   padding: 4px 8px;
   font: inherit;
   background: var(--bg-1);
-}
-
-.overlay-more-wrap {
-  margin-top: 6px;
-}
-
-.overlay-more {
-  font: inherit;
 }
 
 .overlay-dot {
@@ -1514,7 +1515,7 @@ button.primary {
 }
 
 .health-delta.none {
-  color: var(--muted);
+  color: var(--ink-3);
   font-style: italic;
 }
 
@@ -1573,7 +1574,7 @@ button.primary {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--input-bg);
-  color: var(--muted);
+  color: var(--ink-3);
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -1585,7 +1586,7 @@ button.primary {
   gap: 8px 12px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 12px;
   background: var(--bg-0);
 }
@@ -1648,7 +1649,7 @@ button.primary {
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: -16px;
-  background: var(--panel);
+  background: var(--bg-2);
   padding-top: 8px;
   z-index: 1;
 }
@@ -1670,7 +1671,7 @@ button.primary {
 
 .inspector h3 {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-3);
   margin-bottom: 4px;
 }
 
@@ -1682,7 +1683,7 @@ button.primary {
 }
 
 .inspector dt {
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .inspector dd {
@@ -1722,13 +1723,13 @@ button.primary {
 .trace-button {
   font-size: 11px;
   padding: 0 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   flex: none;
 }
 
 .evidence,
 .trace {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
@@ -1755,7 +1756,7 @@ button.primary {
 .diagnostics ul {
   margin: 6px 0 0;
   padding-left: 18px;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .diag-group {
@@ -1789,12 +1790,12 @@ button.primary {
   padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--ink);
+  background: var(--bg-2);
+  color: var(--ink-1);
 }
 
 .dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--veil);
 }
 
 .dialog-header {
@@ -1816,7 +1817,7 @@ button.primary {
   margin: 0;
   padding: 8px 16px;
   border-bottom: 1px solid var(--line);
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 12px;
   font-family: var(--font-mono);
   word-break: break-all;
@@ -1837,12 +1838,12 @@ button.primary {
   border: none;
   border-radius: 6px;
   background: none;
-  color: var(--ink);
+  color: var(--ink-1);
   text-align: left;
 }
 
 .folder:hover {
-  background: var(--bg);
+  background: var(--bg-1);
 }
 
 .folder-repository {
@@ -1851,12 +1852,12 @@ button.primary {
 
 .folder-empty {
   padding: 6px 8px;
-  color: var(--muted);
+  color: var(--ink-3);
 }
 
 .dialog-note {
   margin: 8px 16px 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
@@ -1878,7 +1879,7 @@ button.primary {
   border: 1px solid var(--line);
   border-radius: 4px;
   background: var(--input-bg);
-  color: var(--muted);
+  color: var(--ink-3);
   cursor: pointer;
 }
 
@@ -1905,7 +1906,7 @@ button.primary {
 
 .member-crumb {
   margin: 0;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-family: var(--font-mono);
   word-break: break-all;
@@ -1928,7 +1929,7 @@ button.primary {
   gap: 8px 12px;
   padding: 8px 20px;
   border-block: 1px solid var(--line);
-  background: var(--chrome-bar);
+  background: var(--veiled-surface);
   backdrop-filter: blur(8px);
 }
 
@@ -1942,7 +1943,7 @@ button.primary {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
@@ -1952,7 +1953,7 @@ button.primary {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--input-bg);
-  color: var(--ink);
+  color: var(--ink-1);
   font: inherit;
   font-size: 12px;
 }
@@ -1962,14 +1963,14 @@ button.primary {
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--input-bg);
-  color: var(--muted);
+  color: var(--ink-3);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .member-toolbar button:hover {
-  color: var(--ink);
+  color: var(--ink-1);
   border-color: var(--accent);
 }
 
@@ -1977,7 +1978,7 @@ button.primary {
   display: flex;
   align-items: center;
   gap: 2px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1989,7 +1990,7 @@ button.primary {
 }
 
 .member-zoom button.active {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -2009,7 +2010,7 @@ button.primary {
   gap: 10px;
   padding: 8px 20px;
   border-top: 1px solid var(--line);
-  background: var(--chrome-bar);
+  background: var(--veiled-surface);
 }
 
 .walk-dots {
@@ -2033,7 +2034,7 @@ button.primary {
 .member-step {
   margin: 0;
   padding: 8px 20px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 12px;
   flex: 1;
 }
@@ -2049,7 +2050,7 @@ button.primary {
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--bg-2);
 }
 
 .member-body {
@@ -2072,7 +2073,7 @@ button.primary {
 }
 
 .member-count {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-weight: 400;
 }
@@ -2088,7 +2089,7 @@ button.primary {
   padding: 1px 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 10px;
 }
 
@@ -2099,7 +2100,7 @@ button.primary {
 
 .member-main h4 {
   margin: 14px 0 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -2120,7 +2121,7 @@ button.primary {
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--bg-2);
   transition: transform 0.12s, border-color 0.12s, opacity 0.14s;
 }
 
@@ -2143,11 +2144,11 @@ button.primary {
 }
 
 .method-card {
-  border-left-color: #56d4b1;
+  border-left-color: var(--status-good);
 }
 
 .card-eyebrow {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 9px;
   letter-spacing: 0.06em;
 }
@@ -2163,7 +2164,7 @@ button.primary {
   padding: 0 6px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 10px;
 }
 
@@ -2173,7 +2174,7 @@ button.primary {
 }
 
 .card-metrics {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 10px;
   font-family: var(--font-mono);
 }
@@ -2199,14 +2200,14 @@ button.primary {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--bg-2);
 }
 
 .flow-panel header {
   display: flex;
   justify-content: space-between;
   margin-bottom: 4px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 10px;
   letter-spacing: 0.05em;
 }
@@ -2277,7 +2278,7 @@ button.primary {
 }
 
 .flow-divider-axis {
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 9px;
   writing-mode: vertical-rl;
 }
@@ -2363,7 +2364,7 @@ button.primary {
 }
 
 .flow-node rect {
-  fill: var(--panel);
+  fill: var(--bg-2);
   stroke: var(--line);
   transition: stroke 160ms ease, opacity 160ms ease;
 }
@@ -2374,9 +2375,9 @@ button.primary {
 }
 
 .flow-node text {
-  fill: var(--ink);
+  fill: var(--ink-1);
   font-size: 12px;
-  font-family: var(--mono, monospace);
+  font-family: var(--font-mono);
 }
 
 .flow-node:hover rect,
@@ -2402,15 +2403,15 @@ button.primary {
 @keyframes dataflow-pulse {
   0% {
     border-color: var(--accent);
-    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0.45);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
   }
   70% {
     border-color: var(--accent);
-    box-shadow: 0 0 0 8px rgba(76, 154, 255, 0);
+    box-shadow: 0 0 0 8px transparent;
   }
   100% {
     border-color: var(--line);
-    box-shadow: 0 0 0 0 rgba(76, 154, 255, 0);
+    box-shadow: 0 0 0 0 transparent;
   }
 }
 
@@ -2463,14 +2464,14 @@ button.primary {
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--bg-2);
 }
 
 .member-insights h4 {
   display: flex;
   justify-content: space-between;
   margin: 0 0 8px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -2478,12 +2479,12 @@ button.primary {
 }
 
 .health-score {
-  color: var(--ink);
+  color: var(--ink-1);
 }
 
 .health-metrics {
   margin: 0 0 6px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
@@ -2499,7 +2500,7 @@ button.primary {
 }
 
 .radar-area {
-  fill: #4c9aff33;
+  fill: color-mix(in srgb, var(--accent) 20%, transparent);
   stroke: var(--accent);
 }
 
@@ -2510,17 +2511,17 @@ button.primary {
 .health-axes {
   margin: 8px 0 0;
   padding-left: 16px;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 11px;
 }
 
-.constellation-dot.field { fill: #56d4b1; }
-.constellation-dot.method { fill: #4c9aff; }
-.constellation-dot.consumer { fill: #8da0b5; }
+.constellation-dot.field { fill: var(--status-good); }
+.constellation-dot.method { fill: var(--accent); }
+.constellation-dot.consumer { fill: var(--ink-3); }
 
 .member-view .caveat {
   margin: 6px 0 0;
-  color: var(--muted);
+  color: var(--ink-3);
   font-size: 10px;
   font-style: italic;
 }
@@ -2569,7 +2570,7 @@ button.primary {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: var(--chrome-float);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
 }
 
@@ -2646,7 +2647,7 @@ button.primary {
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: 9px;
-  background: var(--chrome-float);
+  background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
   font-size: 12.5px;
 }
@@ -2700,7 +2701,7 @@ button.primary {
 
 .diag-runtime {
   margin: 4px 0;
-  color: var(--muted);
+  color: var(--ink-3);
   font-family: var(--font-mono);
   font-size: 11px;
 }

@@ -11,6 +11,7 @@ import {
   cohesionDelta,
   constellationLayout,
   clusterSeriesClass,
+  createVirtualList,
   constellationPoints,
   explainClass,
   fieldCard,
@@ -26,6 +27,7 @@ import {
   orderMembers,
   passportFor,
   polygonPoints,
+  rovingIndex,
   radarFrame,
   radarPoints,
   readingLegend,
@@ -52,9 +54,14 @@ import {
   driftRows,
   flowRows,
   repositoryRows,
+  serviceEndpointRows,
+  serviceFlowRows,
   workspaceSummary,
 } from './strabo-workspace.js';
 import { Fragment, h, host, mount } from './view.js';
+
+/** Unique ids so each tab and its panel can point at each other with ARIA. */
+let inspectorSeq = 0;
 
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
@@ -168,7 +175,25 @@ export function renderInspector(container, model, id, handlers = {}) {
     ['members', 'Members', members],
     ['functions', 'Functions', functions],
   ];
+  const base = `inspector-${(inspectorSeq += 1)}`;
   const tabButtons = [];
+  const tabSections = [];
+
+  /** Show one tab panel and make its tab the single tabbable one (roving tabindex). */
+  const selectTab = (index, { focus = false } = {}) => {
+    tabButtons.forEach((button, position) => {
+      const selected = position === index;
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
+      button.tabIndex = selected ? 0 : -1;
+    });
+    tabSections.forEach((section, position) => {
+      section.hidden = position !== index;
+    });
+    if (focus) {
+      tabButtons[index].focus();
+    }
+  };
+
   for (const [key, label, section] of tabDefs) {
     const tab = document.createElement('button');
     tab.type = 'button';
@@ -176,17 +201,27 @@ export function renderInspector(container, model, id, handlers = {}) {
     tab.setAttribute('role', 'tab');
     tab.dataset.tab = key;
     tab.textContent = label;
-    tab.setAttribute('aria-selected', key === 'deps' ? 'true' : 'false');
-    tab.addEventListener('click', () => {
-      for (const other of tabButtons) other.setAttribute('aria-selected', other === tab ? 'true' : 'false');
-      for (const child of panels.children) child.hidden = true;
-      section.hidden = false;
+    tab.id = `${base}-tab-${key}`;
+    tab.setAttribute('aria-controls', `${base}-panel-${key}`);
+    section.id = `${base}-panel-${key}`;
+    section.setAttribute('role', 'tabpanel');
+    section.setAttribute('aria-labelledby', tab.id);
+    section.tabIndex = 0;
+    tab.addEventListener('click', () => selectTab(tabButtons.indexOf(tab)));
+    tab.addEventListener('keydown', (event) => {
+      const next = rovingIndex(tabButtons.indexOf(tab), tabButtons.length, event.key);
+      if (next === null) {
+        return;
+      }
+      event.preventDefault();
+      selectTab(next, { focus: true });
     });
     tabs.append(tab);
     tabButtons.push(tab);
-    section.hidden = key !== 'deps';
+    tabSections.push(section);
     panels.append(section);
   }
+  selectTab(0);
   container.append(tabs, panels);
 
   const trace = document.createElement('p');
@@ -492,6 +527,36 @@ export function renderWorkspace(container, report, handlers = {}) {
           detail.textContent =
             `${flow.files} file${flow.files === 1 ? '' : 's'}` +
             (flow.publishedBy ? ` · published by ${flow.publishedBy}` : '');
+          item.append(detail);
+        }),
+  );
+
+  const endpoints = serviceEndpointRows(report);
+  container.append(workspaceHeading('Service endpoints', endpoints.length));
+  container.append(
+    endpoints.length === 0
+      ? workspaceNote('No service endpoints recorded.')
+      : workspaceList('workspace-endpoints', endpoints, (item, endpoint) => {
+          item.textContent = `${endpoint.label} — ${endpoint.repository}`;
+          const detail = document.createElement('div');
+          detail.className = 'workspace-detail';
+          detail.textContent = endpoint.source;
+          item.append(detail);
+        }),
+  );
+
+  const serviceFlows = serviceFlowRows(report);
+  container.append(workspaceHeading('Service flows', serviceFlows.length));
+  container.append(
+    serviceFlows.length === 0
+      ? workspaceNote('No service flows recorded.')
+      : workspaceList('workspace-service-flows', serviceFlows, (item, flow) => {
+          item.textContent = flow.label;
+          const detail = document.createElement('div');
+          detail.className = 'workspace-detail';
+          detail.textContent =
+            `${flow.calls} call${flow.calls === 1 ? '' : 's'}` +
+            (flow.declaredBy ? ` · declared by ${flow.declaredBy}` : '');
           item.append(detail);
         }),
   );
@@ -1055,14 +1120,34 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
   if (overlay.items.length > 0) {
     const needsSearch = overlay.items.length > 8;
     let filter = '';
-    const list = document.createElement('ul');
-    const moreWrap = document.createElement('div');
-    moreWrap.className = 'overlay-more-wrap';
-    const moreButton = document.createElement('button');
-    moreButton.type = 'button';
-    moreButton.className = 'overlay-more';
-    const PAGE = 50;
-    let shown = PAGE;
+
+    const rowFor = (item) => {
+      const entry = document.createElement('div');
+      entry.className = 'overlay-list-row';
+      entry.setAttribute('role', 'listitem');
+      if (typeof item === 'string') {
+        entry.dataset.delegateOverlayItem = item;
+      }
+      if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
+        const jump = document.createElement('button');
+        jump.type = 'button';
+        jump.textContent = item;
+        jump.title = `Select ${item}`;
+        jump.addEventListener('click', () => options.onSelect(item.split(' · ')[0]));
+        entry.append(jump);
+      } else {
+        entry.textContent = item;
+      }
+      return entry;
+    };
+
+    // A long overlay list scrolls instead of paging: only the visible slice is in the DOM.
+    const list = createVirtualList({
+      rowHeight: 20,
+      overscan: 6,
+      className: 'overlay-list',
+      renderRow: rowFor,
+    });
 
     const matchingItems = () => (
       filter
@@ -1070,39 +1155,15 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
         : overlay.items
     );
 
+    const empty = document.createElement('p');
+    empty.className = 'overlay-empty';
+    empty.textContent = 'No modules match this filter.';
+    empty.hidden = true;
+
     const renderList = () => {
-      list.replaceChildren();
       const matching = matchingItems();
-      for (const item of matching.slice(0, shown)) {
-        const entry = document.createElement('li');
-        if (typeof item === 'string') {
-          entry.dataset.delegateOverlayItem = item;
-        }
-        if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
-          const jump = document.createElement('button');
-          jump.type = 'button';
-          jump.textContent = item;
-          jump.title = `Select ${item}`;
-          jump.addEventListener('click', () => options.onSelect(item.split(' · ')[0]));
-          entry.append(jump);
-        } else {
-          entry.textContent = item;
-        }
-        list.append(entry);
-      }
-      const remaining = matching.length - Math.min(shown, matching.length);
-      if (remaining > 0) {
-        moreButton.hidden = false;
-        moreButton.textContent = `Show ${Math.min(PAGE, remaining)} more (${remaining} remaining)`;
-      } else {
-        moreButton.hidden = true;
-      }
-      if (filter && matching.length === 0) {
-        const empty = document.createElement('li');
-        empty.className = 'overlay-empty';
-        empty.textContent = 'No modules match this filter.';
-        list.append(empty);
-      }
+      empty.hidden = matching.length > 0;
+      list.setItems(matching);
     };
 
     if (needsSearch) {
@@ -1113,19 +1174,14 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
       search.setAttribute('aria-label', 'Filter overlay modules');
       search.addEventListener('input', () => {
         filter = search.value.trim().toLowerCase();
-        shown = PAGE;
         renderList();
       });
       container.append(search);
     }
-    moreButton.addEventListener('click', () => {
-      shown += PAGE;
-      renderList();
-    });
-    container.append(list);
-    container.append(moreWrap);
-    moreWrap.append(moreButton);
+    container.append(list.element);
+    container.append(empty);
     renderList();
+    list.refresh();
   }
 }
 
@@ -2026,6 +2082,8 @@ function buildFieldCard(field, clusterIndex, related) {
   element.dataset.member = field.name;
   element.dataset.cluster = String(clusterIndex ?? 0);
   element.dataset.related = related ? [...related].join(' ') : '';
+  element.setAttribute('role', 'group');
+  element.setAttribute('aria-label', card.signature);
   element.style.setProperty('--cluster-stagger', String(staggerFor(clusterIndex)));
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));
@@ -2043,6 +2101,8 @@ function buildMethodCard(method, clusterIndex, related) {
   element.dataset.member = method.name;
   element.dataset.cluster = String(clusterIndex ?? 0);
   element.dataset.related = related ? [...related].join(' ') : '';
+  element.setAttribute('role', 'group');
+  element.setAttribute('aria-label', card.signature);
   element.style.setProperty('--cluster-stagger', String(staggerFor(clusterIndex)));
   element.append(cardLine('card-eyebrow', `${card.eyebrow} · CLUSTER ${clusterIndex ?? '—'}`));
   element.append(cardLine('card-signature', card.signature));

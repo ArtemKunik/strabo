@@ -60,9 +60,12 @@ import {
 } from '../../ui/strabo-narrator.js';
 import {
   contractRows,
+  crossRepoNodeIds,
   driftRows,
   flowRows,
   repositoryRows,
+  serviceEndpointRows,
+  serviceFlowRows,
   workspaceSummary,
 } from '../../ui/strabo-workspace.js';
 
@@ -856,8 +859,12 @@ test('buildNarratorEvidence lists recorded metrics, signals, and calls only', ()
 test('workspaceSummary reports the recorded counts or says it is unrecorded', () => {
   assert.equal(workspaceSummary(null), 'Workspace not recorded.');
   assert.equal(
-    workspaceSummary({ summary: { repositories: 2, flows: 1, contracts: 3, drifting: 1 } }),
-    '2 repositories · 1 cross-repo flows · 3 contracts · 1 drifting',
+    workspaceSummary({ summary: { repositories: 2, flows: 1, serviceFlows: 4, contracts: 3, drifting: 1 } }),
+    '2 repositories · 1 cross-repo flows · 4 service flows · 3 contracts · 1 drifting',
+  );
+  assert.equal(
+    workspaceSummary({ summary: { repositories: 1, flows: 0, contracts: 0, drifting: 0 } }),
+    '1 repositories · 0 cross-repo flows · 0 service flows · 0 contracts · 0 drifting',
   );
 });
 
@@ -912,4 +919,50 @@ test('flowRows, contractRows, and driftRows shape the recorded workspace', () =>
   assert.deepEqual(clean.deviations, []);
   assert.equal(drifting.clean, false);
   assert.deepEqual(drifting.deviations, ['zip: missing']);
+});
+
+test('serviceEndpointRows and serviceFlowRows shape the recorded service wiring', () => {
+  const [endpoint] = serviceEndpointRows({
+    serviceEndpoints: [
+      { repository: 'api', source: 'openapi.yaml', method: 'GET', path: '/users/{id}', host: 'api.acme.dev' },
+    ],
+  });
+  assert.equal(endpoint.label, 'GET api.acme.dev/users/{id}');
+  assert.equal(endpoint.repository, 'api');
+  assert.equal(endpoint.source, 'openapi.yaml');
+
+  const [hostless] = serviceEndpointRows({
+    serviceEndpoints: [{ repository: 'api', source: 'openapi.yaml', method: 'POST', path: '/users', host: null }],
+  });
+  assert.equal(hostless.label, 'POST /users');
+
+  const [flow] = serviceFlowRows({
+    serviceFlows: [
+      {
+        from: 'web',
+        to: 'api',
+        method: 'GET',
+        path: '/users/{id}',
+        host: 'api.acme.dev',
+        calls: [{ file: 'src/client.ts', line: 12, target: 'https://api.acme.dev/users/1', method: 'GET' }],
+        declaredBy: 'openapi.yaml',
+      },
+    ],
+  });
+  assert.equal(flow.label, 'web → api (GET api.acme.dev/users/{id})');
+  assert.equal(flow.calls, 1);
+  assert.equal(flow.declaredBy, 'openapi.yaml');
+});
+
+test('crossRepoNodeIds keeps only recorded files the current graph actually drew', () => {
+  const report = {
+    flows: [{ files: [{ file: 'src/uses-api.ts' }, { file: 'src/absent.ts' }] }],
+    serviceFlows: [{ calls: [{ file: 'src/client.ts' }, { file: 'src/uses-api.ts' }] }],
+    serviceEndpoints: [{ source: 'openapi.yaml' }],
+  };
+  const nodes = ['src/uses-api.ts', 'src/client.ts', 'src/other.ts'];
+
+  assert.deepEqual(crossRepoNodeIds(report, nodes), ['src/client.ts', 'src/uses-api.ts']);
+  assert.deepEqual(crossRepoNodeIds(null, nodes), []);
+  assert.deepEqual(crossRepoNodeIds(report, []), []);
 });

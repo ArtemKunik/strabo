@@ -10,13 +10,28 @@ import {
   LABEL_INSET,
   SHAPES,
   buildElements,
+  diffGraph,
   fitLabel,
   islandBounds,
   islandLabelFits,
   projectIsland,
 } from './strabo-core.js';
 
-const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner'];
+const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner', 'ov-cross-repo'];
+
+/**
+ * Classes the graph applies after building elements. An incremental render reuses existing
+ * elements, so it clears these first to match the "fresh elements" the old rebuild produced.
+ */
+const RESET_CLASSES = [
+  ...OVERLAY_CLASSES,
+  'hover',
+  'edge-selected',
+  'dimmed',
+  'edge-faded',
+  'label-hidden',
+  'filtered-out',
+];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
 let labelsVisible = true;
@@ -59,6 +74,8 @@ export function createView(container) {
   // just re-project them.
   let islandModel = null;
   let islandVisible = null;
+  // The element set from the last render, so a re-render can update only what changed.
+  let renderedElements = { nodes: [], edges: [] };
 
   function repaintIslands() {
     islands.paint(islandBounds(islandModel, { visible: islandVisible }), {
@@ -196,11 +213,29 @@ export function createView(container) {
     },
     render(model) {
       const elements = buildElements(model);
+      const diff = diffGraph(renderedElements, elements);
+      renderedElements = elements;
       selectedEdge = null;
       cy.batch(() => {
-        cy.elements().remove();
-        cy.add(elements.nodes);
-        cy.add(elements.edges);
+        // Clearing the post-build classes first keeps the reused elements as bare as the
+        // freshly-added ones were, so no overlay survives a re-render that dropped it.
+        cy.elements().unselect().removeClass(RESET_CLASSES.join(' '));
+        for (const id of diff.edges.removed) cy.getElementById(id).remove();
+        for (const id of diff.nodes.removed) cy.getElementById(id).remove();
+        cy.add(diff.nodes.added);
+        cy.add(diff.edges.added);
+        for (const { before, after } of diff.nodes.updated) {
+          const node = cy.getElementById(after.data.id);
+          if (node.empty()) continue;
+          node.removeClass(before.classes ?? '');
+          node.addClass(after.classes ?? '');
+          node.data(after.data);
+          if (after.position) node.position(after.position);
+        }
+        for (const { after } of diff.edges.updated) {
+          const edge = cy.getElementById(after.data.id);
+          if (edge.nonempty()) edge.data(after.data);
+        }
       });
       islandModel = model;
       islandVisible = null;
@@ -234,6 +269,21 @@ export function createView(container) {
         for (const [id, className] of classesByNode ?? []) {
           const node = cy.getElementById(id);
           if (node.nonempty()) node.addClass(className);
+        }
+      });
+    },
+    /**
+     * Ring the nodes that take part in a recorded cross-repo interaction. Pass null to clear.
+     *
+     * This is separate from the review `overlay()` because it is driven by the workspace
+     * report, not by a graph analysis, and the two can be on screen at once.
+     */
+    crossRepo(ids) {
+      cy.batch(() => {
+        cy.nodes().removeClass('ov-cross-repo');
+        for (const id of ids ?? []) {
+          const node = cy.getElementById(id);
+          if (node.nonempty()) node.addClass('ov-cross-repo');
         }
       });
     },
@@ -512,30 +562,15 @@ function reloadWithoutWebGL(error) {
 }
 
 /**
- * The colour the WebGL renderer should blend against.
- *
- * `.graph` is transparent over the dotted `.graph-wrap`, so fall back to the surface
- * token rather than letting Cytoscape assume white.
- */
-function surfaceColour(container) {
-  const own = getComputedStyle(container).backgroundColor;
-  if (own && !own.startsWith('rgba(0, 0, 0, 0)') && own !== 'transparent') {
-    return own;
-  }
-  const token = getComputedStyle(document.documentElement).getPropertyValue('--bg-1').trim();
-  return token || '#10141a';
-}
-
-/**
  * Write the theme's surface onto the container as an inline colour.
  *
- * `surfaceColour` prefers the container's *own* background, and this is what sets it, so
- * clear it first: on a re-theme it would otherwise read back the colour it wrote last
- * time and the token would never be consulted again.
+ * `.graph` is transparent over the dotted `.graph-wrap`, so the WebGL renderer would
+ * otherwise blend against white. The surface is the `--bg-1` token, the same definition
+ * the CSS uses; assigning the token directly means a re-theme reads the new value rather
+ * than a colour written last time.
  */
 function paintContainerBackground(container) {
-  container.style.backgroundColor = '';
-  container.style.backgroundColor = surfaceColour(container);
+  container.style.backgroundColor = cssVar('--bg-1');
 }
 
 /**
@@ -682,28 +717,33 @@ function applyLabelBudget(cy, force = false) {
 }
 
 /**
- * Canvas colours, read from the CSS custom properties so the graph follows the active
- * theme. Falls back to the dark values when the variables are missing (a bare test DOM).
+ * Read one CSS custom property from the document root.
+ *
+ * `styles.css` is the single definition of every colour (Phase 13 M1a R10/R11): the canvas
+ * resolves the tokens at startup rather than carrying a second palette in JavaScript, so the
+ * two can never drift. A missing token yields an empty string, which is a bug in the token
+ * set, not a value to paper over with a fallback.
  */
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** Canvas colours, read from the CSS custom properties so the graph follows the active theme. */
 function graphTheme() {
-  const read = (name, fallback) => {
-    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return value || fallback;
-  };
   return {
-    ink: read('--graph-ink', '#eef3fa'),
-    inkOutline: read('--graph-ink-outline', '#0c1016'),
-    nodeFill: read('--node-fill', '#6b7a8d'),
-    nodeLine: read('--node-line', 'rgba(255,255,255,0.22)'),
-    edge: read('--graph-edge', '#55697f'),
-    edgeAccent: read('--graph-edge-accent', '#7fb4ff'),
-    edgeSelected: read('--graph-edge-selected', '#4c9aff'),
-    hub: read('--graph-hub', '#4c9aff'),
-    selected: read('--graph-selected', '#ffffff'),
-    changed: read('--graph-changed', '#d03b3b'),
-    affected: read('--graph-affected', '#fab219'),
-    cycle: read('--graph-cycle', '#ec835a'),
-    unreached: read('--graph-unreached', '#8da0b5'),
+    ink: cssVar('--graph-ink'),
+    inkOutline: cssVar('--graph-ink-outline'),
+    nodeFill: cssVar('--node-fill'),
+    nodeLine: cssVar('--node-line'),
+    edge: cssVar('--graph-edge'),
+    edgeAccent: cssVar('--graph-edge-accent'),
+    edgeSelected: cssVar('--graph-edge-selected'),
+    hub: cssVar('--graph-hub'),
+    selected: cssVar('--graph-selected'),
+    changed: cssVar('--graph-changed'),
+    affected: cssVar('--graph-affected'),
+    cycle: cssVar('--graph-cycle'),
+    unreached: cssVar('--graph-unreached'),
   };
 }
 
@@ -756,6 +796,9 @@ function stylesheet() {
     { selector: 'node.ov-wide-interface', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.ov-pass-through', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.7 } },
     { selector: 'node.ov-sole-owner', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.cycle, 'background-opacity': 1 } },
+    // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
+    // dotted ring that reads as "part of a workspace flow" without entering the status set.
+    { selector: 'node.ov-cross-repo', style: { 'border-width': 4, 'border-style': 'dotted', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },

@@ -298,6 +298,7 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
   const a = tempDir();
   write(a, 'package.json', '{"name":"@acme/core"}');
   write(a, 'user.proto', 'syntax = "proto3";\npackage acme;\nmessage User {\n  string id = 1;\n  string name = 2;\n}\n');
+  write(a, 'src/profile.ts', 'export interface Profile {\n  id: string;\n  name: string;\n}\n');
   write(
     a,
     'openapi.json',
@@ -320,6 +321,11 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
     b,
     'src/index.ts',
     "import { core } from '@acme/core';\nexport const value = core;\nexport const users = () => fetch('https://api.acme.test/users');\n",
+  );
+  write(
+    b,
+    'src/profile.ts',
+    'export interface Profile {\n  id: string;\n  name: string;\n  email: string;\n}\n',
   );
   write(
     b,
@@ -357,6 +363,18 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
   assert.deepEqual(drift.repositories, [nameOf(a), nameOf(b)].sort());
   assert.deepEqual(
     drift.deviations.map((entry) => [entry.name, entry.issue]),
+    [['email', 'missing']],
+  );
+
+  // A TypeScript DTO is extracted and joins the drift beside the protobuf one.
+  assert.ok(
+    first.contracts.some((entry) => entry.id === 'Profile' && entry.format === 'typescript'),
+    'the language DTO should be extracted',
+  );
+  const profileDrift = first.drift.find((entry) => entry.id === 'Profile');
+  assert.ok(profileDrift);
+  assert.deepEqual(
+    profileDrift.deviations.map((entry) => [entry.name, entry.issue]),
     [['email', 'missing']],
   );
 

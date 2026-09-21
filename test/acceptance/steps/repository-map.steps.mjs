@@ -87,6 +87,14 @@ When('I press Refresh', async function () {
   await this.page.click('#refresh');
 });
 
+When('I close the open panels', async function () {
+  await this.page.evaluate(() => {
+    for (const controller of window.straboTest?.floatingWindows?.() ?? []) {
+      if (controller.isOpen?.()) controller.toggle();
+    }
+  });
+});
+
 When('I open the folder dialog', async function () {
   await this.page.click('#browse');
   await this.page.waitForFunction(() => document.getElementById('folder-dialog')?.open === true);

@@ -16,6 +16,7 @@ export function workspaceSummary(report) {
   return (
     `${summary.repositories} repositories · ` +
     `${summary.flows} cross-repo flows · ` +
+    `${summary.serviceFlows ?? 0} service flows · ` +
     `${summary.contracts} contracts · ` +
     `${summary.drifting} drifting`
   );
@@ -41,6 +42,50 @@ export function flowRows(report) {
     files: Array.isArray(flow.files) ? flow.files.length : 0,
     publishedBy: flow.publishedBy ?? null,
   }));
+}
+
+/** One row per HTTP endpoint a repository declares in its OpenAPI document. */
+export function serviceEndpointRows(report) {
+  return (report?.serviceEndpoints ?? []).map((endpoint) => ({
+    id: `${endpoint.repository}:${endpoint.method} ${endpoint.host ?? ''}${endpoint.path}`,
+    label: `${endpoint.method} ${endpoint.host ?? ''}${endpoint.path}`,
+    repository: endpoint.repository,
+    source: endpoint.source,
+  }));
+}
+
+/** One row per recorded outbound call joined to an endpoint a sibling repository declares. */
+export function serviceFlowRows(report) {
+  return (report?.serviceFlows ?? []).map((flow) => ({
+    id: `${flow.from}->${flow.to}:${flow.method} ${flow.host}${flow.path}`,
+    label: `${flow.from} → ${flow.to} (${flow.method} ${flow.host}${flow.path})`,
+    calls: Array.isArray(flow.calls) ? flow.calls.length : 0,
+    declaredBy: flow.declaredBy ?? null,
+  }));
+}
+
+/**
+ * The current graph's node ids that the report records on one side of a cross-repo
+ * interaction: a file that imports a sibling's coordinate or makes a service call, or a file
+ * that declares an endpoint. Matching is by the recorded repo-relative path, so the mark only
+ * lands on a node the scan actually drew.
+ */
+export function crossRepoNodeIds(report, nodeIds) {
+  const nodes = new Set(nodeIds ?? []);
+  const matched = new Set();
+  const consider = (file) => {
+    if (typeof file === 'string' && nodes.has(file)) {
+      matched.add(file);
+    }
+  };
+  for (const flow of report?.flows ?? []) {
+    for (const file of flow.files ?? []) consider(file.file);
+  }
+  for (const flow of report?.serviceFlows ?? []) {
+    for (const call of flow.calls ?? []) consider(call.file);
+  }
+  for (const endpoint of report?.serviceEndpoints ?? []) consider(endpoint.source);
+  return [...matched].sort();
 }
 
 /** One row per declared contract, with its field count. */

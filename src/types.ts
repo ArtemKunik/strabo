@@ -312,7 +312,17 @@ export interface ContractField {
 export interface ContractDefinition {
   /** Stable id used to match the same contract across repositories. */
   id: string;
-  format: 'protobuf' | 'openapi' | 'json-schema';
+  format:
+    | 'protobuf'
+    | 'openapi'
+    | 'json-schema'
+    | 'typescript'
+    | 'javascript'
+    | 'python'
+    | 'kotlin'
+    | 'java'
+    | 'csharp'
+    | 'rust';
   /** Repository name. */
   repository: string;
   /** Repository-relative source file. */

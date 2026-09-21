@@ -110,6 +110,7 @@ export { readPublishedCoordinate } from './workspace/coordinate.ts';
 export { computeCrossRepoFlows } from './workspace/flows.ts';
 export type { RepoFlowFact } from './workspace/flows.ts';
 export { extractContracts, computeContractDrift, findContractFiles } from './workspace/contracts.ts';
+export { extractLanguageContracts, findSourceFiles } from './workspace/dto.ts';
 export {
   extractServiceEndpoints,
   extractServiceCalls,

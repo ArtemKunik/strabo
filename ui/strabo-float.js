@@ -8,6 +8,8 @@
  * closed or collapsed one.
  */
 
+import { rovingIndex } from './strabo-core.js';
+
 const STORAGE_KEY = 'strabo.float.windows.v2';
 const GAP = 12;
 const DEFAULT_WIDTH = 384;
@@ -102,7 +104,14 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
 
   const renderDock = () => {
     if (!dock) return;
-    dock.replaceChildren(...controllers.map((controller) => controller.dockButton()));
+    const chips = controllers.map((controller) => controller.dockButton());
+    dock.replaceChildren(...chips);
+    // A toolbar is one tab stop: the first enabled chip is tabbable and the arrow keys
+    // move focus between the rest.
+    const enabled = chips.filter((chip) => !chip.disabled);
+    enabled.forEach((chip, index) => {
+      chip.tabIndex = index === 0 ? 0 : -1;
+    });
   };
 
   /** Draw attention to the chip that just opened its window, so the panel is found. */
@@ -146,6 +155,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     const title = document.createElement('span');
     title.className = 'float-title';
     title.textContent = config.title ?? config.key;
+
+    // A floating panel is a non-modal dialog: it can be focused, it names itself, and
+    // Escape closes it. `tabIndex = -1` lets the window take focus on open without joining
+    // the tab order (the dock chip remains the tab stop).
+    win.setAttribute('role', 'dialog');
+    win.setAttribute('aria-label', title.textContent);
+    win.tabIndex = -1;
 
     const spacer = document.createElement('span');
     spacer.className = 'float-spacer';
@@ -251,8 +267,11 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       win.hidden = hidden;
       if (!hidden && config.titleFrom) {
         const heading = config.titleFrom(element);
-        if (heading) title.textContent = heading;
+        if (heading) {
+          title.textContent = heading;
+        }
       }
+      win.setAttribute('aria-label', title.textContent);
       if (hidden !== lastHidden) {
         lastHidden = hidden;
         renderDock();
@@ -293,15 +312,22 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         sync();
         raise();
         persist();
+        // Land the keyboard in the panel that was just opened, without scrolling the rail.
+        win.focus({ preventScroll: true });
         return true;
       },
       close() {
+        const hadFocus = win.contains(document.activeElement);
         if (config.onClose) config.onClose();
         else element.hidden = true;
         win.hidden = true;
         lastHidden = true;
         renderDock();
         persist();
+        // Return focus to the chip that opened it, so closing does not drop the keyboard.
+        if (hadFocus) {
+          dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`)?.focus();
+        }
       },
       toggle() {
         if (win.hidden) {
@@ -355,6 +381,16 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         return button;
       },
     };
+
+    // Escape closes the focused window and stops there, so it does not also reach the
+    // global handler that clears the map selection.
+    win.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
+        event.stopPropagation();
+        event.preventDefault();
+        controller.close();
+      }
+    });
 
     header.addEventListener('pointerdown', (event) => {
       if (event.target.closest('button') || event.button !== 0) return;
@@ -445,6 +481,21 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     controllers.push(controller);
     sync();
   }
+
+  // Arrow keys move focus between the dock chips (roving tabindex), Home/End jump to the
+  // ends. The dock is a `role="toolbar"`, so this is the expected keyboard contract.
+  dock?.addEventListener('keydown', (event) => {
+    const chips = [...dock.querySelectorAll('.dock-chip')].filter((chip) => !chip.disabled);
+    const next = rovingIndex(chips.indexOf(document.activeElement), chips.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    chips.forEach((chip, index) => {
+      chip.tabIndex = index === next ? 0 : -1;
+    });
+    chips[next].focus();
+  });
 
   window.addEventListener('resize', () => {
     for (const controller of controllers) {

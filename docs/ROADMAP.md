@@ -21,10 +21,12 @@ record is reported as `unavailable`, never invented.
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, service flows, per-fingerprint cache; A10: read-only Workspace panel; A11: HTTP/service-call flows) |
-| 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
-| 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget done (R1-R9); M1a one-source-of-truth for colour pending |
+| 12 | Frontend foundation | done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off
+    `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
+| 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
+| 16 | Logical grouping (System view) | Planned (L1-L8) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -165,8 +167,8 @@ scan recorded is drawn; nothing is inferred from names or proximity.
   `Cargo.toml` `[package] name`, `pom.xml` `groupId:artifactId`) joined to a sibling's
   recorded external import (exact, or Maven `groupId` prefix). A coordinate claimed by two
   repositories emits both flows rather than choosing one.
-- **Data contracts**: Protobuf messages, OpenAPI `components.schemas`, and JSON Schema
-  objects, normalised to field name, type, and required-ness.
+- **Data contracts**: Protobuf messages, OpenAPI `components.schemas`, JSON Schema objects,
+  and language-native DTOs, normalised to field name, type, and required-ness.
 - **Contract drift**: a contract id declared by more than one repository, with the fields
   that are missing, differently typed, or disagree on required-ness. An identical shared
   contract is kept with no deviations.
@@ -199,9 +201,28 @@ them (`computeServiceFlows`); the facts are cached per fingerprint beside coordi
 contracts (`WORKSPACE_CACHE_VERSION` bumped to `strabo-workspace-2`), the report gains
 `serviceEndpoints` and `serviceFlows`, and `GET /workspace/services` exposes them. Unit
 coverage is in `test/unit/services.test.ts` and the `analyzeWorkspace` case in
-`test/unit/workspace.test.ts`. The panel does not draw service flows yet.
+`test/unit/workspace.test.ts`. **A12 (done)** service flows in the panel and on the map:
+`ui/strabo-workspace.js` gains `serviceEndpointRows`/`serviceFlowRows` and `crossRepoNodeIds`
+(the recorded files that the current graph actually drew, matched by path), and the summary
+line counts service flows. `renderWorkspace` draws "Service endpoints" and "Service flows"
+sections, stating when a section is unrecorded. Opening the workspace rings the local files
+that take part in a cross-repo flow (`view.crossRepo`, a heavy dotted `ov-cross-repo` ring in
+the accent hue — a relationship, not a status), cleared when the panel closes. Unit coverage
+is in `test/unit/browser-core.test.ts` and `test/unit/panels.test.ts`; the `@workspace`
+scenarios assert the empty-section captions. **A13 (done)** language DTO contracts:
+`src/workspace/dto.ts` extracts DTOs from source and namespaces them so the same shape
+matches across repositories — TypeScript interfaces and object type aliases (also `.js`),
+Python `@dataclass`/pydantic `BaseModel`/`TypedDict` classes, Kotlin `data class` primary
+constructors, Java and C# `record`s, and Rust structs with named fields. A DTO's id is its
+bare type name, the one part two repositories share; only shapes with a clear DTO reading are
+taken (a method, a nested object, or a tuple struct is skipped, never guessed at). The
+extractor is lexical, like the service-call one, and prunes generated directories with the
+scanner's rules. The facts are cached per fingerprint (`WORKSPACE_CACHE_VERSION` bumped to
+`strabo-workspace-3`). Unit coverage is `test/unit/dto.test.ts` and the `analyzeWorkspace`
+case in `test/unit/workspace.test.ts`.
 
-Next: language DTO contracts and marking cross-repo flow endpoints on the map.
+Next: C++ `struct` and Java POJO DTOs, and Kotlin body properties beyond the primary
+constructor.
 
 ## Phase 12 - Frontend foundation
 
@@ -231,11 +252,29 @@ keeps the identity but adds a build step and a small view/state layer.
   rebuilding, so the find input keeps focus and CSS animations do not restart. The floating
   window manager (`ui/strabo-float.js`) already provides dock, float, collapse, and
   persistence, so it was kept rather than rewritten.
-- **M4 - Design system + a11y.** Tokens, shared controls, focus-visible, keyboard navigation,
-  and ARIA on tabs/menus/cards. The tokens and shared controls are what Phase 13 M4 spends;
-  they land once, here.
-- **M5 - Scale.** List virtualization for long panels, incremental graph overlay, and
-  jsdom unit tests for panels.
+- **M4 - Design system + a11y (done).** One `--focus-ring` token and a single `:focus-visible`
+  rule give every interactive element a keyboard focus ring without showing it to the pointer
+  (Phase 13 M1a keeps the value in `styles.css`). `ui/strabo-a11y.js` holds the pure roving
+  index arithmetic (`rovingIndex`, `applyRovingFocus`), and the composite widgets use it:
+  the dock (`role="toolbar"`) moves between chips, the canvas overflow menu (`role="menu"`)
+  moves between items and Escape closes it back to its trigger, and the Module Passport tabs
+  (`role="tablist"`) move and select with a roving tabindex, their panels linked by
+  `aria-controls`/`aria-labelledby`. Floating windows are non-modal dialogs (`role="dialog"`,
+  `aria-label`, `tabindex="-1"`): opening one focuses it, Escape closes it, and closing returns
+  focus to the dock chip. Member cards carry `role="group"` and an `aria-label`. Unit coverage
+  is `test/unit/a11y.test.ts`; the browser scenarios are
+  `test/acceptance/features/keyboard-access.feature` (`@a11y`).
+- **M5 - Scale (done).** Long lists render through a window instead of a page: `ui/strabo-virtual.js`
+  holds the pure `virtualRange(scrollTop, viewportHeight, rowHeight, count, overscan)` kernel and a
+  thin `createVirtualList` shell (a spacer keeps the full scroll height, the visible slice is the only
+  DOM, a `ResizeObserver` redraws when a hidden panel is revealed). The Overlay panel drops its
+  "Show 50 more" paging for it, so a 500-module overlay costs a viewport of rows. The graph re-render
+  is incremental: `diffElements`/`diffGraph` in `ui/strabo-graph.js` compare the built elements by id,
+  and `createView().render` adds, removes, or updates only what changed — clearing the post-build
+  classes first so a reused node is as bare as a fresh one. Panel rendering is covered from Node by
+  `test/unit/panels.test.ts`, which drives the DOM panels through jsdom (a new devDependency) rather
+  than only through the browser. Unit coverage is `test/unit/virtual.test.ts`, `test/unit/graph-diff.test.ts`,
+  and `test/unit/panels.test.ts`.
 
 ## Phase 13 - Visual design
 
@@ -343,11 +382,13 @@ defect in the running app, not a preference.
   `test/unit/directory.test.ts`; the browser scenario is
   `test/acceptance/features/colour-budget.feature` (`@colors`).
 
-- **M1a - One source of truth for colour.** **R11 has landed** (the canvas stylesheet is
-  built from `getComputedStyle` via `graphTheme()`, so it reads the tokens rather than
-  copying them); R10 and R12-R14 remain. The diagnosis below is the state before that: canvas
-  could not read CSS custom properties, so `ui/strabo-view.js` hardcoded 15 hex literals
-  duplicating `styles.css`.
+- **M1a - One source of truth for colour.** **Landed.** Every colour is defined once in
+  `:root` (R10, enforced by `test/unit/colors.test.ts`), the canvas reads the tokens
+  (`graphTheme`/`cssVar`) rather than copying them (R11), the alias names are gone (R12), and
+  alpha comes from a `--wash`/`--hairline`/`--veil` scale with the six floating-panel
+  backgrounds collapsed to one `--veiled-surface` (R13). The diagnosis below is the state
+  before the work: canvas could not read CSS custom properties, so `ui/strabo-view.js`
+  hardcoded 15 hex literals duplicating `styles.css`.
   They have already drifted — danger is `#ff5c5c` in CSS and `#ff8f8f` on canvas, `#7fb4ff`
   exists only in JS, `#ff8f5c` only in CSS and untokenized. The token set has the same
   problem internally: `--bg`/`--bg-1`, `--panel`/`--bg-2` and `--muted`/`--ink-3` are each
@@ -519,6 +560,72 @@ evidence (`buildNarratorEvidence`) and the captions (`narratorStatusLabel`,
 "model-generated narrative — not recorded evidence" attribution, and an unconfigured narrator
 says so instead of failing. A browser scenario (`module-passport.feature` `@narrator`) asserts
 the inert path; it needs no endpoint, so it also proves nothing is contacted when unset.
+
+## Phase 16 - Logical grouping (System view)
+
+Directory islands show where files sit on disk, not how the system is built. On a
+polyglot monorepo (an Android app, several Rust services, a tool with a web UI, scripts)
+the file map breaks into ~150 islands with labels like `…/src` and `…handlers`, and the
+edges between them turn into noise. This phase adds a **System** mode alongside
+`Files` / `Directories` that groups by recorded structure instead of path prefix.
+
+A group is formed only from evidence, strongest first, and every group says why it exists:
+
+- **Units from build manifests**: `Cargo.toml`, `build.gradle(.kts)`, `package.json`,
+  `go.mod`, `*.csproj`, `pyproject.toml`. The unit is named by its crate/package/module
+  name, not its path, and nested workspaces nest.
+- **Edges between units**: aggregated import counts where a language resolves across units,
+  plus the recorded HTTP/service-call flows and contracts from Phase 11
+  (`src/workspace/services.ts`, `contracts.ts`). In a polyglot repo these are the only edges
+  that join, say, Kotlin to Rust, and they carry their endpoint labels.
+- **Layers inside a unit**: from import direction (`src/analysis/depth.ts`), with a small
+  per-ecosystem path-token table as a tiebreaker (Android MVVM `ui/screen` → `viewmodel` →
+  `model`/`repository`; Axum/Actix `http_routes`/`handlers` → service → `db`; React
+  `components` → `hooks` → `api`).
+- **Communities inside a layer**: Leiden/Louvain on the import graph, labelled a *signal*
+  with its internal-edge ratio. Communities are seeded from the cached previous result and
+  snapped to unit/layer boundaries so they do not reshuffle between scans.
+- **Periphery**: tests, `scripts`, generated code, and fixtures fold into one support shelf
+  per unit instead of taking up canvas space.
+- **Declared groups**: an optional `strabo.groups.yml` (glob → group name) overrides the
+  derived grouping. It counts as evidence because the operator stated it.
+- **Naming only by the narrator**: the Phase 15 narrator may propose a group's name and
+  one-line purpose under the model-generated attribution. It never creates, merges, or
+  splits a group.
+
+The view is a C4-style drill ladder that reuses the `blocks.ts` roll-up with a different
+key function (unit → layer → community instead of path prefix):
+
+- **L0 System**: units as boxes (sized by files or LOC), with import edges plus labelled
+  HTTP/contract edges, and a support shelf.
+- **L1 Unit**: layer swim lanes in dependency order.
+- **L2 Component**: communities inside a lane.
+- **L3 Files**: today's file map, filtered to the component.
+
+Edges that break the layer order (lower → upper) or close a cycle are highlighted. Every
+group has a "why grouped" caption, e.g. *crate `server` (Cargo.toml)*, *layer: import depth
+2, token `viewmodel`*, *community: 34 files, 81% of edges internal*.
+
+Two cheap wins also apply to the existing Directories mode:
+
+- **Chain compression and unit-anchored labels**: single-child directory chains collapse,
+  and labels start at the unit root (`…rvice-rust/src/handlers` becomes `service › handlers`).
+- **Adaptive depth**: a group splits only while it is over a size budget *and* the split
+  keeps cohesion (internal/external edge ratio). Otherwise small siblings merge, which
+  removes the long tail of 2-file islands.
+
+Slices: **L1** manifest unit detection (`src/analysis/units.ts`): per-ecosystem manifest
+readers, unit names, nesting; a file outside every unit falls into a root unit, never
+dropped. **L2** chain compression and unit-anchored labels in Directories mode. **L3**
+periphery classification (tests, scripts, generated, fixtures) with the rule that tripped.
+**L4** `GET /analysis/system`: units, aggregated import edges, service-flow and contract
+edges, plus the **System** mode at L0 with "why grouped" captions. **L5** layer assignment
+per unit (depth first, tokens as a tiebreaker) and L1 swim lanes; edges that break the layer
+order are flagged. **L6** communities per layer with seeded stability, and L2/L3 drill-down.
+**L7** `strabo.groups.yml` declared groups, with overridden derived groups reported as such.
+**L8** narrator naming of groups, opt-in, under the existing attribution. Acceptance:
+`test/acceptance/features/system-view.feature`, with a polyglot fixture (Gradle app, two
+Cargo crates with an HTTP call between them, a scripts folder).
 
 ## Phase 6 - Release readiness
 

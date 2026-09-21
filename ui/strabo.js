@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -36,6 +36,7 @@ import {
 import { findPath, neighbourhood } from './strabo-selection.js';
 import { buildNarratorEvidence } from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
+import { crossRepoNodeIds } from './strabo-workspace.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 
@@ -1032,6 +1033,8 @@ async function showWorkspace() {
   try {
     const report = await request('/workspace');
     renderWorkspace(elements.workspacePanel, report, { onClose: closeWorkspace });
+    // Ring the files on this map that the report records on one side of a cross-repo flow.
+    view.crossRepo(crossRepoNodeIds(report, (current?.nodes ?? []).map((node) => node.id)));
   } catch (error) {
     renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
     const note = document.createElement('p');
@@ -1044,6 +1047,7 @@ async function showWorkspace() {
 
 function closeWorkspace() {
   elements.workspacePanel.hidden = true;
+  view.crossRepo(null);
   refreshDock();
 }
 
@@ -1494,21 +1498,62 @@ elements.tbClear.addEventListener('click', clearSelection);
 
 /* ------------------------------------------- Overflow menu + shortcuts */
 
-function closeOverflowMenu() {
-  if (!elements.tbOverflowMenu) return;
+/** The menu items, in DOM order: one roving tab stop across the `role="menu"`. */
+function overflowItems() {
+  return [...(elements.tbOverflowMenu?.querySelectorAll('[role="menuitem"]') ?? [])];
+}
+
+function closeOverflowMenu({ restoreFocus = false } = {}) {
+  if (!elements.tbOverflowMenu || elements.tbOverflowMenu.hidden) {
+    return;
+  }
   elements.tbOverflowMenu.hidden = true;
   elements.tbOverflow.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) {
+    elements.tbOverflow.focus();
+  }
+}
+
+function openOverflowMenu() {
+  elements.tbOverflowMenu.hidden = false;
+  elements.tbOverflow.setAttribute('aria-expanded', 'true');
+  const items = overflowItems();
+  items.forEach((item, index) => {
+    item.tabIndex = index === 0 ? 0 : -1;
+  });
+  items[0]?.focus();
 }
 
 if (elements.tbOverflow) {
   elements.tbOverflow.addEventListener('click', (event) => {
     event.stopPropagation();
-    const willOpen = elements.tbOverflowMenu.hidden;
-    elements.tbOverflowMenu.hidden = !willOpen;
-    elements.tbOverflow.setAttribute('aria-expanded', String(willOpen));
+    if (elements.tbOverflowMenu.hidden) {
+      openOverflowMenu();
+    } else {
+      closeOverflowMenu();
+    }
+  });
+  // Arrow keys move between the items; Escape closes and returns focus to the trigger.
+  elements.tbOverflowMenu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      event.preventDefault();
+      closeOverflowMenu({ restoreFocus: true });
+      return;
+    }
+    const items = overflowItems();
+    const next = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    items.forEach((item, index) => {
+      item.tabIndex = index === next ? 0 : -1;
+    });
+    items[next].focus();
   });
   for (const id of ['tb-timeline', 'tb-review', 'tb-risk']) {
-    document.getElementById(id)?.addEventListener('click', closeOverflowMenu);
+    document.getElementById(id)?.addEventListener('click', () => closeOverflowMenu({ restoreFocus: true }));
   }
   document.addEventListener('click', (event) => {
     if (!event.target.closest?.('.tb-overflow-wrap')) closeOverflowMenu();
@@ -1706,7 +1751,7 @@ function resolveDomDelegateTarget(node) {
   if (reviewPanel && currentReview?.available) {
     return reviewDelegateTarget(currentReview);
   }
-  const overlayItem = node.closest('#overlay-panel li');
+  const overlayItem = node.closest('#overlay-panel [data-delegate-overlay-item]');
   if (overlayItem) {
     return overlayDelegateTarget(overlayItem);
   }
