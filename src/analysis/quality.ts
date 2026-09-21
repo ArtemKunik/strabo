@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
@@ -9,11 +7,9 @@ import { computeCycles } from './cycles.ts';
 import { analyzeModuleDepth } from './depth.ts';
 import { computeMemberCohesion } from './file-health.ts';
 import { buildFunctions } from './functions.ts';
-import { getFileAuthorHistory } from './ownership.ts';
+import { collectHistory } from './history.ts';
 import { symbolExtractorFor } from '../scan/languages/registry.ts';
 import { assertReadable } from '../boundary/repository-root.ts';
-
-const run = promisify(execFile);
 
 export interface PercentileMeasure {
   percentile: number;
@@ -73,10 +69,19 @@ export interface QualityPercentile {
   protection: Record<string, PercentileMeasure>;
 }
 
+/** What the evolution measures read from Git, so a skipped mass commit is visible. */
+export interface HistoryMeta {
+  available: boolean;
+  windowDays: number;
+  commitsScanned: number;
+  skippedCommits: Array<{ hash: string; files: number }>;
+}
+
 export interface QualityScorecard {
   repository: string;
   modules: ModuleQuality[];
   percentiles: QualityPercentile;
+  history: HistoryMeta;
 }
 
 export async function computeQualityScorecard(
@@ -97,9 +102,13 @@ export async function computeQualityScorecard(
     depthByFile.set(d.file, d);
   }
 
-  const churnMap = await computeChurn(root, nodes.map((n) => n.id));
-  const authorMap = await computeAuthors(root, nodes.map((n) => n.id));
-  const coChangeMap = await computeCoChange(root, nodes.map((n) => n.id));
+  const history = await collectHistory(
+    root,
+    nodes.map((n) => n.id),
+  );
+  const churnMap = history.churn;
+  const authorMap = history.authors;
+  const coChangeMap = history.coChange;
 
   const importGraph = buildImportGraph(graph);
 
@@ -121,6 +130,12 @@ export async function computeQualityScorecard(
     repository,
     modules: moduleQualities,
     percentiles,
+    history: {
+      available: history.available,
+      windowDays: history.windowDays,
+      commitsScanned: history.commitsScanned,
+      skippedCommits: history.skippedCommits,
+    },
   };
 }
 
@@ -362,62 +377,4 @@ function percentileOf(values: number[], higherIsBetter: boolean): PercentileMeas
   }
 
   return { percentile, value: mean };
-}
-
-async function computeChurn(
-  root: string,
-  files: readonly string[],
-  days = 90,
-): Promise<Map<string, number>> {
-  const churnMap = new Map<string, number>();
-  for (const file of files) {
-    try {
-      const { stdout } = await run('git', ['log', '--oneline', `--since="${days}d ago"`, '--', file], {
-        cwd: root,
-        maxBuffer: 4 * 1024 * 1024,
-      });
-      churnMap.set(file, stdout.split('\n').filter(Boolean).length);
-    } catch {
-      churnMap.set(file, 0);
-    }
-  }
-  return churnMap;
-}
-
-async function computeAuthors(
-  root: string,
-  files: readonly string[],
-): Promise<Map<string, { authors: string[]; commits: number }>> {
-  const history = await getFileAuthorHistory(root, files);
-  const map = new Map<string, { authors: string[]; commits: number }>();
-  for (const h of history) {
-    map.set(h.file, { authors: h.authors, commits: h.commits });
-  }
-  return map;
-}
-
-async function computeCoChange(
-  root: string,
-  files: readonly string[],
-): Promise<Map<string, Set<string>>> {
-  const coChangeMap = new Map<string, Set<string>>();
-  for (const file of files) {
-    try {
-      const { stdout } = await run('git', ['log', '--oneline', '--name-only', '-z', '--', file], {
-        cwd: root,
-        maxBuffer: 8 * 1024 * 1024,
-      });
-      const tokens = stdout.split('\0');
-      const commitFiles = new Set<string>();
-      for (const token of tokens) {
-        if (token === '' || token === file) continue;
-        if (/^[a-f0-9]{7,40}$/.test(token) || token.startsWith('commit')) continue;
-        commitFiles.add(token);
-      }
-      coChangeMap.set(file, commitFiles);
-    } catch {
-      coChangeMap.set(file, new Set());
-    }
-  }
-  return coChangeMap;
 }
