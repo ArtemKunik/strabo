@@ -1351,8 +1351,10 @@ var DELEGATE_TASKS = {
   member: "Explain this member: what it does and how it is wired to state.",
   review: "Explain this change set as a function of the app: what capability or behaviour it adds, changes, or removes for a user of the app \u2014 not just which files and lines moved. Read the actual diff for the listed files to ground the explanation.",
   view: "Give an architectural overview of this view: hotspots, coupling, and where to look first.",
-  group: "Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group."
+  group: "Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.",
+  selection: "Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in."
 };
+var MAX_SELECTION = 4e3;
 var MAX_FACTS_PER_GROUP_ITEM = 6;
 var MAX_GROUP_ITEMS = 30;
 function renderFacts(lines, facts, cap) {
@@ -1381,6 +1383,18 @@ function buildAgentPrompt({ agent, repository, target }) {
     `Target: ${kind}${items ? ` (${items.length} file(s))` : item.id ? ` \`${item.id}\`` : ""}`
   );
   lines.push("");
+  const selection = typeof item.selection === "string" ? item.selection.trim() : "";
+  if (selection) {
+    lines.push("## Selected text (highlighted by the user in Strabo)");
+    lines.push("");
+    for (const line of selection.slice(0, MAX_SELECTION).split("\n")) {
+      lines.push(`> ${line.trimEnd()}`);
+    }
+    if (selection.length > MAX_SELECTION) {
+      lines.push("> \u2026(selection truncated)");
+    }
+    lines.push("");
+  }
   lines.push("## Recorded evidence (from the Strabo scan \u2014 do not invent links)");
   lines.push("");
   if (items) {
@@ -1410,6 +1424,10 @@ function buildAgentPrompt({ agent, repository, target }) {
   lines.push("## Task");
   lines.push("");
   lines.push(DELEGATE_TASKS[kind]);
+  if (selection && kind !== "selection") {
+    lines.push("");
+    lines.push("Give the selected text particular attention: it is what the user is asking about.");
+  }
   lines.push("");
   lines.push(`Work inside \`${repository?.root ?? "."}\`. Quote file paths and line numbers for every claim.`);
   const prompt = lines.join("\n");
@@ -10298,11 +10316,29 @@ document.addEventListener("contextmenu", (event) => {
   if (!event.target.closest?.(".workspace, .statusbar, #member-view, #diagnostics, #breadcrumb, .toolbar")) {
     return;
   }
+  const selection = window.getSelection?.()?.toString().trim() ?? "";
   event.preventDefault();
   closeContextMenu();
   hideTooltip();
-  openDelegateMenu(resolveDomDelegateTarget(event.target) ?? fallbackDelegateTarget(), event.clientX, event.clientY);
+  const resolved = resolveDomDelegateTarget(event.target);
+  openDelegateMenu(withSelection(resolved, selection), event.clientX, event.clientY);
 });
+function withSelection(resolved, selection) {
+  if (!selection) {
+    return resolved ?? fallbackDelegateTarget();
+  }
+  if (resolved) {
+    return { ...resolved, selection };
+  }
+  const context = fallbackDelegateTarget();
+  const excerpt = selection.replace(/\s+/g, " ");
+  return {
+    kind: "selection",
+    label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
+    evidence: context.evidence,
+    selection
+  };
+}
 view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);

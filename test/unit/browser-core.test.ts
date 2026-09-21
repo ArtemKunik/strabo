@@ -993,6 +993,39 @@ test('buildAgentPrompt frames a review target around functional effect', () => {
   assert.match(prompt, /as a function of the app/);
 });
 
+test('buildAgentPrompt carries highlighted text as a quoted section', () => {
+  const selection = 'yaml@2.2.2 · stack overflow\nFixed in: 2.8.3';
+  const repository = { name: 'strabo', root: '/repo' };
+
+  const alone = buildAgentPrompt({
+    agent: 'claude',
+    repository,
+    target: { kind: 'selection', label: '“yaml”', evidence: ['244 nodes'], selection },
+  });
+  assert.match(alone, /## Selected text/);
+  assert.match(alone, /> yaml@2\.2\.2 · stack overflow\n> Fixed in: 2\.8\.3/);
+  assert.match(alone, /Address the selected text/);
+
+  const onNode = buildAgentPrompt({
+    agent: 'claude',
+    repository,
+    target: { kind: 'node', id: 'src/a.ts', evidence: [], selection },
+  });
+  assert.match(onNode, /> Fixed in: 2\.8\.3/);
+  assert.match(onNode, /Assess this file/);
+  assert.match(onNode, /particular attention/);
+
+  const without = buildAgentPrompt({ agent: 'claude', repository, target: { kind: 'node', id: 'src/a.ts' } });
+  assert.doesNotMatch(without, /Selected text/);
+
+  const huge = buildAgentPrompt({
+    agent: 'claude',
+    repository,
+    target: { kind: 'selection', selection: 'x'.repeat(9000) },
+  });
+  assert.match(huge, /selection truncated/);
+});
+
 test('buildAgentPrompt degrades gracefully and rejects unknown agents', () => {
   const bare = buildAgentPrompt({ agent: 'claude', repository: null, target: null });
   assert.match(bare, /Target: view/);

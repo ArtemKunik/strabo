@@ -2802,11 +2802,36 @@ document.addEventListener('contextmenu', (event) => {
   if (!event.target.closest?.('.workspace, .statusbar, #member-view, #diagnostics, #breadcrumb, .toolbar')) {
     return;
   }
+  // Read before anything else runs: opening the menu must not be able to disturb it.
+  const selection = window.getSelection?.()?.toString().trim() ?? '';
   event.preventDefault();
   closeContextMenu();
   hideTooltip();
-  openDelegateMenu(resolveDomDelegateTarget(event.target) ?? fallbackDelegateTarget(), event.clientX, event.clientY);
+  const resolved = resolveDomDelegateTarget(event.target);
+  openDelegateMenu(withSelection(resolved, selection), event.clientX, event.clientY);
 });
+
+/**
+ * Add highlighted text to a delegation target. With no specific target under the cursor the
+ * selection is the subject, and the fallback view or node becomes its context, rather than
+ * the generic overview the menu would otherwise be titled with.
+ */
+function withSelection(resolved, selection) {
+  if (!selection) {
+    return resolved ?? fallbackDelegateTarget();
+  }
+  if (resolved) {
+    return { ...resolved, selection };
+  }
+  const context = fallbackDelegateTarget();
+  const excerpt = selection.replace(/\s+/g, ' ');
+  return {
+    kind: 'selection',
+    label: `“${excerpt.length > 60 ? `${excerpt.slice(0, 60)}…` : excerpt}”`,
+    evidence: context.evidence,
+    selection,
+  };
+}
 
 view.onSelect(onSelect);
 view.onDrill(onDrill);

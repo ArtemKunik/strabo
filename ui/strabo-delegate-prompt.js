@@ -20,7 +20,11 @@ const DELEGATE_TASKS = {
   review: 'Explain this change set as a function of the app: what capability or behaviour it adds, changes, or removes for a user of the app — not just which files and lines moved. Read the actual diff for the listed files to ground the explanation.',
   view: 'Give an architectural overview of this view: hotspots, coupling, and where to look first.',
   group: 'Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.',
+  selection: 'Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in.',
 };
+
+/** Selected text kept in a prompt; a whole panel can be selected. */
+const MAX_SELECTION = 4000;
 
 /** Facts shown per file inside a group's evidence section — lower than a single item's
  * cap so a large selection still gives every file some representation before the
@@ -48,7 +52,8 @@ function renderFacts(lines, facts, cap) {
  *
  * Pure function: only the recorded facts in `target` are rendered, nothing is
  * inferred. `target` is `{ kind, id?, label?, detail?, evidence? }` where kind is
- * one of node | edge | diagnostic | commit | member | view | group and `evidence` is
+ * one of node | edge | diagnostic | commit | member | review | view | group | selection,
+ * an optional `selection` is text the user highlighted, and `evidence` is
  * an array of short fact strings. A `group` target additionally carries `items`, one
  * `{ id?, label?, evidence? }` per selected file, each rendered as its own subsection —
  * a flat merged evidence list would blur which fact belongs to which file. Returns
@@ -69,6 +74,18 @@ export function buildAgentPrompt({ agent, repository, target }) {
     `Target: ${kind}${items ? ` (${items.length} file(s))` : item.id ? ` \`${item.id}\`` : ''}`,
   );
   lines.push('');
+  const selection = typeof item.selection === 'string' ? item.selection.trim() : '';
+  if (selection) {
+    lines.push('## Selected text (highlighted by the user in Strabo)');
+    lines.push('');
+    for (const line of selection.slice(0, MAX_SELECTION).split('\n')) {
+      lines.push(`> ${line.trimEnd()}`);
+    }
+    if (selection.length > MAX_SELECTION) {
+      lines.push('> …(selection truncated)');
+    }
+    lines.push('');
+  }
   lines.push('## Recorded evidence (from the Strabo scan — do not invent links)');
   lines.push('');
   if (items) {
@@ -98,6 +115,10 @@ export function buildAgentPrompt({ agent, repository, target }) {
   lines.push('## Task');
   lines.push('');
   lines.push(DELEGATE_TASKS[kind]);
+  if (selection && kind !== 'selection') {
+    lines.push('');
+    lines.push('Give the selected text particular attention: it is what the user is asking about.');
+  }
   lines.push('');
   lines.push(`Work inside \`${repository?.root ?? '.'}\`. Quote file paths and line numbers for every claim.`);
   const prompt = lines.join('\n');
