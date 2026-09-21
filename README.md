@@ -319,12 +319,16 @@ the server); `GET /delegate/:id` returns one run. The endpoint is Windows-only a
 mapping are always available; advisories and licenses require the opt-in online lookup.**
 
 - **Inventory** parses `package-lock.json` / `package.json` (npm), `Cargo.lock` /
-  `Cargo.toml` (Cargo), and `pom.xml` (Maven). Only a lockfile names an exact version, so a
-  manifest-only dependency is listed with `version: null` rather than guessed from a range.
+  `Cargo.toml` (Cargo), `pom.xml` (Maven), and `gradle.lockfile` / `libs.versions.toml` /
+  `build.gradle(.kts)` (Gradle). Only a lockfile names an exact version, so a manifest-only
+  dependency is listed with `version: null` rather than guessed from a range.
 - **Imports** are recorded per file during the scan. A bare specifier is an external
   reference, not a graph edge — its target is outside the repository — so the scan stores it
   separately in `graph.externalImports`. That is what lets a finding name the file that
-  imports the package (npm, Cargo, and conservative Maven `groupId` prefix matches).
+  imports the package (npm, Cargo, and conservative Maven `groupId` prefix matches, plus a
+  short table of well-known libraries such as `okhttp3` whose package differs from their
+  groupId). Platform packages (`android.*`, `kotlin.*`, Node builtins), the repository's own
+  JVM packages, Rust modules, and workspace crates are local, not undeclared dependencies.
 - **Advisories** come from [OSV.dev](https://osv.dev): one batched query per package set,
   then the full record per advisory id. Severity is the advisory's own label; Strabo never
   computes or downgrades it.

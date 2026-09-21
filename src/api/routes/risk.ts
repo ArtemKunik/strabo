@@ -17,13 +17,19 @@ import { sendError } from '../http.ts';
  */
 export function createRiskRouter(config: StraboConfig): Router {
   const router = Router();
-  const online = config.risk?.online === true;
   const denied = parseDeniedLicenses(config.risk?.deniedLicenses?.join(','));
-  const osv = online ? createOsvClient({ log: config.serverLog }) : undefined;
-  const licenses = online ? createLicenseClient({ log: config.serverLog }) : undefined;
+  // Settings toggles `config.risk.online` at runtime, so it is read per request; the
+  // clients are created on first online use and kept for their caches.
+  let osv: ReturnType<typeof createOsvClient> | undefined;
+  let licenses: ReturnType<typeof createLicenseClient> | undefined;
 
   router.get('/analysis/risk', async (request, response) => {
     try {
+      const online = config.risk?.online === true;
+      if (online) {
+        osv ??= createOsvClient({ log: config.serverLog });
+        licenses ??= createLicenseClient({ log: config.serverLog });
+      }
       const repository = resolveRepositoryRoot({
         workspaceRoot: config.workspaceRoot,
         scanCeiling: config.scanCeiling ?? config.workspaceRoot,

@@ -97,7 +97,181 @@ export function readDependencies(root: string, files: readonly string[]): {
     }
   }
 
+  // A Gradle lockfile names exact versions; declarations are only read where none exists.
+  const gradleLocked = new Set<string>();
+  for (const file of files) {
+    if (!file.endsWith('gradle.lockfile')) {
+      continue;
+    }
+    const content = read(file);
+    if (content === null) {
+      continue;
+    }
+    dependencies.push(...parseGradleLockfile(content, file));
+    gradleLocked.add(path.posix.dirname(file));
+  }
+  const catalogs = files.filter((file) => file.endsWith('.versions.toml'));
+  const buildScripts = files.filter((file) => file.endsWith('build.gradle') || file.endsWith('build.gradle.kts'));
+  if (gradleLocked.size === 0 && (catalogs.length > 0 || buildScripts.length > 0)) {
+    for (const file of catalogs) {
+      const content = read(file);
+      if (content !== null) {
+        dependencies.push(...parseGradleVersionCatalog(content, file));
+      }
+    }
+    for (const file of buildScripts) {
+      const content = read(file);
+      if (content !== null) {
+        dependencies.push(...parseGradleBuildScript(content, file));
+      }
+    }
+    caveats.push(
+      'Gradle dependencies are read from declarations, not a resolved gradle.lockfile; transitive dependencies are absent and BOM-managed versions are unresolved.',
+    );
+  }
+
   return { dependencies: dedupe(dependencies), caveats };
+}
+
+/** Parse `gradle.lockfile`: one `group:artifact:version=configurations` line per dependency. */
+export function parseGradleLockfile(content: string, source: string): Dependency[] {
+  const dependencies: Dependency[] = [];
+  for (const rawLine of content.split('\n')) {
+    const match = /^([^:#=\s]+):([^:=\s]+):([^:=\s]+)=(.*)$/.exec(rawLine.trim());
+    if (!match) {
+      continue;
+    }
+    const configurations = (match[4] ?? '').split(',').filter(Boolean);
+    const testOnly = configurations.length > 0 && configurations.every((entry) => /test/i.test(entry));
+    dependencies.push({
+      ecosystem: 'maven',
+      name: `${match[1]}:${match[2]}`,
+      version: match[3] ?? null,
+      source,
+      direct: false,
+      ...(testOnly ? { dev: true } : {}),
+    });
+  }
+  return dependencies;
+}
+
+/**
+ * Parse a Gradle version catalog (`gradle/libs.versions.toml`) `[libraries]` table.
+ *
+ * Entries take `module = "g:a"` or `group`/`name`, with `version = "x"`, `version.ref`, or
+ * `version = { ref = "x" }`. A library without a version (BOM-managed) keeps `version: null`.
+ */
+export function parseGradleVersionCatalog(content: string, source: string): Dependency[] {
+  const versions = new Map<string, string>();
+  const libraries: string[] = [];
+  let section = '';
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.replace(/\s+#.*$/, '').trim();
+    if (line === '' || line.startsWith('#')) {
+      continue;
+    }
+    const header = /^\[([^\]]+)\]$/.exec(line);
+    if (header) {
+      section = header[1]?.trim() ?? '';
+      continue;
+    }
+    if (section === 'versions') {
+      const match = /^([A-Za-z0-9_.-]+)\s*=\s*"([^"]+)"/.exec(line);
+      if (match) {
+        versions.set(match[1] ?? '', match[2] ?? '');
+      }
+    } else if (section === 'libraries') {
+      libraries.push(line);
+    }
+  }
+
+  const dependencies: Dependency[] = [];
+  for (const line of libraries) {
+    let group: string | null;
+    let artifact: string | null;
+    let version: string | null;
+    const shorthand = /^[A-Za-z0-9_.-]+\s*=\s*"([^":]+):([^":]+)(?::([^"]+))?"/.exec(line);
+    if (shorthand) {
+      group = shorthand[1] ?? null;
+      artifact = shorthand[2] ?? null;
+      version = shorthand[3] ?? null;
+    } else {
+      const module = /\bmodule\s*=\s*"([^":]+):([^"]+)"/.exec(line);
+      group = module?.[1] ?? /\bgroup\s*=\s*"([^"]+)"/.exec(line)?.[1] ?? null;
+      artifact = module?.[2] ?? /\bname\s*=\s*"([^"]+)"/.exec(line)?.[1] ?? null;
+      const reference =
+        /\bversion\.ref\s*=\s*"([^"]+)"/.exec(line)?.[1] ??
+        /\bversion\s*=\s*\{[^}]*\bref\s*=\s*"([^"]+)"/.exec(line)?.[1];
+      version = reference
+        ? versions.get(reference) ?? null
+        : /\bversion\s*=\s*"([^"]+)"/.exec(line)?.[1] ?? null;
+    }
+    if (!group || !artifact) {
+      continue;
+    }
+    dependencies.push({ ecosystem: 'maven', name: `${group}:${artifact}`, version, source, direct: true });
+  }
+  return dependencies;
+}
+
+/**
+ * Read literal `"group:artifact:version"` coordinates from a Gradle build script.
+ *
+ * Catalog references (`libs.foo`) are covered by the catalog itself; an interpolated
+ * version (`"g:a:$v"`) is left unresolved rather than guessed.
+ */
+export function parseGradleBuildScript(content: string, source: string): Dependency[] {
+  const dependencies: Dependency[] = [];
+  const pattern =
+    /\b(implementation|api|compileOnly|runtimeOnly|kapt|ksp|annotationProcessor|classpath|(?:test|androidTest|debug|release)[A-Za-z]*)\s*\(?\s*(?:platform\s*\(\s*)?["']([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)(?::([^"'@]+))?(?:@[a-z]+)?["']/g;
+  for (const match of content.matchAll(pattern)) {
+    const version = match[4] ?? null;
+    dependencies.push({
+      ecosystem: 'maven',
+      name: `${match[2]}:${match[3]}`,
+      version: version !== null && !version.includes('$') ? version : null,
+      source,
+      direct: true,
+      ...(/^(test|androidTest)/.test(match[1] ?? '') ? { dev: true } : {}),
+    });
+  }
+  return dependencies;
+}
+
+/**
+ * Crates that belong to this repository: every `[package] name` in a `Cargo.toml`, and
+ * every `Cargo.lock` package without a `source` (a path or workspace member). Names are
+ * normalised to `-`, matching how imports are recorded.
+ */
+export function readLocalCrates(root: string, files: readonly string[]): Set<string> {
+  const names = new Set<string>();
+  for (const file of files) {
+    const isManifest = file.endsWith('Cargo.toml');
+    if (!isManifest && !file.endsWith('Cargo.lock')) {
+      continue;
+    }
+    let content: string;
+    try {
+      content = fs.readFileSync(path.join(root, file), 'utf8');
+    } catch {
+      continue;
+    }
+    if (isManifest) {
+      const section = /^\[package\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(content)?.[1] ?? '';
+      const name = matchTomlString(section, 'name');
+      if (name) {
+        names.add(name.replace(/_/g, '-'));
+      }
+      continue;
+    }
+    for (const block of content.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+      const name = matchTomlString(block, 'name');
+      if (name && !/^source\s*=/m.test(block)) {
+        names.add(name.replace(/_/g, '-'));
+      }
+    }
+  }
+  return names;
 }
 
 interface ParsedNpmLockEntry {
@@ -367,6 +541,10 @@ const MANIFEST_NAMES = [
   'Cargo.lock',
   'Cargo.toml',
   'pom.xml',
+  'gradle.lockfile',
+  'libs.versions.toml',
+  'build.gradle',
+  'build.gradle.kts',
 ];
 
 /**

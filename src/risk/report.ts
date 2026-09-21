@@ -1,3 +1,5 @@
+import { builtinModules } from 'node:module';
+
 import type {
   AdvisorySeverity,
   Dependency,
@@ -10,7 +12,7 @@ import type {
 } from '../types.ts';
 import { impactFromPaths } from '../analysis/impact.ts';
 import { mavenCoordinateMatches } from '../scan/external-polyglot.ts';
-import { findManifestFiles, readDependencies } from './inventory.ts';
+import { findManifestFiles, readDependencies, readLocalCrates } from './inventory.ts';
 import { classifyLicenseExpression, isDeniedLicense, type LicenseClient } from './licenses.ts';
 import {
   fixedVersions,
@@ -44,7 +46,11 @@ export async function computeRiskReport(
 ): Promise<RiskReport> {
   const manifests = findManifestFiles(root);
   const { dependencies, caveats } = readDependencies(root, manifests);
-  const externalImports = graph.externalImports ?? [];
+  // A workspace crate is this repository's own code, not a dependency to declare.
+  const localCrates = readLocalCrates(root, manifests);
+  const externalImports = (graph.externalImports ?? []).filter(
+    (reference) => !(reference.ecosystem === 'cargo' && localCrates.has(reference.package)),
+  );
 
   const importedBy = new Map<string, string[]>();
   const matched = new Set<string>();
@@ -68,6 +74,9 @@ export async function computeRiskReport(
     ...new Set(
       externalImports
         .filter((reference) => !matched.has(reference.ecosystem + '\u0000' + reference.package))
+        // `fs` or `crypto` without the `node:` prefix is the runtime, unless a manifest
+        // declares a same-named package (which `matched` already accounted for).
+        .filter((reference) => !(reference.ecosystem === 'npm' && NODE_BUILTINS.has(reference.package)))
         .map((reference) => reference.package),
     ),
   ].sort();
@@ -209,10 +218,43 @@ function matches(reference: ExternalImport, dependency: Dependency): boolean {
     return false;
   }
   if (dependency.ecosystem === 'maven') {
-    return mavenCoordinateMatches(reference.package, dependency.name);
+    return (
+      mavenCoordinateMatches(reference.package, dependency.name) ||
+      knownJvmGroupMatches(reference.package, dependency.name)
+    );
+  }
+  if (dependency.ecosystem === 'cargo') {
+    // Imports normalise `_` to `-`; Cargo.lock keeps the crate's published spelling.
+    return reference.package === dependency.name.replace(/_/g, '-');
   }
   return reference.package === dependency.name;
 }
+
+/**
+ * Well-known libraries whose Java package root differs from their Maven groupId. Each is
+ * an exact published fact about that library, not a heuristic, so the join stays provable.
+ */
+const JVM_PACKAGE_GROUPS: ReadonlyArray<readonly [packageRoot: string, groupId: string]> = [
+  ['okhttp3', 'com.squareup.okhttp3'],
+  ['okio', 'com.squareup.okio'],
+  ['retrofit2', 'com.squareup.retrofit2'],
+  ['kotlinx.coroutines', 'org.jetbrains.kotlinx'],
+  ['kotlinx.serialization', 'org.jetbrains.kotlinx'],
+  ['com.google.gson', 'com.google.code.gson'],
+  ['com.google.common', 'com.google.guava'],
+  ['org.junit', 'junit'],
+  ['io.airlift.compress', 'io.airlift'],
+];
+
+function knownJvmGroupMatches(packageName: string, coordinate: string): boolean {
+  const [groupId = ''] = coordinate.split(':');
+  return JVM_PACKAGE_GROUPS.some(
+    ([packageRoot, group]) =>
+      group === groupId && (packageName === packageRoot || packageName.startsWith(`${packageRoot}.`)),
+  );
+}
+
+const NODE_BUILTINS: ReadonlySet<string> = new Set(builtinModules);
 
 function overallRisk(licenses: readonly string[]): LicenseRisk {
   const order: LicenseRisk[] = ['permissive', 'weak-copyleft', 'strong-copyleft', 'unknown'];

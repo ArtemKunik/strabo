@@ -8,6 +8,8 @@ import { classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses } from 
 import {
   findManifestFiles,
   parseCargoLock,
+  parseGradleBuildScript,
+  parseGradleVersionCatalog,
   parseMavenPom,
   parseNpmLock,
   parseNpmManifest,
@@ -368,4 +370,108 @@ test('computeRiskReport is offline by default and says so', async () => {
   assert.equal(report.online, false);
   assert.deepEqual(report.advisories, []);
   assert.ok(report.caveats.some((entry) => /disabled/i.test(entry)));
+});
+
+test('Gradle catalogs and build scripts are inventoried, and a lockfile wins over them', () => {
+  const catalog = [
+    '[versions]',
+    'okhttp = "4.12.0"',
+    'composeBom = "2024.12.01"',
+    '',
+    '[libraries]',
+    'okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }',
+    'compose-bom = { module = "androidx.compose:compose-bom", version = { ref = "composeBom" } }',
+    'material3 = { group = "androidx.compose.material3", name = "material3" }',
+    'gson = "com.google.code.gson:gson:2.11.0"',
+  ].join('\n');
+  assert.deepEqual(
+    parseGradleVersionCatalog(catalog, 'gradle/libs.versions.toml').map((entry) => [entry.name, entry.version]),
+    [
+      ['com.squareup.okhttp3:okhttp', '4.12.0'],
+      ['androidx.compose:compose-bom', '2024.12.01'],
+      ['androidx.compose.material3:material3', null],
+      ['com.google.code.gson:gson', '2.11.0'],
+    ],
+  );
+
+  const script = [
+    'dependencies {',
+    '    implementation(libs.okhttp)',
+    '    implementation("io.airlift:aircompressor:0.27")',
+    '    testImplementation "io.mockk:mockk:$mockk"',
+    '}',
+  ].join('\n');
+  assert.deepEqual(
+    parseGradleBuildScript(script, 'app/build.gradle.kts').map((entry) => [entry.name, entry.version, entry.dev ?? false]),
+    [
+      ['io.airlift:aircompressor', '0.27', false],
+      ['io.mockk:mockk', null, true],
+    ],
+  );
+
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'gradle'));
+  fs.writeFileSync(path.join(root, 'gradle', 'libs.versions.toml'), catalog);
+  fs.writeFileSync(path.join(root, 'gradle.lockfile'), 'com.squareup.okhttp3:okhttp:4.12.0=runtimeClasspath\nempty=\n');
+  const locked = readDependencies(root, findManifestFiles(root));
+  assert.deepEqual(locked.dependencies.map((entry) => [entry.name, entry.version]), [['com.squareup.okhttp3:okhttp', '4.12.0']]);
+});
+
+test('computeRiskReport does not report platform, local, or builtin imports as undeclared', async () => {
+  const root = tempDir();
+  fs.writeFileSync(
+    path.join(root, 'Cargo.toml'),
+    '[package]\nname = "app_core"\n\n[dependencies]\nserde_json = "1"\n',
+  );
+  fs.writeFileSync(
+    path.join(root, 'Cargo.lock'),
+    [
+      '[[package]]',
+      'name = "app_core"',
+      'version = "0.1.0"',
+      '',
+      '[[package]]',
+      'name = "serde_json"',
+      'version = "1.0.0"',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"',
+    ].join('\n'),
+  );
+  fs.mkdirSync(path.join(root, 'gradle'));
+  fs.writeFileSync(
+    path.join(root, 'gradle', 'libs.versions.toml'),
+    '[libraries]\nokhttp = "com.squareup.okhttp3:okhttp:4.12.0"\n',
+  );
+
+  const files = ['src/main.rs', 'src/alerts.rs', 'tests/it.rs', 'app/src/main/java/com/acme/app/Main.kt', 'app/src/main/java/com/acme/app/ui/Screen.kt'];
+  const content = new Map([
+    ['src/main.rs', ['mod alerts;', 'use alerts::Rule;', 'use serde_json::Value;', 'use tokio::spawn;'].join('\n')],
+    ['src/alerts.rs', 'pub struct Rule;'],
+    ['tests/it.rs', 'use app_core::alerts;'],
+    [
+      'app/src/main/java/com/acme/app/Main.kt',
+      [
+        'package com.acme.app',
+        'import android.os.Bundle',
+        'import kotlin.math.max',
+        'import com.acme.app.ui.Screen',
+        'import okhttp3.MediaType.Companion.toMediaType',
+        'import retrofit2.Retrofit',
+      ].join('\n'),
+    ],
+    ['app/src/main/java/com/acme/app/ui/Screen.kt', 'package com.acme.app.ui\nclass Screen'],
+  ]);
+  const graph: Graph = {
+    nodes: [],
+    edges: [],
+    diagnostics: [],
+    excluded: [],
+    externalImports: [
+      ...collectPolyglotExternalImports(files, content, []),
+      { file: 'tools/run.js', line: 1, specifier: 'child_process', package: 'child_process', ecosystem: 'npm', kind: 'import' },
+    ],
+  };
+
+  const report = await computeRiskReport(root, graph, { online: false });
+  // Only the genuinely undeclared ones remain: `tokio` and `retrofit2` have no manifest entry.
+  assert.deepEqual(report.inventory.undeclared, ['retrofit2', 'tokio']);
 });

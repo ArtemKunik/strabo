@@ -11,7 +11,7 @@ import type { ScanReport } from '../types.ts';
 const run = promisify(execFile);
 
 /** Bump when the on-disk artifact shape changes. */
-export const CACHE_ARTIFACT_VERSION = 'strabo-cache-3';
+export const CACHE_ARTIFACT_VERSION = 'strabo-cache-4';
 export const MEMORY_TTL_MS = 60_000;
 
 export type ScanFn = (root: string) => Promise<ScanReport>;
