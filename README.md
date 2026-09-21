@@ -13,8 +13,9 @@ source evidence behind every connection.
 ## Status
 
 Implemented and running: scanner, resolvers, graph cache, HTTP API, and the browser app,
-including review overlays, the Module Passport, the Member map, the Repository passport,
-Git review, workspace analysis, dependency risk, and the opt-in narrator. Design internals
+including review overlays, the Change impact passport, the Module Passport, the Member map,
+the Repository passport, Git review, branch review and actions, workspace analysis,
+dependency risk, and the opt-in narrator. Design internals
 and the deliberately parked surface live in [docs/DESIGN.md](docs/DESIGN.md); the phased
 plan and what is still pending live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -113,10 +114,13 @@ changed while the server runs from **Settings** (see below).
 
 ## Settings
 
-The toolbar's **Settings** button opens a floating window with two groups.
+The toolbar's **Settings** button opens a floating window with four groups: **Appearance**
+and **Rendering** (browser preferences), **Server** (the scan ceiling and the online risk
+lookup), and **Narrator** (the opt-in setup described under
+[LLM narrator](#llm-narrator-opt-in)).
 
-**Appearance and graph defaults** are browser preferences, stored in `localStorage` under
-`strabo.settings.v1` and applied immediately:
+**Appearance** preferences are stored in `localStorage` under `strabo.settings.v1` and
+applied immediately:
 
 | Preference | Meaning |
 | ---------- | ------- |
@@ -129,6 +133,12 @@ The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and 
 colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
 together (the graph stylesheet reads `--graph-*` at runtime). Reduce motion sets
 `data-reduce-motion`, which the graph viewport also honours.
+
+**Rendering** chooses the map's renderer: **GPU rendering (WebGL2)** on draws on the GPU,
+off on the 2D canvas. Cytoscape fixes its renderer when the map is constructed, so changing
+this reloads the page and says so before it is clicked; when the browser exposes no WebGL2
+context the toggle is disabled and names that reason. Diagnostics reports the renderer
+actually in use.
 
 **Server settings** are read from `GET /api/strabo/settings` and written with
 `PUT /api/strabo/settings`:
@@ -267,7 +277,7 @@ Counts come from the local object store and are as fresh as the last fetch.
 Branches is the one place Strabo writes to Git, and only through explicit buttons:
 
 - **Fetch** runs `git fetch --prune` on the remote(s) the listed branches track (else
-  `origin`), so the ahead/behind counts update.
+  `origin`, or the repository's only remote), so the ahead/behind counts update.
 - **Push** appears on a local branch that is ahead of its upstream; a branch with no
   upstream gets **Publish**, which pushes it and sets the upstream. It never force-pushes.
 - **Sync** runs on the checked-out branch: fetch, then fast-forward when behind (it refuses
@@ -537,9 +547,9 @@ the Functions tab is unchanged.
 
 ### Floating panels
 
-Every panel — Repository passport, Review, Dependency risk, Timeline, Overlay, Edge
-evidence, Legend, the Module
-Passport, Diagnostics, the Member map, and Workspace — opens as a **floating window** rather than a
+Every panel — Repository passport, Review, Dependency risk, Timeline, Branches, Narrator,
+Overlay, Edge evidence, Legend, the Module passport, Diagnostics, Member map, Workspace,
+Settings, and Keyboard shortcuts — opens as a **floating window** rather than a
 docked column, so the map keeps the full width. Drag a window by its header to move it,
 double-click the header (or use `–`) to collapse it to its title bar, and close it with `×`.
 The **dock** along the bottom restores any window, showing a solid chip for an open window,
@@ -548,8 +558,8 @@ collapsed state are remembered per panel in `localStorage`, so a layout survives
 
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an
-`Open in Workspace` action. Dependencies, Dependents, Members, and Functions are separate
-tabs so a large file does not push its member list off screen.
+`Open in Workspace` action. Dependencies, Dependents, Members, Functions, and Impact are
+separate tabs so a large file does not push its member list off screen.
 
 The **Functions** tab is a sortable table with one row per function and a summary line
 (function count, total and max complexity, max nesting, signal count). Columns cover name,
