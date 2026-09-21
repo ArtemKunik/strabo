@@ -2,19 +2,33 @@ import type { ResolvedRepository } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { openWorkspaceCache, type WorkspaceCache } from '../cache/workspace-cache.ts';
 import { describeRepository } from '../repository.ts';
-import type { ContractDefinition, WorkspaceReport, WorkspaceRepository } from '../types.ts';
+import type {
+  ContractDefinition,
+  ServiceCall,
+  ServiceEndpoint,
+  WorkspaceReport,
+  WorkspaceRepository,
+} from '../types.ts';
 import { computeContractDrift, extractContracts } from './contracts.ts';
 import { readPublishedCoordinate } from './coordinate.ts';
 import { computeCrossRepoFlows, type RepoFlowFact } from './flows.ts';
+import {
+  computeServiceFlows,
+  extractServiceCalls,
+  extractServiceEndpoints,
+  type RepoServiceFact,
+} from './services.ts';
 
 export interface AnalyzeWorkspaceOptions {
   /** Injectable fact cache; defaults to the persisted one beside the graph cache. */
   cache?: WorkspaceCache;
 }
 
-interface RepoAnalysis extends RepoFlowFact {
+interface RepoAnalysis extends RepoFlowFact, RepoServiceFact {
   descriptor: WorkspaceRepository;
   contracts: ContractDefinition[];
+  endpoints: ServiceEndpoint[];
+  calls: ServiceCall[];
 }
 
 /**
@@ -40,6 +54,8 @@ export async function analyzeWorkspace(
     const facts = stored ?? {
       publishes: readPublishedCoordinate(repository.root),
       contracts: extractContracts(repository.root, repository.name),
+      endpoints: extractServiceEndpoints(repository.root, repository.name),
+      calls: extractServiceCalls(repository.root),
     };
     if (!stored) {
       cache.set(repository.root, cached.fingerprint, facts);
@@ -49,6 +65,8 @@ export async function analyzeWorkspace(
       publishes: facts.publishes,
       graph: cached.report.graph,
       contracts: facts.contracts,
+      endpoints: facts.endpoints,
+      calls: facts.calls,
       descriptor: {
         name: repository.name,
         root: repository.root,
@@ -64,6 +82,8 @@ export async function analyzeWorkspace(
   const flows = computeCrossRepoFlows(analyses);
   const contracts = analyses.flatMap((analysis) => analysis.contracts);
   const drift = computeContractDrift(contracts);
+  const serviceEndpoints = analyses.flatMap((analysis) => analysis.endpoints);
+  const serviceFlows = computeServiceFlows(analyses);
   const descriptor = analyses.map((analysis) => analysis.descriptor);
 
   return {
@@ -72,11 +92,14 @@ export async function analyzeWorkspace(
     flows,
     contracts,
     drift,
+    serviceEndpoints,
+    serviceFlows,
     summary: {
       repositories: descriptor.length,
       flows: flows.length,
       contracts: contracts.length,
       drifting: drift.filter((entry) => entry.deviations.length > 0).length,
+      serviceFlows: serviceFlows.length,
     },
   };
 }

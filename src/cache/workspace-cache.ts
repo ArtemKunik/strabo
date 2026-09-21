@@ -1,15 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { ContractDefinition, PublishedCoordinate } from '../types.ts';
+import type {
+  ContractDefinition,
+  PublishedCoordinate,
+  ServiceCall,
+  ServiceEndpoint,
+} from '../types.ts';
 import { cacheRoot } from './graph-cache.ts';
 
-export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-1';
+export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-2';
 
 /** The per-repository facts that are expensive to recompute and cheap to store. */
 export interface CachedRepoFacts {
   publishes: PublishedCoordinate | null;
   contracts: ContractDefinition[];
+  endpoints: ServiceEndpoint[];
+  calls: ServiceCall[];
 }
 
 interface StoreEntry extends CachedRepoFacts {
@@ -54,7 +61,12 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
       if (!entry || entry.fingerprint !== fingerprint) {
         return null;
       }
-      return { publishes: entry.publishes, contracts: entry.contracts };
+      return {
+        publishes: entry.publishes,
+        contracts: entry.contracts,
+        endpoints: entry.endpoints,
+        calls: entry.calls,
+      };
     },
 
     set(root: string, fingerprint: string | null, facts: CachedRepoFacts): void {
@@ -65,6 +77,8 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
         fingerprint,
         publishes: facts.publishes,
         contracts: facts.contracts,
+        endpoints: facts.endpoints,
+        calls: facts.calls,
       };
       dirty = true;
     },
@@ -96,13 +110,20 @@ function readStore(file: string): StoreFile {
     }
     const entries: Record<string, StoreEntry> = {};
     for (const [root, entry] of Object.entries(parsed.entries)) {
-      if (typeof entry?.fingerprint !== 'string' || !Array.isArray(entry?.contracts)) {
+      if (
+        typeof entry?.fingerprint !== 'string' ||
+        !Array.isArray(entry?.contracts) ||
+        !Array.isArray(entry?.endpoints) ||
+        !Array.isArray(entry?.calls)
+      ) {
         continue;
       }
       entries[root] = {
         fingerprint: entry.fingerprint,
         publishes: isCoordinate(entry.publishes) ? entry.publishes : null,
         contracts: entry.contracts,
+        endpoints: entry.endpoints,
+        calls: entry.calls,
       };
     }
     return { version: WORKSPACE_CACHE_VERSION, entries };

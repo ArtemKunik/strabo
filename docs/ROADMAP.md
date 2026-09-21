@@ -20,7 +20,7 @@ record is reported as `unavailable`, never invented.
 | 5 | Timeline and compare versions | Done (commit list + impact against a revision) |
 | 6 | Release readiness | Done (`npm run test:pack`: pack, clean-consumer install, contract tests) |
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
-| 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, per-fingerprint cache; A10: read-only Workspace panel) |
+| 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, service flows, per-fingerprint cache; A10: read-only Workspace panel; A11: HTTP/service-call flows) |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
 | 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
@@ -170,11 +170,20 @@ scan recorded is drawn; nothing is inferred from names or proximity.
 - **Contract drift**: a contract id declared by more than one repository, with the fields
   that are missing, differently typed, or disagree on required-ness. An identical shared
   contract is kept with no deviations.
+- **Service flows**: an outbound HTTP call recorded in a repository's source joined to an
+  endpoint a sibling declares in its OpenAPI `paths`. The call is recorded lexically, like
+  external imports: a verb-named callee (`get`/`post`/…), `fetch`, `requests.request`,
+  `GetAsync`, OkHttp `url`/`URI.create`, or `reqwest::get` with a string-literal URL or
+  absolute path. The endpoint takes its host and path prefix from the first `servers[0].url`
+  (or Swagger 2 `host`/`basePath`). The join needs a recorded host, path, and method on both
+  sides, so a relative call or a serverless endpoint is evidence without a flow, and a call
+  whose method is not recorded joins only when that host and path declares exactly one method.
+  An interpolated template literal is recorded with no readable path rather than guessed at.
 - **Caching**: graphs come from the shared graph cache; per-repo coordinates and contracts
   are cached per git fingerprint (`strabo-workspace.json`), so an unchanged repository is
   never rescanned or re-extracted. A non-git root is not cached under a key that cannot be
   checked.
-- Endpoints: `GET /workspace` and `GET /workspace/contracts`.
+- Endpoints: `GET /workspace`, `GET /workspace/contracts`, and `GET /workspace/services`.
 
 Slices: **A10 (done)** the read-only workspace UI. `ui/strabo-workspace.js` turns the
 recorded `WorkspaceReport` into pure rows (`workspaceSummary`, `repositoryRows`, `flowRows`,
@@ -183,10 +192,16 @@ cross-repo flows, contracts, and drift in a floating panel, saying so when a sec
 nothing recorded rather than showing it empty. The panel is registered in the dock
 (`ui/strabo.js`, `ui/index.html`) and opened from `window.straboTest.workspace()`. Route-level
 coverage is in `test/unit/server.test.ts`; `test/acceptance/features/workspace.feature`
-(`@workspace`) asserts the single-root report and the empty-section captions.
+(`@workspace`) asserts the single-root report and the empty-section captions. **A11 (done)**
+HTTP/service-call flows: `src/workspace/services.ts` extracts declared endpoints
+(`extractServiceEndpoints`) and recorded outbound calls (`extractServiceCalls`), then joins
+them (`computeServiceFlows`); the facts are cached per fingerprint beside coordinates and
+contracts (`WORKSPACE_CACHE_VERSION` bumped to `strabo-workspace-2`), the report gains
+`serviceEndpoints` and `serviceFlows`, and `GET /workspace/services` exposes them. Unit
+coverage is in `test/unit/services.test.ts` and the `analyzeWorkspace` case in
+`test/unit/workspace.test.ts`. The panel does not draw service flows yet.
 
-Next: HTTP/service-call flows, language DTO contracts, and marking cross-repo flow endpoints
-on the map.
+Next: language DTO contracts and marking cross-repo flow endpoints on the map.
 
 ## Phase 12 - Frontend foundation
 

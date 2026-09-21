@@ -231,4 +231,13 @@ test('the workspace endpoint reports the single configured root', async () => {
   assert.deepEqual(contracts.repositories, ['block-repo']);
   assert.ok(Array.isArray(contracts.contracts));
   assert.ok(Array.isArray(contracts.drift));
+
+  const services = (await (await fetch(`${base}/api/strabo/workspace/services`)).json()) as {
+    repositories: string[];
+    endpoints: unknown[];
+    flows: unknown[];
+  };
+  assert.deepEqual(services.repositories, ['block-repo']);
+  assert.deepEqual(services.endpoints, []);
+  assert.deepEqual(services.flows, []);
 });

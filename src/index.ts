@@ -98,6 +98,13 @@ export { readPublishedCoordinate } from './workspace/coordinate.ts';
 export { computeCrossRepoFlows } from './workspace/flows.ts';
 export type { RepoFlowFact } from './workspace/flows.ts';
 export { extractContracts, computeContractDrift, findContractFiles } from './workspace/contracts.ts';
+export {
+  extractServiceEndpoints,
+  extractServiceCalls,
+  computeServiceFlows,
+  locateTarget,
+} from './workspace/services.ts';
+export type { RepoServiceFact } from './workspace/services.ts';
 export { analyzeWorkspace } from './workspace/analyze.ts';
 export type { AnalyzeWorkspaceOptions } from './workspace/analyze.ts';
 export { openWorkspaceCache, clearWorkspaceCache, workspaceCachePath, WORKSPACE_CACHE_VERSION } from './cache/workspace-cache.ts';

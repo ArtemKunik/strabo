@@ -211,8 +211,8 @@ than showing a fabricated score.
 Roots are relative to the config file, and every one is still resolved through
 `STRABO_SCAN_CEILING`, so naming a path can never widen what Strabo may read. Without a
 config the workspace is the single configured root, so multi-repo analysis stays opt-in.
-`GET /api/strabo/workspace` returns the repositories, the flows between them, and the data
-contracts they share.
+`GET /api/strabo/workspace` returns the repositories, the package and service flows between
+them, and the data contracts they share.
 
 **Cross-repo flows** are package publish/consume edges. A repository's published coordinate
 is read from its own manifest (`package.json` `name`, `Cargo.toml` `[package] name`,
@@ -227,6 +227,16 @@ JSON Schema objects, normalised to field name, type, and required-ness. The
 the same contract id is declared by more than one repository, the fields that are missing on
 a side, have a different type, or disagree on required-ness. An identical shared contract is
 kept with no deviations rather than silently omitted.
+
+**Service flows** join an outbound HTTP call recorded in one repository's source to an
+endpoint a sibling declares in its OpenAPI `paths`. A call is recorded when a verb-named
+callee (`get`/`post`/…), `fetch`, `requests.request`, `GetAsync`, OkHttp `url`/`URI.create`,
+or `reqwest::get` is passed a string-literal URL or absolute path; the endpoint's host and
+path prefix come from the first `servers[0].url` (or Swagger 2 `host`/`basePath`). The join
+needs a recorded host, path, and method on both sides, so a relative call or a serverless
+endpoint is evidence without a flow, and a call whose method is not recorded joins only when
+that host and path declares exactly one method. The `/api/strabo/workspace/services` endpoint
+returns the declared endpoints and the joined flows.
 
 The **Workspace** panel (dock entry, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the
@@ -524,7 +534,7 @@ src/
   scan/            collectSourceFiles, scanRepository, exclusion + gitignore handling
   resolve/         language facts -> internal repository paths
   analysis/        metrics, impact, coverage, cycles, depth, ownership, blocks
-  workspace/       declared multi-repo analysis: published coordinates, flows, contracts
+  workspace/       declared multi-repo analysis: coordinates, package/service flows, contracts
   view/            deterministic server-side view model
   cache/           memory + disk graph cache, workspace fact cache, fingerprints, refresh
   api/             router composition and focused routes

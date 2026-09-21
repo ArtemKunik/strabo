@@ -257,6 +257,50 @@ export interface CrossRepoFlow {
   publishedBy: string;
 }
 
+/** A recorded outbound HTTP call in a repository's source. */
+export interface ServiceCall {
+  /** Repository-relative source file. */
+  file: string;
+  line: number;
+  /** Uppercase HTTP method when the call names one, else null. */
+  method: string | null;
+  /** The URL or path as written. */
+  target: string;
+  /** Lowercased host with port when the target is absolute, else null. */
+  host: string | null;
+  /** Normalised request path, or null when it could not be read (an interpolated URL). */
+  path: string | null;
+}
+
+/** An HTTP endpoint a repository declares in an OpenAPI document. */
+export interface ServiceEndpoint {
+  /** Repository name. */
+  repository: string;
+  /** Repository-relative source file. */
+  source: string;
+  /** Uppercase HTTP method. */
+  method: string;
+  /** Full path: the server's path prefix plus the operation path. */
+  path: string;
+  /** Lowercased host with port from the first server, else null. */
+  host: string | null;
+}
+
+/** A recorded call from one repository to an endpoint another repository declares. */
+export interface ServiceFlow {
+  /** Repository whose source makes the call. */
+  from: string;
+  /** Repository that declares the endpoint. */
+  to: string;
+  method: string;
+  path: string;
+  host: string;
+  /** Calls in `from` that matched, with the authored target. */
+  calls: Array<{ file: string; line: number; target: string; method: string | null }>;
+  /** OpenAPI file in `to` that declared the endpoint, for evidence. */
+  declaredBy: string;
+}
+
 /** One field of a data contract, normalised across formats. */
 export interface ContractField {
   name: string;
@@ -303,12 +347,17 @@ export interface WorkspaceReport {
   flows: CrossRepoFlow[];
   contracts: ContractDefinition[];
   drift: ContractDrift[];
+  /** HTTP endpoints repositories declare, from their OpenAPI documents. */
+  serviceEndpoints: ServiceEndpoint[];
+  /** Recorded calls joined to a declared endpoint in another repository. */
+  serviceFlows: ServiceFlow[];
   /** Totals for the status line; never a verdict. */
   summary: {
     repositories: number;
     flows: number;
     contracts: number;
     drifting: number;
+    serviceFlows: number;
   };
 }
 

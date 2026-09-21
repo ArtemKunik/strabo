@@ -12,7 +12,8 @@ import { sendError } from '../http.ts';
  * The workspace is the explicitly declared repository list (`STRABO_CONFIG`), or the single
  * configured root when none is given. Cross-repo flows are package publish/consume edges
  * resolved from recorded manifests and imports; contract drift compares the data contracts
- * repositories share. Both report only what the scan recorded.
+ * repositories share; service flows join a recorded outbound HTTP call to an endpoint a
+ * sibling declares in its OpenAPI document. All of them report only what the scan recorded.
  */
 export function createWorkspaceRouter(config: StraboConfig): Router {
   const router = Router();
@@ -35,6 +36,21 @@ export function createWorkspaceRouter(config: StraboConfig): Router {
         repositories: report.repositories.map((entry) => entry.name),
         contracts: report.contracts,
         drift: report.drift,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.get('/workspace/services', async (_request, response) => {
+    try {
+      const { name, repositories } = resolveWorkspaceRepositories(config);
+      const report = await analyzeWorkspace(name, repositories, { cache: openWorkspaceCache() });
+      response.json({
+        name: report.name,
+        repositories: report.repositories.map((entry) => entry.name),
+        endpoints: report.serviceEndpoints,
+        flows: report.serviceFlows,
       });
     } catch (error) {
       sendError(response, error);

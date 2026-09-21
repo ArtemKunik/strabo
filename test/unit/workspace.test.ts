@@ -298,6 +298,16 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
   const a = tempDir();
   write(a, 'package.json', '{"name":"@acme/core"}');
   write(a, 'user.proto', 'syntax = "proto3";\npackage acme;\nmessage User {\n  string id = 1;\n  string name = 2;\n}\n');
+  write(
+    a,
+    'openapi.json',
+    JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'Core API', version: '1' },
+      servers: [{ url: 'https://api.acme.test' }],
+      paths: { '/users': { get: {} } },
+    }),
+  );
   git(a, 'init', '-q');
   git(a, 'config', 'user.email', 'test@example.com');
   git(a, 'config', 'user.name', 'Tester');
@@ -306,7 +316,11 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
 
   const b = tempDir();
   write(b, 'package.json', '{"name":"consumer"}');
-  write(b, 'src/index.ts', "import { core } from '@acme/core';\nexport const value = core;\n");
+  write(
+    b,
+    'src/index.ts',
+    "import { core } from '@acme/core';\nexport const value = core;\nexport const users = () => fetch('https://api.acme.test/users');\n",
+  );
   write(
     b,
     'user.proto',
@@ -345,6 +359,19 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
     drift.deviations.map((entry) => [entry.name, entry.issue]),
     [['email', 'missing']],
   );
+
+  assert.equal(first.summary.serviceFlows, 1);
+  assert.equal(first.serviceEndpoints.length, 1);
+  assert.deepEqual(
+    first.serviceEndpoints.map((entry) => [entry.repository, entry.method, entry.path, entry.host]),
+    [[nameOf(a), 'GET', '/users', 'api.acme.test']],
+  );
+  const serviceFlow = first.serviceFlows[0];
+  assert.ok(serviceFlow);
+  assert.equal(serviceFlow.from, nameOf(b));
+  assert.equal(serviceFlow.to, nameOf(a));
+  assert.equal(serviceFlow.method, 'GET');
+  assert.equal(serviceFlow.path, '/users');
 
   assert.ok(fs.existsSync(cacheFile), 'the workspace cache should be written');
 
