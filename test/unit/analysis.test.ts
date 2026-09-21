@@ -13,6 +13,7 @@ import {
 import { computeCoverage } from '../../src/index.ts';
 import { computeCycles } from '../../src/index.ts';
 import { buildPositions } from '../../src/index.ts';
+import { buildSystemPositions } from '../../src/index.ts';
 import { scanRepository } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +93,43 @@ test('buildPositions shelf-packs directories into a roughly rectangular map', ()
 test('buildPositions is deterministic for equivalent graph input', async () => {
   const graph = await loadGraph();
   assert.deepEqual(buildPositions(graph), buildPositions(graph));
+});
+
+test('buildSystemPositions orders units left-to-right by dependency depth', () => {
+  const units = [{ id: 'app' }, { id: 'lib' }, { id: 'core' }];
+  const edges = [
+    { source: 'app', target: 'lib' },
+    { source: 'lib', target: 'core' },
+  ];
+  const x = new Map(buildSystemPositions(units, edges).map((position) => [position.id, position.x]));
+  assert.ok((x.get('core') as number) < (x.get('lib') as number));
+  assert.ok((x.get('lib') as number) < (x.get('app') as number));
+});
+
+test('buildSystemPositions terminates on a cycle and places every unit once', () => {
+  const units = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const edges = [
+    { source: 'a', target: 'b' },
+    { source: 'b', target: 'a' },
+  ];
+  const positions = buildSystemPositions(units, edges);
+  assert.equal(positions.length, 3);
+  assert.equal(new Set(positions.map((position) => position.id)).size, 3);
+  assert.deepEqual(buildSystemPositions(units, edges), positions);
+});
+
+test('buildSystemPositions wraps a wide rank into a compact block', () => {
+  const units = Array.from({ length: 20 }, (_, index) => ({
+    id: `u${String(index).padStart(2, '0')}`,
+  }));
+  const positions = buildSystemPositions(units, []);
+  const xs = positions.map((position) => position.x);
+  const ys = positions.map((position) => position.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  assert.ok(width > 0 && height > 0, 'a wide rank should not collapse to a single line');
+  assert.ok(height <= 5 * 300, `a rank should cap its rows, got height ${height}`);
+  assert.equal(new Set(positions.map((position) => `${position.x},${position.y}`)).size, positions.length);
 });
 
 test('buildAdjacency leaves declare edges out of blast radius unless asked', () => {

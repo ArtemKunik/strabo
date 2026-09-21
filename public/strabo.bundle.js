@@ -1416,105 +1416,6 @@ function buildAgentPrompt({ agent, repository, target }) {
 \u2026(truncated)` : prompt;
 }
 
-// ui/strabo-unit-cards.js
-function formatCount(value) {
-  const number = Math.max(0, Math.round(Number(value) || 0));
-  if (number < 1e3) {
-    return String(number);
-  }
-  const thousands = number / 1e3;
-  return `${thousands >= 100 ? Math.round(thousands) : thousands.toFixed(1).replace(/\.0$/, "")}k`;
-}
-function layerBars(layers) {
-  const max = Math.max(1, ...(layers ?? []).map((layer) => layer.files));
-  return (layers ?? []).map((layer) => ({
-    name: layer.name,
-    files: layer.files,
-    ratio: layer.files / max
-  }));
-}
-function element(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) {
-    node.className = className;
-  }
-  if (text !== void 0) {
-    node.textContent = text;
-  }
-  return node;
-}
-function shelfCategories(shelf) {
-  return [
-    ["test", "tests"],
-    ["script", "scripts"],
-    ["generated", "generated"],
-    ["fixture", "fixtures"]
-  ].filter(([key]) => shelf[key] > 0);
-}
-function unitCardElement(card, options = {}) {
-  const root = element("article", "unit-card");
-  root.dataset.unit = card.id;
-  const head = element("header", "unit-card-head");
-  head.append(element("span", "unit-card-name", card.name));
-  if (card.role) {
-    head.append(element("span", "unit-card-role", card.role));
-  }
-  head.append(element("span", "unit-card-eco", card.ecosystem));
-  root.append(head);
-  if (card.manifest) {
-    root.append(element("div", "unit-card-why", `why: ${card.manifest}`));
-  }
-  const stats = element("div", "unit-card-stats");
-  stats.append(element("span", "unit-stat", `${formatCount(card.files)} files`));
-  stats.append(element("span", "unit-stat", `${formatCount(card.loc)} lines`));
-  const languages = Object.keys(card.languages ?? {}).length;
-  stats.append(element("span", "unit-stat", `${languages} lang${languages === 1 ? "" : "s"}`));
-  root.append(stats);
-  const layers = element("div", "unit-card-layers");
-  for (const bar of layerBars(card.layers)) {
-    const row = element("div", "unit-layer");
-    row.append(element("span", "unit-layer-name", bar.name));
-    const track = element("span", "unit-layer-track");
-    const fill = element("span", "unit-layer-bar");
-    fill.style.width = `${Math.round(bar.ratio * 100)}%`;
-    track.append(fill);
-    row.append(track, element("span", "unit-layer-count", String(bar.files)));
-    layers.append(row);
-  }
-  if (card.layers?.length) {
-    root.append(layers);
-  }
-  const reach = element("div", "unit-card-reach");
-  const hotspots = card.hotspots === null || card.hotspots === void 0 ? "\u2014" : String(card.hotspots);
-  const share = card.testReach?.total ? `${Math.round(card.testReach.reached / card.testReach.total * 100)}%` : "0%";
-  reach.append(
-    element("span", "unit-stat", `hotspots ${hotspots}`),
-    element("span", "unit-stat", `test reach ${share}`)
-  );
-  root.append(reach);
-  if (card.shelf?.total > 0) {
-    const strip = element("button", "unit-shelf");
-    strip.type = "button";
-    const parts = [];
-    if (card.shelf.test) parts.push(`${card.shelf.test} test${card.shelf.test === 1 ? "" : "s"}`);
-    if (card.shelf.script) parts.push(`${card.shelf.script} script${card.shelf.script === 1 ? "" : "s"}`);
-    strip.textContent = `support: ${parts.length ? parts.join(" \xB7 ") : `${card.shelf.total} files`}`;
-    strip.setAttribute("aria-expanded", String(Boolean(options.expanded)));
-    const more = element("div", "unit-shelf-more");
-    more.hidden = !options.expanded;
-    for (const [key, label] of shelfCategories(card.shelf)) {
-      more.append(element("div", "unit-shelf-row", `${card.shelf[key]} ${label}`));
-    }
-    strip.addEventListener("click", (event) => {
-      event.stopPropagation();
-      more.hidden = !more.hidden;
-      strip.setAttribute("aria-expanded", String(!more.hidden));
-    });
-    root.append(strip, more);
-  }
-  return root;
-}
-
 // ui/strabo-island-layer.js
 var SVG_NS = "http://www.w3.org/2000/svg";
 var LABEL_BASELINE_GAP = 6;
@@ -1915,6 +1816,177 @@ function createCytoscape(container) {
   return window.cytoscape(options);
 }
 
+// ui/strabo-unit-cards.js
+function formatCount(value) {
+  const number = Math.max(0, Math.round(Number(value) || 0));
+  if (number < 1e3) {
+    return String(number);
+  }
+  const thousands = number / 1e3;
+  return `${thousands >= 100 ? Math.round(thousands) : thousands.toFixed(1).replace(/\.0$/, "")}k`;
+}
+function layerBars(layers) {
+  const max = Math.max(1, ...(layers ?? []).map((layer) => layer.files));
+  return (layers ?? []).map((layer) => ({
+    name: layer.name,
+    files: layer.files,
+    ratio: layer.files / max
+  }));
+}
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== void 0) {
+    node.textContent = text;
+  }
+  return node;
+}
+function shelfCategories(shelf) {
+  return [
+    ["test", "tests"],
+    ["script", "scripts"],
+    ["generated", "generated"],
+    ["fixture", "fixtures"]
+  ].filter(([key]) => shelf[key] > 0);
+}
+function unitCardElement(card, options = {}) {
+  const root = element("article", "unit-card");
+  root.dataset.unit = card.id;
+  const head = element("header", "unit-card-head");
+  head.append(element("span", "unit-card-name", card.name));
+  if (card.role) {
+    head.append(element("span", "unit-card-role", card.role));
+  }
+  head.append(element("span", "unit-card-eco", card.ecosystem));
+  root.append(head);
+  if (typeof options.onOpen === "function") {
+    head.classList.add("unit-card-open");
+    head.setAttribute("role", "button");
+    head.setAttribute("tabindex", "0");
+    head.setAttribute("aria-label", `Open unit ${card.name}`);
+    head.addEventListener("click", (event) => {
+      event.stopPropagation();
+      options.onOpen(card.id);
+    });
+    head.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        options.onOpen(card.id);
+      }
+    });
+  }
+  if (card.manifest) {
+    root.append(element("div", "unit-card-why", `why: ${card.manifest}`));
+  }
+  const stats = element("div", "unit-card-stats");
+  stats.append(element("span", "unit-stat", `${formatCount(card.files)} files`));
+  stats.append(element("span", "unit-stat", `${formatCount(card.loc)} lines`));
+  const languages = Object.keys(card.languages ?? {}).length;
+  stats.append(element("span", "unit-stat", `${languages} lang${languages === 1 ? "" : "s"}`));
+  root.append(stats);
+  const layers = element("div", "unit-card-layers");
+  for (const bar of layerBars(card.layers)) {
+    const row = element("div", "unit-layer");
+    row.append(element("span", "unit-layer-name", bar.name));
+    const track = element("span", "unit-layer-track");
+    const fill = element("span", "unit-layer-bar");
+    fill.style.width = `${Math.round(bar.ratio * 100)}%`;
+    track.append(fill);
+    row.append(track, element("span", "unit-layer-count", String(bar.files)));
+    layers.append(row);
+  }
+  if (card.layers?.length) {
+    root.append(layers);
+  }
+  const reach = element("div", "unit-card-reach");
+  const hotspots = card.hotspots === null || card.hotspots === void 0 ? "\u2014" : String(card.hotspots);
+  const share = card.testReach?.total ? `${Math.round(card.testReach.reached / card.testReach.total * 100)}%` : "0%";
+  reach.append(
+    element("span", "unit-stat", `hotspots ${hotspots}`),
+    element("span", "unit-stat", `test reach ${share}`)
+  );
+  root.append(reach);
+  if (card.shelf?.total > 0) {
+    const strip = element("button", "unit-shelf");
+    strip.type = "button";
+    const parts = [];
+    if (card.shelf.test) parts.push(`${card.shelf.test} test${card.shelf.test === 1 ? "" : "s"}`);
+    if (card.shelf.script) parts.push(`${card.shelf.script} script${card.shelf.script === 1 ? "" : "s"}`);
+    strip.textContent = `support: ${parts.length ? parts.join(" \xB7 ") : `${card.shelf.total} files`}`;
+    strip.title = `${card.shelf.test} test file${card.shelf.test === 1 ? "" : "s"}, ${card.shelf.script} script${card.shelf.script === 1 ? "" : "s"}: folded support`;
+    strip.setAttribute("aria-expanded", String(Boolean(options.expanded)));
+    const more = element("div", "unit-shelf-more");
+    more.hidden = !options.expanded;
+    for (const [key, label] of shelfCategories(card.shelf)) {
+      more.append(element("div", "unit-shelf-row", `${card.shelf[key]} ${label}`));
+    }
+    strip.addEventListener("click", (event) => {
+      event.stopPropagation();
+      more.hidden = !more.hidden;
+      strip.setAttribute("aria-expanded", String(!more.hidden));
+    });
+    root.append(strip, more);
+  }
+  return root;
+}
+
+// ui/strabo-unit-card-layer.js
+function createUnitCardLayer(container, cy, onOpen) {
+  const layer = document.createElement("div");
+  layer.className = "unit-card-layer";
+  container.appendChild(layer);
+  const elements2 = /* @__PURE__ */ new Map();
+  const signatures = /* @__PURE__ */ new Map();
+  function repaint() {
+    if (elements2.size === 0) {
+      return;
+    }
+    for (const [id, card] of elements2) {
+      const node = cy.getElementById(id);
+      if (node.empty() || !node.visible()) {
+        card.hidden = true;
+        continue;
+      }
+      const position = node.renderedPosition();
+      const radius = (Number(node.data("diameter")) || 48) / 2;
+      card.hidden = false;
+      card.style.left = `${position.x}px`;
+      card.style.top = `${position.y + radius + 8}px`;
+    }
+  }
+  function apply(model) {
+    const cards = model?.system && !model.systemUnit ? model.unitCards ?? [] : [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const card of cards) {
+      seen.add(card.id);
+      const signature = JSON.stringify(card);
+      if (signatures.get(card.id) === signature) {
+        continue;
+      }
+      const element2 = unitCardElement(card, { onOpen });
+      const existing = elements2.get(card.id);
+      if (existing) {
+        existing.replaceWith(element2);
+      } else {
+        layer.append(element2);
+      }
+      elements2.set(card.id, element2);
+      signatures.set(card.id, signature);
+    }
+    for (const [id, element2] of [...elements2]) {
+      if (!seen.has(id)) {
+        element2.remove();
+        elements2.delete(id);
+        signatures.delete(id);
+      }
+    }
+    repaint();
+  }
+  return { apply, repaint };
+}
+
 // ui/strabo-graph-classes.js
 var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell"];
 var RESET_CLASSES = [
@@ -1933,22 +2005,45 @@ var RESET_CLASSES = [
   "edge-tier-skip"
 ];
 
-// ui/strabo-view.js
-function createView(container) {
-  const islands = createIslandLayer(container);
-  const cy = createCytoscape(container);
-  const gpu = Boolean(cy.renderer()?.webgl);
-  const cardLayer = document.createElement("div");
-  cardLayer.className = "unit-card-layer";
-  container.appendChild(cardLayer);
-  const cardElements = /* @__PURE__ */ new Map();
-  const cardSignatures = /* @__PURE__ */ new Map();
-  let lastModel = null;
-  let islandModel = null;
-  let islandVisible = null;
-  let renderedElements = { nodes: [], edges: [] };
+// ui/strabo-graph-sync.js
+function applyGraphDiff(cy, model, prevElements) {
+  const elements2 = buildElements(model);
+  const diff = diffGraph(prevElements, elements2);
+  cy.batch(() => {
+    cy.elements().unselect().removeClass(RESET_CLASSES.join(" "));
+    const removedNodes = new Set(diff.nodes.removed);
+    const orphaned = cy.edges().filter(
+      (edge) => removedNodes.has(edge.source().id()) || removedNodes.has(edge.target().id())
+    );
+    for (const id of diff.edges.removed) cy.getElementById(id).remove();
+    orphaned.remove();
+    for (const id of diff.nodes.removed) cy.getElementById(id).remove();
+    cy.add(diff.nodes.added);
+    cy.add(diff.edges.added);
+    for (const { before, after } of diff.nodes.updated) {
+      const node = cy.getElementById(after.data.id);
+      if (node.empty()) continue;
+      node.removeClass(before.classes ?? "");
+      node.addClass(after.classes ?? "");
+      node.data(after.data);
+      if (after.position) node.position(after.position);
+    }
+    for (const { after } of diff.edges.updated) {
+      const edge = cy.getElementById(after.data.id);
+      if (edge.nonempty()) {
+        edge.data(after.data);
+      } else {
+        cy.add(after);
+      }
+    }
+  });
+  return elements2;
+}
+
+// ui/strabo-edge-focus.js
+function createEdgeFocus(cy) {
   let focusedFile = null;
-  function applyEdgeFocus() {
+  function apply() {
     cy.batch(() => {
       cy.edges().forEach((edge) => {
         if (edge.data("scope") !== "unit") {
@@ -1960,6 +2055,149 @@ function createView(container) {
       });
     });
   }
+  return {
+    apply,
+    setFile(fileId) {
+      focusedFile = fileId ?? null;
+      apply();
+    }
+  };
+}
+
+// ui/strabo-edge-highlight.js
+function createEdgeHighlight(cy) {
+  function fade(node) {
+    cy.batch(() => {
+      cy.edges().removeClass("edge-faded");
+      if (!node || node.empty()) {
+        return;
+      }
+      cy.edges().forEach((edge) => {
+        const incident = edge.source().same(node) || edge.target().same(node);
+        if (!incident) edge.addClass("edge-faded");
+      });
+    });
+  }
+  function select(edgeId) {
+    cy.edges().removeClass("edge-selected");
+    if (edgeId) {
+      const edge = cy.getElementById(edgeId);
+      if (edge.nonempty()) {
+        edge.addClass("edge-selected");
+      }
+    }
+  }
+  return { fade, select };
+}
+
+// ui/strabo-lenses.js
+function dimOutside(cy, ids) {
+  const keep = ids ? new Set(ids) : null;
+  cy.batch(() => {
+    cy.elements().removeClass("dimmed");
+    if (keep) {
+      cy.nodes().forEach((node) => {
+        if (!keep.has(node.id())) node.addClass("dimmed");
+      });
+      cy.edges().forEach((edge) => {
+        const inside = keep.has(edge.source().id()) && keep.has(edge.target().id());
+        if (!inside) edge.addClass("dimmed");
+      });
+    }
+  });
+}
+function overlayNodes(cy, classesByNode) {
+  cy.batch(() => {
+    cy.nodes().removeClass(OVERLAY_CLASSES.join(" "));
+    for (const [id, className] of classesByNode ?? []) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.addClass(className);
+    }
+  });
+}
+function ringCrossRepo(cy, ids) {
+  cy.batch(() => {
+    cy.nodes().removeClass("ov-cross-repo");
+    for (const id of ids ?? []) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.addClass("ov-cross-repo");
+    }
+  });
+}
+function filterNodes2(cy, ids) {
+  const keep = ids ? new Set(ids) : null;
+  cy.batch(() => {
+    cy.nodes().forEach((node) => {
+      const visible = !keep || keep.has(node.id());
+      node.toggleClass("filtered-out", !visible);
+    });
+  });
+  return keep;
+}
+function applyTier(cy, tierByFile, filterTier = "all") {
+  const enabled = tierByFile instanceof Map;
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      for (const tier2 of TIER_ORDER) {
+        node.removeClass(`tier-${tier2}`);
+      }
+      if (!enabled) {
+        node.removeClass("tier-hidden");
+        continue;
+      }
+      const tier = tierByFile.get(node.id());
+      if (tier) {
+        node.addClass(`tier-${tier}`);
+      }
+      const keep = filterTier === "all" || tier === filterTier;
+      node.toggleClass("tier-hidden", !keep);
+    }
+  });
+}
+function applyTierDirections(cy, directions) {
+  const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
+  const edges = Array.isArray(directions?.edges) ? directions.edges : [];
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      node.removeClass("tier-upward");
+      node.removeClass("tier-skip");
+    }
+    for (const edge of cy.edges()) {
+      edge.removeClass("edge-tier-upward");
+      edge.removeClass("edge-tier-skip");
+    }
+    if (!nodes) {
+      return;
+    }
+    for (const [id, classes] of nodes) {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) {
+        for (const cls of classes) {
+          node.addClass(cls);
+        }
+      }
+    }
+    for (const direction of edges) {
+      const cls = direction.kind === "upward" ? "edge-tier-upward" : "edge-tier-skip";
+      cy.edges().filter(
+        (edge) => edge.data("source") === direction.source && edge.data("target") === direction.target
+      ).addClass(cls);
+    }
+  });
+}
+
+// ui/strabo-view.js
+function createView(container) {
+  const islands = createIslandLayer(container);
+  const cy = createCytoscape(container);
+  const gpu = Boolean(cy.renderer()?.webgl);
+  const cards = createUnitCardLayer(container, cy, openCard);
+  const edgeFocus = createEdgeFocus(cy);
+  const edgeHighlight = createEdgeHighlight(cy);
+  let lastModel = null;
+  let islandModel = null;
+  let islandVisible = null;
+  let renderedElements = { nodes: [], edges: [] };
   function repaintIslands() {
     islands.paint(
       islandBounds(islandModel, {
@@ -1972,65 +2210,19 @@ function createView(container) {
       }
     );
   }
-  function repaintCards() {
-    if (cardElements.size === 0) {
-      return;
-    }
-    for (const [id, card] of cardElements) {
-      const node = cy.getElementById(id);
-      if (node.empty() || !node.visible()) {
-        card.hidden = true;
-        continue;
-      }
-      const position = node.renderedPosition();
-      const radius = (Number(node.data("diameter")) || 48) / 2;
-      card.hidden = false;
-      card.style.left = `${position.x}px`;
-      card.style.top = `${position.y + radius + 8}px`;
-    }
-  }
-  function applyUnitCards(model) {
-    const cards = model?.system && !model.systemUnit ? model.unitCards ?? [] : [];
-    const seen = /* @__PURE__ */ new Set();
-    for (const card of cards) {
-      seen.add(card.id);
-      const signature = JSON.stringify(card);
-      if (cardSignatures.get(card.id) === signature) {
-        continue;
-      }
-      const element2 = unitCardElement(card);
-      const existing = cardElements.get(card.id);
-      if (existing) {
-        existing.replaceWith(element2);
-      } else {
-        cardLayer.append(element2);
-      }
-      cardElements.set(card.id, element2);
-      cardSignatures.set(card.id, signature);
-    }
-    for (const [id, element2] of [...cardElements]) {
-      if (!seen.has(id)) {
-        element2.remove();
-        cardElements.delete(id);
-        cardSignatures.delete(id);
-      }
-    }
-    repaintCards();
-  }
   const selectHandlers = [];
   const drillHandlers = [];
   const hoverHandlers = [];
   const edgeHandlers = [];
   const contextHandlers = [];
   const groupHandlers = [];
-  let selectedEdge = null;
   const observer = new ResizeObserver(() => {
     cy.resize();
     repaintIslands();
   });
   observer.observe(container);
   cy.on("pan zoom resize", repaintIslands);
-  cy.on("pan zoom resize", repaintCards);
+  cy.on("pan zoom resize", cards.repaint);
   let labelFrame = 0;
   function scheduleLabelRecompute() {
     if (labelFrame) {
@@ -2050,12 +2242,12 @@ function createView(container) {
     for (const handler of drillHandlers) handler(event.target.id());
   });
   cy.on("tap", "edge", (event) => {
-    selectEdge2(event.target.id());
+    edgeHighlight.select(event.target.id());
     for (const handler of edgeHandlers) handler(event.target.id());
   });
   cy.on("tap", (event) => {
     if (event.target === cy) {
-      selectEdge2(null);
+      edgeHighlight.select(null);
       for (const handler of edgeHandlers) handler(null);
     }
   });
@@ -2078,11 +2270,11 @@ function createView(container) {
     }
   });
   cy.on("mouseover", "node", (event) => {
-    fadeEdgesAround(cy, event.target);
+    edgeHighlight.fade(event.target);
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
   cy.on("mouseout", "node", () => {
-    fadeEdgesAround(cy, null);
+    edgeHighlight.fade(null);
     for (const handler of hoverHandlers) handler(null);
   });
   cy.on("mouseover", "edge", (event) => {
@@ -2096,15 +2288,8 @@ function createView(container) {
     const ids = cy.nodes(":selected").map((node) => node.id());
     for (const handler of groupHandlers) handler(ids);
   }
-  function selectEdge2(edgeId) {
-    cy.edges().removeClass("edge-selected");
-    selectedEdge = edgeId;
-    if (edgeId) {
-      const edge = cy.getElementById(edgeId);
-      if (edge.nonempty()) {
-        edge.addClass("edge-selected");
-      }
-    }
+  function openCard(id) {
+    for (const handler of drillHandlers) handler(id);
   }
   return {
     cy,
@@ -2122,61 +2307,18 @@ function createView(container) {
       setLabelsVisible(cy, visible);
     },
     render(model) {
-      const elements2 = buildElements(model);
-      const diff = diffGraph(renderedElements, elements2);
-      renderedElements = elements2;
-      selectedEdge = null;
-      cy.batch(() => {
-        cy.elements().unselect().removeClass(RESET_CLASSES.join(" "));
-        const removedNodes = new Set(diff.nodes.removed);
-        const orphaned = cy.edges().filter(
-          (edge) => removedNodes.has(edge.source().id()) || removedNodes.has(edge.target().id())
-        );
-        for (const id of diff.edges.removed) cy.getElementById(id).remove();
-        orphaned.remove();
-        for (const id of diff.nodes.removed) cy.getElementById(id).remove();
-        cy.add(diff.nodes.added);
-        cy.add(diff.edges.added);
-        for (const { before, after } of diff.nodes.updated) {
-          const node = cy.getElementById(after.data.id);
-          if (node.empty()) continue;
-          node.removeClass(before.classes ?? "");
-          node.addClass(after.classes ?? "");
-          node.data(after.data);
-          if (after.position) node.position(after.position);
-        }
-        for (const { after } of diff.edges.updated) {
-          const edge = cy.getElementById(after.data.id);
-          if (edge.nonempty()) {
-            edge.data(after.data);
-          } else {
-            cy.add(after);
-          }
-        }
-      });
+      renderedElements = applyGraphDiff(cy, model, renderedElements);
       islandModel = model;
       lastModel = model;
       islandVisible = null;
       repaintIslands();
-      applyUnitCards(model);
-      applyEdgeFocus();
+      cards.apply(model);
+      edgeFocus.apply();
       applyLabelBudget(cy, true);
       notifyGroup();
     },
     highlight(ids) {
-      const keep = ids ? new Set(ids) : null;
-      cy.batch(() => {
-        cy.elements().removeClass("dimmed");
-        if (keep) {
-          cy.nodes().forEach((node) => {
-            if (!keep.has(node.id())) node.addClass("dimmed");
-          });
-          cy.edges().forEach((edge) => {
-            const inside = keep.has(edge.source().id()) && keep.has(edge.target().id());
-            if (!inside) edge.addClass("dimmed");
-          });
-        }
-      });
+      dimOutside(cy, ids);
     },
     /**
      * Draw only one file's edges inside its unit in a System drill-down; null hides them.
@@ -2185,18 +2327,11 @@ function createView(container) {
      * once one is chosen only its import edges to and from files in the same unit show.
      */
     focusFile(fileId) {
-      focusedFile = fileId ?? null;
-      applyEdgeFocus();
+      edgeFocus.setFile(fileId);
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
-      cy.batch(() => {
-        cy.nodes().removeClass(OVERLAY_CLASSES.join(" "));
-        for (const [id, className] of classesByNode ?? []) {
-          const node = cy.getElementById(id);
-          if (node.nonempty()) node.addClass(className);
-        }
-      });
+      overlayNodes(cy, classesByNode);
     },
     /**
      * Ring the nodes that take part in a recorded cross-repo interaction. Pass null to clear.
@@ -2205,24 +2340,11 @@ function createView(container) {
      * report, not by a graph analysis, and the two can be on screen at once.
      */
     crossRepo(ids) {
-      cy.batch(() => {
-        cy.nodes().removeClass("ov-cross-repo");
-        for (const id of ids ?? []) {
-          const node = cy.getElementById(id);
-          if (node.nonempty()) node.addClass("ov-cross-repo");
-        }
-      });
+      ringCrossRepo(cy, ids);
     },
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {
-      const keep = ids ? new Set(ids) : null;
-      cy.batch(() => {
-        cy.nodes().forEach((node) => {
-          const visible = !keep || keep.has(node.id());
-          node.toggleClass("filtered-out", !visible);
-        });
-      });
-      islandVisible = keep;
+      islandVisible = filterNodes2(cy, ids);
       repaintIslands();
       applyLabelBudget(cy, true);
     },
@@ -2234,24 +2356,7 @@ function createView(container) {
      * the two filters compose instead of clearing each other.
      */
     applyTier(tierByFile, filterTier = "all") {
-      const enabled = tierByFile instanceof Map;
-      cy.batch(() => {
-        for (const node of cy.nodes()) {
-          for (const tier2 of TIER_ORDER) {
-            node.removeClass(`tier-${tier2}`);
-          }
-          if (!enabled) {
-            node.removeClass("tier-hidden");
-            continue;
-          }
-          const tier = tierByFile.get(node.id());
-          if (tier) {
-            node.addClass(`tier-${tier}`);
-          }
-          const keep = filterTier === "all" || tier === filterTier;
-          node.toggleClass("tier-hidden", !keep);
-        }
-      });
+      applyTier(cy, tierByFile, filterTier);
     },
     /**
      * Mark the files and edges in a wrong-way dependency. Pass null to clear.
@@ -2260,41 +2365,13 @@ function createView(container) {
      * and skip-layer use different classes, so the two differ by border/line shape, not hue.
      */
     applyTierDirections(directions) {
-      const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
-      const edges = Array.isArray(directions?.edges) ? directions.edges : [];
-      cy.batch(() => {
-        for (const node of cy.nodes()) {
-          node.removeClass("tier-upward");
-          node.removeClass("tier-skip");
-        }
-        for (const edge of cy.edges()) {
-          edge.removeClass("edge-tier-upward");
-          edge.removeClass("edge-tier-skip");
-        }
-        if (!nodes) {
-          return;
-        }
-        for (const [id, classes] of nodes) {
-          const node = cy.getElementById(id);
-          if (node.nonempty()) {
-            for (const cls of classes) {
-              node.addClass(cls);
-            }
-          }
-        }
-        for (const direction of edges) {
-          const cls = direction.kind === "upward" ? "edge-tier-upward" : "edge-tier-skip";
-          cy.edges().filter(
-            (edge) => edge.data("source") === direction.source && edge.data("target") === direction.target
-          ).addClass(cls);
-        }
-      });
+      applyTierDirections(cy, directions);
     },
     /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */
-    setUnitCards(cards) {
+    setUnitCards(unitCards) {
       if (lastModel) {
-        lastModel = { ...lastModel, unitCards: cards };
-        applyUnitCards(lastModel);
+        lastModel = { ...lastModel, unitCards };
+        cards.apply(lastModel);
       }
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
@@ -2323,7 +2400,7 @@ function createView(container) {
       contextHandlers.push(handler);
     },
     clearEdge() {
-      selectEdge2(null);
+      edgeHighlight.select(null);
     },
     /** Ids of the natively-selected nodes: ⌘/ctrl-click toggles one, shift-drag a region. */
     selectedNodeIds() {
@@ -2344,18 +2421,6 @@ function createView(container) {
       );
     }
   };
-}
-function fadeEdgesAround(cy, node) {
-  cy.batch(() => {
-    cy.edges().removeClass("edge-faded");
-    if (!node || node.empty()) {
-      return;
-    }
-    cy.edges().forEach((edge) => {
-      const incident = edge.source().same(node) || edge.target().same(node);
-      if (!incident) edge.addClass("edge-faded");
-    });
-  });
 }
 
 // ui/strabo-delegate.js
@@ -7045,6 +7110,7 @@ async function scan({ refresh = false } = {}) {
       scan();
     });
     updateOutsideButton();
+    applyModeChrome();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -8082,6 +8148,9 @@ function updateOutsideButton() {
   elements.tbOutside.hidden = !shown;
   elements.tbOutside.classList.toggle("active", state.showOutside);
   elements.tbOutside.setAttribute("aria-pressed", String(state.showOutside));
+}
+function applyModeChrome() {
+  document.body.dataset.mode = state.mode;
 }
 function onDrill(id) {
   if (state.mode === "system") {

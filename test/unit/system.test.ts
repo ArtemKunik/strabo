@@ -361,6 +361,10 @@ test('buildSystemViewModel leaves a multi-unit repository at L0', () => {
   // The rolled-up import count travels as the edge weight, for the stroke.
   assert.equal(model.edges.length, 1);
   assert.equal(model.edges[0].weight, 1);
+  // L20: the dependency sits left of the unit that imports it.
+  const coreX = model.positions.find((position) => position.id === 'crates/core')?.x ?? Number.NaN;
+  const apiX = model.positions.find((position) => position.id === 'crates/api')?.x ?? Number.NaN;
+  assert.ok(coreX < apiX, `expected core left of api, got core=${coreX} api=${apiX}`);
 });
 
 /** Two crates: api imports a file in core, which is the one cross-unit edge. */

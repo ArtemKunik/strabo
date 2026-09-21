@@ -63,7 +63,7 @@ export {
   findDirectedPath,
   neighbourhood,
 } from './analysis/analysis.ts';
-export { buildPositions } from './analysis/layout.ts';
+export { buildPositions, buildSystemPositions } from './analysis/layout.ts';
 export {
   blockRegion,
   topLevelDirectory,

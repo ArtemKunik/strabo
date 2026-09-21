@@ -209,6 +209,15 @@ body {
   border-right: none;
 }
 
+/* System mode (L20): hide the per-file lenses and file-map tools the unit map cannot act on. */
+body[data-mode="system"] .control-tier,
+body[data-mode="system"] .control-overlay,
+body[data-mode="system"] #tb-impact,
+body[data-mode="system"] #tb-path,
+body[data-mode="system"] #tb-boundaries {
+  display: none;
+}
+
 .tb-spacer {
   flex: 1;
   min-width: 0;
@@ -3150,6 +3159,16 @@ table.change-metrics td:first-child .link {
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+/* The header is a door into the unit; the rest of the card stays transparent to the map. */
+.unit-card-open {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.unit-card-open:hover .unit-card-name {
+  text-decoration: underline;
 }
 
 .unit-card-name {

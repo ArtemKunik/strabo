@@ -35,7 +35,7 @@ export function createView(container) {
   const islands = createIslandLayer(container);
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
-  const cards = createUnitCardLayer(container, cy);
+  const cards = createUnitCardLayer(container, cy, openCard);
   const edgeFocus = createEdgeFocus(cy);
   const edgeHighlight = createEdgeHighlight(cy);
   let lastModel = null;
@@ -156,6 +156,11 @@ export function createView(container) {
   function notifyGroup() {
     const ids = cy.nodes(':selected').map((node) => node.id());
     for (const handler of groupHandlers) handler(ids);
+  }
+
+  /** A card header is a second door into a unit: the same drill a double-click performs. */
+  function openCard(id) {
+    for (const handler of drillHandlers) handler(id);
   }
 
   return {

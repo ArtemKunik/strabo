@@ -84,6 +84,18 @@ test('the shelf footer expands in place on click', () => {
   assert.match(more.textContent ?? '', /3 tests/);
 });
 
+test('a card header opens the unit when given an onOpen handler', () => {
+  const opened: string[] = [];
+  const card = unitCardElement(sampleCard(), { onOpen: (id: string) => opened.push(id) });
+  const head = card.querySelector('.unit-card-head') as HTMLElement;
+  assert.equal(head.getAttribute('role'), 'button');
+  assert.equal(head.getAttribute('aria-label'), 'Open unit ledger-api');
+  head.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  assert.deepEqual(opened, ['crates/api']);
+  // Without a handler the header stays inert, so a test card cannot drill anywhere.
+  assert.equal(unitCardElement(sampleCard()).querySelector('.unit-card-head')?.getAttribute('role'), null);
+});
+
 test('a unit hover card speaks unit vocabulary, never blast radius', () => {
   const model = { unitCards: [sampleCard()] };
   const facts = unitHoverFacts(model, 'crates/api');

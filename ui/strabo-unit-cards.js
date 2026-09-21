@@ -68,6 +68,23 @@ export function unitCardElement(card, options = {}) {
   head.append(element('span', 'unit-card-eco', card.ecosystem));
   root.append(head);
 
+  if (typeof options.onOpen === 'function') {
+    head.classList.add('unit-card-open');
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-label', `Open unit ${card.name}`);
+    head.addEventListener('click', (event) => {
+      event.stopPropagation();
+      options.onOpen(card.id);
+    });
+    head.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        options.onOpen(card.id);
+      }
+    });
+  }
+
   if (card.manifest) {
     root.append(element('div', 'unit-card-why', `why: ${card.manifest}`));
   }
@@ -112,6 +129,8 @@ export function unitCardElement(card, options = {}) {
     if (card.shelf.test) parts.push(`${card.shelf.test} test${card.shelf.test === 1 ? '' : 's'}`);
     if (card.shelf.script) parts.push(`${card.shelf.script} script${card.shelf.script === 1 ? '' : 's'}`);
     strip.textContent = `support: ${parts.length ? parts.join(' · ') : `${card.shelf.total} files`}`;
+    // The shelf's hover vocabulary (L20): unit words, never a blast radius or a `#` id.
+    strip.title = `${card.shelf.test} test file${card.shelf.test === 1 ? '' : 's'}, ${card.shelf.script} script${card.shelf.script === 1 ? '' : 's'}: folded support`;
     strip.setAttribute('aria-expanded', String(Boolean(options.expanded)));
     const more = element('div', 'unit-shelf-more');
     more.hidden = !options.expanded;

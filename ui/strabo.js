@@ -396,6 +396,7 @@ async function scan({ refresh = false } = {}) {
       scan();
     });
     updateOutsideButton();
+    applyModeChrome();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -1664,6 +1665,17 @@ function updateOutsideButton() {
   elements.tbOutside.hidden = !shown;
   elements.tbOutside.classList.toggle('active', state.showOutside);
   elements.tbOutside.setAttribute('aria-pressed', String(state.showOutside));
+}
+
+/**
+ * Show only the toolbar controls the current mode can act on (L20).
+ *
+ * Tier and Review are per-file lenses, and Impact / Path / Boundaries are file-map tools; a
+ * unit map has none of those, so leaving them up would only invite a click that does nothing.
+ * The mode lives on the body so `styles.css` owns the hiding, keeping layout out of the JS.
+ */
+function applyModeChrome() {
+  document.body.dataset.mode = state.mode;
 }
 
 /**

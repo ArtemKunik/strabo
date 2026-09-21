@@ -8,7 +8,7 @@
 
 import { unitCardElement } from './strabo-unit-cards.js';
 
-export function createUnitCardLayer(container, cy) {
+export function createUnitCardLayer(container, cy, onOpen) {
   const layer = document.createElement('div');
   layer.className = 'unit-card-layer';
   container.appendChild(layer);
@@ -44,7 +44,7 @@ export function createUnitCardLayer(container, cy) {
       if (signatures.get(card.id) === signature) {
         continue;
       }
-      const element = unitCardElement(card);
+      const element = unitCardElement(card, { onOpen });
       const existing = elements.get(card.id);
       if (existing) {
         existing.replaceWith(element);

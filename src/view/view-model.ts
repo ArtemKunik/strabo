@@ -1,6 +1,6 @@
 import { buildAdjacency, computeGraphMetrics, rankHubs } from '../analysis/analysis.ts';
 import { computeTestReachByFile } from '../analysis/coverage.ts';
-import { buildPositions } from '../analysis/layout.ts';
+import { buildPositions, buildSystemPositions } from '../analysis/layout.ts';
 import type { SystemReport } from '../analysis/system.ts';
 import type { OutsideLink, UnitCard, UnitShelfFact } from '../types.ts';
 
@@ -68,11 +68,6 @@ export function buildViewModel(
  * "why grouped" caption travels on the node so the inspector can show it. The periphery is
  * a shelf, not a node, so it is carried as a count rather than drawn.
  */
-/** The one support shelf a unit's tests, scripts, generated code, and fixtures fold into. */
-function shelfId(unitId: string): string {
-  return unitId === '.' ? '#support' : `${unitId}#support`;
-}
-
 export function buildSystemViewModel(
   system: SystemReport,
   repository: RepositoryDescriptor,
@@ -101,7 +96,9 @@ export function buildSystemViewModel(
   };
 
   const metrics = computeGraphMetrics(graph, buildAdjacency(graph));
-  const positions = buildPositions(graph);
+  // L20: L0 reads as a build order — a unit sits right of everything it imports — rather
+  // than the directory grid the file map uses, which for units collapses to one island.
+  const positions = buildSystemPositions(system.units, system.edges);
   // Units are cards, not files: the hub ring is reserved for files, so a unit never
   // takes the thick outline a central file earns. Selection is its only outline (L18).
   const hubs: string[] = [];
@@ -325,8 +322,6 @@ export function buildSystemUnitViewModel(
     return { inUnit, outside: seen.size - inUnit };
   };
 
-  const shelfCount = system.periphery.filter((entry) => entry.unit === unitId).length;
-
   const nodes: ViewNode[] = [];
   for (const file of memberFiles.slice().sort()) {
     const layer = layerOf.get(file);
@@ -351,24 +346,8 @@ export function buildSystemUnitViewModel(
       why: layer ? `layer \`${layer.name}\` · ${layer.why}` : undefined,
     });
   }
-  if (shelfCount > 0) {
-    nodes.push({
-      id: shelfId(unitId),
-      kind: 'shelf' as const,
-      directory: unit.parent ?? '.',
-      label: `${unit.name} support`,
-      workspacePath: shelfId(unitId),
-      fanIn: 0,
-      fanOut: 0,
-      transitiveDependencies: 0,
-      transitiveDependents: 0,
-      files: shelfCount,
-      periphery: shelfCount,
-      why: `tests, scripts, generated, and fixtures folded into one shelf for ${unit.name}`,
-      systemUnit: unitId,
-      shelf: shelfFactFor(system, unitId),
-    });
-  }
+  // L21: the open unit's support files are a footer on its card, not a node in the frame,
+  // so a drill-down never draws a shelf peer (and never an edge to a missing unit node).
   for (const other of system.units) {
     if (other.id === unitId) {
       continue;
@@ -397,19 +376,6 @@ export function buildSystemUnitViewModel(
       edges.push({ ...edge, semanticSource: edge.source, semanticTarget: edge.target, scope: 'unit' });
     }
   }
-  if (shelfCount > 0) {
-    edges.push({
-      source: unitId,
-      target: shelfId(unitId),
-      kind: 'import',
-      role: 'declare',
-      evidence: { line: 1, specifier: 'support', resolution: 'exact' },
-      semanticSource: unitId,
-      semanticTarget: shelfId(unitId),
-      scope: 'unit',
-    });
-  }
-
   // Cross-unit relationships of the selected file, grouped by target unit for the badge.
   const outsideLinks: OutsideLink[] = [];
   const expanded = new Set(options.expandedUnits ?? []);
@@ -516,18 +482,7 @@ export function buildSystemUnitViewModel(
   };
 }
 
-/** The support files one unit's shelf folds, by category (L22). */
-function shelfFactFor(system: SystemReport, unitId: string): UnitShelfFact {
-  const shelf: UnitShelfFact = { test: 0, script: 0, generated: 0, fixture: 0, total: 0 };
-  for (const entry of system.periphery) {
-    if (entry.unit !== unitId) {
-      continue;
-    }
-    shelf[entry.category] += 1;
-    shelf.total += 1;
-  }
-  return shelf;
-}
+
 
 /** The unit a file belongs to: the layer that lists it, else the root. */
 function fileUnitOf(system: SystemReport, file: string): string {

@@ -69,13 +69,18 @@ Then('the System view draws the unit {string}', async function (name) {
 Then('the System view draws a support shelf for {string}', async function (name) {
   // L21: the shelf is a footer strip on the unit card, not a peer node.
   await this.page.waitForFunction(
-    (id) => {
+    (label) => {
       const model = window.straboTest?.model();
-      const unit = model?.nodes.find((node) => node.id === id);
-      if (!model?.system || !unit || !(unit.periphery > 0)) {
+      if (!model?.system || model.systemUnit) {
         return false;
       }
-      const card = document.querySelector(`.unit-card[data-unit="${id}"]`);
+      const unit = model.nodes.find((node) => node.label === label);
+      if (!unit || !(unit.periphery > 0)) {
+        return false;
+      }
+      const card = [...document.querySelectorAll('.unit-card')].find(
+        (element) => element.dataset.unit === unit.id,
+      );
       return Boolean(card && card.querySelector('.unit-shelf')?.textContent.includes('support'));
     },
     name,

@@ -26,7 +26,7 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 done (in-app narrator setup) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13 done: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17 and unit cards L18-L22 remain) |
+| 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q8 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run) |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -812,8 +812,9 @@ the selected file's cross-unit edges ending at the target unit's box with a coun
 expands in place; trace and blast radius split the in-unit and outside counts. Served by
 `buildSystemUnitViewModel` (`src/view/view-model.ts`) at `GET /graph?systemUnit=`, with
 coverage in `test/unit/system.test.ts`, `test/unit/browser-core.test.ts`, and the `@units-only`,
-`@open-unit`, `@unit-edges`, and `@outside` scenarios in `system-view.feature`. Still to do:
-the tier lens.
+`@open-unit`, `@unit-edges`, and `@outside` scenarios in `system-view.feature`.
+
+**L18-L22 (done)** unit cards and the single-unit case. A System unit and its shelf are their own node kinds (`unit`, `shelf`) with their own shapes, sized by file count on a square-root scale, and the blue outline is reserved for selection (units stay out of the hub set); a unit edge widens with the rolled-up import count. One manifest-declared unit auto-opens at L1 with the note *1 build unit: showing its layers*, while a repository whose only unit is the unmanifested root fallback keeps the L0 map. Each unit draws a DOM card (`ui/strabo-unit-cards.js`, anchored under its node and reprojected on pan/zoom) with a header (name, dominant layer as role, ecosystem, manifest), stats (files, lines, languages), layer bars, a hotspot/test-reach line, and the support shelf as a muted, dashed footer strip that expands in place, so a shelf is never a peer node (`buildSystemViewModel`/`buildSystemUnitViewModel`). Hotspot counts are filled from `/analysis/functions` after the map renders, since the signals need symbol extraction. Hovering a unit reads unit vocabulary (*cargo package `ledger-api` · 12 files · depends on 2 units · used by 4 units · why: Cargo.toml*), never a blast radius. Coverage: `test/unit/unit-cards.test.ts`, `test/unit/system.test.ts`, and the `@single-unit` and `@unit-hover` scenarios in `system-view.feature`.
 
 ### System drill-down
 
