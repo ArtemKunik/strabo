@@ -34,6 +34,7 @@ import {
   renderWorkspace,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
+import { renderTierPanel } from './strabo-tier-panel.js';
 import {
   GROUP_NAMING_INSTRUCTION,
   buildGroupNamingEvidence,
@@ -365,7 +366,7 @@ async function scan({ refresh = false } = {}) {
     }
     if (state.overlay !== 'none') {
       await applyOverlay(generation);
-    } else {
+    } else if (state.tier === 'off') {
       renderOverlayPanel(elements.overlayPanel, '', null);
     }
     refreshDock();
@@ -485,6 +486,7 @@ async function applyTierLens() {
     return;
   }
   view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
+  renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
 }
 
 function selectNode(id) {
