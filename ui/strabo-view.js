@@ -13,7 +13,9 @@ import {
   diffGraph,
   fitLabel,
   islandBounds,
+  islandHit,
   islandLabelFits,
+  islandTooltipText,
   projectIsland,
 } from './strabo-core.js';
 
@@ -376,14 +378,52 @@ function createIslandLayer(container) {
   svg.append(plates, labels);
   container.prepend(svg);
 
+  // The hover caption is the one interactive affordance of an otherwise inert layer. It
+  // lives outside the SVG so it is not clipped by the layer's `overflow: hidden`, and it is
+  // driven by hit-testing the painted boxes rather than by pointer events on the plates —
+  // the layer must keep passing clicks through to the canvas so a click on "an island"
+  // still clears the selection.
+  const tooltip = document.createElement('div');
+  tooltip.className = 'island-tooltip';
+  tooltip.hidden = true;
+  container.appendChild(tooltip);
+
+  let boxes = [];
+
+  function hideTooltip() {
+    if (!tooltip.hidden) {
+      tooltip.hidden = true;
+    }
+  }
+
+  container.addEventListener('pointermove', (event) => {
+    const bounds = container.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const y = event.clientY - bounds.top;
+    const hit = islandHit(boxes, x, y);
+    if (!hit) {
+      hideTooltip();
+      return;
+    }
+    tooltip.textContent = islandTooltipText(hit);
+    tooltip.hidden = false;
+    tooltip.style.left = `${x + 14}px`;
+    tooltip.style.top = `${y + 14}px`;
+  });
+  container.addEventListener('pointerleave', hideTooltip);
+
   return {
     /** Draw `islands` (model coordinates) under the given viewport transform. */
     paint(islands, viewport) {
+      // A pan, zoom, or resize moves the plates out from under any caption, so the next
+      // pointermove recomputes it.
+      hideTooltip();
       // Reuse elements across frames: a pan repaints every island, and replacing the DOM
       // each time would churn a node per directory per frame.
       sync(plates, 'rect', islands.length);
       sync(labels, 'text', islands.length);
 
+      boxes = [];
       islands.forEach((island, index) => {
         const box = projectIsland(island, viewport);
         const rect = plates.childNodes[index];
@@ -409,6 +449,13 @@ function createIslandLayer(container) {
         if (label.textContent !== text) {
           label.textContent = text;
         }
+        boxes.push({
+          ...box,
+          directory: island.directory,
+          label: island.label,
+          count: island.count,
+          trimmed: text !== island.label,
+        });
       });
     },
   };

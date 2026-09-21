@@ -121,6 +121,39 @@ export function islandLabelFits(projected) {
   return projected.width >= LABEL_MIN_WIDTH && projected.height >= LABEL_MIN_HEIGHT;
 }
 
+/**
+ * The island under a device-space pointer, or null.
+ *
+ * Only islands whose drawn label had to be trimmed are candidates: when the plate already
+ * shows the full directory there is nothing for a hover to reveal. When boxes overlap, the
+ * smallest wins so a nested plate is not shadowed by the larger one it sits inside.
+ */
+export function islandHit(boxes, x, y) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const box of boxes) {
+    if (!box.trimmed) {
+      continue;
+    }
+    if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
+      continue;
+    }
+    const area = box.width * box.height;
+    if (area < bestArea) {
+      best = box;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/** The hover caption for a trimmed island: the full path, and its member count. */
+export function islandTooltipText(box) {
+  const label = box.label ?? islandLabel(box.directory ?? '.');
+  const count = box.count ?? 0;
+  return count > 1 ? `${label} · ${count} files` : label;
+}
+
 /** Inset from the plate edge to the first glyph, in device pixels. */
 export const LABEL_INSET = 10;
 /**

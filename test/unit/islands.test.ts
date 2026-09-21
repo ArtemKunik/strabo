@@ -5,8 +5,10 @@ import {
   ISLAND_PADDING,
   fitLabel,
   islandBounds,
+  islandHit,
   islandLabel,
   islandLabelFits,
+  islandTooltipText,
   islandsApply,
   projectIsland,
 } from '../../ui/strabo-islands.js';
@@ -108,4 +110,28 @@ test('fitLabel keeps the tail, where a path says where you are', () => {
 
 test('fitLabel drops the label when the plate holds little more than the ellipsis', () => {
   assert.equal(fitLabel('src/analysis', 30), '');
+});
+
+test('islandHit finds a trimmed plate under the pointer and ignores untrimmed ones', () => {
+  const boxes = [
+    { x: 0, y: 0, width: 100, height: 60, trimmed: true, label: 'src/api', count: 3 },
+    { x: 200, y: 0, width: 100, height: 60, trimmed: false, label: 'src/web', count: 2 },
+  ];
+  assert.equal(islandHit(boxes, 20, 20)?.label, 'src/api');
+  // The full label is already drawn, so there is nothing to reveal.
+  assert.equal(islandHit(boxes, 220, 20), null);
+  assert.equal(islandHit(boxes, 500, 500), null);
+});
+
+test('islandHit prefers the smallest plate when boxes overlap', () => {
+  const boxes = [
+    { x: 0, y: 0, width: 400, height: 400, trimmed: true, label: 'big', count: 10 },
+    { x: 40, y: 40, width: 100, height: 100, trimmed: true, label: 'small', count: 1 },
+  ];
+  assert.equal(islandHit(boxes, 50, 50)?.label, 'small');
+});
+
+test('islandTooltipText names the path and its member count', () => {
+  assert.equal(islandTooltipText({ label: 'test/fixtures/kotlin-repo/src', count: 1 }), 'test/fixtures/kotlin-repo/src');
+  assert.equal(islandTooltipText({ label: 'test/fixtures', count: 4 }), 'test/fixtures · 4 files');
 });
