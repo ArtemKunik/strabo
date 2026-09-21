@@ -120,7 +120,7 @@ export function mapCounts(model) {
  */
 export function readingLegend(model) {
   if (model?.system) {
-    return ['box = build unit', 'size = files', 'edge = import between units'];
+    return ['box = build unit', 'size = files', 'edge = import between units', 'shelf = support files'];
   }
   return ['size = dependents', 'island = directory', 'diamond = test', 'star = entry'];
 }

@@ -950,6 +950,7 @@ const LEGEND_SWATCHES = {
   'box = build unit': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'size = files': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'edge = import between units': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
+  'shelf = support files': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
 };
 
 export function renderLegend(container, model) {

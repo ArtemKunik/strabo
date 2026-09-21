@@ -176,7 +176,7 @@ function mapCounts(model) {
 }
 function readingLegend(model) {
   if (model?.system) {
-    return ["box = build unit", "size = files", "edge = import between units"];
+    return ["box = build unit", "size = files", "edge = import between units", "shelf = support files"];
   }
   return ["size = dependents", "island = directory", "diamond = test", "star = entry"];
 }
@@ -3425,7 +3425,8 @@ var LEGEND_SWATCHES = {
   "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
   "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))"
+  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
+  "shelf = support files": "linear-gradient(135deg,var(--wash),var(--node-fill))"
 };
 function renderLegend(container, model) {
   container.replaceChildren();

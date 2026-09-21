@@ -53,12 +53,17 @@ export interface SystemCommunity {
   why: string;
 }
 
+/** A support file, with the unit whose shelf it folds into. */
+export interface SystemPeriphery extends Periphery {
+  unit: string;
+}
+
 export interface SystemReport {
   units: SystemNode[];
   edges: SystemEdge[];
   layers: SystemLayer[];
   communities: SystemCommunity[];
-  periphery: Periphery[];
+  periphery: SystemPeriphery[];
   summary: {
     units: number;
     edges: number;
@@ -83,15 +88,15 @@ export function buildSystemReport(root: string, repositoryName: string, graph: G
   const assignment = assignUnits(files, units);
   const kindOf = new Map(graph.nodes.map((node) => [node.id, node.kind]));
 
-  const periphery: Periphery[] = [];
+  const periphery: SystemPeriphery[] = [];
   const componentFiles = new Map<string, string[]>(units.map((unit) => [unit.id, []]));
   for (const file of files) {
+    const unit = assignment.get(file) ?? '.';
     const classified = classifyPeriphery(file, kindOf.get(file) ?? 'module');
     if (classified) {
-      periphery.push(classified);
+      periphery.push({ ...classified, unit });
       continue;
     }
-    const unit = assignment.get(file) ?? '.';
     componentFiles.get(unit)?.push(file);
   }
 

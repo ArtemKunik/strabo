@@ -337,6 +337,7 @@ test('the reading legend names units and files in system mode', () => {
     'box = build unit',
     'size = files',
     'edge = import between units',
+    'shelf = support files',
   ]);
 });
 

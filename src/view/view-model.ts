@@ -66,28 +66,69 @@ export function buildViewModel(
  * "why grouped" caption travels on the node so the inspector can show it. The periphery is
  * a shelf, not a node, so it is carried as a count rather than drawn.
  */
+/** The one support shelf a unit's tests, scripts, generated code, and fixtures fold into. */
+function shelfId(unitId: string): string {
+  return unitId === '.' ? '#support' : `${unitId}#support`;
+}
+
 export function buildSystemViewModel(
   system: SystemReport,
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
 ): ViewModel {
-  const graph: Graph = {
-    nodes: system.units.map((unit) => ({
-      id: unit.id,
-      kind: 'module',
+  const shelfCounts = new Map<string, number>();
+  for (const entry of system.periphery) {
+    shelfCounts.set(entry.unit, (shelfCounts.get(entry.unit) ?? 0) + 1);
+  }
+  const shelves = system.units
+    .filter((unit) => (shelfCounts.get(unit.id) ?? 0) > 0)
+    .map((unit) => ({
+      id: shelfId(unit.id),
+      unit: unit.id,
+      name: unit.name,
+      // Drawn in the unit's own directory block, so the shelf sits beside its unit.
       directory: unit.parent ?? '.',
-      label: unit.name,
-    })),
-    edges: system.edges.map((edge): GraphEdge => ({
-      source: edge.source,
-      target: edge.target,
-      kind: 'import',
-      evidence: {
-        line: 1,
-        specifier: edge.weight > 1 ? `${edge.samples[0] ?? 'import'} (+${edge.weight - 1})` : edge.samples[0] ?? 'import',
-        resolution: 'exact',
-      },
-    })),
+      label: `${unit.name} support`,
+      count: shelfCounts.get(unit.id) ?? 0,
+    }));
+
+  const graph: Graph = {
+    nodes: [
+      ...system.units.map((unit) => ({
+        id: unit.id,
+        kind: 'module' as const,
+        directory: unit.parent ?? '.',
+        label: unit.name,
+      })),
+      ...shelves.map((shelf) => ({
+        id: shelf.id,
+        kind: 'module' as const,
+        directory: shelf.directory,
+        label: shelf.label,
+      })),
+    ],
+    edges: [
+      ...system.edges.map((edge): GraphEdge => ({
+        source: edge.source,
+        target: edge.target,
+        kind: 'import',
+        evidence: {
+          line: 1,
+          specifier: edge.weight > 1 ? `${edge.samples[0] ?? 'import'} (+${edge.weight - 1})` : edge.samples[0] ?? 'import',
+          resolution: 'exact',
+        },
+      })),
+      // The shelf belongs to its unit; `declare` keeps it out of blast radius and metrics.
+      ...shelves.map(
+        (shelf): GraphEdge => ({
+          source: shelf.unit,
+          target: shelf.id,
+          kind: 'import',
+          role: 'declare',
+          evidence: { line: 1, specifier: 'support', resolution: 'exact' },
+        }),
+      ),
+    ],
     diagnostics: [],
     excluded: [],
   };
@@ -96,9 +137,11 @@ export function buildSystemViewModel(
   const positions = buildPositions(graph);
   const hubs = rankHubs(metrics);
   const byId = new Map(system.units.map((unit) => [unit.id, unit]));
+  const shelfById = new Map(shelves.map((shelf) => [shelf.id, shelf]));
 
   const nodes: ViewNode[] = graph.nodes.map((node) => {
     const unit = byId.get(node.id);
+    const shelf = shelfById.get(node.id);
     return {
       ...node,
       workspacePath: node.id,
@@ -106,10 +149,14 @@ export function buildSystemViewModel(
       fanOut: metrics.fanOut.get(node.id) ?? 0,
       transitiveDependencies: metrics.transitiveDependencies.get(node.id) ?? 0,
       transitiveDependents: metrics.transitiveDependents.get(node.id) ?? 0,
-      size: unit?.files ?? 0,
-      files: unit?.files ?? 0,
-      periphery: unit?.periphery ?? 0,
-      why: unit?.why,
+      size: unit?.files ?? shelf?.count ?? 0,
+      files: unit?.files ?? shelf?.count ?? 0,
+      periphery: unit?.periphery ?? shelf?.count ?? 0,
+      why:
+        unit?.why ??
+        (shelf
+          ? `tests, scripts, generated, and fixtures folded into one shelf for ${shelf.name}`
+          : undefined),
     };
   });
 

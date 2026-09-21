@@ -246,6 +246,28 @@ test('buildSystemViewModel rolls units into the graph model the map draws', () =
   assert.equal(model.positions.length, model.nodes.length);
 });
 
+test('buildSystemViewModel folds support files into one shelf node', () => {
+  const root = tempDir();
+  write(root, 'pkg/package.json', '{ "name": "widgets" }\n');
+  const graph = graphOf(
+    ['pkg/src/components/list.ts', 'pkg/src/components/list.test.ts'],
+    [['pkg/src/components/list.test.ts', 'pkg/src/components/list.ts']],
+  );
+  const report = buildSystemReport(root, 'widgets', graph);
+  const model = buildSystemViewModel(
+    report,
+    { name: 'widgets', root, head: null, dirty: false, gitUrl: null },
+    { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+  );
+
+  const shelf = model.nodes.find((node) => node.id === 'pkg#support');
+  assert.equal(shelf?.files, 1);
+  assert.match(shelf?.why ?? '', /shelf/);
+  const edge = model.edges.find((candidate) => candidate.target === 'pkg#support');
+  assert.equal(edge?.source, 'pkg');
+  assert.equal((edge as { role?: string })?.role, 'declare');
+});
+
 test('GET /graph?system=1 serves the unit roll-up', async () => {
   const root = tempDir();
   write(root, 'pkg/package.json', '{ "name": "widgets" }\n');

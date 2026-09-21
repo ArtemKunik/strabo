@@ -88,6 +88,7 @@ export type {
   SystemEdge,
   SystemLayer,
   SystemCommunity,
+  SystemPeriphery,
 } from './analysis/system.ts';
 export { analyzeModuleDepth } from './analysis/depth.ts';
 export { computeImpact, getChangedFiles, impactFromPaths } from './analysis/impact.ts';
