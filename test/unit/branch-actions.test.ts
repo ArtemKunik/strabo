@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { fetchBranches, isSafeBranch, pushBranch, syncBranch } from '../../src/index.ts';
+import { fetchBranches, isSafeBranch, pullBranch, pushBranch, syncBranch } from '../../src/index.ts';
 
 const created: string[] = [];
 
@@ -174,6 +174,81 @@ test('syncBranch only runs on the checked-out branch', async () => {
   assert.equal(result.available, false);
   if (result.available) return;
   assert.equal(result.reason, 'not-current');
+});
+
+test('pullBranch fast-forwards the checked-out branch without pushing', async () => {
+  const { root, remote } = makeFixture();
+  const peer = tempDir('strabo-branch-peer-');
+  git(peer, 'clone', '-q', remote, '.');
+  configure(peer);
+  fs.writeFileSync(path.join(peer, 'file.txt'), 'from peer\n');
+  git(peer, 'commit', '-aqm', 'peer change');
+  git(peer, 'push', '-q', 'origin', 'main');
+  const peerTip = git(peer, 'rev-parse', 'HEAD').trim();
+
+  const result = await pullBranch(root, 'main');
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.action, 'pull');
+  assert.equal(result.fastForwarded, true);
+  assert.equal(result.pushed, false);
+  assert.equal(head(root), peerTip);
+});
+
+test('pullBranch advances a branch that is not checked out through its ref', async () => {
+  const { root, remote } = makeFixture();
+  git(root, 'branch', 'other');
+  git(root, 'branch', '--set-upstream-to=origin/main', 'other');
+
+  const peer = tempDir('strabo-branch-peer-');
+  git(peer, 'clone', '-q', remote, '.');
+  configure(peer);
+  fs.writeFileSync(path.join(peer, 'file.txt'), 'from peer\n');
+  git(peer, 'commit', '-aqm', 'peer change');
+  git(peer, 'push', '-q', 'origin', 'main');
+  const peerTip = git(peer, 'rev-parse', 'HEAD').trim();
+
+  const result = await pullBranch(root, 'other');
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.fastForwarded, true);
+  assert.equal(git(root, 'rev-parse', 'other').trim(), peerTip);
+  assert.equal(head(root), git(root, 'rev-parse', 'main').trim());
+});
+
+test('pullBranch reports a diverged branch instead of merging it', async () => {
+  const { root, remote } = makeFixture();
+  const peer = tempDir('strabo-branch-peer-');
+  git(peer, 'clone', '-q', remote, '.');
+  configure(peer);
+  fs.writeFileSync(path.join(peer, 'file.txt'), 'from peer\n');
+  git(peer, 'commit', '-aqm', 'peer change');
+  git(peer, 'push', '-q', 'origin', 'main');
+
+  fs.writeFileSync(path.join(root, 'local.txt'), 'local\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-qm', 'local change');
+
+  const result = await pullBranch(root, 'main');
+  assert.equal(result.available, false);
+  if (result.available) return;
+  assert.equal(result.action, 'pull');
+  assert.equal(result.reason, 'not-fast-forward');
+});
+
+test('pullBranch says when there is nothing to pull and refuses a branch with no upstream', async () => {
+  const { root } = makeFixture();
+  const upToDate = await pullBranch(root, 'main');
+  assert.equal(upToDate.available, true);
+  if (!upToDate.available) return;
+  assert.equal(upToDate.fastForwarded, false);
+  assert.match(upToDate.message, /up to date/);
+
+  git(root, 'checkout', '-q', '-b', 'feature');
+  const noUpstream = await pullBranch(root, 'feature');
+  assert.equal(noUpstream.available, false);
+  if (noUpstream.available) return;
+  assert.equal(noUpstream.reason, 'no-upstream');
 });
 
 test('a directory outside Git is reported as no-git rather than throwing', async () => {

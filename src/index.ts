@@ -171,6 +171,32 @@ export type {
 } from './analysis/change-metrics.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export {
+  computeMeasuredCoverage,
+  parseCoverageText,
+  parseLcov,
+  parseCobertura,
+  parseJacoco,
+  detectCoverageFormat,
+  measuredFileFigure,
+  coverageProvenance,
+  clearMeasuredCoverageCache,
+  formatAge,
+  percent,
+  DEFAULT_COVERAGE_REPORT_PATHS,
+} from './analysis/measured-coverage.ts';
+export type {
+  CoverageFormat,
+  CoverageUnavailableReason,
+  MeasuredFunctionCoverage,
+  MeasuredFileCoverage,
+  MeasuredCoverageSummary,
+  MeasuredCoverageOptions,
+  CoverageProvenance,
+  FileCoverageFigure,
+  ParsedCoverageReport,
+  ParsedFileCoverage,
+} from './analysis/measured-coverage.ts';
+export {
   diffGraphs,
   structuralContext,
   computeStructuralDiff,
@@ -207,7 +233,7 @@ export {
   parseTrack,
 } from './analysis/branches.ts';
 export type { BranchBase, BranchesResult, BranchSummary, BranchSync } from './analysis/branches.ts';
-export { fetchBranches, pushBranch, syncBranch, isSafeBranch } from './analysis/branch-actions.ts';
+export { fetchBranches, pullBranch, pushBranch, syncBranch, isSafeBranch } from './analysis/branch-actions.ts';
 export type { BranchActionFailure, BranchActionName, BranchActionResult, BranchActionReason } from './analysis/branch-actions.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 export { computeQualityScorecard, smellsFromScorecard, SMELL_RULES } from './analysis/quality.ts';

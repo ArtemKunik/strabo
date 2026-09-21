@@ -35,6 +35,23 @@ export function setLabelsVisible(cy, visible) {
 }
 
 /**
+ * Hide every label for the duration of a zoom/pan gesture.
+ *
+ * `font-size` is a model-unit value computed from the zoom at the last restyle, so a gesture
+ * that does not restyle would let labels scale with the map (doubling at a 2x pinch) and
+ * pulling the whole stylesheet update back onto every frame. Hiding them for the gesture and
+ * recomputing once at rest ({@link applyLabelBudget}) avoids both. Returns whether it hid
+ * anything, so a caller can remember that a restore is owed.
+ */
+export function freezeLabels(cy) {
+  if (!labelsVisible) {
+    return false;
+  }
+  cy.batch(() => cy.nodes().addClass('label-hidden'));
+  return true;
+}
+
+/**
  * Re-evaluate the zoom-compensated label sizes after a viewport change.
  *
  * The label stylesheet returns a function of the current zoom, so it has to be re-applied

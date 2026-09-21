@@ -89,6 +89,9 @@ export function stylesheet() {
     { selector: 'node.tier-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-kind-hidden', style: { display: 'none' } },
+    // Level of detail: at far zoom on a large graph the unweighted edges drop from the draw
+    // (see `applyEdgeLod`). Display, not opacity, so the renderer skips them entirely.
+    { selector: 'edge.edge-lod-hidden', style: { display: 'none' } },
     // A co-change edge is a changed-together relationship, not a dependency: dashed so the
     // reading survives next to an import, and hidden until the off-by-default lens is on.
     { selector: 'edge[kind = "co-change"]', style: { 'line-style': 'dashed', opacity: 0.85 } },

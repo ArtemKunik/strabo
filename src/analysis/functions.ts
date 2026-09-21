@@ -1,5 +1,6 @@
 import type { CodeSymbol, FunctionCall, FunctionMetrics } from '../scan/languages/symbols.ts';
 import type { FunctionEntryMark } from '../scan/languages/entry.ts';
+import type { MeasuredFunctionCoverage } from './measured-coverage.ts';
 import { computeSignals, type FunctionSignal } from './signals.ts';
 
 /** One recorded call made by a function, inside the same file. */
@@ -32,6 +33,11 @@ export interface FunctionEntry {
   entry?: FunctionEntryMark;
   /** Deterministic cost signals from the recorded metrics. */
   signals: FunctionSignal[];
+  /**
+   * Measured coverage when a report names this function. Absent when the report does not,
+   * so the UI says `unavailable` rather than 0%.
+   */
+  coverage?: MeasuredFunctionCoverage;
 }
 
 /**
@@ -48,27 +54,38 @@ export interface FunctionsReport {
   functions: FunctionEntry[];
 }
 
-/** Build the function list for a file from its extracted symbols and recorded calls. */
+/**
+ * Build the function list for a file from its extracted symbols and recorded calls.
+ *
+ * `coverage` is the measured per-function coverage the report records for this file, when
+ * one was read; a function it does not name keeps no `coverage`, which the UI reads as
+ * `unavailable` rather than 0%.
+ */
 export function buildFunctions(
   file: string,
   symbols: CodeSymbol[],
   calls: FunctionCall[] = [],
+  coverage: readonly MeasuredFunctionCoverage[] = [],
 ): FunctionsReport {
   const methods = symbols.filter((symbol) => symbol.kind === 'method');
 
-  const functions: FunctionEntry[] = methods.map((symbol) => ({
-    name: symbol.name,
-    owner: symbol.owner,
-    visibility: symbol.visibility,
-    type: symbol.type,
-    parameters: symbol.parameters,
-    line: symbol.line,
-    metrics: symbol.metrics,
-    calls: callsOf(symbol, calls),
-    callers: callersOf(symbol, methods, calls),
-    ...(symbol.entry ? { entry: symbol.entry } : {}),
-    signals: computeSignals(symbol),
-  }));
+  const functions: FunctionEntry[] = methods.map((symbol) => {
+    const measured = coverageMark(symbol, coverage);
+    return {
+      name: symbol.name,
+      owner: symbol.owner,
+      visibility: symbol.visibility,
+      type: symbol.type,
+      parameters: symbol.parameters,
+      line: symbol.line,
+      metrics: symbol.metrics,
+      calls: callsOf(symbol, calls),
+      callers: callersOf(symbol, methods, calls),
+      ...(symbol.entry ? { entry: symbol.entry } : {}),
+      signals: computeSignals(symbol),
+      ...(measured ? { coverage: measured } : {}),
+    };
+  });
 
   // Worst signals first, then busiest; source order breaks ties, and signatures
   // without a body sort last.
@@ -81,6 +98,21 @@ export function buildFunctions(
   );
 
   return { file, available: true, functions };
+}
+
+/**
+ * Match a symbol to its measured coverage by name, preferring the report's line when it
+ * agrees with the declaration. A name with no recorded entry returns undefined.
+ */
+function coverageMark(
+  symbol: CodeSymbol,
+  coverage: readonly MeasuredFunctionCoverage[],
+): MeasuredFunctionCoverage | undefined {
+  const candidates = coverage.filter((entry) => entry.name === symbol.name);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  return candidates.find((entry) => entry.line > 0 && entry.line === symbol.line) ?? candidates[0];
 }
 
 function complexity(entry: FunctionEntry): number {

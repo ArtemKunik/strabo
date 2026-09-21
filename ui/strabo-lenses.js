@@ -9,6 +9,7 @@
 
 import { TIER_ORDER } from './strabo-core.js';
 import { OVERLAY_CLASSES } from './strabo-graph-classes.js';
+import { edgeLodHidden } from './strabo-perf.js';
 
 /**
  * Dim everything outside `ids`; pass null to clear.
@@ -90,6 +91,21 @@ export function applyCoChange(cy, on) {
         continue;
       }
       edge.toggleClass('edge-cochange-hidden', !visible);
+    }
+  });
+}
+
+/**
+ * Thin the edges by level of detail at far zoom on a large graph.
+ *
+ * The rule is pure ({@link edgeLodHidden}); this walks the live edges and applies it. It
+ * runs on a render and after a zoom settles, never per frame, because toggling a class on
+ * every edge is itself per-element work.
+ */
+export function applyEdgeLod(cy, { edgeCount = 0, zoom = 1 } = {}) {
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      edge.toggleClass('edge-lod-hidden', edgeLodHidden(edge.data('weight'), zoom, edgeCount));
     }
   });
 }

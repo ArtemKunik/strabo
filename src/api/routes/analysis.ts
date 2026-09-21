@@ -11,12 +11,17 @@ import {
   computeWorkingTreeMetrics,
 } from '../../analysis/change-metrics.ts';
 import { listBranches, reviewBranch } from '../../analysis/branches.ts';
-import { fetchBranches, pushBranch, syncBranch } from '../../analysis/branch-actions.ts';
+import { fetchBranches, pullBranch, pushBranch, syncBranch } from '../../analysis/branch-actions.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
+import {
+  computeMeasuredCoverage,
+  coverageProvenance,
+  type MeasuredCoverageSummary,
+} from '../../analysis/measured-coverage.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
@@ -37,7 +42,7 @@ import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { revisionFromFingerprint } from '../../status.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
-import type { StraboConfig } from '../../types.ts';
+import type { Graph, StraboConfig } from '../../types.ts';
 import { parseBoolean, parsePositiveInt, isSameOriginRequest, sendError } from '../http.ts';
 
 /** Review-focused analyses. All of them inherit the scanner's scope. */
@@ -49,6 +54,17 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       workspaceRoot: config.workspaceRoot,
       scanCeiling: config.scanCeiling ?? config.workspaceRoot,
       requested: typeof request.query.repository === 'string' ? request.query.repository : undefined,
+    });
+
+  /**
+   * Read the repository's existing coverage report, bounded by the scan ceiling. `files`
+   * limits the staleness `git log` to the files a caller needs (e.g. one file for `/symbols`).
+   */
+  const measuredCoverage = (repository: { root: string }, graph: Graph, files?: readonly string[]) =>
+    computeMeasuredCoverage(repository.root, graph, {
+      reportPaths: config.coverageReports,
+      ceiling: config.scanCeiling ?? config.workspaceRoot,
+      ...(files ? { files } : {}),
     });
 
   router.get('/analysis/impact', async (request, response) => {
@@ -67,6 +83,29 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(computeCoverage(cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Measured coverage from an existing report, with the static test-reach as the fallback.
+   *
+   * The report is read, never produced. A path the report names that is not a graph node is
+   * listed in `measured.outOfGraph`; an absent or malformed report is `available: false`
+   * with a reason, not zeros. `reachable` is always the graph-reach answer so a caller can
+   * label a figure `measured` or `reachable`.
+   */
+  router.get('/analysis/coverage', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      response.json({
+        repository: repository.name,
+        measured,
+        reachable: { basis: 'reachable', ...computeCoverage(cached.report.graph) },
+      });
     } catch (error) {
       sendError(response, error);
     }
@@ -231,7 +270,8 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
-      response.json(computeArchitectureHealth(cached.report.graph));
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      response.json(computeArchitectureHealth(cached.report.graph, measured));
     } catch (error) {
       sendError(response, error);
     }
@@ -351,9 +391,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
   });
 
   /**
-   * Git actions that write: fetch, push, and fast-forward sync. They are state-changing, so
-   * they are accepted only from the Strabo page's own origin (see `isSameOriginRequest`), and
-   * the analysis module validates every ref before it reaches Git and never force-pushes.
+   * Git actions that write: fetch, pull (fetch + fast-forward), push, and sync. They are
+   * state-changing, so they are accepted only from the Strabo page's own origin (see
+   * `isSameOriginRequest`), and the analysis module validates every ref before it reaches Git
+   * and never force-pushes.
    */
   router.post('/analysis/branches/fetch', async (request, response) => {
     try {
@@ -382,6 +423,24 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         return;
       }
       response.json(await pushBranch(repository.root, branch));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.post('/analysis/branches/pull', async (request, response) => {
+    try {
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
+        return;
+      }
+      const repository = resolve(request);
+      const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
+      if (!branch) {
+        response.status(400).json({ error: 'branch is required.' });
+        return;
+      }
+      response.json(await pullBranch(repository.root, branch));
     } catch (error) {
       sendError(response, error);
     }

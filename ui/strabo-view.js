@@ -14,7 +14,7 @@ import {
   shiftIslandOffset,
 } from './strabo-core.js';
 import { createIslandLayer } from './strabo-island-layer.js';
-import { createCytoscape } from './strabo-cytoscape.js';
+import { applyViewportPerf, createCytoscape } from './strabo-cytoscape.js';
 import { createUnitCardLayer } from './strabo-unit-card-layer.js';
 import { applyGraphDiff } from './strabo-graph-sync.js';
 import { buildCoChangeElements } from './strabo-core.js';
@@ -23,6 +23,7 @@ import { createEdgeHighlight } from './strabo-edge-highlight.js';
 import {
   applyCoChange,
   applyEdgeKind,
+  applyEdgeLod,
   applyTier,
   applyTierDirections,
   dimOutside,
@@ -32,8 +33,11 @@ import {
 } from './strabo-lenses.js';
 import { stylesheet } from './strabo-stylesheet.js';
 import { retintBackground } from './strabo-renderer-preference.js';
+import { viewportPerfFor } from './strabo-perf.js';
+import { buildNodeGrid, gridHit } from './strabo-spatial.js';
 import {
   applyLabelBudget,
+  freezeLabels,
   rescaleLabels,
   setLabelsVisible as setLabelsVisibleState,
 } from './strabo-labels.js';
@@ -72,6 +76,9 @@ export function createView(container) {
   let islandVisible = null;
   // The element set from the last render, so a re-render can update only what changed.
   let renderedElements = { nodes: [], edges: [] };
+  // A model-space grid of the drawn node boxes, for the island layer's press hit-test. Kept
+  // out of `isOverNode`'s per-press work, which would otherwise scan every node.
+  let nodeGrid = null;
   // The edge kind being read ('imports' | 'calls'); reapplied after every render because an
   // incremental diff clears the classes the lens put on the edges.
   let edgeKind = 'imports';
@@ -98,26 +105,53 @@ export function createView(container) {
     lastModel = islandModel;
     directoryMembers = membersByDirectory(islandModel);
     renderedElements = applyGraphDiff(cy, islandModel, renderedElements);
+    // The element count is only known now, so arm the renderer's viewport fast paths here.
+    // Below the size gate they stay off: the scene walk is cheap and the tradeoff (a soft
+    // frame mid-gesture) only costs looks.
+    applyViewportPerf(
+      cy,
+      viewportPerfFor(renderedElements.nodes.length, renderedElements.edges.length),
+    );
     islandVisible = null;
+    rebuildNodeGrid();
     repaintIslands();
     cards.apply(islandModel);
     edgeFocus.apply();
+    edgeHighlight.rebuild();
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
-    applyLabelBudget(cy, true);
+    // A render forces the label and edge-LOD pass; drop any pending settle and un-freeze.
+    clearTimeout(labelTimer);
+    labelTimer = 0;
+    labelsFrozen = false;
+    recomputeLabels();
     // Removal doesn't fire unselect events, so the old node ids would otherwise linger
     // in whatever last read the group — tell listeners the slate is clean.
     notifyGroup();
   }
 
-  /** Whether a device-space point lands on a visible node, so Cytoscape keeps that press. */
+  /**
+   * Whether a device-space point lands on a visible node, so Cytoscape keeps that press.
+   *
+   * The pointer is projected into model space (the inverse of `projectIsland`) and tested
+   * against the pre-built grid, rather than walking every node's rendered box on each press.
+   */
   function isOverNode(clientX, clientY) {
+    if (!nodeGrid) {
+      return false;
+    }
     const bounds = container.getBoundingClientRect();
-    const x = clientX - bounds.left;
-    const y = clientY - bounds.top;
-    return cy.nodes(':visible').some((node) => {
-      const box = node.renderedBoundingBox();
-      return x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2;
+    const pan = cy.pan();
+    const zoom = cy.zoom() || 1;
+    const x = (clientX - bounds.left - pan.x) / zoom;
+    const y = (clientY - bounds.top - pan.y) / zoom;
+    return gridHit(nodeGrid, x, y);
+  }
+
+  /** Rebuild the press hit-test grid from the rendered model and its current visibility. */
+  function rebuildNodeGrid() {
+    nodeGrid = buildNodeGrid(islandModel?.nodes ?? [], islandModel?.positions ?? [], {
+      visible: islandVisible,
     });
   }
 
@@ -193,6 +227,8 @@ export function createView(container) {
     for (const [key, value] of Object.entries(offsetsByDirectory)) {
       snapshot[key] = { ...value };
     }
+    // The drag moved nodes in the model, so the press grid now points at where they were.
+    rebuildNodeGrid();
     for (const handler of layoutHandlers) {
       handler(snapshot);
     }
@@ -238,30 +274,55 @@ export function createView(container) {
   // rendered coordinates drift from the DOM and hit-testing misses.
   const observer = new ResizeObserver(() => {
     cy.resize();
-    repaintIslands();
+    scheduleViewportRepaint();
   });
   observer.observe(container);
 
   // Islands are drawn in the same transform as the nodes, so every viewport change has to
-  // carry them along or the plates slide off the regions they name. This stays synchronous:
-  // deferring it a frame would let the plates trail the nodes during a drag.
-  cy.on('pan zoom resize', repaintIslands);
-  cy.on('pan zoom resize', cards.repaint);
-
-  // A trackpad pinch or a momentum wheel can fire several `zoom` events inside one frame,
-  // and the label work below is the expensive half of the handler — `rescaleLabels` can
-  // restyle every element. Collapse a burst to the one recompute the frame will actually
-  // paint. Callers that change the elements themselves still force the walk synchronously.
-  let labelFrame = 0;
-  function scheduleLabelRecompute() {
-    if (labelFrame) {
+  // carry them along or the plates slide off the regions they name. A wheel burst and a
+  // trackpad pan each fire several `pan`/`zoom` events per frame, so collapse them to one
+  // repaint per frame instead of projecting the plates and cards once per event.
+  let viewportFrame = 0;
+  function scheduleViewportRepaint() {
+    if (viewportFrame) {
       return;
     }
-    labelFrame = requestAnimationFrame(() => {
-      labelFrame = 0;
-      rescaleLabels(cy);
-      applyLabelBudget(cy);
+    viewportFrame = requestAnimationFrame(() => {
+      viewportFrame = 0;
+      repaintIslands();
+      cards.repaint();
     });
+  }
+  cy.on('pan zoom resize', scheduleViewportRepaint);
+
+  // A trackpad pinch or a momentum wheel fires several `zoom` events inside one frame, and
+  // the label work is the expensive half of the handler — `rescaleLabels` restyles every
+  // element, the per-element walk the renderer cannot absorb. So the restyle is deferred
+  // until the gesture rests: labels are hidden for the duration (their `font-size` is a
+  // model value, so without a restyle they would scale with the map), and one recompute runs
+  // once the events stop. Edge level of detail follows the same timing, since toggling a
+  // class on every edge is per-element work too.
+  const LABEL_SETTLE_MS = 140;
+  let labelTimer = 0;
+  let labelsFrozen = false;
+
+  /** The one restyle a settled gesture pays for: labels plus edge level of detail. */
+  function recomputeLabels() {
+    rescaleLabels(cy);
+    applyLabelBudget(cy, true);
+    applyEdgeLod(cy, { edgeCount: renderedElements.edges.length, zoom: cy.zoom() });
+  }
+
+  function scheduleLabelRecompute() {
+    if (!labelsFrozen) {
+      labelsFrozen = freezeLabels(cy);
+    }
+    clearTimeout(labelTimer);
+    labelTimer = setTimeout(() => {
+      labelTimer = 0;
+      labelsFrozen = false;
+      recomputeLabels();
+    }, LABEL_SETTLE_MS);
   }
 
   cy.on('tap', 'node', (event) => {
@@ -345,6 +406,9 @@ export function createView(container) {
     },
     /** Show or hide every node label. Islands draw their own layer and are unaffected. */
     setLabelsVisible(visible) {
+      clearTimeout(labelTimer);
+      labelTimer = 0;
+      labelsFrozen = false;
       setLabelsVisibleState(cy, visible);
     },
     render(model) {
@@ -401,6 +465,7 @@ export function createView(container) {
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {
       islandVisible = filterNodes(cy, ids);
+      rebuildNodeGrid();
       repaintIslands();
       applyLabelBudget(cy, true);
     },

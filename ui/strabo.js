@@ -12,6 +12,7 @@
 
 import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
+import { createFrameSampler } from './strabo-perf.js';
 import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -1402,7 +1403,8 @@ async function loadBranches() {
       });
     },
     onFetch: () => runBranchAction('fetch', {}),
-    onSync: () => runBranchAction('sync', { branch: result?.current }),
+    onPull: () => runBranchAction('pull', { branch: result?.current }),
+    onPullBranch: (branch) => runBranchAction('pull', { branch: branch.name }),
     onPush: (branch) => runBranchAction('push', { branch: branch.name }),
     onClose: () => {
       elements.branchesPanel.hidden = true;
@@ -1411,15 +1413,15 @@ async function loadBranches() {
 }
 
 /**
- * Run one branch action (fetch, push, or fast-forward sync) and reload the listing.
+ * Run one branch action (fetch, pull, push, or fast-forward sync) and reload the listing.
  *
  * The server is the authority: it validates the ref, never force-pushes, and reports a
  * classified reason. The panel simply shows the message and refreshes its counts.
  */
 async function runBranchAction(action, payload) {
   if (branchesBusy) return;
-  if (action === 'sync' && !payload.branch) {
-    elements.status.textContent = 'Sync needs a checked-out branch.';
+  if ((action === 'sync' || action === 'pull') && !payload.branch) {
+    elements.status.textContent = `${action === 'pull' ? 'Pull' : 'Sync'} needs a checked-out branch.`;
     return;
   }
   branchesBusy = true;

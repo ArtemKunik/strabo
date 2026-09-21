@@ -737,6 +737,28 @@ function projectIsland(island, viewport) {
     height: island.height * zoom
   };
 }
+function uniformIslandShift(previous, islands, next) {
+  if (!previous || !next || previous.length === 0 || previous.length !== next.length) {
+    return null;
+  }
+  const epsilon = 1e-6;
+  const dx = next[0].x - previous[0].x;
+  const dy = next[0].y - previous[0].y;
+  for (let index = 0; index < next.length; index += 1) {
+    const before = previous[index];
+    const after = next[index];
+    if (after.width !== before.width || after.height !== before.height) {
+      return null;
+    }
+    if (islands[index].directory !== before.directory || islands[index].label !== before.label || islands[index].count !== before.count) {
+      return null;
+    }
+    if (Math.abs(after.x - before.x - dx) > epsilon || Math.abs(after.y - before.y - dy) > epsilon) {
+      return null;
+    }
+  }
+  return { dx, dy };
+}
 var LABEL_HEIGHT = 12;
 var LABEL_BASELINE_GAP = 6;
 function rectsOverlap(a, b) {
@@ -1638,6 +1660,7 @@ function createIslandLayer(container, handlers = {}) {
   container.appendChild(tooltip);
   let boxes = [];
   let lastViewport = { pan: { x: 0, y: 0 }, zoom: 1 };
+  let layerShift = { x: 0, y: 0 };
   let drag = null;
   function hideTooltip2() {
     if (!tooltip.hidden) {
@@ -1733,9 +1756,29 @@ function createIslandLayer(container, handlers = {}) {
     paint(islands, viewport) {
       hideTooltip2();
       lastViewport = viewport;
+      const projected = islands.map((island) => projectIsland(island, viewport));
+      const shift = uniformIslandShift(boxes, islands, projected);
+      if (shift) {
+        boxes = projected.map((box, index) => ({
+          ...box,
+          directory: boxes[index].directory,
+          label: boxes[index].label,
+          count: boxes[index].count,
+          trimmed: boxes[index].trimmed
+        }));
+        if (shift.dx !== 0 || shift.dy !== 0) {
+          layerShift = { x: layerShift.x + shift.dx, y: layerShift.y + shift.dy };
+          const transform = `translate(${layerShift.x} ${layerShift.y})`;
+          plates.setAttribute("transform", transform);
+          labels.setAttribute("transform", transform);
+        }
+        return;
+      }
+      plates.removeAttribute("transform");
+      labels.removeAttribute("transform");
+      layerShift = { x: 0, y: 0 };
       sync(plates, "rect", islands.length);
       sync(labels, "text", islands.length);
-      const projected = islands.map((island) => projectIsland(island, viewport));
       const candidates = projected.map(
         (box, index) => islandLabelFits(box) ? fitLabel(islands[index].label, box.width) : ""
       );
@@ -1816,6 +1859,13 @@ var labelsVisible = true;
 function setLabelsVisible(cy, visible) {
   labelsVisible = Boolean(visible);
   applyLabelBudget(cy, true);
+}
+function freezeLabels(cy) {
+  if (!labelsVisible) {
+    return false;
+  }
+  cy.batch(() => cy.nodes().addClass("label-hidden"));
+  return true;
 }
 function rescaleLabels(cy) {
   const zoom = cy.zoom();
@@ -1987,6 +2037,9 @@ function stylesheet() {
     { selector: "node.tier-hidden", style: { display: "none" } },
     { selector: "edge.edge-hidden", style: { display: "none" } },
     { selector: "edge.edge-kind-hidden", style: { display: "none" } },
+    // Level of detail: at far zoom on a large graph the unweighted edges drop from the draw
+    // (see `applyEdgeLod`). Display, not opacity, so the renderer skips them entirely.
+    { selector: "edge.edge-lod-hidden", style: { display: "none" } },
     // A co-change edge is a changed-together relationship, not a dependency: dashed so the
     // reading survives next to an import, and hidden until the off-by-default lens is on.
     { selector: 'edge[kind = "co-change"]', style: { "line-style": "dashed", opacity: 0.85 } },
@@ -2159,6 +2212,14 @@ function createCytoscape(container) {
     }
   }
   return window.cytoscape(options);
+}
+function applyViewportPerf(cy, perf) {
+  const renderer = cy?.renderer?.();
+  if (!renderer) {
+    return;
+  }
+  renderer.textureOnViewport = Boolean(perf?.textureOnViewport);
+  renderer.hideEdgesOnViewport = Boolean(perf?.hideEdgesOnViewport);
 }
 
 // ui/strabo-unit-cards.js
@@ -2355,6 +2416,7 @@ var RESET_CLASSES = [
   "edge-faded",
   "edge-kind-hidden",
   "edge-cochange-hidden",
+  "edge-lod-hidden",
   "label-hidden",
   "filtered-out",
   "tier-hidden",
@@ -2425,16 +2487,68 @@ function createEdgeFocus(cy) {
 
 // ui/strabo-edge-highlight.js
 function createEdgeHighlight(cy) {
+  let incident = /* @__PURE__ */ new Map();
+  let allEdgeIds = [];
+  let hoveredId = null;
+  let faded = /* @__PURE__ */ new Set();
+  function index(nodeId, edgeId) {
+    const set = incident.get(nodeId);
+    if (set) {
+      set.add(edgeId);
+    } else {
+      incident.set(nodeId, /* @__PURE__ */ new Set([edgeId]));
+    }
+  }
+  function rebuild() {
+    incident = /* @__PURE__ */ new Map();
+    allEdgeIds = [];
+    cy.edges().forEach((edge) => {
+      const id = edge.id();
+      allEdgeIds.push(id);
+      index(edge.data("source"), id);
+      index(edge.data("target"), id);
+    });
+    hoveredId = null;
+    faded = /* @__PURE__ */ new Set();
+  }
   function fade(node) {
+    const nextId = node && node.nonempty() ? node.id() : null;
+    if (nextId === hoveredId) {
+      return;
+    }
+    const previous = new Set(incident.get(hoveredId) ?? []);
+    hoveredId = nextId;
+    if (nextId === null) {
+      if (faded.size > 0) {
+        cy.batch(() => {
+          for (const id of faded) cy.getElementById(id).removeClass("edge-faded");
+          faded = /* @__PURE__ */ new Set();
+        });
+      }
+      return;
+    }
+    const next = new Set(incident.get(nextId) ?? []);
     cy.batch(() => {
-      cy.edges().removeClass("edge-faded");
-      if (!node || node.empty()) {
+      if (faded.size === 0) {
+        for (const id of allEdgeIds) {
+          if (!next.has(id)) {
+            cy.getElementById(id).addClass("edge-faded");
+            faded.add(id);
+          }
+        }
         return;
       }
-      cy.edges().forEach((edge) => {
-        const incident = edge.source().same(node) || edge.target().same(node);
-        if (!incident) edge.addClass("edge-faded");
-      });
+      for (const id of previous) {
+        if (!next.has(id) && !faded.has(id)) {
+          cy.getElementById(id).addClass("edge-faded");
+          faded.add(id);
+        }
+      }
+      for (const id of next) {
+        if (faded.delete(id)) {
+          cy.getElementById(id).removeClass("edge-faded");
+        }
+      }
     });
   }
   function select(edgeId) {
@@ -2446,7 +2560,28 @@ function createEdgeHighlight(cy) {
       }
     }
   }
-  return { fade, select };
+  return { fade, select, rebuild };
+}
+
+// ui/strabo-perf.js
+var VIEWPORT_PERF_MIN_ELEMENTS = 1500;
+var EDGE_LOD_MIN_EDGES = 4e3;
+var EDGE_LOD_ZOOM = 0.4;
+var EDGE_LOD_MIN_WEIGHT = 2;
+function viewportPerfFor(nodes, edges) {
+  const total = (Number.isFinite(nodes) ? nodes : 0) + (Number.isFinite(edges) ? edges : 0);
+  const enabled = total >= VIEWPORT_PERF_MIN_ELEMENTS;
+  return { enabled, textureOnViewport: enabled, hideEdgesOnViewport: enabled };
+}
+function edgeLodHidden(weight, zoom, edgeCount) {
+  if (!(edgeCount >= EDGE_LOD_MIN_EDGES)) {
+    return false;
+  }
+  if (!(zoom < EDGE_LOD_ZOOM)) {
+    return false;
+  }
+  const value = Number.isFinite(weight) ? weight : 1;
+  return value < EDGE_LOD_MIN_WEIGHT;
 }
 
 // ui/strabo-lenses.js
@@ -2500,6 +2635,13 @@ function applyCoChange(cy, on) {
         continue;
       }
       edge.toggleClass("edge-cochange-hidden", !visible);
+    }
+  });
+}
+function applyEdgeLod(cy, { edgeCount = 0, zoom = 1 } = {}) {
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      edge.toggleClass("edge-lod-hidden", edgeLodHidden(edge.data("weight"), zoom, edgeCount));
     }
   });
 }
@@ -2565,6 +2707,61 @@ function applyTierDirections(cy, directions) {
   });
 }
 
+// ui/strabo-spatial.js
+var GRID_CELL = 256;
+function buildNodeGrid(nodes, positions, options = {}) {
+  const visible = options.visible ?? null;
+  const cell = options.cell ?? GRID_CELL;
+  const byId = new Map((positions ?? []).map((position) => [position.id, position]));
+  const cells = /* @__PURE__ */ new Map();
+  let maxRadius = 0;
+  for (const node of nodes ?? []) {
+    if (visible && !visible.has(node.id)) {
+      continue;
+    }
+    const position = byId.get(node.id);
+    if (!position) {
+      continue;
+    }
+    const radius = nodeDiameter(node) / 2;
+    if (radius > maxRadius) {
+      maxRadius = radius;
+    }
+    const key = `${Math.floor(position.x / cell)},${Math.floor(position.y / cell)}`;
+    const entry = { x: position.x, y: position.y, radius };
+    const list = cells.get(key);
+    if (list) {
+      list.push(entry);
+    } else {
+      cells.set(key, [entry]);
+    }
+  }
+  return { cells, cell, maxRadius };
+}
+function gridHit(grid, x, y) {
+  if (!grid || !grid.cells || grid.cells.size === 0) {
+    return false;
+  }
+  const { cells, cell } = grid;
+  const span = Math.max(1, Math.ceil(grid.maxRadius / cell));
+  const cx = Math.floor(x / cell);
+  const cy = Math.floor(y / cell);
+  for (let gx = cx - span; gx <= cx + span; gx += 1) {
+    for (let gy = cy - span; gy <= cy + span; gy += 1) {
+      const list = cells.get(`${gx},${gy}`);
+      if (!list) {
+        continue;
+      }
+      for (const entry of list) {
+        if (x >= entry.x - entry.radius && x <= entry.x + entry.radius && y >= entry.y - entry.radius && y <= entry.y + entry.radius) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // ui/strabo-view.js
 function createView(container) {
   const islands = createIslandLayer(container, {
@@ -2587,6 +2784,7 @@ function createView(container) {
   const layoutHandlers = [];
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
+  let nodeGrid = null;
   let edgeKind = "imports";
   let coChangeReport2 = null;
   let coChangeOn = false;
@@ -2604,22 +2802,38 @@ function createView(container) {
     lastModel = islandModel;
     directoryMembers = membersByDirectory(islandModel);
     renderedElements = applyGraphDiff(cy, islandModel, renderedElements);
+    applyViewportPerf(
+      cy,
+      viewportPerfFor(renderedElements.nodes.length, renderedElements.edges.length)
+    );
     islandVisible = null;
+    rebuildNodeGrid();
     repaintIslands();
     cards.apply(islandModel);
     edgeFocus.apply();
+    edgeHighlight.rebuild();
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
-    applyLabelBudget(cy, true);
+    clearTimeout(labelTimer);
+    labelTimer = 0;
+    labelsFrozen = false;
+    recomputeLabels();
     notifyGroup();
   }
   function isOverNode(clientX, clientY) {
+    if (!nodeGrid) {
+      return false;
+    }
     const bounds = container.getBoundingClientRect();
-    const x = clientX - bounds.left;
-    const y = clientY - bounds.top;
-    return cy.nodes(":visible").some((node) => {
-      const box = node.renderedBoundingBox();
-      return x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2;
+    const pan = cy.pan();
+    const zoom = cy.zoom() || 1;
+    const x = (clientX - bounds.left - pan.x) / zoom;
+    const y = (clientY - bounds.top - pan.y) / zoom;
+    return gridHit(nodeGrid, x, y);
+  }
+  function rebuildNodeGrid() {
+    nodeGrid = buildNodeGrid(islandModel?.nodes ?? [], islandModel?.positions ?? [], {
+      visible: islandVisible
     });
   }
   function membersByDirectory(model) {
@@ -2683,6 +2897,7 @@ function createView(container) {
     for (const [key, value] of Object.entries(offsetsByDirectory)) {
       snapshot[key] = { ...value };
     }
+    rebuildNodeGrid();
     for (const handler of layoutHandlers) {
       handler(snapshot);
     }
@@ -2718,21 +2933,39 @@ function createView(container) {
   const groupHandlers = [];
   const observer = new ResizeObserver(() => {
     cy.resize();
-    repaintIslands();
+    scheduleViewportRepaint();
   });
   observer.observe(container);
-  cy.on("pan zoom resize", repaintIslands);
-  cy.on("pan zoom resize", cards.repaint);
-  let labelFrame = 0;
-  function scheduleLabelRecompute() {
-    if (labelFrame) {
+  let viewportFrame = 0;
+  function scheduleViewportRepaint() {
+    if (viewportFrame) {
       return;
     }
-    labelFrame = requestAnimationFrame(() => {
-      labelFrame = 0;
-      rescaleLabels(cy);
-      applyLabelBudget(cy);
+    viewportFrame = requestAnimationFrame(() => {
+      viewportFrame = 0;
+      repaintIslands();
+      cards.repaint();
     });
+  }
+  cy.on("pan zoom resize", scheduleViewportRepaint);
+  const LABEL_SETTLE_MS = 140;
+  let labelTimer = 0;
+  let labelsFrozen = false;
+  function recomputeLabels() {
+    rescaleLabels(cy);
+    applyLabelBudget(cy, true);
+    applyEdgeLod(cy, { edgeCount: renderedElements.edges.length, zoom: cy.zoom() });
+  }
+  function scheduleLabelRecompute() {
+    if (!labelsFrozen) {
+      labelsFrozen = freezeLabels(cy);
+    }
+    clearTimeout(labelTimer);
+    labelTimer = setTimeout(() => {
+      labelTimer = 0;
+      labelsFrozen = false;
+      recomputeLabels();
+    }, LABEL_SETTLE_MS);
   }
   cy.on("tap", "node", (event) => {
     for (const handler of selectHandlers) handler(event.target.id());
@@ -2806,6 +3039,9 @@ function createView(container) {
     },
     /** Show or hide every node label. Islands draw their own layer and are unaffected. */
     setLabelsVisible(visible) {
+      clearTimeout(labelTimer);
+      labelTimer = 0;
+      labelsFrozen = false;
       setLabelsVisible(cy, visible);
     },
     render(model) {
@@ -3777,6 +4013,308 @@ function functionSignals(entry) {
     return "no cost signals";
   }
   return signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ");
+}
+
+// ui/strabo-highlight.js
+var words = (list) => new Set(list.split(/\s+/).filter(Boolean));
+var C_LIKE_LITERALS = "true false null";
+var LANGUAGES = {
+  javascript: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'", "`"],
+    multilineQuotes: ["`"],
+    attribute: /^@[A-Za-z_$][\w$]*/,
+    keywords: words(`
+      as async await break case catch class const continue debugger declare default delete do
+      else enum export extends finally for from function get if implements import in instanceof
+      interface let namespace new of private protected public readonly return set static super
+      switch this throw try type typeof var void while with yield abstract satisfies keyof
+      infer is override accessor`),
+    literals: words(`${C_LIKE_LITERALS} undefined NaN Infinity`)
+  },
+  python: {
+    lineComments: ["#"],
+    blockComment: null,
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""', "'''"],
+    attribute: /^@[A-Za-z_][\w.]*/,
+    keywords: words(`
+      and as assert async await break class continue def del elif else except finally for from
+      global if import in is lambda nonlocal not or pass raise return try while with yield
+      match case self cls`),
+    literals: words("True False None")
+  },
+  rust: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"'],
+    // A quote is a char literal only when it closes at once; otherwise it is a lifetime.
+    charLiteral: /^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\])'/,
+    attribute: /^#!?\[[^\]]*\]/,
+    macroBang: true,
+    keywords: words(`
+      as async await break const continue crate dyn else enum extern fn for if impl in let loop
+      match mod move mut pub ref return self Self static struct super trait type union unsafe
+      use where while`),
+    literals: words("true false")
+  },
+  java: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    attribute: /^@[A-Za-z_$][\w$.]*/,
+    keywords: words(`
+      abstract assert break case catch class continue default do else enum extends final
+      finally for if implements import instanceof interface native new package private
+      protected public return static strictfp super switch synchronized this throw throws
+      transient try var void volatile while record sealed permits yield
+      boolean byte char double float int long short`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  kotlin: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    attribute: /^@[A-Za-z_][\w.]*/,
+    keywords: words(`
+      abstract annotation as break by catch class companion const constructor continue crossinline
+      data do else enum expect external final finally for fun get if import in infix init inline
+      inner interface internal is lateinit noinline object open operator out override package
+      private protected public reified return sealed set super suspend this throw try typealias
+      val value var vararg when where while`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  csharp: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    keywords: words(`
+      abstract as async await base bool break byte case catch char checked class const continue
+      decimal default delegate do double else enum event explicit extern finally fixed float for
+      foreach get goto if implicit in init int interface internal is lock long namespace new
+      object operator out override params private protected public readonly record ref required
+      return sbyte sealed set short sizeof stackalloc static string struct switch this throw try
+      typeof uint ulong unchecked unsafe ushort using var virtual void volatile when while yield`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  cpp: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    directive: /^\s*#\s*\w+/,
+    keywords: words(`
+      alignas alignof and asm auto bool break case catch char class concept const consteval
+      constexpr constinit const_cast continue co_await co_return co_yield decltype default delete
+      do double dynamic_cast else enum explicit export extern float for friend goto if inline int
+      long mutable namespace new noexcept not operator or override private protected public
+      register reinterpret_cast requires return short signed sizeof static static_assert
+      static_cast struct switch template this thread_local throw try typedef typeid typename
+      union unsigned using virtual void volatile while final`),
+    literals: words("true false nullptr NULL")
+  },
+  sql: {
+    lineComments: ["--"],
+    blockComment: ["/*", "*/"],
+    quotes: ["'", '"'],
+    caseInsensitive: true,
+    keywords: words(`
+      add all alter and as asc begin between by case cast check column commit constraint create
+      cross database default delete desc distinct drop else end exists foreign from full group
+      having if in index inner insert into is join key left like limit not offset on or order
+      outer primary references replace returning right rollback select set table then transaction
+      trigger union unique update using values view when where with without rowid autoincrement
+      pragma integer int text real blob numeric varchar char boolean date timestamp`),
+    literals: words("true false null")
+  }
+};
+var EXTENSION_LANGUAGE = {
+  ".ts": "javascript",
+  ".tsx": "javascript",
+  ".mts": "javascript",
+  ".cts": "javascript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".rs": "rust",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".cs": "csharp",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".hh": "cpp",
+  ".hxx": "cpp",
+  ".h": "cpp",
+  ".c": "cpp",
+  ".sql": "sql"
+};
+function languageForFile(file) {
+  if (typeof file !== "string") return null;
+  const dot = file.lastIndexOf(".");
+  if (dot < 0 || file.lastIndexOf("/") > dot || file.lastIndexOf("\\") > dot) return null;
+  return EXTENSION_LANGUAGE[file.slice(dot).toLowerCase()] ?? null;
+}
+var NUMBER = /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)[a-zA-Z]{0,3}/;
+var IDENTIFIER = /^[A-Za-z_$][\w$]*/;
+function findClose(text, from, closer, escapes) {
+  for (let index = from; index < text.length; index += 1) {
+    if (escapes && text[index] === "\\") {
+      index += 1;
+    } else if (text.startsWith(closer, index)) {
+      return index + closer.length;
+    }
+  }
+  return -1;
+}
+function tokenizeLine(line, language, state2 = null) {
+  const spec = LANGUAGES[language];
+  if (!spec) return { tokens: [{ text: line, type: null }], state: null };
+  const tokens = [];
+  let plain = "";
+  const flush = () => {
+    if (plain) tokens.push({ text: plain, type: null });
+    plain = "";
+  };
+  const emit = (text, type) => {
+    flush();
+    tokens.push({ text, type });
+  };
+  let position = 0;
+  let open = state2;
+  if (open) {
+    const end = findClose(line, 0, open.closer, open.kind === "string");
+    if (end < 0) return { tokens: [{ text: line, type: open.kind }], state: open };
+    emit(line.slice(0, end), open.kind);
+    position = end;
+    open = null;
+  }
+  if (spec.directive) {
+    const directive = spec.directive.exec(line.slice(position));
+    if (directive && position === 0) {
+      emit(directive[0], "meta");
+      position = directive[0].length;
+    }
+  }
+  while (position < line.length) {
+    const rest = line.slice(position);
+    const char = rest[0];
+    const lineComment = spec.lineComments.find((prefix) => rest.startsWith(prefix));
+    if (lineComment) {
+      emit(rest, "comment");
+      position = line.length;
+      break;
+    }
+    if (spec.blockComment && rest.startsWith(spec.blockComment[0])) {
+      const [opener, closer] = spec.blockComment;
+      const end = findClose(line, position + opener.length, closer, false);
+      if (end < 0) {
+        emit(rest, "comment");
+        open = { kind: "comment", closer };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "comment");
+      position = end;
+      continue;
+    }
+    const triple = spec.tripleQuotes?.find((quote) => rest.startsWith(quote));
+    if (triple) {
+      const end = findClose(line, position + triple.length, triple, true);
+      if (end < 0) {
+        emit(rest, "string");
+        open = { kind: "string", closer: triple };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "string");
+      position = end;
+      continue;
+    }
+    if (char === "'" && spec.charLiteral) {
+      const literal = spec.charLiteral.exec(rest);
+      if (literal) {
+        emit(literal[0], "string");
+        position += literal[0].length;
+      } else {
+        plain += char;
+        position += 1;
+      }
+      continue;
+    }
+    if (spec.quotes.includes(char)) {
+      const end = findClose(line, position + 1, char, true);
+      if (end < 0) {
+        emit(rest, "string");
+        if (spec.multilineQuotes?.includes(char)) open = { kind: "string", closer: char };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "string");
+      position = end;
+      continue;
+    }
+    if (spec.attribute && (char === "@" || char === "#")) {
+      const attribute = spec.attribute.exec(rest);
+      if (attribute) {
+        emit(attribute[0], "meta");
+        position += attribute[0].length;
+        continue;
+      }
+    }
+    if (/\d/.test(char)) {
+      const number = NUMBER.exec(rest);
+      if (number) {
+        emit(number[0], "number");
+        position += number[0].length;
+        continue;
+      }
+    }
+    const identifier = IDENTIFIER.exec(rest);
+    if (identifier) {
+      const word = identifier[0];
+      const lookup = spec.caseInsensitive ? word.toLowerCase() : word;
+      const after = rest.slice(word.length);
+      let type = null;
+      if (spec.keywords.has(lookup)) type = "keyword";
+      else if (spec.literals.has(lookup)) type = "literal";
+      else if (/^\s*\(/.test(after) || spec.macroBang && /^!\s*[([{]/.test(after)) type = "function";
+      else if (/^[A-Z]/.test(word) && /[a-z]/.test(word)) type = "type";
+      if (type === "function" && spec.macroBang && after.startsWith("!")) {
+        emit(word + "!", "function");
+        position += word.length + 1;
+        continue;
+      }
+      if (type) emit(word, type);
+      else plain += word;
+      position += word.length;
+      continue;
+    }
+    plain += char;
+    position += 1;
+  }
+  flush();
+  return { tokens, state: open };
+}
+function highlightLines(lines, language) {
+  if (!LANGUAGES[language]) return null;
+  let state2 = null;
+  return lines.map((line) => {
+    const result = tokenizeLine(line, language, state2);
+    state2 = result.state;
+    return result.tokens;
+  });
+}
+function highlightIsolated(lines, language) {
+  if (!LANGUAGES[language]) return null;
+  return lines.map((line) => tokenizeLine(line, language).tokens);
 }
 
 // ui/strabo-narrator.js
@@ -6755,9 +7293,9 @@ function renderBranches(container, result, handlers = {}) {
   if (handlers.onFetch) {
     actions.append(branchActionButton("branch-fetch", "Fetch", "Update the remote-tracking refs", handlers.onFetch, handlers.busy));
   }
-  if (handlers.onSync && result.current) {
+  if (handlers.onPull && result.current) {
     actions.append(
-      branchActionButton("branch-sync", `Sync ${result.current}`, `Fetch, fast-forward, then push ${result.current}`, handlers.onSync, handlers.busy)
+      branchActionButton("branch-pull", `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy)
     );
   }
   if (actions.childElementCount > 0) {
@@ -6815,6 +7353,19 @@ function renderBranches(container, result, handlers = {}) {
         tagLine.append(chip);
       }
       item.append(tagLine);
+    }
+    const behindCount = branch.upstream?.behind ?? 0;
+    if (handlers.onPullBranch && branch.kind === "local" && !branch.current && !branch.upstream?.gone && behindCount > 0) {
+      const pull = document.createElement("button");
+      pull.type = "button";
+      pull.className = "branch-action";
+      pull.dataset.role = "branch-pull-branch";
+      pull.dataset.branch = branch.name;
+      pull.textContent = `Pull \u2193${behindCount}`;
+      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? "its upstream"}`;
+      pull.disabled = Boolean(handlers.busy);
+      pull.addEventListener("click", () => handlers.onPullBranch(branch));
+      item.append(pull);
     }
     const pushCount = branch.upstream?.ahead ?? 0;
     const publish = branch.kind === "local" && !branch.isBase && (!branch.upstream || branch.upstream.gone);
@@ -6949,6 +7500,65 @@ function renderReviewLoading(container, handlers = {}) {
   note3.textContent = "Reviewing changes\u2026";
   container.append(note3);
 }
+function structuralDiffGroups(structural) {
+  if (!structural || structural.available === false) {
+    return [];
+  }
+  const diff = structural.diff ?? {};
+  return [
+    { key: "edges-added", label: "Dependency edges added", items: (diff.edgesAdded ?? []).map(structuralEdgeLabel) },
+    { key: "edges-removed", label: "Dependency edges removed", items: (diff.edgesRemoved ?? []).map(structuralEdgeLabel) },
+    { key: "cycles-introduced", label: "Cycles introduced", items: (diff.cyclesIntroduced ?? []).map(structuralCycleLabel) },
+    { key: "cycles-resolved", label: "Cycles resolved", items: (diff.cyclesResolved ?? []).map(structuralCycleLabel) },
+    { key: "tier-edges-added", label: "Wrong-way tier edges added", items: (diff.tierEdgesAdded ?? []).map(structuralTierEdgeLabel) },
+    { key: "entry-points-added", label: "Entry points added", items: [...diff.entryPointsAdded ?? []] },
+    { key: "newly-unreached", label: "Newly unreached", items: [...diff.newlyUnreached ?? []] }
+  ].filter((group) => group.items.length > 0);
+}
+function structuralEdgeLabel(edge) {
+  return `${edge.source} \u2192 ${edge.target} (${edge.kind})`;
+}
+function structuralCycleLabel(cycle) {
+  return (cycle.members ?? []).join(" \u2192 ");
+}
+function structuralTierEdgeLabel(edge) {
+  return `${edge.source} \u2192 ${edge.target} (${edge.kind}, ${edge.unit})`;
+}
+function renderStructuralDiff(container, structural) {
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Structure";
+  container.append(heading2);
+  if (!structural || structural.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-structure-unavailable";
+    note3.textContent = structural?.detail ? `Structure unavailable: ${structural.detail}` : "Structure unavailable: no base revision to compare.";
+    container.append(note3);
+    return;
+  }
+  const groups = structuralDiffGroups(structural);
+  if (groups.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-structure-empty";
+    note3.textContent = "No structural change between the base and HEAD.";
+    container.append(note3);
+    return;
+  }
+  for (const group of groups) {
+    const title = document.createElement("h5");
+    title.textContent = `${group.label} (${group.items.length})`;
+    container.append(title);
+    const list = document.createElement("ul");
+    list.dataset.role = `review-structure-${group.key}`;
+    for (const item of group.items) {
+      const entry = document.createElement("li");
+      entry.textContent = item;
+      list.append(entry);
+    }
+    container.append(list);
+  }
+}
 function renderReview(container, result, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -7043,6 +7653,9 @@ function renderReview(container, result, handlers = {}) {
       list.append(item);
     }
     container.append(list);
+  }
+  if (result.structural !== void 0) {
+    renderStructuralDiff(container, result.structural);
   }
   renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
@@ -8330,7 +8943,7 @@ function sourceNote(text, className, role) {
   note3.textContent = text;
   return note3;
 }
-function sourceLine(kind, gutters, text, mark) {
+function sourceLine(kind, gutters, text, mark, tokens) {
   const row = document.createElement("div");
   row.className = `src-line src-${kind}`;
   if (mark) row.classList.add("src-mark");
@@ -8354,8 +8967,9 @@ function renderContentBody(body, data) {
   }
   const lines = content.replace(/\n$/, "").split("\n");
   const shown = lines.slice(0, SOURCE_LINE_CAP);
-  lines.slice(0, SOURCE_LINE_CAP).forEach((line, index) => {
-    body.append(sourceLine("context", [index + 1], line, data.line === index + 1));
+  const tokens = highlightLines(shown, languageForFile(data.file));
+  shown.forEach((line, index) => {
+    body.append(sourceLine("context", [index + 1], line, data.line === index + 1, tokens?.[index]));
   });
   if (lines.length > shown.length) {
     body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} of ${lines.length} lines.`, "source-note"));
@@ -8375,18 +8989,23 @@ function renderDiffBody(body, data) {
     body.append(sourceNote("No change between the two sides.", "source-note", "source-empty"));
     return;
   }
+  const language = languageForFile(data.file);
   let budget = SOURCE_LINE_CAP;
   let truncated = false;
   for (const hunk of diff.hunks) {
     body.append(sourceNote(hunk.header, "src-hunk"));
-    for (const line of hunk.lines) {
+    const tokens = highlightIsolated(
+      hunk.lines.map((line) => line.text),
+      language
+    );
+    for (const [index, line] of hunk.lines.entries()) {
       if (budget <= 0) {
         truncated = true;
         break;
       }
       budget -= 1;
       const marked = data.line !== null && data.line !== void 0 && (line.newLine === data.line || line.oldLine === data.line);
-      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked));
+      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked, tokens?.[index]));
     }
     if (truncated) break;
   }
@@ -10349,7 +10968,8 @@ async function loadBranches() {
       });
     },
     onFetch: () => runBranchAction("fetch", {}),
-    onSync: () => runBranchAction("sync", { branch: result?.current }),
+    onPull: () => runBranchAction("pull", { branch: result?.current }),
+    onPullBranch: (branch) => runBranchAction("pull", { branch: branch.name }),
     onPush: (branch) => runBranchAction("push", { branch: branch.name }),
     onClose: () => {
       elements.branchesPanel.hidden = true;
@@ -10358,8 +10978,8 @@ async function loadBranches() {
 }
 async function runBranchAction(action, payload) {
   if (branchesBusy) return;
-  if (action === "sync" && !payload.branch) {
-    elements.status.textContent = "Sync needs a checked-out branch.";
+  if ((action === "sync" || action === "pull") && !payload.branch) {
+    elements.status.textContent = `${action === "pull" ? "Pull" : "Sync"} needs a checked-out branch.`;
     return;
   }
   branchesBusy = true;
@@ -10429,6 +11049,14 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
     elements.reviewPanel.hidden = false;
     renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
     return;
+  }
+  if (commit) {
+    try {
+      data.structural = await request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+    } catch (error) {
+      data.structural = { available: false, reason: "git-error", detail: error.message };
+    }
+    if (ticket !== reviewTicket) return;
   }
   if (narratorStatus === null) {
     narratorStatus = await fetchNarratorStatus();

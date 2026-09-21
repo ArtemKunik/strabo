@@ -2,6 +2,7 @@ import type { Graph } from '../types.ts';
 import { buildAdjacency } from './analysis.ts';
 import { computeCoverage } from './coverage.ts';
 import { computeCycles } from './cycles.ts';
+import { coverageProvenance, formatAge, type CoverageProvenance, type MeasuredCoverageSummary } from './measured-coverage.ts';
 
 export interface HealthAxis {
   key: string;
@@ -10,12 +11,19 @@ export interface HealthAxis {
   value: number | null;
   /** The values the axis was derived from, so the number is explainable. */
   detail: string;
+  /**
+   * Which method produced the figure when this axis is coverage: `measured` from an
+   * existing report, or `reachable` from the static test-reach. Other axes omit it.
+   */
+  basis?: 'measured' | 'reachable';
 }
 
 export interface HealthReport {
   /** Mean of the available axes, or null when none could be derived. */
   score: number | null;
   axes: HealthAxis[];
+  /** The measured report the coverage axis consulted, when one was read. */
+  coverage?: CoverageProvenance;
 }
 
 /**
@@ -25,7 +33,10 @@ export interface HealthReport {
  * an absent edge limits what any of these can measure, so the caller should present the
  * detail alongside the number.
  */
-export function computeArchitectureHealth(graph: Graph): HealthReport {
+export function computeArchitectureHealth(
+  graph: Graph,
+  measured?: MeasuredCoverageSummary | null,
+): HealthReport {
   const { forward, backward } = buildAdjacency(graph);
   const nodeCount = graph.nodes.length;
 
@@ -69,23 +80,37 @@ export function computeArchitectureHealth(graph: Graph): HealthReport {
     detail: cohesion.detail,
   });
 
-  // Coverage: modules reachable from a test.
+  // Coverage: measured lines when a report exists, else modules reachable from a test.
   const reach = computeCoverage(graph);
   const modules = graph.nodes.filter((node) => node.kind !== 'test');
-  if (reach.testFiles.length === 0 || modules.length === 0) {
+  const measuredLine = measured?.available ? measured.summary.lineCoverage : null;
+  if (measured?.available && measuredLine !== null && measured.summary.filesMeasured > 0) {
+    axes.push({
+      key: 'coverage',
+      label: 'Coverage',
+      value: score(measuredLine / 100),
+      detail:
+        `measured ${measuredLine}% line coverage across ${measured.summary.filesMeasured} module(s)` +
+        reportAge(measured),
+      basis: 'measured',
+    });
+  } else if (reach.testFiles.length === 0 || modules.length === 0) {
     axes.push({
       key: 'coverage',
       label: 'Coverage',
       value: null,
       detail: 'no test files identified',
+      basis: 'reachable',
     });
   } else {
     const covered = modules.filter((node) => reach.reached.includes(node.id)).length;
+    const noLines = measured?.available ? '; the measured report records no line counts' : '';
     axes.push({
       key: 'coverage',
       label: 'Coverage',
       value: score(covered / modules.length),
-      detail: `${covered} of ${modules.length} modules reachable from tests`,
+      detail: `${covered} of ${modules.length} modules reachable from tests${noLines}`,
+      basis: 'reachable',
     });
   }
 
@@ -93,7 +118,13 @@ export function computeArchitectureHealth(graph: Graph): HealthReport {
   return {
     score: available.length > 0 ? Math.round(available.reduce((sum, n) => sum + n, 0) / available.length) : null,
     axes,
+    ...(measured ? { coverage: coverageProvenance(measured) } : {}),
   };
+}
+
+/** " · report 3d old", when the measured report records a timestamp. */
+function reportAge(measured: MeasuredCoverageSummary): string {
+  return measured.reportAgeMs === null ? '' : ` · report ${formatAge(measured.reportAgeMs)} old`;
 }
 
 function computeCohesion(

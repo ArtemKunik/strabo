@@ -12,6 +12,8 @@ export interface CliEnv {
   allowCeilingWidening: boolean;
   autoRebuild: boolean;
   deniedLicenses?: string[];
+  /** Explicit coverage report paths, overriding the conventional auto-detected locations. */
+  coverageReports?: string[];
   narratorEndpoint?: string;
   narratorModel?: string;
   narratorKeyEnv?: string;
@@ -53,6 +55,9 @@ export function readEnv(
     // observe HEAD moving without forcing a synchronous scan on the next request.
     autoRebuild: !isDisabled(env.STRABO_AUTO_REBUILD),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
+    // An explicit report path (or a comma-separated list) overrides auto-detection; it is
+    // still read only inside the scan ceiling.
+    coverageReports: env.STRABO_COVERAGE_REPORT?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // The narrator is a second opt-in provider; without an endpoint and model it is inert.
     narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
     narratorModel: env.STRABO_NARRATOR_MODEL?.trim() || undefined,
@@ -118,6 +123,7 @@ export function configFromEnv(
     allowCeilingWidening,
     autoRebuild,
     deniedLicenses,
+    coverageReports,
     narratorEndpoint,
     narratorModel,
     narratorKeyEnv,
@@ -145,6 +151,7 @@ export function configFromEnv(
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),
     },
+    ...(coverageReports && coverageReports.length > 0 ? { coverageReports } : {}),
     ...(narrator ? { narrator } : {}),
     serverLog: (message, error) => {
       if (error) {

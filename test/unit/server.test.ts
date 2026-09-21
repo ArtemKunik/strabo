@@ -153,6 +153,13 @@ test('the branch action routes refuse a cross-origin request and require a branc
     body: JSON.stringify({}),
   });
   assert.equal(missingBranch.status, 400);
+
+  const missingPullBranch = await fetch(`${base}/api/strabo/analysis/branches/pull${repository}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missingPullBranch.status, 400);
 });
 
 test('the symbol endpoint serves the function inventory with body metrics', async () => {

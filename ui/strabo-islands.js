@@ -191,6 +191,44 @@ export function projectIsland(island, viewport) {
   };
 }
 
+/**
+ * The uniform device-space shift between two projections, or null when they differ otherwise.
+ *
+ * A pan is the one viewport change that moves every plate by the same amount without
+ * resizing it. Detecting that lets the island layer translate its whole SVG group instead of
+ * rewriting each plate's geometry and re-running the label-collision pass, which is the
+ * expensive half of a repaint. `islands` is the model set behind `next`; its directory,
+ * label, and count are compared so a filter that swapped a same-sized directory for another
+ * is not mistaken for a pan. Floating-point projection is compared with a small epsilon,
+ * because a false negative only costs a full repaint.
+ */
+export function uniformIslandShift(previous, islands, next) {
+  if (!previous || !next || previous.length === 0 || previous.length !== next.length) {
+    return null;
+  }
+  const epsilon = 1e-6;
+  const dx = next[0].x - previous[0].x;
+  const dy = next[0].y - previous[0].y;
+  for (let index = 0; index < next.length; index += 1) {
+    const before = previous[index];
+    const after = next[index];
+    if (after.width !== before.width || after.height !== before.height) {
+      return null;
+    }
+    if (
+      islands[index].directory !== before.directory ||
+      islands[index].label !== before.label ||
+      islands[index].count !== before.count
+    ) {
+      return null;
+    }
+    if (Math.abs(after.x - before.x - dx) > epsilon || Math.abs(after.y - before.y - dy) > epsilon) {
+      return null;
+    }
+  }
+  return { dx, dy };
+}
+
 /** Rendered label box: 11px type sitting `LABEL_BASELINE_GAP` above the plate's top edge. */
 export const LABEL_HEIGHT = 12;
 export const LABEL_BASELINE_GAP = 6;

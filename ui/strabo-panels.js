@@ -50,6 +50,7 @@ import {
   functionSignals,
   functionSummary,
 } from './strabo-functions.js';
+import { highlightIsolated, highlightLines, languageForFile } from './strabo-highlight.js';
 import {
   NARRATOR_ATTRIBUTION,
   narrativeBlocks,
@@ -2524,9 +2525,9 @@ export function renderBranches(container, result, handlers = {}) {
   if (handlers.onFetch) {
     actions.append(branchActionButton('branch-fetch', 'Fetch', 'Update the remote-tracking refs', handlers.onFetch, handlers.busy));
   }
-  if (handlers.onSync && result.current) {
+  if (handlers.onPull && result.current) {
     actions.append(
-      branchActionButton('branch-sync', `Sync ${result.current}`, `Fetch, fast-forward, then push ${result.current}`, handlers.onSync, handlers.busy),
+      branchActionButton('branch-pull', `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy),
     );
   }
   if (actions.childElementCount > 0) {
@@ -2590,6 +2591,20 @@ export function renderBranches(container, result, handlers = {}) {
         tagLine.append(chip);
       }
       item.append(tagLine);
+    }
+
+    const behindCount = branch.upstream?.behind ?? 0;
+    if (handlers.onPullBranch && branch.kind === 'local' && !branch.current && !branch.upstream?.gone && behindCount > 0) {
+      const pull = document.createElement('button');
+      pull.type = 'button';
+      pull.className = 'branch-action';
+      pull.dataset.role = 'branch-pull-branch';
+      pull.dataset.branch = branch.name;
+      pull.textContent = `Pull ↓${behindCount}`;
+      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? 'its upstream'}`;
+      pull.disabled = Boolean(handlers.busy);
+      pull.addEventListener('click', () => handlers.onPullBranch(branch));
+      item.append(pull);
     }
 
     const pushCount = branch.upstream?.ahead ?? 0;
@@ -4480,8 +4495,11 @@ function sourceNote(text, className, role) {
   return note;
 }
 
-/** One numbered line. `gutters` is `[old, new]` for a diff and `[line]` for a file. */
-function sourceLine(kind, gutters, text, mark) {
+/**
+ * One numbered line. `gutters` is `[old, new]` for a diff and `[line]` for a file; `tokens`
+ * is the line's highlight tokens, or absent to show it plain.
+ */
+function sourceLine(kind, gutters, text, mark, tokens) {
   const row = document.createElement('div');
   row.className = `src-line src-${kind}`;
   if (mark) row.classList.add('src-mark');
@@ -4506,8 +4524,9 @@ function renderContentBody(body, data) {
   }
   const lines = content.replace(/\n$/, '').split('\n');
   const shown = lines.slice(0, SOURCE_LINE_CAP);
-  lines.slice(0, SOURCE_LINE_CAP).forEach((line, index) => {
-    body.append(sourceLine('context', [index + 1], line, data.line === index + 1));
+  const tokens = highlightLines(shown, languageForFile(data.file));
+  shown.forEach((line, index) => {
+    body.append(sourceLine('context', [index + 1], line, data.line === index + 1, tokens?.[index]));
   });
   if (lines.length > shown.length) {
     body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} of ${lines.length} lines.`, 'source-note'));
@@ -4528,11 +4547,17 @@ function renderDiffBody(body, data) {
     body.append(sourceNote('No change between the two sides.', 'source-note', 'source-empty'));
     return;
   }
+  const language = languageForFile(data.file);
   let budget = SOURCE_LINE_CAP;
   let truncated = false;
   for (const hunk of diff.hunks) {
     body.append(sourceNote(hunk.header, 'src-hunk'));
-    for (const line of hunk.lines) {
+    // Diff lines are not consecutive source, so each is highlighted on its own.
+    const tokens = highlightIsolated(
+      hunk.lines.map((line) => line.text),
+      language,
+    );
+    for (const [index, line] of hunk.lines.entries()) {
       if (budget <= 0) {
         truncated = true;
         break;
@@ -4542,7 +4567,7 @@ function renderDiffBody(body, data) {
         data.line !== null &&
         data.line !== undefined &&
         (line.newLine === data.line || line.oldLine === data.line);
-      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked));
+      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked, tokens?.[index]));
     }
     if (truncated) break;
   }

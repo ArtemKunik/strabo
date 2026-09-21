@@ -17,6 +17,7 @@ import {
   islandTooltipText,
   labelsThatFit,
   projectIsland,
+  uniformIslandShift,
 } from './strabo-core.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -62,6 +63,9 @@ export function createIslandLayer(container, handlers = {}) {
   let boxes = [];
   // The last viewport painted, so a screen-pixel drag can be converted to model units.
   let lastViewport = { pan: { x: 0, y: 0 }, zoom: 1 };
+  // The translation applied to the plate/label groups since the last full paint. A pan is
+  // absorbed here instead of rewriting every plate, and reset whenever the geometry changes.
+  let layerShift = { x: 0, y: 0 };
   // The plate being dragged; null when the pointer is only hovering.
   let drag = null;
 
@@ -177,12 +181,39 @@ export function createIslandLayer(container, handlers = {}) {
       // pointermove recomputes it.
       hideTooltip();
       lastViewport = viewport;
+      const projected = islands.map((island) => projectIsland(island, viewport));
+
+      // A pure pan moves every plate the same way without resizing it, so the label fit
+      // is unchanged: translate the whole layer and skip the per-plate DOM writes and the
+      // collision pass. Zoom, resize, a mode change, or a filter falls through to a full
+      // paint below.
+      const shift = uniformIslandShift(boxes, islands, projected);
+      if (shift) {
+        boxes = projected.map((box, index) => ({
+          ...box,
+          directory: boxes[index].directory,
+          label: boxes[index].label,
+          count: boxes[index].count,
+          trimmed: boxes[index].trimmed,
+        }));
+        if (shift.dx !== 0 || shift.dy !== 0) {
+          layerShift = { x: layerShift.x + shift.dx, y: layerShift.y + shift.dy };
+          const transform = `translate(${layerShift.x} ${layerShift.y})`;
+          plates.setAttribute('transform', transform);
+          labels.setAttribute('transform', transform);
+        }
+        return;
+      }
+
+      // Full paint: drop any accumulated translation and write absolute geometry instead.
+      plates.removeAttribute('transform');
+      labels.removeAttribute('transform');
+      layerShift = { x: 0, y: 0 };
       // Reuse elements across frames: a pan repaints every island, and replacing the DOM
       // each time would churn a node per directory per frame.
       sync(plates, 'rect', islands.length);
       sync(labels, 'text', islands.length);
 
-      const projected = islands.map((island) => projectIsland(island, viewport));
       // The label is chrome, not part of the map, so it holds one device size at every
       // zoom instead of growing with the plate, and is trimmed to what the plate can
       // hold rather than overflowing into the next island. Zoomed out there is no gap

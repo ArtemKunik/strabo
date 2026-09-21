@@ -4,6 +4,12 @@ import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
 import { computeCoverage } from './coverage.ts';
 import { computeCycles } from './cycles.ts';
 import type { HealthAxis } from './health.ts';
+import {
+  coverageProvenance,
+  formatAge,
+  type CoverageProvenance,
+  type MeasuredCoverageSummary,
+} from './measured-coverage.ts';
 
 export interface FileHealthMetrics {
   directImports: number;
@@ -18,6 +24,8 @@ export interface FileHealthReport {
   score: number | null;
   axes: HealthAxis[];
   metrics: FileHealthMetrics;
+  /** The measured report the coverage axis consulted, when one was read. */
+  coverage?: CoverageProvenance;
 }
 
 /**
@@ -35,6 +43,7 @@ export function computeFileHealth(
   symbols: CodeSymbol[] = [],
   accesses: MemberAccess[] = [],
   cohesionUnavailable?: string,
+  measured?: MeasuredCoverageSummary | null,
 ): FileHealthReport {
   const { forward, backward } = buildAdjacency(graph);
   const metrics = computeGraphMetrics(graph);
@@ -81,7 +90,7 @@ export function computeFileHealth(
     : computeMemberCohesion(symbols, accesses);
   axes.push({ key: 'cohesion', label: 'Cohesion', value: cohesion.value, detail: cohesion.detail });
 
-  axes.push(fileCoverage(graph, file, node));
+  axes.push(fileCoverage(graph, file, node, measured));
 
   const available = axes.filter((axis) => axis.value !== null).map((axis) => axis.value as number);
   return {
@@ -90,26 +99,56 @@ export function computeFileHealth(
     score: available.length > 0 ? Math.round(available.reduce((sum, n) => sum + n, 0) / available.length) : null,
     axes,
     metrics: { directImports, directImporters, blastRadius },
+    ...(measured ? { coverage: coverageProvenance(measured) } : {}),
   };
 }
 
-function fileCoverage(graph: Graph, file: string, node: Graph['nodes'][number] | undefined): HealthAxis {
+function fileCoverage(
+  graph: Graph,
+  file: string,
+  node: Graph['nodes'][number] | undefined,
+  measured?: MeasuredCoverageSummary | null,
+): HealthAxis {
   const unavailable = (detail: string): HealthAxis => ({
     key: 'coverage',
     label: 'Coverage',
     value: null,
     detail,
+    basis: 'reachable',
   });
 
   if (!node) {
     return unavailable('file is not in the scanned graph');
   }
+
+  // Measured lines win when the report names this file; a named file with no line counts
+  // stays measured-but-unavailable rather than being read as 0%.
+  const measuredEntry =
+    measured?.available ? measured.files.find((entry) => entry.inGraph && entry.file === file) : undefined;
+  if (measuredEntry) {
+    const age =
+      measured?.reportAgeMs === null || measured?.reportAgeMs === undefined
+        ? ''
+        : ` · report ${formatAge(measured.reportAgeMs)} old`;
+    const stale = measuredEntry.stale ? ' · stale' : '';
+    return {
+      key: 'coverage',
+      label: 'Coverage',
+      value: measuredEntry.lineCoverage === null ? null : measuredEntry.lineCoverage,
+      detail:
+        measuredEntry.lineCoverage === null
+          ? `measured: the report records no line counts for this file${age}${stale}`
+          : `measured ${measuredEntry.lineCoverage}% of ${measuredEntry.linesFound} line(s)${age}${stale}`,
+      basis: 'measured',
+    };
+  }
+
   const reach = computeCoverage(graph);
   if (reach.testFiles.length === 0) {
     return unavailable('no test files identified');
   }
   if (node.kind === 'test') {
-    return { key: 'coverage', label: 'Coverage', value: 100, detail: 'test file' };
+    return { key: 'coverage', label: 'Coverage', value: 100, detail: 'test file', basis: 'reachable' };
   }
   if (reach.reached.includes(file)) {
     return {
@@ -117,9 +156,10 @@ function fileCoverage(graph: Graph, file: string, node: Graph['nodes'][number] |
       label: 'Coverage',
       value: 100,
       detail: `reachable from ${reach.testFiles.length} test file(s)`,
+      basis: 'reachable',
     };
   }
-  return { key: 'coverage', label: 'Coverage', value: 0, detail: 'no path from a test' };
+  return { key: 'coverage', label: 'Coverage', value: 0, detail: 'no path from a test', basis: 'reachable' };
 }
 
 export interface MemberCohesion {

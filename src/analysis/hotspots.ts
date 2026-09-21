@@ -1,4 +1,5 @@
 import type { FunctionsReport } from './functions.ts';
+import type { MeasuredFunctionCoverage } from './measured-coverage.ts';
 import type { FunctionSignal } from './signals.ts';
 
 /** One function that tripped at least one recorded signal. */
@@ -10,6 +11,8 @@ export interface Hotspot {
   decisionPoints: number;
   lines: number;
   signals: FunctionSignal[];
+  /** Measured coverage when a report names the function; absent means unavailable. */
+  coverage?: MeasuredFunctionCoverage;
 }
 
 export interface HotspotReport {
@@ -53,6 +56,7 @@ export function rankHotspots(reports: FunctionsReport[], options: HotspotOptions
         decisionPoints: entry.metrics?.decisionPoints ?? 0,
         lines: entry.metrics?.lines ?? 0,
         signals: entry.signals,
+        ...(entry.coverage ? { coverage: entry.coverage } : {}),
       });
     }
   }

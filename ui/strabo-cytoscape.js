@@ -65,3 +65,22 @@ export function createCytoscape(container) {
   }
   return window.cytoscape(options);
 }
+
+/**
+ * Turn the built-in viewport fast paths on or off for the live renderer.
+ *
+ * `textureOnViewport` transforms the last painted frame while a wheel/pinch/drag gesture is
+ * in flight instead of walking every element, and `hideEdgesOnViewport` skips the edge draw
+ * for those frames. Both are read from the renderer each frame, so assigning them here
+ * works on the 2D renderer even though it is chosen at construction. The element count is
+ * only known after a render, and the tradeoff (a soft, briefly stale frame) is only worth
+ * it on a large graph, so the caller gates them with {@link viewportPerfFor}.
+ */
+export function applyViewportPerf(cy, perf) {
+  const renderer = cy?.renderer?.();
+  if (!renderer) {
+    return;
+  }
+  renderer.textureOnViewport = Boolean(perf?.textureOnViewport);
+  renderer.hideEdgesOnViewport = Boolean(perf?.hideEdgesOnViewport);
+}

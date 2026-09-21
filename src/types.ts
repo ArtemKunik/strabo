@@ -893,6 +893,12 @@ export interface StraboConfig {
   autoRebuild?: boolean;
   integrations?: StraboIntegrations;
   /**
+   * Explicit coverage report paths (relative to the repository root, or absolute inside the
+   * scan ceiling). When set, these replace the conventional auto-detected locations. Reports
+   * are only ever read, never produced.
+   */
+  coverageReports?: string[];
+  /**
    * Dependency-risk lookup. Online advisory/license calls are opt-in and off by default;
    * inventory and file mapping work without them.
    */

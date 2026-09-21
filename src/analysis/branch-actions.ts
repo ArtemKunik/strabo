@@ -25,7 +25,7 @@ const ACTION_TIMEOUT_MS = 120_000;
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const SAFE_REMOTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export type BranchActionName = 'fetch' | 'push' | 'sync';
+export type BranchActionName = 'fetch' | 'push' | 'pull' | 'sync';
 
 export type BranchActionReason =
   | 'no-git'
@@ -165,6 +165,82 @@ export async function pushBranch(root: string, branch: string): Promise<BranchAc
 }
 
 /**
+ * Pull a local branch: fetch its upstream and fast-forward it, never pushing.
+ *
+ * The checked-out branch is advanced with `merge --ff-only` so the working tree follows; any
+ * other local branch is advanced through its ref (`git fetch <remote> <remote>:<branch>`),
+ * which Git refuses to update when it would not be a fast-forward. A diverged or dirty tree
+ * is reported, not merged.
+ */
+export async function pullBranch(root: string, branch: string): Promise<BranchActionResult | BranchActionFailure> {
+  return guard('pull', root, async () => {
+    if (!isSafeBranch(branch)) {
+      return fail('pull', 'unknown-branch', `Refusing to pull "${branch}".`);
+    }
+    if (!(await branchExists(root, branch))) {
+      return fail('pull', 'unknown-branch', `No local branch named "${branch}".`);
+    }
+    const remote = await gitValue(root, ['config', '--get', `branch.${branch}.remote`]);
+    const merge = await gitValue(root, ['config', '--get', `branch.${branch}.merge`]);
+    if (!remote || !merge) {
+      return fail('pull', 'no-upstream', `"${branch}" has no upstream to pull from.`);
+    }
+    const remotes = await listRemotes(root);
+    if (!remotes.includes(remote) || !merge.startsWith('refs/heads/')) {
+      return fail('pull', 'git-error', `"${branch}" has an upstream this tool will not pull from.`);
+    }
+
+    await gitAction(root, ['fetch', '--prune', remote]);
+    const upstreamRef = await gitValue(root, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+    if (!upstreamRef) {
+      return fail('pull', 'no-upstream', `"${branch}" has no upstream to pull from.`);
+    }
+    const counts = await gitValue(root, ['rev-list', '--left-right', '--count', `${branch}...${upstreamRef}`]);
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+    if (behind === 0) {
+      return {
+        available: true,
+        action: 'pull',
+        branch,
+        remotes: [remote],
+        fastForwarded: false,
+        pushed: false,
+        message: ahead > 0
+          ? `${branch} is ${ahead} commit(s) ahead of ${upstreamRef}; nothing to pull.`
+          : `${branch} is already up to date with ${upstreamRef}.`,
+        output: '',
+      };
+    }
+
+    const current = await currentBranch(root);
+    if (current === branch) {
+      try {
+        await gitAction(root, ['merge', '--ff-only', upstreamRef]);
+      } catch (error) {
+        return classifyMergeFailure(error, 'pull', branch, upstreamRef);
+      }
+    } else {
+      const remoteBranch = merge.slice('refs/heads/'.length);
+      try {
+        await gitAction(root, ['fetch', remote, `${remoteBranch}:${branch}`]);
+      } catch (error) {
+        return classifyMergeFailure(error, 'pull', branch, upstreamRef);
+      }
+    }
+    return {
+      available: true,
+      action: 'pull',
+      branch,
+      remotes: [remote],
+      fastForwarded: true,
+      pushed: false,
+      message: `Fast-forwarded ${branch} to ${upstreamRef}.`,
+      output: '',
+    };
+  });
+}
+
+/**
  * Sync the checked-out branch: fetch its upstream, fast-forward when behind (refusing a
  * diverged branch or a dirty tree), then push when ahead.
  */
@@ -198,7 +274,7 @@ export async function syncBranch(root: string, branch: string): Promise<BranchAc
         await gitAction(root, ['merge', '--ff-only', upstreamRef]);
         fastForwarded = true;
       } catch (error) {
-        return classifyMergeFailure(error, branch, upstreamRef);
+        return classifyMergeFailure(error, 'sync', branch, upstreamRef);
       }
     }
 
@@ -226,14 +302,20 @@ export async function syncBranch(root: string, branch: string): Promise<BranchAc
   });
 }
 
-function classifyMergeFailure(error: unknown, branch: string, upstreamRef: string): BranchActionFailure {
+function classifyMergeFailure(
+  error: unknown,
+  action: 'pull' | 'sync',
+  branch: string,
+  upstreamRef: string,
+): BranchActionFailure {
   const message = error instanceof Error ? error.message : String(error);
   if (/local changes|would be overwritten|Please commit|Please stash|unstaged|untracked working tree/i.test(message)) {
-    return { available: false, action: 'sync', reason: 'dirty', detail: `Working tree is not clean; commit or stash before syncing ${branch}.` };
+    const verb = action === 'sync' ? 'syncing' : 'pulling';
+    return { available: false, action, reason: 'dirty', detail: `Working tree is not clean; commit or stash before ${verb} ${branch}.` };
   }
   return {
     available: false,
-    action: 'sync',
+    action,
     reason: 'not-fast-forward',
     detail: `"${branch}" and "${upstreamRef}" have diverged; a fast-forward is not possible.`,
   };

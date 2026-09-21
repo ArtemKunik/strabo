@@ -25,6 +25,13 @@
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
+  /* Syntax colours for the source viewer: identity within code, never status. */
+  --syntax-keyword: #c99bff;
+  --syntax-string: #9ccf8a;
+  --syntax-number: #f0a878;
+  --syntax-type: #6fc3df;
+  --syntax-function: #8ab8ff;
+  --syntax-meta: #d4b86a;
   /* One neutral node fill. Near-achromatic, so any status hue beside it reads as the
      marked one; full opacity, with --node-line as the hairline ring (R3). */
   --node-fill: #6b7a8d;
@@ -109,6 +116,12 @@
   --status-warning: #b9741a;
   --status-serious: #b5562a;
   --status-critical: #d23b3b;
+  --syntax-keyword: #7b3fc4;
+  --syntax-string: #2b7a3d;
+  --syntax-number: #a94e14;
+  --syntax-type: #0f6a88;
+  --syntax-function: #2456b3;
+  --syntax-meta: #83630c;
   --node-fill: #5b6b7d;
   --node-line: rgba(20, 40, 70, 0.32);
   --series-1: #3987e5;
@@ -1729,6 +1742,36 @@ button.primary {
   flex: 1 1 auto;
   padding-right: 14px;
   white-space: pre;
+}
+
+.tok-keyword {
+  color: var(--syntax-keyword);
+}
+
+.tok-string {
+  color: var(--syntax-string);
+}
+
+.tok-number,
+.tok-literal {
+  color: var(--syntax-number);
+}
+
+.tok-type {
+  color: var(--syntax-type);
+}
+
+.tok-function {
+  color: var(--syntax-function);
+}
+
+.tok-meta {
+  color: var(--syntax-meta);
+}
+
+.tok-comment {
+  color: var(--ink-3);
+  font-style: italic;
 }
 
 .src-add {
