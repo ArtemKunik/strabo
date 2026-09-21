@@ -22,7 +22,7 @@ record is reported as `unavailable`, never invented.
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, service flows, per-fingerprint cache; A10: read-only Workspace panel; A11: HTTP/service-call flows) |
 | 12 | Frontend foundation | M0-M3 done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off `replaceChildren`); design/a11y milestones pending |
-| 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget re-specified (R1-R8) and pending |
+| 13 | Visual design | M0, M2-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run); M1 colour budget done (R1-R9); M1a one-source-of-truth for colour pending |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -329,8 +329,25 @@ defect in the running app, not a preference.
   modulo its length. An acceptance scenario asserts an impacted node and a changed node
   differ by something other than hue.
 
-- **M1a - One source of truth for colour.** The diagnosis: canvas cannot read CSS custom
-  properties, so `ui/strabo-view.js` hardcodes 15 hex literals duplicating `styles.css`.
+  **Landed.** `PALETTE`, `paletteColor`, `paletteKey`, `assignPaletteIndexes`,
+  `PALETTE_SIZE` and the `paletteIndex` field are removed; `src/analysis/palette.ts` becomes
+  `src/analysis/directory.ts` with only `topLevelDirectory` and `blockRegion`. The status
+  scale (`--status-good/warning/serious/critical`) replaces `--ok`, `--warn`, `--danger`,
+  `--cycle` and the untokenized `#ff8f5c`; the `--graph-*` status tokens alias it. Node fill
+  is one neutral `--node-fill` with `--node-line`; the canvas no longer reads a per-node
+  colour. Overlay borders differ by shape (`ov-changed` solid, `ov-affected` dotted,
+  `ov-cycle` double, `ov-unreached` dashed, `ov-hotspot` dotted) so the changed/affected
+  pair is distinguishable without hue. `--graph-edge` is `#55697f` at full opacity and
+  non-incident edges dim on hover. Clusters use `clusterSeriesClass` → `series-1..3` plus
+  `series-other`, with no modulo. Unit coverage is `test/unit/colors.test.ts` and
+  `test/unit/directory.test.ts`; the browser scenario is
+  `test/acceptance/features/colour-budget.feature` (`@colors`).
+
+- **M1a - One source of truth for colour.** **R11 has landed** (the canvas stylesheet is
+  built from `getComputedStyle` via `graphTheme()`, so it reads the tokens rather than
+  copying them); R10 and R12-R14 remain. The diagnosis below is the state before that: canvas
+  could not read CSS custom properties, so `ui/strabo-view.js` hardcoded 15 hex literals
+  duplicating `styles.css`.
   They have already drifted — danger is `#ff5c5c` in CSS and `#ff8f8f` on canvas, `#7fb4ff`
   exists only in JS, `#ff8f5c` only in CSS and untokenized. The token set has the same
   problem internally: `--bg`/`--bg-1`, `--panel`/`--bg-2` and `--muted`/`--ink-3` are each
@@ -403,9 +420,8 @@ defect in the running app, not a preference.
   Spec: `test/acceptance/features/map-legibility.feature` (`@islands`),
   `test/unit/islands.test.ts`.
 
-  Still open in M3: lift edge contrast (`#3a4a5e` at 0.55 opacity over `#10141a` reads as
-  haze at 0.38 zoom) and dim non-neighbourhood edges on hover instead of drawing 454 edges
-  at equal weight.
+  Edge contrast (`--graph-edge` `#55697f`, clearing 3:1 on `--bg-1`) and the dimming of
+  non-neighbourhood edges on hover are now covered by M1 R9.
 - **M4 - Chrome consolidation.** The map is ringed by eight control surfaces: toolbar,
   breadcrumb, canvas toolbar, panel dock, tests strip, status bar, zoom controls, and the
   node counter. At 1280px the toolbar wraps to two rows and the dock overlaps a node label.

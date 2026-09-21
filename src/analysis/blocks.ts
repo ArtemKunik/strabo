@@ -10,7 +10,6 @@ import type {
 } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics, rankHubs } from './analysis.ts';
 import { buildPositions } from './layout.ts';
-import { assignPaletteIndexes, blockRegion } from './palette.ts';
 
 export interface BlockOptions {
   /** Number of directory segments to group by, relative to `prefix`. */
@@ -95,12 +94,8 @@ export function buildBlockViewModel(
   );
 
   const metrics = computeGraphMetrics(aggregated, buildAdjacency(aggregated));
-  const palette = assignPaletteIndexes(
-    new Map(aggregated.nodes.map((node) => [node.id, blockRegion(node.id)])),
-  );
   const viewNodes: ViewNode[] = aggregated.nodes.map((node) => ({
     ...node,
-    paletteIndex: palette.get(node.id) ?? 0,
     workspacePath: node.id,
     fanIn: metrics.fanIn.get(node.id) ?? 0,
     fanOut: metrics.fanOut.get(node.id) ?? 0,

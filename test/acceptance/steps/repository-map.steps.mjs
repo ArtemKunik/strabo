@@ -282,6 +282,52 @@ When('I open the working-tree review', async function () {
   );
 });
 
+When('I review the working tree through the automation hook', async function () {
+  await this.page.evaluate(() => window.straboTest.review());
+  await this.page.waitForFunction(() => !document.getElementById('review-panel').hidden, undefined, {
+    timeout: 20_000,
+  });
+  const info = await this.page.evaluate(() => {
+    const cy = window.straboTest?.cy;
+    return {
+      changed: cy ? cy.nodes('.ov-changed').length : -1,
+      affected: cy ? cy.nodes('.ov-affected').length : -1,
+      nodes: cy ? cy.nodes().length : -1,
+      text: (document.getElementById('review-panel').textContent || '').slice(0, 160),
+    };
+  });
+  assert.ok(
+    info.changed > 0 && info.affected > 0,
+    `expected changed and affected overlays: ${JSON.stringify(info)}`,
+  );
+});
+
+Then('a changed node and an affected node differ by more than hue', async function () {
+  const handle = await this.page.waitForFunction(
+    () => {
+      const cy = window.straboTest?.cy;
+      if (!cy) return null;
+      const changed = cy.nodes('.ov-changed').first();
+      const affected = cy.nodes('.ov-affected').first();
+      if (changed.empty() || affected.empty()) return null;
+      return {
+        changedStyle: changed.style('border-style'),
+        affectedStyle: affected.style('border-style'),
+        changedWidth: changed.style('border-width'),
+        affectedWidth: affected.style('border-width'),
+      };
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const value = await handle.jsonValue();
+  assert.ok(value, 'expected both a changed node and an affected node on the map');
+  assert.ok(
+    value.changedStyle !== value.affectedStyle || value.changedWidth !== value.affectedWidth,
+    `changed and affected differ only by hue: ${JSON.stringify(value)}`,
+  );
+});
+
 Then('the review panel reports the commit and its changed files', async function () {
   const panel = await this.page.textContent('#review-panel');
   const commit = await this.page.textContent('#review-panel [data-role="review-commit"]');

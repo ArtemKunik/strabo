@@ -10,6 +10,8 @@ export { resolveRepositoryRoot, assertReadable, isInside, StraboScopeError } fro
 export { browseDirectories } from './boundary/browse.ts';
 
 export { scanRepository, collectSourceFiles, isTestLike, isSourceExtension } from './scan/scan.ts';
+export { detectEntryPoints } from './scan/entry-points.ts';
+export type { EntryPoint } from './scan/entry-points.ts';
 export { scanJsTsEdges } from './scan/scan-js.ts';
 export { scanPolyglotEdges, languageOf, isPolyglotSource } from './scan/scan-polyglot.ts';
 export {
@@ -59,7 +61,7 @@ export {
   neighbourhood,
 } from './analysis/analysis.ts';
 export { buildPositions } from './analysis/layout.ts';
-export { PALETTE_SIZE, assignPaletteIndexes, blockRegion, topLevelDirectory } from './analysis/palette.ts';
+export { blockRegion, topLevelDirectory } from './analysis/directory.ts';
 export { buildBlockViewModel } from './analysis/blocks.ts';
 export { analyzeModuleDepth } from './analysis/depth.ts';
 export { computeImpact, getChangedFiles, impactFromPaths } from './analysis/impact.ts';
@@ -89,6 +91,15 @@ export { rankHotspots } from './analysis/hotspots.ts';
 export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
+export { computeRepositoryPassport } from './analysis/passport.ts';
+export type {
+  RepositoryPassport,
+  PassportLanguage,
+  PassportTopFile,
+  PassportLayer,
+  PassportEntryPoint,
+  PassportCycle,
+} from './analysis/passport.ts';
 export { createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
 export type { StraboSettings } from './api/routes/settings.ts';
 

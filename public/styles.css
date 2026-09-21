@@ -15,10 +15,22 @@
   --accent: #4c9aff;
   --accent-soft: rgba(76, 154, 255, 0.14);
   --accent-ink: #bcd8ff;
-  --ok: #56d4b1;
-  --warn: #f2b25c;
-  --danger: #ff5c5c;
-  --cycle: #c98bf0;
+  /* The status scale: fixed, reserved, never themed, never reused for identity. Hue on
+     the map and in panels means status and nothing else (Phase 13 M1 R4). Values are
+     chosen to clear 3:1 on both --bg-1 and --bg-2. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  /* One neutral node fill. Near-achromatic, so any status hue beside it reads as the
+     marked one; full opacity, with --node-line as the hairline ring (R3). */
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  /* Bounded categorical: three hues plus one neutral, fixed order, never cycled (R8). */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
   /* Directory plates: structure, not status, so they stay achromatic and sit just above
      the canvas rather than competing with any node on it. */
   --island-fill: rgba(255, 255, 255, 0.028);
@@ -28,16 +40,15 @@
   --graph-grid: rgba(255, 255, 255, 0.045);
   --graph-ink: #eef3fa;
   --graph-ink-outline: #0c1016;
-  --graph-node-border: rgba(255, 255, 255, 0.22);
-  --graph-edge: #4a5e78;
+  --graph-edge: #55697f;
   --graph-edge-accent: #7fb4ff;
   --graph-edge-selected: #4c9aff;
   --graph-hub: #4c9aff;
   --graph-selected: #ffffff;
-  --graph-changed: #ff5c5c;
-  --graph-affected: #f2b25c;
-  --graph-cycle: #c98bf0;
-  --graph-unreached: #8da0b5;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
   /* Chrome surfaces: the translucent overlays that sit above the canvas. Tokens so the
      light theme can re-skin them without rewriting each rule. */
   --chrome: rgba(22, 28, 36, 0.92);
@@ -84,10 +95,16 @@
   --accent: #2f6fd0;
   --accent-soft: rgba(47, 111, 208, 0.12);
   --accent-ink: #1c4f9c;
-  --ok: #1f9e7c;
-  --warn: #b9741a;
-  --danger: #d23b3b;
-  --cycle: #8a4fbf;
+  --status-good: #1f9e7c;
+  --status-warning: #b9741a;
+  --status-serious: #b5562a;
+  --status-critical: #d23b3b;
+  --node-fill: #5b6b7d;
+  --node-line: rgba(20, 40, 70, 0.32);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #66748a;
   --island-fill: rgba(20, 40, 70, 0.045);
   --island-line: rgba(20, 40, 70, 0.14);
   --shadow-1: 0 2px 8px rgba(30, 45, 70, 0.12);
@@ -96,16 +113,15 @@
   --graph-grid: rgba(20, 40, 70, 0.10);
   --graph-ink: #1b2530;
   --graph-ink-outline: #f4f6fa;
-  --graph-node-border: rgba(20, 40, 70, 0.32);
   --graph-edge: #9aa9bb;
   --graph-edge-accent: #2f6fd0;
   --graph-edge-selected: #2f6fd0;
   --graph-hub: #2f6fd0;
   --graph-selected: #16202c;
-  --graph-changed: #d23b3b;
-  --graph-affected: #b9741a;
-  --graph-cycle: #8a4fbf;
-  --graph-unreached: #66748a;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
   --chrome: rgba(255, 255, 255, 0.92);
   --chrome-strong: rgba(255, 255, 255, 0.98);
   --chrome-deep: rgba(255, 255, 255, 0.95);
@@ -333,7 +349,7 @@ button.primary {
   margin-left: 4px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--warn);
+  background: var(--status-warning);
   color: #111;
   font-size: 11px;
   font-weight: 700;
@@ -341,7 +357,7 @@ button.primary {
 }
 
 .diag-badge.has-errors {
-  background: var(--danger);
+  background: var(--status-critical);
   color: #fff;
 }
 
@@ -945,6 +961,50 @@ button.primary {
   margin-top: 2px;
 }
 
+.passport-panel {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.passport-summary {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.passport-section-heading {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.passport-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.passport-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.passport-list .link {
+  text-align: left;
+  word-break: break-all;
+}
+
+.passport-list .evidence {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
 .data-flow {
   margin-top: 10px;
   border-top: 1px solid var(--line);
@@ -1257,7 +1317,7 @@ button.primary {
 }
 
 .timeline-panel li.selected-commit {
-  border-left-color: var(--warn);
+  border-left-color: var(--status-warning);
 }
 
 .commit {
@@ -1347,17 +1407,21 @@ button.primary {
   flex: none;
 }
 
-.overlay-kind-impact .overlay-dot { background: var(--warn); }
-.overlay-kind-cycles .overlay-dot { background: var(--cycle); }
+.overlay-kind-impact .overlay-dot { background: var(--status-warning); }
+.overlay-kind-cycles .overlay-dot { background: var(--status-serious); }
 .overlay-kind-test-reach .overlay-dot { background: var(--ink-3); }
-.overlay-kind-architecture .overlay-dot { background: var(--ok); }
-.overlay-kind-hotspots .overlay-dot { background: var(--warn); }
+.overlay-kind-architecture .overlay-dot { background: var(--status-good); }
+.overlay-kind-hotspots .overlay-dot { background: var(--status-warning); }
+.overlay-kind-module-depth .overlay-dot { background: var(--status-serious); }
+.overlay-kind-ownership .overlay-dot { background: var(--accent); }
 
-.overlay-kind-impact { border-left-color: var(--warn); }
-.overlay-kind-cycles { border-left-color: var(--cycle); }
+.overlay-kind-impact { border-left-color: var(--status-warning); }
+.overlay-kind-cycles { border-left-color: var(--status-serious); }
 .overlay-kind-test-reach { border-left-color: var(--ink-3); }
-.overlay-kind-architecture { border-left-color: var(--ok); }
-.overlay-kind-hotspots { border-left-color: var(--warn); }
+.overlay-kind-architecture { border-left-color: var(--status-good); }
+.overlay-kind-hotspots { border-left-color: var(--status-warning); }
+.overlay-kind-module-depth { border-left-color: var(--status-serious); }
+.overlay-kind-ownership { border-left-color: var(--accent); }
 
 .panel-dismiss {
   margin-left: auto;
@@ -1374,7 +1438,7 @@ button.primary {
 }
 
 .review-panel {
-  border-left: 3px solid var(--warn);
+  border-left: 3px solid var(--status-warning);
   background: var(--bg-0);
   max-height: 46vh;
   overflow: auto;
@@ -1426,13 +1490,13 @@ button.primary {
 }
 
 .health-delta.up {
-  color: var(--ok);
-  border-color: var(--ok);
+  color: var(--status-good);
+  border-color: var(--status-good);
 }
 
 .health-delta.down {
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--status-critical);
+  border-color: var(--status-critical);
 }
 
 .health-delta.flat {
@@ -1445,8 +1509,8 @@ button.primary {
 }
 
 .health-delta.removed {
-  color: var(--warn);
-  border-color: var(--warn);
+  color: var(--status-warning);
+  border-color: var(--status-warning);
 }
 
 .health-delta.none {
@@ -1455,7 +1519,7 @@ button.primary {
 }
 
 .risk-panel {
-  border-left: 3px solid var(--danger);
+  border-left: 3px solid var(--status-critical);
   background: var(--bg-0);
   max-height: 52vh;
   overflow: auto;
@@ -1483,10 +1547,10 @@ button.primary {
   letter-spacing: 0.05em;
 }
 
-.risk-severity.severity-critical { border-color: var(--danger); color: var(--danger); }
-.risk-severity.severity-high { border-color: #ff8f5c; color: #ff8f5c; }
-.risk-severity.severity-moderate { border-color: var(--warn); color: var(--warn); }
-.risk-severity.severity-low { border-color: var(--ok); color: var(--ok); }
+.risk-severity.severity-critical { border-color: var(--status-critical); color: var(--status-critical); }
+.risk-severity.severity-high { border-color: var(--status-serious); color: var(--status-serious); }
+.risk-severity.severity-moderate { border-color: var(--status-warning); color: var(--status-warning); }
+.risk-severity.severity-low { border-color: var(--status-good); color: var(--status-good); }
 .risk-severity.severity-unknown { border-color: var(--ink-3); color: var(--ink-3); }
 
 .risk-panel .evidence {
@@ -1554,8 +1618,14 @@ button.primary {
 }
 
 .kind-chip.kind-test {
-  border-color: var(--warn);
-  color: var(--warn);
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+}
+
+.kind-chip.kind-entry {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .inspector-actions {
@@ -1791,7 +1861,7 @@ button.primary {
 }
 
 .dialog-note.at-ceiling {
-  color: var(--warn);
+  color: var(--status-warning);
 }
 
 .dialog-footer {
@@ -2022,13 +2092,10 @@ button.primary {
   font-size: 10px;
 }
 
-.cluster-1 { color: #4c9aff; border-color: #4c9aff55; background: #4c9aff14; }
-.cluster-2 { color: #56d4b1; border-color: #56d4b155; background: #56d4b114; }
-.cluster-3 { color: #f2b25c; border-color: #f2b25c55; background: #f2b25c14; }
-.cluster-4 { color: #c98bf0; border-color: #c98bf055; background: #c98bf014; }
-.cluster-5 { color: #ff8f8f; border-color: #ff8f8f55; background: #ff8f8f14; }
-.cluster-6 { color: #9ad46a; border-color: #9ad46a55; background: #9ad46a14; }
-.cluster-7 { color: #6fb1ff; border-color: #6fb1ff55; background: #6fb1ff14; }
+.cluster.series-1 { color: var(--series-1); border-color: color-mix(in srgb, var(--series-1) 42%, transparent); background: color-mix(in srgb, var(--series-1) 10%, transparent); }
+.cluster.series-2 { color: var(--series-2); border-color: color-mix(in srgb, var(--series-2) 42%, transparent); background: color-mix(in srgb, var(--series-2) 10%, transparent); }
+.cluster.series-3 { color: var(--series-3); border-color: color-mix(in srgb, var(--series-3) 42%, transparent); background: color-mix(in srgb, var(--series-3) 10%, transparent); }
+.cluster.series-other { color: var(--series-other); border-color: color-mix(in srgb, var(--series-other) 42%, transparent); background: color-mix(in srgb, var(--series-other) 10%, transparent); }
 
 .member-main h4 {
   margin: 14px 0 6px;
@@ -2101,8 +2168,8 @@ button.primary {
 }
 
 .card-tag.is-wired {
-  border-color: var(--ok);
-  color: var(--ok);
+  border-color: var(--status-good);
+  color: var(--status-good);
 }
 
 .card-metrics {
@@ -2279,7 +2346,7 @@ button.primary {
 }
 
 .flow-edge.write {
-  stroke: var(--warn);
+  stroke: var(--status-warning);
 }
 
 .flow-arrowhead.read {
@@ -2287,7 +2354,7 @@ button.primary {
 }
 
 .flow-arrowhead.write {
-  fill: var(--warn);
+  fill: var(--status-warning);
 }
 
 .flow-node {
@@ -2631,30 +2698,6 @@ button.primary {
   background-repeat: no-repeat;
 }
 
-.legend-dirs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  flex-basis: 100%;
-  margin-top: 2px;
-  padding-top: 6px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.legend-dir {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--ink-2);
-  font-size: var(--text-xs);
-}
-
-.legend-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 3px;
-}
-
 .diag-runtime {
   margin: 4px 0;
   color: var(--muted);
@@ -2755,10 +2798,10 @@ button.primary {
 
 .setting-status {
   margin: 6px 0 0;
-  color: var(--ok);
+  color: var(--status-good);
   font-size: var(--text-xs);
 }
 
 .setting-status.is-error {
-  color: var(--danger);
+  color: var(--status-critical);
 }

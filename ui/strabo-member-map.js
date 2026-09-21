@@ -138,6 +138,18 @@ export function memberClusters(memberMap) {
 }
 
 /**
+ * The categorical class for a member cluster.
+ *
+ * Clusters are the one genuine categorical set in the UI, and their cards sit adjacent, so
+ * the set is capped at three hues plus one neutral rather than cycled: the fourth cluster
+ * and later share `series-other`. There is deliberately no modulo, which would map
+ * unrelated clusters onto the same hue where the eye cannot tell them apart.
+ */
+export function clusterSeriesClass(index) {
+  return index >= 1 && index <= 3 ? `series-${index}` : 'series-other';
+}
+
+/**
  * Bipartite data-flow graph from recorded wiring only: fields on the left,
  * methods on the right. A read is an edge field → method, a write is an edge
  * method → field. References to undeclared members are dropped so the diagram

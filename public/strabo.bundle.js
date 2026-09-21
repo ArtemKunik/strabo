@@ -4,18 +4,10 @@
 var API_PATH = "/api/strabo";
 var MIN_DIAMETER = 22;
 var MAX_DIAMETER = 62;
-var PALETTE = [
-  "#4c9aff",
-  "#56d4b1",
-  "#f2b25c",
-  "#c98bf0",
-  "#6fb1ff",
-  "#ff8f8f",
-  "#9ad46a"
-];
 var SHAPES = {
   module: "round-rectangle",
   test: "diamond",
+  entry: "star",
   service: "hexagon",
   topic: "ellipse",
   queue: "rectangle",
@@ -29,10 +21,6 @@ function hash(value) {
     result = result * 31 + value.charCodeAt(index) | 0;
   }
   return Math.abs(result);
-}
-function paletteColor(paletteIndex, id) {
-  const index = Number.isInteger(paletteIndex) ? paletteIndex : hash(String(id));
-  return PALETTE[(index % PALETTE.length + PALETTE.length) % PALETTE.length];
 }
 function topLevelDirectory(id) {
   const value = String(id ?? "");
@@ -83,7 +71,7 @@ function mapCounts(model) {
   return { tests, modules, entries };
 }
 function readingLegend() {
-  return ["size = dependents", "colour = directory", "diamond = test"];
+  return ["size = dependents", "island = directory", "diamond = test", "star = entry"];
 }
 function shortcutSheet() {
   return [
@@ -101,22 +89,6 @@ function shortcutSheet() {
     { keys: "hover a node", action: "Report its blast radius" },
     { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
   ];
-}
-function paletteKey(model) {
-  const isBlock = model?.prefixLength !== void 0;
-  const byIndex = /* @__PURE__ */ new Map();
-  for (const node of model?.nodes ?? []) {
-    const index = Number.isInteger(node.paletteIndex) ? node.paletteIndex : 0;
-    const region = isBlock ? node.id === "." ? "/" : node.id.split("/")[0] : topLevelDirectory(node.id);
-    const regions = byIndex.get(index) ?? /* @__PURE__ */ new Set();
-    regions.add(region);
-    byIndex.set(index, regions);
-  }
-  return [...byIndex.entries()].sort((a, b) => a[0] - b[0]).map(([index, regions]) => ({
-    index,
-    regions: [...regions].sort().map((region) => region === "." ? "/" : region),
-    color: paletteColor(index, "")
-  }));
 }
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
@@ -150,8 +122,8 @@ function buildElements(model) {
       label: node.label ?? node.id.split("/").pop(),
       path: node.id,
       kind: node.kind,
-      // Colour by top-level directory so a module reads as one region on the map.
-      color: paletteColor(node.paletteIndex, topLevelDirectory(node.id)),
+      // Fill is one neutral surface for every node; directory is carried by position
+      // (the island plates), never by hue. See Phase 13 M1.
       diameter: diameter(node.transitiveDependents),
       hub: hubs.has(node.id)
     },
@@ -506,9 +478,47 @@ function overlayFor(kind, data) {
       return architectureOverlay(data);
     case "hotspots":
       return hotspotsOverlay(data);
+    case "module-depth":
+      return moduleDepthOverlay(data);
+    case "ownership":
+      return ownershipOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
+}
+function moduleDepthOverlay(signals) {
+  const list = Array.isArray(signals) ? signals : [];
+  const flagged = list.filter((entry) => entry.signal && entry.signal !== "ok");
+  const classes = /* @__PURE__ */ new Map();
+  for (const entry of flagged) {
+    classes.set(entry.file, entry.signal === "pass-through" ? "ov-pass-through" : "ov-wide-interface");
+  }
+  const passThrough = flagged.filter((entry) => entry.signal === "pass-through").length;
+  return {
+    classes,
+    summary: `${flagged.length} flagged \xB7 ${passThrough} pass-through \xB7 ${list.length} file(s)`,
+    items: flagged.map(
+      (entry) => `${entry.file} \xB7 ${entry.signal} \xB7 ${entry.implementationLines} impl line(s) \xB7 interface width ${entry.interfaceWidth}`
+    )
+  };
+}
+function ownershipOverlay(contexts) {
+  const list = Array.isArray(contexts) ? contexts : [];
+  const classes = /* @__PURE__ */ new Map();
+  let sole = 0;
+  for (const entry of list) {
+    if (entry.distinctAuthors === 1 && entry.transitiveDependents > 0) {
+      classes.set(entry.file, "ov-sole-owner");
+      sole += 1;
+    }
+  }
+  return {
+    classes,
+    summary: `${sole} single-author module(s) with dependents \xB7 ${list.length} file(s) with history`,
+    items: list.slice(0, 200).map(
+      (entry) => `${entry.file} \xB7 ${entry.distinctAuthors} author(s) \xB7 ${entry.commits} commit(s) \xB7 ${entry.transitiveDependents} dependent(s)`
+    )
+  };
 }
 function hotspotsOverlay(report) {
   const hotspots = report?.hotspots ?? [];
@@ -703,6 +713,9 @@ function memberClusters(memberMap) {
     clusters.push({ index, members: members.sort() });
   }
   return { clusters, clusterOf };
+}
+function clusterSeriesClass(index) {
+  return index >= 1 && index <= 3 ? `series-${index}` : "series-other";
 }
 function flowGraph(memberMap) {
   const nodes = [];
@@ -910,7 +923,7 @@ function buildAgentPrompt({ agent, repository, target }) {
 }
 
 // ui/strabo-view.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner"];
 var labelsVisible = true;
 var LABEL_DETAIL_ZOOM = 0.65;
 var MIN_ZOOM = 0.12;
@@ -1304,15 +1317,16 @@ function graphTheme() {
   return {
     ink: read("--graph-ink", "#eef3fa"),
     inkOutline: read("--graph-ink-outline", "#0c1016"),
-    nodeBorder: read("--graph-node-border", "rgba(255,255,255,0.22)"),
-    edge: read("--graph-edge", "#4a5e78"),
+    nodeFill: read("--node-fill", "#6b7a8d"),
+    nodeLine: read("--node-line", "rgba(255,255,255,0.22)"),
+    edge: read("--graph-edge", "#55697f"),
     edgeAccent: read("--graph-edge-accent", "#7fb4ff"),
     edgeSelected: read("--graph-edge-selected", "#4c9aff"),
     hub: read("--graph-hub", "#4c9aff"),
     selected: read("--graph-selected", "#ffffff"),
-    changed: read("--graph-changed", "#ff5c5c"),
-    affected: read("--graph-affected", "#f2b25c"),
-    cycle: read("--graph-cycle", "#c98bf0"),
+    changed: read("--graph-changed", "#d03b3b"),
+    affected: read("--graph-affected", "#fab219"),
+    cycle: read("--graph-cycle", "#ec835a"),
     unreached: read("--graph-unreached", "#8da0b5")
   };
 }
@@ -1327,8 +1341,10 @@ function stylesheet() {
       selector: "node",
       style: {
         shape: "round-rectangle",
-        "background-color": "data(color)",
-        "background-opacity": 0.88,
+        // One neutral fill for every node: directory is carried by position (island
+        // plates), and hue on the map is reserved for status. See Phase 13 M1 R3.
+        "background-color": theme.nodeFill,
+        "background-opacity": 1,
         width: "data(diameter)",
         height: "data(diameter)",
         label: "data(label)",
@@ -1344,18 +1360,24 @@ function stylesheet() {
         "text-outline-width": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
         "text-outline-opacity": 0.9,
         "border-width": 1.5,
-        "border-color": theme.nodeBorder,
+        "border-color": theme.nodeLine,
         "border-opacity": 1
       }
     },
     ...kindRules,
     { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
     { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
-    { selector: "node.ov-changed", style: { "border-width": 4, "border-color": theme.changed, "background-opacity": 1 } },
-    { selector: "node.ov-affected", style: { "border-width": 3, "border-color": theme.affected, "background-opacity": 1 } },
-    { selector: "node.ov-cycle", style: { "border-width": 4, "border-color": theme.cycle, "background-opacity": 1 } },
-    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.55 } },
-    { selector: "node.ov-hotspot", style: { "border-width": 3, "border-style": "double", "border-color": theme.affected, "background-opacity": 1 } },
+    // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
+    // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
+    // warning ring. The changed/affected pair co-occurs, so its shape differs too.
+    { selector: "node.ov-changed", style: { "border-width": 4, "border-style": "solid", "border-color": theme.changed, "background-opacity": 1 } },
+    { selector: "node.ov-affected", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-cycle", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
+    { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
+    { selector: "node.ov-hotspot", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-wide-interface", style: { "border-width": 3, "border-style": "solid", "border-color": theme.affected, "background-opacity": 1 } },
+    { selector: "node.ov-pass-through", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
+    { selector: "node.ov-sole-owner", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
@@ -1365,9 +1387,9 @@ function stylesheet() {
         "curve-style": "bezier",
         "target-arrow-shape": "triangle",
         width: 1.2,
-        // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
-        // repository is fitted at 0.38 zoom.
-        opacity: 0.72,
+        // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the
+        // whole repository was fitted. Non-neighbourhood edges dim on hover (R9).
+        opacity: 1,
         "line-color": theme.edge,
         "target-arrow-color": theme.edge,
         "arrow-scale": 0.9
@@ -2700,6 +2722,125 @@ function renderWorkspace(container, report, handlers = {}) {
     container.append(close);
   }
 }
+function passportSection(title, count) {
+  const heading = document.createElement("h4");
+  heading.className = "passport-section-heading";
+  heading.textContent = `${title} (${count})`;
+  return heading;
+}
+function passportNote(text) {
+  const note2 = document.createElement("p");
+  note2.className = "unavailable";
+  note2.textContent = text;
+  return note2;
+}
+function passportFileList(entries, handlers, label) {
+  const list = document.createElement("ul");
+  list.className = "passport-list";
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    const id = entry.file ?? entry.id;
+    item.dataset.delegateNode = id;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "link";
+    open.textContent = id;
+    open.addEventListener("click", () => handlers.onSelect?.(id));
+    item.append(open);
+    const detail = label(entry);
+    if (detail) {
+      const span = document.createElement("span");
+      span.className = "evidence";
+      span.textContent = detail;
+      item.append(span);
+    }
+    list.append(item);
+  }
+  return list;
+}
+function passportPlainList(entries, label) {
+  const list = document.createElement("ul");
+  list.className = "passport-list";
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    item.textContent = label(entry);
+    list.append(item);
+  }
+  return list;
+}
+function renderRepositoryPassport(container, report, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = `Repository passport \u2014 ${report?.repository ?? "repository"}`;
+  container.append(title);
+  if (!report) {
+    container.append(passportNote("No passport was recorded for this repository."));
+    return;
+  }
+  const size = report.size ?? {};
+  const summary = document.createElement("p");
+  summary.className = "passport-summary";
+  summary.textContent = `${size.files ?? 0} files \xB7 ${size.edges ?? 0} edges \xB7 ${size.directories ?? 0} directories \xB7 ${size.tests ?? 0} tests \xB7 ${size.diagnostics ?? 0} diagnostics \xB7 ${size.excluded ?? 0} excluded`;
+  container.append(summary);
+  const languages = report.languages ?? [];
+  container.append(passportSection("Languages", languages.length));
+  container.append(
+    languages.length === 0 ? passportNote("No source languages recorded.") : passportPlainList(languages, (entry) => `${entry.language} \xB7 ${entry.files} file(s)`)
+  );
+  const entryPoints = report.entryPoints ?? [];
+  container.append(passportSection("Entry points", entryPoints.length));
+  container.append(
+    entryPoints.length === 0 ? passportNote("No entry point declared by a manifest (package.json, Cargo.toml, pom.xml).") : passportFileList(entryPoints, handlers, (entry) => entry.reason)
+  );
+  const layers = report.layers ?? [];
+  container.append(passportSection("Top-level directories", layers.length));
+  container.append(
+    layers.length === 0 ? passportNote("No directories recorded.") : passportPlainList(
+      layers,
+      (entry) => `${entry.directory} \xB7 ${entry.files} file(s) \xB7 ${entry.incoming} incoming`
+    )
+  );
+  const topFiles = report.topFiles ?? [];
+  container.append(passportSection("Most depended-upon files (by fan-in)", topFiles.length));
+  container.append(
+    topFiles.length === 0 ? passportNote("No files recorded.") : passportFileList(
+      topFiles,
+      handlers,
+      (entry) => `${entry.fanIn} importer(s) \xB7 blast radius ${entry.transitiveDependents} \xB7 ${entry.kind}`
+    )
+  );
+  const cycles = report.cycles ?? { total: 0, largest: [] };
+  container.append(passportSection("Cycles", cycles.total ?? 0));
+  if ((cycles.largest ?? []).length === 0) {
+    container.append(passportNote("No dependency cycles recorded."));
+  } else {
+    const list = document.createElement("ul");
+    list.className = "passport-list";
+    for (const group of cycles.largest) {
+      const item = document.createElement("li");
+      item.textContent = `${group.size} file(s): ${group.members.join(" \u2194 ")}`;
+      list.append(item);
+    }
+    container.append(list);
+  }
+  const untested = report.untested ?? { total: 0, files: [] };
+  container.append(passportSection("Used but no test reaches", untested.total ?? 0));
+  container.append(
+    (untested.files ?? []).length === 0 ? passportNote("Every used module is reachable from a test, or no test file was identified.") : passportFileList(
+      untested.files.map((file) => ({ file })),
+      handlers,
+      () => ""
+    )
+  );
+  if (handlers.onClose) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.id = "close-passport";
+    close.textContent = "View the map";
+    close.addEventListener("click", () => handlers.onClose());
+    container.append(close);
+  }
+}
 function renderMemberType(type) {
   const section2 = document.createElement("section");
   section2.className = "member-type";
@@ -2857,10 +2998,10 @@ function renderDiagnostics(container, model, runtime = {}) {
   return summary;
 }
 var LEGEND_SWATCHES = {
-  "size = dependents": "linear-gradient(135deg,#4c9aff,#c98bf0)",
-  "colour = directory": "linear-gradient(135deg,#56d4b1,#f2b25c)",
-  "diamond = test": "linear-gradient(135deg,#f2b25c,#ff8f8f)",
-  "hover = blast radius": "linear-gradient(135deg,#8da0b5,#4c9aff)"
+  "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
+  "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))"
 };
 function renderLegend(container, model) {
   container.replaceChildren();
@@ -2881,29 +3022,13 @@ function renderLegend(container, model) {
     guide.append(item);
   }
   container.append(guide);
-  const directories = paletteKey(model);
-  if (directories.length > 0) {
-    const key = document.createElement("div");
-    key.className = "legend-dirs";
-    for (const entry of directories) {
-      const item = document.createElement("span");
-      item.className = "legend-dir";
-      const swatch = document.createElement("span");
-      swatch.className = "legend-dot";
-      swatch.style.background = entry.color;
-      item.append(swatch);
-      item.append(document.createTextNode(entry.regions.join(" \xB7 ")));
-      key.append(item);
-    }
-    container.append(key);
-  }
   const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement("span");
     item.className = "legend-item";
     const glyph = document.createElement("span");
     glyph.className = "legend-shape";
-    glyph.textContent = kind === "test" ? "\u25C6" : kind === "service" ? "\u2B21" : "\u25A3";
+    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : "\u25A3";
     item.append(glyph);
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
     container.append(item);
@@ -3750,7 +3875,7 @@ function buildTypeSection(type, view2, clusters, handlers) {
   legend.dataset.role = "clusters";
   for (const cluster of clusters.clusters) {
     const chip = document.createElement("span");
-    chip.className = `cluster cluster-${cluster.index % 7 + 1}`;
+    chip.className = `cluster ${clusterSeriesClass(cluster.index)}`;
     chip.textContent = `cluster ${cluster.index}`;
     legend.append(chip);
   }
@@ -4409,7 +4534,7 @@ function renderSettings(container, handlers = {}) {
     ceilingRow.append(ceilingInput, saveButton, resetButton);
     remote.append(field("Scan ceiling", ceilingRow));
     const remoteNote = note(
-      "Applies immediately and is bounded only by what this server process may read. Reset after a restart."
+      server.allowCeilingWidening ? "Applies immediately and may widen the read boundary (STRABO_ALLOW_CEILING_WIDENING is on). Reset after a restart." : "Applies immediately; narrowing is allowed, widening beyond the startup boundary is refused unless STRABO_ALLOW_CEILING_WIDENING is set. Reset after a restart."
     );
     remote.append(remoteNote);
     const statusLine = document.createElement("p");
@@ -4623,7 +4748,7 @@ function applyViewPrefs() {
   if (prefs.overlay && [...elements.overlay.options].some((option) => option.value === prefs.overlay)) {
     state.overlay = prefs.overlay;
     elements.overlay.value = prefs.overlay;
-    if (["impact", "cycles", "test-reach"].includes(prefs.overlay) && state.mode !== "file") {
+    if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== "file") {
       state.mode = "file";
       elements.detail.value = "file";
     }
@@ -4692,7 +4817,8 @@ var elements = {
   shortcuts: document.getElementById("shortcuts"),
   settingsToggle: document.getElementById("settings-toggle"),
   settingsPanel: document.getElementById("settings-panel"),
-  workspacePanel: document.getElementById("workspace-panel")
+  workspacePanel: document.getElementById("workspace-panel"),
+  passportPanel: document.getElementById("passport-panel")
 };
 var memberData = null;
 var memberTimer = null;
@@ -5358,6 +5484,48 @@ function closeWorkspace() {
   elements.workspacePanel.hidden = true;
   refreshDock();
 }
+async function showPassport() {
+  elements.passportPanel.hidden = false;
+  try {
+    const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
+    renderRepositoryPassport(elements.passportPanel, report, {
+      onSelect: (id) => selectNode(id),
+      onClose: closePassport
+    });
+  } catch (error) {
+    renderRepositoryPassport(elements.passportPanel, null, { onClose: closePassport });
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = error.message;
+    elements.passportPanel.append(note2);
+  }
+  refreshDock();
+}
+function closePassport() {
+  elements.passportPanel.hidden = true;
+  refreshDock();
+}
+var PASSPORT_SEEN_PREFIX = "strabo.passport.seen.";
+function passportSeen(repository) {
+  try {
+    return window.localStorage.getItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`) === "1";
+  } catch {
+    return true;
+  }
+}
+function markPassportSeen(repository) {
+  try {
+    window.localStorage.setItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`, "1");
+  } catch {
+  }
+}
+async function maybeOpenPassport() {
+  if (!state.repository || passportSeen(state.repository)) {
+    return;
+  }
+  markPassportSeen(state.repository);
+  await showPassport();
+}
 function clearOverlay() {
   state.overlay = "none";
   elements.overlay.value = "none";
@@ -5420,15 +5588,20 @@ var OVERLAY_TITLES = {
   cycles: "Cycles",
   "test-reach": "Test reach",
   architecture: "Architecture health",
-  hotspots: "Function hotspots"
+  hotspots: "Function hotspots",
+  "module-depth": "Module depth",
+  ownership: "Ownership"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
   cycles: "/analysis/cycles",
   "test-reach": "/analysis/test-reach",
   architecture: "/analysis/architecture-health",
-  hotspots: "/analysis/functions"
+  hotspots: "/analysis/functions",
+  "module-depth": "/analysis/module-depth",
+  ownership: "/analysis/ownership"
 };
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership"];
 async function applyOverlay(generation) {
   const kind = state.overlay;
   if (kind === "none") {
@@ -5568,7 +5741,7 @@ elements.overlay.addEventListener("change", () => {
     applyOverlay();
     return;
   }
-  const needsFileMode = ["impact", "cycles", "test-reach"].includes(state.overlay);
+  const needsFileMode = FILE_MODE_OVERLAYS.includes(state.overlay);
   if (needsFileMode && state.mode !== "file") {
     state.mode = "file";
     elements.detail.value = "file";
@@ -6157,6 +6330,18 @@ var floatingWindows = initFloatingWindows({
         });
       },
       onClose: () => closeWorkspace()
+    },
+    {
+      key: "passport",
+      element: elements.passportPanel,
+      title: "Repository passport",
+      dockLabel: "Passport",
+      width: 460,
+      onOpen: () => {
+        showPassport().catch(() => {
+        });
+      },
+      onClose: () => closePassport()
     }
   ]
 });
@@ -6190,7 +6375,8 @@ if (window.STRABO_TEST) {
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
     islands: () => view.islandDirectories(),
-    workspace: () => showWorkspace()
+    workspace: () => showWorkspace(),
+    passport: () => showPassport()
   };
 }
 loadCatalogue().then(() => {
@@ -6203,7 +6389,12 @@ loadCatalogue().then(() => {
   }
   applyViewPrefs();
   return scan();
-}).then(() => restoreUrlPanel()).catch((error) => {
+}).then(() => restoreUrlPanel()).then(() => {
+  if (elements.memberView.hidden) {
+    return maybeOpenPassport();
+  }
+  return void 0;
+}).catch((error) => {
   elements.status.textContent = `Error: ${error.message}`;
 });
 //# sourceMappingURL=strabo.bundle.js.map

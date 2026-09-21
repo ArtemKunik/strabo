@@ -87,10 +87,10 @@ Then('the delegate menu title is {string}', async function (title) {
   assert.equal(text, title);
 });
 
-Then('the legend explains size, colour, and shape', async function () {
+Then('the legend explains size, position, and shape', async function () {
   const text = (await this.page.textContent('#legend')) ?? '';
   assert.match(text, /size = dependents/);
-  assert.match(text, /colour = directory/);
+  assert.match(text, /island = directory/);
   assert.match(text, /diamond = test/);
 });
 

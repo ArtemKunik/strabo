@@ -2,6 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { isInside } from '../../boundary/repository-root.ts';
 import type { StraboConfig } from '../../types.ts';
 import { sendError } from '../http.ts';
 
@@ -24,6 +25,8 @@ export interface StraboSettings {
   configPath: string | null;
   /** Whether OSV.dev / deps.dev lookups are enabled. */
   riskOnline: boolean;
+  /** Whether `PUT` may widen the scan ceiling beyond its startup value. */
+  allowCeilingWidening: boolean;
   /** SPDX ids the license policy denies, or null for the built-in policy. */
   riskDeniedLicenses: string[] | null;
 }
@@ -39,6 +42,7 @@ function settingsView(config: StraboConfig, defaultCeiling: string): StraboSetti
     defaultScanCeiling: defaultCeiling,
     configPath: config.configPath ?? null,
     riskOnline: Boolean(config.risk?.online),
+    allowCeilingWidening: Boolean(config.allowCeilingWidening),
     riskDeniedLicenses: config.risk?.deniedLicenses ?? null,
   };
 }
@@ -47,14 +51,15 @@ function settingsView(config: StraboConfig, defaultCeiling: string): StraboSetti
  * Resolve and validate a requested scan ceiling.
  *
  * The ceiling is a security boundary, so this deliberately does not accept an arbitrary
- * string: it must name an existing directory. It *can* widen the boundary — that is the
- * point of an editable ceiling — so it is bounded only by what the server process may
- * already read, and never by a parent of `STRABO_SCAN_CEILING` beyond that. Passing null
- * or an empty string restores the startup ceiling.
+ * string: it must name an existing directory. Narrowing it is always allowed. Widening it
+ * beyond the ceiling currently in force is refused unless the process was started with
+ * `STRABO_ALLOW_CEILING_WIDENING`, so the default process cannot grow its own read
+ * boundary at runtime. Passing null or an empty string restores the startup ceiling.
  */
 export function resolveScanCeiling(
   requested: unknown,
   defaultCeiling: string,
+  options: { currentCeiling?: string; allowWidening?: boolean } = {},
 ): { ceiling: string } | { error: string } {
   if (requested === null || requested === undefined || requested === '') {
     return { ceiling: defaultCeiling };
@@ -65,6 +70,14 @@ export function resolveScanCeiling(
   const resolved = path.resolve(requested.trim());
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
     return { error: `Scan ceiling "${requested}" does not exist or is not a directory.` };
+  }
+  const current = options.currentCeiling ?? defaultCeiling;
+  if (!options.allowWidening && !isInside(resolved, current)) {
+    return {
+      error:
+        `Scan ceiling "${requested}" would widen the read boundary beyond "${current}". ` +
+        'Set STRABO_ALLOW_CEILING_WIDENING to permit runtime widening.',
+    };
   }
   return { ceiling: resolved };
 }
@@ -93,7 +106,10 @@ export function createSettingsRouter(config: StraboConfig): Router {
       const body = request.body ?? {};
       let nextCeiling = currentCeiling(config);
       if ('scanCeiling' in body) {
-        const resolved = resolveScanCeiling(body.scanCeiling, defaultCeiling);
+        const resolved = resolveScanCeiling(body.scanCeiling, defaultCeiling, {
+          currentCeiling: currentCeiling(config),
+          allowWidening: Boolean(config.allowCeilingWidening),
+        });
         if ('error' in resolved) {
           response.status(400).json({ error: resolved.error });
           return;

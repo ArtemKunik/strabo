@@ -1,7 +1,7 @@
 /**
- * Graph model for the Strabo browser app: API path, palette and shapes, Cytoscape
- * element building, traversal (adjacency, neighbourhood, path), drill-down, and the
- * per-node and per-edge facts the inspector shows.
+ * Graph model for the Strabo browser app: API path, node shapes, Cytoscape element
+ * building, traversal (adjacency, neighbourhood, path), drill-down, and the per-node and
+ * per-edge facts the inspector shows.
  *
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
@@ -11,19 +11,10 @@ export const API_PATH = '/api/strabo';
 export const MIN_DIAMETER = 22;
 export const MAX_DIAMETER = 62;
 
-export const PALETTE = [
-  '#4c9aff',
-  '#56d4b1',
-  '#f2b25c',
-  '#c98bf0',
-  '#6fb1ff',
-  '#ff8f8f',
-  '#9ad46a',
-];
-
 export const SHAPES = {
   module: 'round-rectangle',
   test: 'diamond',
+  entry: 'star',
   service: 'hexagon',
   topic: 'ellipse',
   queue: 'rectangle',
@@ -38,12 +29,6 @@ export function hash(value) {
     result = (result * 31 + value.charCodeAt(index)) | 0;
   }
   return Math.abs(result);
-}
-
-/** Resolve a server-assigned palette index, falling back to a stable id hash. */
-export function paletteColor(paletteIndex, id) {
-  const index = Number.isInteger(paletteIndex) ? paletteIndex : hash(String(id));
-  return PALETTE[((index % PALETTE.length) + PALETTE.length) % PALETTE.length];
 }
 
 /** The first path segment, or `.` for a file at the repository root. */
@@ -123,7 +108,7 @@ export function mapCounts(model) {
  * drawing encodes and how to read it.
  */
 export function readingLegend() {
-  return ['size = dependents', 'colour = directory', 'diamond = test'];
+  return ['size = dependents', 'island = directory', 'diamond = test', 'star = entry'];
 }
 
 /** The shortcut sheet shown on `?`: gestures, not encodings. */
@@ -143,36 +128,6 @@ export function shortcutSheet() {
     { keys: 'hover a node', action: 'Report its blast radius' },
     { keys: '⌘/ctrl-click, shift-drag', action: 'Select a group' },
   ];
-}
-
-/**
- * The directory-to-colour key, from the palette indexes the server assigned.
- *
- * One row per palette index: the regions that share it and the colour they are drawn in.
- * When the palette wraps, the regions are listed together rather than pretending they are
- * distinct, so the key never claims an encoding the view does not carry.
- */
-export function paletteKey(model) {
-  const isBlock = model?.prefixLength !== undefined;
-  const byIndex = new Map();
-  for (const node of model?.nodes ?? []) {
-    const index = Number.isInteger(node.paletteIndex) ? node.paletteIndex : 0;
-    const region = isBlock
-      ? node.id === '.'
-        ? '/'
-        : node.id.split('/')[0]
-      : topLevelDirectory(node.id);
-    const regions = byIndex.get(index) ?? new Set();
-    regions.add(region);
-    byIndex.set(index, regions);
-  }
-  return [...byIndex.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([index, regions]) => ({
-      index,
-      regions: [...regions].sort().map((region) => (region === '.' ? '/' : region)),
-      color: paletteColor(index, ''),
-    }));
 }
 
 /** Square-root transform keeps leaf nodes visible without one hub consuming the map. */
@@ -205,7 +160,7 @@ export function buildGraphQuery(state, options = {}) {
   return query ? `?${query}` : '';
 }
 
-/** Join API nodes to metrics and positions, and resolve palette indexes. */
+/** Join API nodes to metrics and positions. */
 export function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
@@ -218,8 +173,8 @@ export function buildElements(model) {
       label: node.label ?? node.id.split('/').pop(),
       path: node.id,
       kind: node.kind,
-      // Colour by top-level directory so a module reads as one region on the map.
-      color: paletteColor(node.paletteIndex, topLevelDirectory(node.id)),
+      // Fill is one neutral surface for every node; directory is carried by position
+      // (the island plates), never by hue. See Phase 13 M1.
       diameter: diameter(node.transitiveDependents),
       hub: hubs.has(node.id),
     },

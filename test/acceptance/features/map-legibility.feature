@@ -10,7 +10,7 @@ Feature: Map legibility
 
   @legend
   Scenario: The legend explains the encoding
-    Then the legend explains size, colour, and shape
+    Then the legend explains size, position, and shape
 
   @hover
   Scenario: Hovering a node reports its blast radius

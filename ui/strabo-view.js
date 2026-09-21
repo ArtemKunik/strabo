@@ -1,9 +1,9 @@
 /**
  * Cytoscape rendering for Strabo.
  *
- * Joins API nodes to metrics and positions by ID, resolves server-assigned palette
- * indexes, and generates Cytoscape elements. Pure element construction lives in
- * strabo-core so it can be unit-tested; this module only touches Cytoscape.
+ * Joins API nodes to metrics and positions by ID and generates Cytoscape elements. Pure
+ * element construction lives in strabo-core so it can be unit-tested; this module only
+ * touches Cytoscape.
  */
 
 import {
@@ -16,7 +16,7 @@ import {
   projectIsland,
 } from './strabo-core.js';
 
-const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot'];
+const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner'];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
 let labelsVisible = true;
@@ -582,15 +582,16 @@ function graphTheme() {
   return {
     ink: read('--graph-ink', '#eef3fa'),
     inkOutline: read('--graph-ink-outline', '#0c1016'),
-    nodeBorder: read('--graph-node-border', 'rgba(255,255,255,0.22)'),
-    edge: read('--graph-edge', '#4a5e78'),
+    nodeFill: read('--node-fill', '#6b7a8d'),
+    nodeLine: read('--node-line', 'rgba(255,255,255,0.22)'),
+    edge: read('--graph-edge', '#55697f'),
     edgeAccent: read('--graph-edge-accent', '#7fb4ff'),
     edgeSelected: read('--graph-edge-selected', '#4c9aff'),
     hub: read('--graph-hub', '#4c9aff'),
     selected: read('--graph-selected', '#ffffff'),
-    changed: read('--graph-changed', '#ff5c5c'),
-    affected: read('--graph-affected', '#f2b25c'),
-    cycle: read('--graph-cycle', '#c98bf0'),
+    changed: read('--graph-changed', '#d03b3b'),
+    affected: read('--graph-affected', '#fab219'),
+    cycle: read('--graph-cycle', '#ec835a'),
     unreached: read('--graph-unreached', '#8da0b5'),
   };
 }
@@ -607,8 +608,10 @@ function stylesheet() {
       selector: 'node',
       style: {
         shape: 'round-rectangle',
-        'background-color': 'data(color)',
-        'background-opacity': 0.88,
+        // One neutral fill for every node: directory is carried by position (island
+        // plates), and hue on the map is reserved for status. See Phase 13 M1 R3.
+        'background-color': theme.nodeFill,
+        'background-opacity': 1,
         width: 'data(diameter)',
         height: 'data(diameter)',
         label: 'data(label)',
@@ -624,18 +627,24 @@ function stylesheet() {
         'text-outline-width': (ele) => 2 / Math.max(0.0001, ele.cy().zoom()),
         'text-outline-opacity': 0.9,
         'border-width': 1.5,
-        'border-color': theme.nodeBorder,
+        'border-color': theme.nodeLine,
         'border-opacity': 1,
       },
     },
     ...kindRules,
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
     { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
-    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-color': theme.changed, 'background-opacity': 1 } },
-    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-color': theme.affected, 'background-opacity': 1 } },
-    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-color': theme.cycle, 'background-opacity': 1 } },
-    { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.55 } },
-    { selector: 'node.ov-hotspot', style: { 'border-width': 3, 'border-style': 'double', 'border-color': theme.affected, 'background-opacity': 1 } },
+    // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
+    // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
+    // warning ring. The changed/affected pair co-occurs, so its shape differs too.
+    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-style': 'solid', 'border-color': theme.changed, 'background-opacity': 1 } },
+    { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.affected, 'background-opacity': 1 } },
+    { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
+    { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.7 } },
+    { selector: 'node.ov-hotspot', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.affected, 'background-opacity': 1 } },
+    { selector: 'node.ov-wide-interface', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.affected, 'background-opacity': 1 } },
+    { selector: 'node.ov-pass-through', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.7 } },
+    { selector: 'node.ov-sole-owner', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.cycle, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
@@ -645,9 +654,9 @@ function stylesheet() {
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
         width: 1.2,
-        // Lifted from #3a4a5e / 0.55, which read as haze rather than links when the whole
-        // repository is fitted at 0.38 zoom.
-        opacity: 0.72,
+        // `--graph-edge` clears 3:1 on `--bg-1`; the old #3a4a5e read as haze when the
+        // whole repository was fitted. Non-neighbourhood edges dim on hover (R9).
+        opacity: 1,
         'line-color': theme.edge,
         'target-arrow-color': theme.edge,
         'arrow-scale': 0.9,

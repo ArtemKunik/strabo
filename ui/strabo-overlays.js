@@ -131,9 +131,66 @@ export function overlayFor(kind, data) {
       return architectureOverlay(data);
     case 'hotspots':
       return hotspotsOverlay(data);
+    case 'module-depth':
+      return moduleDepthOverlay(data);
+    case 'ownership':
+      return ownershipOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
+}
+
+/**
+ * Surface modules whose interface is wide relative to their implementation.
+ *
+ * The endpoint returns one record per scanned file; a file with no signal (`ok`) is not
+ * annotated, so the map shows only the pass-throughs and wide interfaces the server
+ * flagged. Nothing is inferred from the record; its own recorded counts are the label.
+ */
+export function moduleDepthOverlay(signals) {
+  const list = Array.isArray(signals) ? signals : [];
+  const flagged = list.filter((entry) => entry.signal && entry.signal !== 'ok');
+  const classes = new Map();
+  for (const entry of flagged) {
+    classes.set(entry.file, entry.signal === 'pass-through' ? 'ov-pass-through' : 'ov-wide-interface');
+  }
+  const passThrough = flagged.filter((entry) => entry.signal === 'pass-through').length;
+  return {
+    classes,
+    summary: `${flagged.length} flagged · ${passThrough} pass-through · ${list.length} file(s)`,
+    items: flagged.map(
+      (entry) =>
+        `${entry.file} · ${entry.signal} · ${entry.implementationLines} impl line(s) · interface width ${entry.interfaceWidth}`,
+    ),
+  };
+}
+
+/**
+ * Surface files whose recorded history and dependency reach sit at one author.
+ *
+ * A single recorded author with dependents is a bus-factor signal, not a verdict: the
+ * panel states the recorded author count, commit count, and dependent count it came from.
+ */
+export function ownershipOverlay(contexts) {
+  const list = Array.isArray(contexts) ? contexts : [];
+  const classes = new Map();
+  let sole = 0;
+  for (const entry of list) {
+    if (entry.distinctAuthors === 1 && entry.transitiveDependents > 0) {
+      classes.set(entry.file, 'ov-sole-owner');
+      sole += 1;
+    }
+  }
+  return {
+    classes,
+    summary: `${sole} single-author module(s) with dependents · ${list.length} file(s) with history`,
+    items: list
+      .slice(0, 200)
+      .map(
+        (entry) =>
+          `${entry.file} · ${entry.distinctAuthors} author(s) · ${entry.commits} commit(s) · ${entry.transitiveDependents} dependent(s)`,
+      ),
+  };
 }
 
 /**

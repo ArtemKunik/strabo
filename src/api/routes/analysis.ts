@@ -13,6 +13,7 @@ import { computeImpact } from '../../analysis/impact.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
+import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
@@ -80,6 +81,28 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const files = cached.report.graph.nodes.map((node) => node.id);
       const history = await getFileAuthorHistory(repository.root, files);
       response.json(computeOwnership(history, cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The repository passport: languages, size, entry points, layers, top files by fan-in,
+   * cycles, and what no test reaches. The opening summary for an unfamiliar repository.
+   */
+  router.get('/analysis/passport', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const limit = parsePositiveInt(request.query.limit, 10) ?? 10;
+      response.json(
+        computeRepositoryPassport(
+          repository.name,
+          cached.report.graph,
+          cached.report.extensionCounts,
+          limit,
+        ),
+      );
     } catch (error) {
       sendError(response, error);
     }

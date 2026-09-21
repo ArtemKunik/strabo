@@ -5,6 +5,7 @@ import { toPosix } from '../boundary/repository-root.ts';
 import type { Diagnostic, Exclusion, ExternalImport, Graph, GraphNode, ScanReport } from '../types.ts';
 import { classifyExclusion, excludedDirectory, looksMinified } from './exclusions.ts';
 import { collectPolyglotExternalImports } from './external-polyglot.ts';
+import { detectEntryPoints } from './entry-points.ts';
 import { findGitIgnoredFiles } from './gitignore.ts';
 import { scanJsTsEdges } from './scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from './scan-polyglot.ts';
@@ -74,10 +75,14 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   }
 
   const files = [...contentByFile.keys()].sort();
+  const entryByFile = new Map(detectEntryPoints(root, files).map((entry) => [entry.file, entry.reason]));
   const nodes: GraphNode[] = files.map((id) => ({
     id,
-    kind: isTestLike(id) ? 'test' : 'module',
+    // A test-like path stays a test even if a manifest names it; coverage and the tests
+    // strip key off `kind === 'test'`, so that classification must not be displaced.
+    kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
     directory: directoryOf(id),
+    ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
   }));
 
   const [jsScan, polyglot] = await Promise.all([

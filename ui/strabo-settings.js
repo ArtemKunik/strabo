@@ -221,7 +221,9 @@ export function renderSettings(container, handlers = {}) {
     remote.append(field('Scan ceiling', ceilingRow));
 
     const remoteNote = note(
-      'Applies immediately and is bounded only by what this server process may read. Reset after a restart.',
+      server.allowCeilingWidening
+        ? 'Applies immediately and may widen the read boundary (STRABO_ALLOW_CEILING_WIDENING is on). Reset after a restart.'
+        : 'Applies immediately; narrowing is allowed, widening beyond the startup boundary is refused unless STRABO_ALLOW_CEILING_WIDENING is set. Reset after a restart.',
     );
     remote.append(remoteNote);
 

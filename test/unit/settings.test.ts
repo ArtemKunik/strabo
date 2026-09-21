@@ -58,6 +58,7 @@ test('GET /settings reports the start root, ceiling, and risk switch', async () 
     defaultScanCeiling: string;
     configPath: string | null;
     riskOnline: boolean;
+    allowCeilingWidening: boolean;
   };
 
   assert.equal(settings.workspaceRoot, path.join(fixtures, 'block-repo'));
@@ -65,9 +66,10 @@ test('GET /settings reports the start root, ceiling, and risk switch', async () 
   assert.equal(settings.defaultScanCeiling, fixtures);
   assert.equal(settings.configPath, null);
   assert.equal(settings.riskOnline, false);
+  assert.equal(settings.allowCeilingWidening, false);
 });
 
-test('PUT /settings widens the ceiling so a previously out-of-scope root is accepted', async () => {
+test('PUT /settings refuses to widen the ceiling without the opt-in and changes nothing', async () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
   tempDirs.push(outside);
   const config = makeConfig();
@@ -81,14 +83,34 @@ test('PUT /settings widens the ceiling so a previously out-of-scope root is acce
   });
   assert.equal(denied.status, 400);
 
+  const widened = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: outside }),
+  });
+  assert.equal(widened.status, 400);
+
+  // The rejection leaves the boundary and the config untouched.
+  const settings = (await (await fetch(`${base}/api/strabo/settings`)).json()) as { scanCeiling: string };
+  assert.equal(settings.scanCeiling, fixtures);
+  assert.equal(fixtures, config.scanCeiling);
+});
+
+test('PUT /settings widens the ceiling when allowCeilingWidening is set', async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
+  tempDirs.push(outside);
+  const config = { ...makeConfig(), allowCeilingWidening: true };
+  const base = await mount(config);
+
   const updated = await fetch(`${base}/api/strabo/settings`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ scanCeiling: outside }),
   });
   assert.equal(updated.status, 200);
-  const body = (await updated.json()) as { scanCeiling: string };
+  const body = (await updated.json()) as { scanCeiling: string; allowCeilingWidening: boolean };
   assert.equal(body.scanCeiling, path.resolve(outside));
+  assert.equal(body.allowCeilingWidening, true);
 
   // The new boundary is in force immediately: the same root is now inside scope.
   const accepted = await fetch(`${base}/api/strabo/repositories`, {
@@ -97,6 +119,20 @@ test('PUT /settings widens the ceiling so a previously out-of-scope root is acce
     body: JSON.stringify({ root: outside }),
   });
   assert.equal(accepted.status, 201);
+});
+
+test('PUT /settings narrows the ceiling without the widening opt-in', async () => {
+  const base = await mount(makeConfig());
+  const inside = path.join(fixtures, 'block-repo');
+
+  const narrowed = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: inside }),
+  });
+  assert.equal(narrowed.status, 200);
+  const body = (await narrowed.json()) as { scanCeiling: string };
+  assert.equal(body.scanCeiling, path.resolve(inside));
 });
 
 test('PUT /settings rejects a ceiling that is not an existing directory and changes nothing', async () => {
@@ -115,14 +151,12 @@ test('PUT /settings rejects a ceiling that is not an existing directory and chan
 });
 
 test('PUT /settings resets the ceiling to the startup value when passed null', async () => {
-  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-reset-'));
-  tempDirs.push(outside);
   const base = await mount(makeConfig());
 
   await fetch(`${base}/api/strabo/settings`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ scanCeiling: outside }),
+    body: JSON.stringify({ scanCeiling: path.join(fixtures, 'block-repo') }),
   });
   const reset = await fetch(`${base}/api/strabo/settings`, {
     method: 'PUT',

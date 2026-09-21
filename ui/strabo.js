@@ -25,6 +25,7 @@ import {
   renderMemberMap,
   renderMembers,
   renderOverlayPanel,
+  renderRepositoryPassport,
   renderReview,
   renderRisk,
   renderShortcuts,
@@ -163,7 +164,7 @@ function applyViewPrefs() {
     state.overlay = prefs.overlay;
     elements.overlay.value = prefs.overlay;
     // File-mode overlays need file mode (same rule as the change handler).
-    if (['impact', 'cycles', 'test-reach'].includes(prefs.overlay) && state.mode !== 'file') {
+    if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== 'file') {
       state.mode = 'file';
       elements.detail.value = 'file';
     }
@@ -174,8 +175,8 @@ const view = createView(document.getElementById('graph'));
 
 /**
  * Client preferences, read once and re-applied on every change. `applyAppearance` sets the
- * theme and reduce-motion attributes before the first render; the canvas reads them for its
- * own palette, so it is restyled here too.
+ * theme and reduce-motion attributes before the first render; the canvas reads their
+ * colours, so it is restyled here too.
  */
 let clientPrefs = readSettings();
 
@@ -243,6 +244,7 @@ const elements = {
   settingsToggle: document.getElementById('settings-toggle'),
   settingsPanel: document.getElementById('settings-panel'),
   workspacePanel: document.getElementById('workspace-panel'),
+  passportPanel: document.getElementById('passport-panel'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -1043,6 +1045,66 @@ function closeWorkspace() {
   refreshDock();
 }
 
+/**
+ * Open the Repository passport: the opening summary for the current repository.
+ *
+ * The passport is server-computed from the same graph the map draws, so the panel and the
+ * canvas can never disagree. A server error is shown in the panel, not thrown.
+ */
+async function showPassport() {
+  elements.passportPanel.hidden = false;
+  try {
+    const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+    renderRepositoryPassport(elements.passportPanel, report, {
+      onSelect: (id) => selectNode(id),
+      onClose: closePassport,
+    });
+  } catch (error) {
+    renderRepositoryPassport(elements.passportPanel, null, { onClose: closePassport });
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = error.message;
+    elements.passportPanel.append(note);
+  }
+  refreshDock();
+}
+
+function closePassport() {
+  elements.passportPanel.hidden = true;
+  refreshDock();
+}
+
+/**
+ * Open the passport once for a repository the operator has not seen before. The set of
+ * seen roots is browser-local, so the opening screen appears on a first visit and never
+ * again for that repository.
+ */
+const PASSPORT_SEEN_PREFIX = 'strabo.passport.seen.';
+
+function passportSeen(repository) {
+  try {
+    return window.localStorage.getItem(`${PASSPORT_SEEN_PREFIX}${repository ?? 'default'}`) === '1';
+  } catch {
+    return true;
+  }
+}
+
+function markPassportSeen(repository) {
+  try {
+    window.localStorage.setItem(`${PASSPORT_SEEN_PREFIX}${repository ?? 'default'}`, '1');
+  } catch {
+    // Storage is optional; the passport simply reappears next session.
+  }
+}
+
+async function maybeOpenPassport() {
+  if (!state.repository || passportSeen(state.repository)) {
+    return;
+  }
+  markPassportSeen(state.repository);
+  await showPassport();
+}
+
 function clearOverlay() {
   state.overlay = 'none';
   elements.overlay.value = 'none';
@@ -1112,6 +1174,8 @@ const OVERLAY_TITLES = {
   'test-reach': 'Test reach',
   architecture: 'Architecture health',
   hotspots: 'Function hotspots',
+  'module-depth': 'Module depth',
+  ownership: 'Ownership',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -1120,7 +1184,12 @@ const OVERLAY_ENDPOINTS = {
   'test-reach': '/analysis/test-reach',
   architecture: '/analysis/architecture-health',
   hotspots: '/analysis/functions',
+  'module-depth': '/analysis/module-depth',
+  ownership: '/analysis/ownership',
 };
+
+/** Overlays that annotate file nodes and therefore need Files mode. */
+const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership'];
 
 /**
  * Load the selected review analysis and annotate the graph. Overlays annotate only what
@@ -1281,7 +1350,7 @@ elements.overlay.addEventListener('change', () => {
     return;
   }
   // Node overlays annotate file nodes; architecture health is repository-level.
-  const needsFileMode = ['impact', 'cycles', 'test-reach'].includes(state.overlay);
+  const needsFileMode = FILE_MODE_OVERLAYS.includes(state.overlay);
   if (needsFileMode && state.mode !== 'file') {
     state.mode = 'file';
     elements.detail.value = 'file';
@@ -1942,6 +2011,17 @@ const floatingWindows = initFloatingWindows({
       },
       onClose: () => closeWorkspace(),
     },
+    {
+      key: 'passport',
+      element: elements.passportPanel,
+      title: 'Repository passport',
+      dockLabel: 'Passport',
+      width: 460,
+      onOpen: () => {
+        showPassport().catch(() => {});
+      },
+      onClose: () => closePassport(),
+    },
   ],
 });
 
@@ -1983,6 +2063,7 @@ if (window.STRABO_TEST) {
     floatingWindows: () => floatingWindows,
     islands: () => view.islandDirectories(),
     workspace: () => showWorkspace(),
+    passport: () => showPassport(),
   };
 }
 
@@ -2003,6 +2084,13 @@ loadCatalogue()
     return scan();
   })
   .then(() => restoreUrlPanel())
+  .then(() => {
+    // A deep link that opened the member map is explicit intent; do not cover it.
+    if (elements.memberView.hidden) {
+      return maybeOpenPassport();
+    }
+    return undefined;
+  })
   .catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
   });

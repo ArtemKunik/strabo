@@ -10,6 +10,7 @@ import {
   breadcrumb,
   cohesionDelta,
   constellationLayout,
+  clusterSeriesClass,
   constellationPoints,
   explainClass,
   fieldCard,
@@ -23,7 +24,6 @@ import {
   methodCard,
   orderAdvisories,
   orderMembers,
-  paletteKey,
   passportFor,
   polygonPoints,
   radarFrame,
@@ -534,6 +534,161 @@ export function renderWorkspace(container, report, handlers = {}) {
   }
 }
 
+function passportSection(title, count) {
+  const heading = document.createElement('h4');
+  heading.className = 'passport-section-heading';
+  heading.textContent = `${title} (${count})`;
+  return heading;
+}
+
+function passportNote(text) {
+  const note = document.createElement('p');
+  note.className = 'unavailable';
+  note.textContent = text;
+  return note;
+}
+
+function passportFileList(entries, handlers, label) {
+  const list = document.createElement('ul');
+  list.className = 'passport-list';
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    const id = entry.file ?? entry.id;
+    item.dataset.delegateNode = id;
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'link';
+    open.textContent = id;
+    open.addEventListener('click', () => handlers.onSelect?.(id));
+    item.append(open);
+    const detail = label(entry);
+    if (detail) {
+      const span = document.createElement('span');
+      span.className = 'evidence';
+      span.textContent = detail;
+      item.append(span);
+    }
+    list.append(item);
+  }
+  return list;
+}
+
+/** A list of rows that name no selectable file (languages, directories). */
+function passportPlainList(entries, label) {
+  const list = document.createElement('ul');
+  list.className = 'passport-list';
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    item.textContent = label(entry);
+    list.append(item);
+  }
+  return list;
+}
+
+/**
+ * The Repository passport: the opening summary for an unfamiliar repository.
+ *
+ * Languages, size, entry points, top-level layers, the files that decide the codebase by
+ * fan-in, cycles, and what no test reaches. A section with no recorded evidence says so
+ * rather than showing an empty list, and every number comes from the scan.
+ */
+export function renderRepositoryPassport(container, report, handlers = {}) {
+  container.replaceChildren();
+
+  const title = document.createElement('h3');
+  title.textContent = `Repository passport — ${report?.repository ?? 'repository'}`;
+  container.append(title);
+
+  if (!report) {
+    container.append(passportNote('No passport was recorded for this repository.'));
+    return;
+  }
+
+  const size = report.size ?? {};
+  const summary = document.createElement('p');
+  summary.className = 'passport-summary';
+  summary.textContent =
+    `${size.files ?? 0} files · ${size.edges ?? 0} edges · ${size.directories ?? 0} directories · ` +
+    `${size.tests ?? 0} tests · ${size.diagnostics ?? 0} diagnostics · ${size.excluded ?? 0} excluded`;
+  container.append(summary);
+
+  const languages = report.languages ?? [];
+  container.append(passportSection('Languages', languages.length));
+  container.append(
+    languages.length === 0
+      ? passportNote('No source languages recorded.')
+      : passportPlainList(languages, (entry) => `${entry.language} · ${entry.files} file(s)`),
+  );
+
+  const entryPoints = report.entryPoints ?? [];
+  container.append(passportSection('Entry points', entryPoints.length));
+  container.append(
+    entryPoints.length === 0
+      ? passportNote('No entry point declared by a manifest (package.json, Cargo.toml, pom.xml).')
+      : passportFileList(entryPoints, handlers, (entry) => entry.reason),
+  );
+
+  const layers = report.layers ?? [];
+  container.append(passportSection('Top-level directories', layers.length));
+  container.append(
+    layers.length === 0
+      ? passportNote('No directories recorded.')
+      : passportPlainList(
+          layers,
+          (entry) => `${entry.directory} · ${entry.files} file(s) · ${entry.incoming} incoming`,
+        ),
+  );
+
+  const topFiles = report.topFiles ?? [];
+  container.append(passportSection('Most depended-upon files (by fan-in)', topFiles.length));
+  container.append(
+    topFiles.length === 0
+      ? passportNote('No files recorded.')
+      : passportFileList(
+          topFiles,
+          handlers,
+          (entry) =>
+            `${entry.fanIn} importer(s) · blast radius ${entry.transitiveDependents} · ${entry.kind}`,
+        ),
+  );
+
+  const cycles = report.cycles ?? { total: 0, largest: [] };
+  container.append(passportSection('Cycles', cycles.total ?? 0));
+  if ((cycles.largest ?? []).length === 0) {
+    container.append(passportNote('No dependency cycles recorded.'));
+  } else {
+    const list = document.createElement('ul');
+    list.className = 'passport-list';
+    for (const group of cycles.largest) {
+      const item = document.createElement('li');
+      item.textContent = `${group.size} file(s): ${group.members.join(' ↔ ')}`;
+      list.append(item);
+    }
+    container.append(list);
+  }
+
+  const untested = report.untested ?? { total: 0, files: [] };
+  container.append(passportSection('Used but no test reaches', untested.total ?? 0));
+  container.append(
+    (untested.files ?? []).length === 0
+      ? passportNote('Every used module is reachable from a test, or no test file was identified.')
+      : passportFileList(
+          untested.files.map((file) => ({ file })),
+          handlers,
+          () => '',
+        ),
+  );
+
+  if (handlers.onClose) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.id = 'close-passport';
+    close.textContent = 'View the map';
+    close.addEventListener('click', () => handlers.onClose());
+    container.append(close);
+  }
+}
+
 function renderMemberType(type) {
   const section = document.createElement('section');
   section.className = 'member-type';
@@ -715,10 +870,10 @@ export function renderDiagnostics(container, model, runtime = {}) {
 }
 
 const LEGEND_SWATCHES = {
-  'size = dependents': 'linear-gradient(135deg,#4c9aff,#c98bf0)',
-  'colour = directory': 'linear-gradient(135deg,#56d4b1,#f2b25c)',
-  'diamond = test': 'linear-gradient(135deg,#f2b25c,#ff8f8f)',
-  'hover = blast radius': 'linear-gradient(135deg,#8da0b5,#4c9aff)',
+  'size = dependents': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'island = directory': 'linear-gradient(135deg,var(--island-fill),var(--node-fill))',
+  'diamond = test': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'hover = blast radius': 'linear-gradient(135deg,var(--ink-3),var(--accent))',
 };
 
 export function renderLegend(container, model) {
@@ -742,32 +897,13 @@ export function renderLegend(container, model) {
   }
   container.append(guide);
 
-  // The actual directory → colour key, so the legend shows the colours the view draws
-  // rather than a gradient that stands for "some colour".
-  const directories = paletteKey(model);
-  if (directories.length > 0) {
-    const key = document.createElement('div');
-    key.className = 'legend-dirs';
-    for (const entry of directories) {
-      const item = document.createElement('span');
-      item.className = 'legend-dir';
-      const swatch = document.createElement('span');
-      swatch.className = 'legend-dot';
-      swatch.style.background = entry.color;
-      item.append(swatch);
-      item.append(document.createTextNode(entry.regions.join(' · ')));
-      key.append(item);
-    }
-    container.append(key);
-  }
-
   const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement('span');
     item.className = 'legend-item';
     const glyph = document.createElement('span');
     glyph.className = 'legend-shape';
-    glyph.textContent = kind === 'test' ? '◆' : kind === 'service' ? '⬡' : '▣';
+    glyph.textContent = kind === 'test' ? '◆' : kind === 'entry' ? '★' : kind === 'service' ? '⬡' : '▣';
     item.append(glyph);
     item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? 'round-rectangle'})`));
     container.append(item);
@@ -1776,7 +1912,7 @@ function buildTypeSection(type, view, clusters, handlers) {
   legend.dataset.role = 'clusters';
   for (const cluster of clusters.clusters) {
     const chip = document.createElement('span');
-    chip.className = `cluster cluster-${(cluster.index % 7) + 1}`;
+    chip.className = `cluster ${clusterSeriesClass(cluster.index)}`;
     chip.textContent = `cluster ${cluster.index}`;
     legend.append(chip);
   }

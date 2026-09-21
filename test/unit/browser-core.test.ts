@@ -33,12 +33,11 @@ import {
   normalizeGitUrl,
   orderMembers,
   overlayFor,
-  paletteColor,
-  paletteKey,
   passportFor,
   polygonPoints,
   radarFrame,
   radarPoints,
+  readingLegend,
   reviewFileLabel,
   reviewGroups,
   reviewOverlay,
@@ -116,11 +115,6 @@ test('buildGraphQuery sends blockDepth and a drilled prefix', () => {
   const query = buildGraphQuery({ repository: '/demo', mode: 'block', depth: 1, prefix: 'src/api' });
   assert.ok(query.includes('blockDepth=1'));
   assert.ok(query.includes('blockPrefix=src%2Fapi'));
-});
-
-test('paletteColor honours a server-assigned index and is stable otherwise', () => {
-  assert.equal(paletteColor(0, 'anything'), paletteColor(0, 'other'));
-  assert.equal(paletteColor(undefined, 'src/util.ts'), paletteColor(undefined, 'src/util.ts'));
 });
 
 test('diameter uses a square-root scale bounded to the documented range', () => {
@@ -287,7 +281,31 @@ test('overlayFor maps function hotspots onto their files with their signals', ()
   ]);
 });
 
-test('nodes in the same top-level directory share a colour', () => {
+test('overlayFor flags module depth and single-author modules', () => {
+  const depth = overlayFor('module-depth', [
+    { file: 'thin.ts', signal: 'pass-through', implementationLines: 1, interfaceWidth: 2 },
+    { file: 'wide.ts', signal: 'wide-interface', implementationLines: 10, interfaceWidth: 20 },
+    { file: 'ok.ts', signal: 'ok', implementationLines: 40, interfaceWidth: 4 },
+  ]);
+
+  assert.equal(depth.classes.get('thin.ts'), 'ov-pass-through');
+  assert.equal(depth.classes.get('wide.ts'), 'ov-wide-interface');
+  assert.equal(depth.classes.has('ok.ts'), false);
+  assert.equal(depth.summary, '2 flagged · 1 pass-through · 3 file(s)');
+
+  const ownership = overlayFor('ownership', [
+    { file: 'shared.ts', distinctAuthors: 1, commits: 4, transitiveDependents: 3 },
+    { file: 'crowded.ts', distinctAuthors: 5, commits: 9, transitiveDependents: 2 },
+    { file: 'leaf.ts', distinctAuthors: 1, commits: 1, transitiveDependents: 0 },
+  ]);
+
+  assert.equal(ownership.classes.get('shared.ts'), 'ov-sole-owner');
+  assert.equal(ownership.classes.has('crowded.ts'), false);
+  assert.equal(ownership.classes.has('leaf.ts'), false);
+  assert.match(ownership.summary, /1 single-author module/);
+});
+
+test('node elements carry no directory colour; the neutral fill is stylesheet-owned', () => {
   const { nodes } = buildElements({
     nodes: [
       { id: 'src/a.ts', kind: 'module' },
@@ -298,35 +316,11 @@ test('nodes in the same top-level directory share a colour', () => {
     positions: [],
   });
 
-  assert.equal(nodes[0].data.color, nodes[1].data.color);
+  assert.ok(nodes.every((node) => !('color' in node.data)));
 });
 
-test('paletteKey lists each palette index with the directory it encodes', () => {
-  const key = paletteKey({
-    nodes: [
-      { id: 'src/a.ts', paletteIndex: 0 },
-      { id: 'src/b.ts', paletteIndex: 0 },
-      { id: 'ui/c.ts', paletteIndex: 1 },
-    ],
-  });
-  assert.deepEqual(key.map((entry) => entry.regions), [['src'], ['ui']]);
-  assert.notEqual(key[0].color, key[1].color);
-});
-
-test('paletteKey merges directories that share a wrapped palette index', () => {
-  const key = paletteKey({
-    nodes: [
-      { id: 'a/x.ts', paletteIndex: 0 },
-      { id: 'b/y.ts', paletteIndex: 0 },
-    ],
-  });
-  assert.deepEqual(key[0].regions, ['a', 'b']);
-  assert.equal(key[0].color, paletteColor(0, ''));
-});
-
-test('paletteKey labels a block id by its own directory', () => {
-  const key = paletteKey({ prefixLength: 1, nodes: [{ id: 'ui', paletteIndex: 2 }] });
-  assert.deepEqual(key[0].regions, ['ui']);
+test('the reading legend names position, not colour, as the directory encoding', () => {
+  assert.deepEqual(readingLegend(), ['size = dependents', 'island = directory', 'diamond = test', 'star = entry']);
 });
 
 test('shortcutSheet carries the gestures the legend no longer mixes in', () => {

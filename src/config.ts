@@ -8,6 +8,7 @@ export interface CliEnv {
   scanCeiling: string;
   port: number;
   riskOnline: boolean;
+  allowCeilingWidening: boolean;
   deniedLicenses?: string[];
   narratorEndpoint?: string;
   narratorModel?: string;
@@ -39,6 +40,8 @@ export function readEnv(
     port: Number.parseInt(env.PORT ?? '3000', 10),
     // Online risk lookup is opt-in: it is the only feature that contacts a third party.
     riskOnline: isEnabled(env.STRABO_RISK),
+    // Runtime ceiling widening is a second opt-in; the environment only ever narrows.
+    allowCeilingWidening: isEnabled(env.STRABO_ALLOW_CEILING_WIDENING),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // The narrator is a second opt-in provider; without an endpoint and model it is inert.
     narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
@@ -74,6 +77,7 @@ export function configFromEnv(
     configPath,
     scanCeiling,
     riskOnline,
+    allowCeilingWidening,
     deniedLicenses,
     narratorEndpoint,
     narratorModel,
@@ -95,6 +99,7 @@ export function configFromEnv(
     workspaceRoot: root,
     configPath,
     scanCeiling,
+    allowCeilingWidening,
     risk: {
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),

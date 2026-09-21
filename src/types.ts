@@ -6,7 +6,7 @@
  */
 
 /** The kind of a graph node. */
-export type NodeKind = 'module' | 'test';
+export type NodeKind = 'module' | 'test' | 'entry';
 
 /** A node in the repository graph. `id` is repository-relative and POSIX-normalised. */
 export interface GraphNode {
@@ -18,8 +18,8 @@ export interface GraphNode {
   label?: string;
   /** Optional language tag derived during scanning. */
   language?: string;
-  /** Optional palette index assigned by the server; colours are theme-owned. */
-  paletteIndex?: number;
+  /** Why this node is an entry point, when a manifest declares it as one. */
+  entryReason?: string;
 }
 
 /** The kind of relationship an edge represents. */
@@ -451,6 +451,14 @@ export interface StraboConfig {
   workspaceRoot: string;
   configPath?: string;
   scanCeiling?: string;
+  /**
+   * Permit `PUT /settings` to widen `scanCeiling` beyond its startup value.
+   *
+   * The environment variable only ever narrows the read boundary; without this opt-in
+   * the running process cannot grow its own boundary through the settings route. Off by
+   * default, so an operator must deliberately enable runtime widening.
+   */
+  allowCeilingWidening?: boolean;
   integrations?: StraboIntegrations;
   /**
    * Dependency-risk lookup. Online advisory/license calls are opt-in and off by default;

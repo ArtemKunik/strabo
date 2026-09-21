@@ -98,14 +98,9 @@ test('positions are deterministic and every node has one', async () => {
   assert.deepEqual(model.positions, buildBlockViewModel(graph, { depth: 1 }).positions);
 });
 
-test('blocks under one top-level directory share a palette index, others differ', async () => {
+test('block view nodes carry no directory colour', async () => {
   const graph = await loadGraph();
-  const shallow = buildBlockViewModel(graph, { depth: 2, prefix: 'src' });
-  const indexOf = (model: typeof shallow, id: string) => model.nodes.find((node) => node.id === id)?.paletteIndex;
+  const model = buildBlockViewModel(graph, { depth: 1 });
 
-  assert.equal(indexOf(shallow, 'src'), indexOf(shallow, 'src/api'));
-  assert.equal(indexOf(shallow, 'src'), indexOf(shallow, 'src/api/v2'));
-
-  const root = buildBlockViewModel(graph, { depth: 1 });
-  assert.notEqual(indexOf(root, 'src'), indexOf(root, 'lib'));
+  assert.ok(model.nodes.every((node) => !('paletteIndex' in node)));
 });
