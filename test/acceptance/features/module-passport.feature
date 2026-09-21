@@ -21,6 +21,17 @@ Feature: Module Passport
     And I select the "main.ts" node
     Then the inspector reports members as not recorded
 
+  @back
+  Scenario: The passport steps back to the module it was opened from, then to the map
+    When I switch to file detail
+    And I select the "main.ts" node
+    Then the inspector shows the passport metrics for "main.ts"
+    When I open the first inspector dependency
+    When I step the module passport back
+    Then the inspector shows the passport metrics for "main.ts"
+    When I step the module passport back
+    Then the module passport is closed
+
   @members
   Scenario: Members are listed for a supported language
     When I open the folder dialog

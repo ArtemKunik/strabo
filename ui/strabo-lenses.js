@@ -77,7 +77,26 @@ export function applyEdgeKind(cy, mode) {
   });
 }
 
-/** Hide nodes that do not match; returns the id set that stayed visible (null for all). */
+/**
+ * Show or hide the co-change coupling lens. Off by default; `on` reveals the dashed
+ * co-change edges an `/analysis/co-change` report already recorded. Their `coChange` data
+ * flag is the source of truth, so this only toggles visibility and never invents an edge.
+ */
+export function applyCoChange(cy, on) {
+  const visible = on === true;
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      if (edge.data('coChange') !== true) {
+        continue;
+      }
+      edge.toggleClass('edge-cochange-hidden', !visible);
+    }
+  });
+}
+
+/**
+ * Hide nodes that do not match; returns the id set that stayed visible (null for all).
+ */
 export function filterNodes(cy, ids) {
   const keep = ids ? new Set(ids) : null;
   cy.batch(() => {

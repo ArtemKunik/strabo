@@ -3,14 +3,21 @@ import { test } from 'node:test';
 
 import {
   ISLAND_PADDING,
+  applyIslandOffsets,
   fitLabel,
+  hasIslandOffsets,
+  islandHitAny,
+  labelsThatFit,
   islandBounds,
   islandHit,
   islandLabel,
   islandLabelFits,
+  islandOffset,
   islandTooltipText,
   islandsApply,
+  normalizeIslandOffsets,
   projectIsland,
+  shiftIslandOffset,
 } from '../../ui/strabo-islands.js';
 
 /** A file-mode view model: two directories, positions as the layout packs them. */
@@ -144,7 +151,103 @@ test('islandHit prefers the smallest plate when boxes overlap', () => {
   assert.equal(islandHit(boxes, 50, 50)?.label, 'small');
 });
 
+test('islandHitAny finds a plate that is not trimmed, where the hover caption would not', () => {
+  const boxes = [
+    { x: 0, y: 0, width: 100, height: 60, trimmed: false, directory: 'src', count: 2 },
+  ];
+  assert.equal(islandHitAny(boxes, 20, 20)?.directory, 'src');
+  assert.equal(islandHitAny(boxes, 200, 200), null);
+});
+
+test('islandHitAny prefers the smallest plate so a nested directory moves on its own', () => {
+  const boxes = [
+    { x: 0, y: 0, width: 400, height: 400, directory: 'src', count: 10 },
+    { x: 40, y: 40, width: 100, height: 100, directory: 'src/api', count: 1 },
+  ];
+  assert.equal(islandHitAny(boxes, 50, 50)?.directory, 'src/api');
+});
+
+test('normalizeIslandOffsets drops anything that is not a finite move', () => {
+  assert.deepEqual(
+    normalizeIslandOffsets({
+      src: { dx: 96, dy: -48 },
+      'src/api': { dx: 0, dy: 0 },
+      bad: { dx: 'nope', dy: 4 },
+      halfr: { dx: 1 },
+      junk: null,
+    }),
+    { src: { dx: 96, dy: -48 } },
+  );
+  assert.deepEqual(normalizeIslandOffsets('not an object'), {});
+  assert.deepEqual(normalizeIslandOffsets(undefined), {});
+});
+
+test('shiftIslandOffset accumulates a directory move without disturbing the others', () => {
+  const first = shiftIslandOffset({}, 'src', 10, 20);
+  const second = shiftIslandOffset(first, 'src', -4, 6);
+  assert.deepEqual(second, { src: { dx: 6, dy: 26 } });
+  // A different directory is added beside the first, not merged into it.
+  assert.deepEqual(shiftIslandOffset(second, 'ui', 1, 1), {
+    src: { dx: 6, dy: 26 },
+    ui: { dx: 1, dy: 1 },
+  });
+  // A no-op move changes nothing.
+  assert.equal(shiftIslandOffset(second, 'src', 0, 0), second);
+});
+
+test('applyIslandOffsets shifts only the moved directory and leaves the rest', () => {
+  const moved = applyIslandOffsets(model(), { src: { dx: 100, dy: -50 } });
+  assert.deepEqual(
+    moved.positions.find((position) => position.id === 'src/a.ts'),
+    { id: 'src/a.ts', x: 100, y: -50 },
+  );
+  assert.deepEqual(
+    moved.positions.find((position) => position.id === 'ui/c.js'),
+    { id: 'ui/c.js', x: 0, y: 200 },
+  );
+  // The source model is untouched, so a reset can repaint it.
+  assert.deepEqual(model().positions[0], { id: 'src/a.ts', x: 0, y: 0 });
+});
+
+test('applyIslandOffsets is a no-op without moves and in modes that have no islands', () => {
+  const base = model();
+  assert.equal(applyIslandOffsets(base, {}), base);
+  const blocks = { ...model(), prefixLength: 1 };
+  assert.equal(applyIslandOffsets(blocks, { src: { dx: 100, dy: 0 } }), blocks);
+});
+
+test('islandOffset and hasIslandOffsets read the stored map', () => {
+  assert.equal(islandOffset({}, 'src'), null);
+  assert.deepEqual(islandOffset({ src: { dx: 1, dy: 2 } }, 'src'), { dx: 1, dy: 2 });
+  assert.equal(hasIslandOffsets({}), false);
+  assert.equal(hasIslandOffsets({ src: { dx: 1, dy: 2 } }), true);
+});
+
 test('islandTooltipText names the path and its member count', () => {
   assert.equal(islandTooltipText({ label: 'test/fixtures/kotlin-repo/src', count: 1 }), 'test/fixtures/kotlin-repo/src');
   assert.equal(islandTooltipText({ label: 'test/fixtures', count: 4 }), 'test/fixtures · 4 files');
+});
+
+test('labelsThatFit drops a title that would land on the plate above it', () => {
+  const upper = { x: 0, y: 0, width: 200, height: 100 };
+  // Only 6px of gap: the 11px title above the lower plate sits over the upper plate.
+  const lower = { x: 0, y: 106, width: 200, height: 100 };
+  assert.deepEqual(labelsThatFit([upper, lower], ['src/a', 'src/b']), [true, false]);
+});
+
+test('labelsThatFit keeps a title that has a gap to sit in', () => {
+  const upper = { x: 0, y: 0, width: 200, height: 100 };
+  const lower = { x: 0, y: 140, width: 200, height: 100 };
+  assert.deepEqual(labelsThatFit([upper, lower], ['src/a', 'src/b']), [true, true]);
+});
+
+test('labelsThatFit lets the earlier (larger) plate win a collision between two titles', () => {
+  const left = { x: 0, y: 40, width: 100, height: 60 };
+  // Beside `left` with a sliver of gap: both titles are 60+ px wide and start 10px in.
+  const right = { x: 20, y: 40, width: 100, height: 60 };
+  assert.deepEqual(labelsThatFit([left, right], ['abcdefgh', 'ijklmnop']), [true, false]);
+});
+
+test('labelsThatFit skips islands with no text', () => {
+  assert.deepEqual(labelsThatFit([{ x: 0, y: 40, width: 50, height: 50 }], ['']), [false]);
 });

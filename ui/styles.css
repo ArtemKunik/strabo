@@ -373,6 +373,30 @@ button.primary {
   white-space: nowrap;
 }
 
+.freshness-badge {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.freshness-badge.is-stale {
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+  cursor: pointer;
+}
+
+.freshness-badge:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
 .diag-badge {
   display: inline-block;
   min-width: 18px;
@@ -461,6 +485,19 @@ button.primary {
 
 .island-label.is-hidden {
   display: none;
+}
+
+/*
+ * Island dragging is read at the container (the SVG stays pointer-events: none), so the
+ * grab affordance belongs on the graph surface: it shows only while a plate is under the
+ * pointer, and switches to a closed hand for the length of the drag.
+ */
+.graph.island-grab {
+  cursor: grab;
+}
+
+.graph.island-dragging {
+  cursor: grabbing;
 }
 
 /*
@@ -1601,6 +1638,119 @@ button.primary {
   padding-bottom: 40px;
 }
 
+/* --------------------------------------------------------- Source viewer */
+/*
+ * The file viewer reads a file or a change, mono-spaced and numbered. Diff tints reuse the
+ * status hues rather than adding new ones, and the two gutters share fixed widths so old and
+ * new line numbers keep their columns however long the code runs.
+ */
+.source-panel {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.float-body .source-panel {
+  padding: 0;
+  border-bottom: none;
+  background: none;
+}
+
+.source-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--veiled-surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.source-path {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.source-ref,
+.source-counts {
+  color: var(--ink-3);
+}
+
+.source-modes {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.source-mode {
+  font: inherit;
+  padding: 2px 8px;
+  color: var(--ink-2);
+  background: var(--wash);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.source-mode:hover {
+  border-color: var(--accent);
+}
+
+.source-body {
+  padding: 6px 0 14px;
+}
+
+.src-hunk {
+  margin: 8px 0 2px;
+  padding: 3px 12px;
+  color: var(--ink-3);
+  background: var(--wash);
+}
+
+.src-line {
+  display: flex;
+  align-items: baseline;
+  line-height: 1.55;
+}
+
+.src-no {
+  flex: none;
+  width: 3.6em;
+  padding: 0 8px 0 4px;
+  color: var(--ink-3);
+  text-align: right;
+  user-select: none;
+}
+
+.src-code {
+  flex: 1 1 auto;
+  padding-right: 14px;
+  white-space: pre;
+}
+
+.src-add {
+  background: color-mix(in srgb, var(--status-good) 15%, transparent);
+}
+
+.src-del {
+  background: color-mix(in srgb, var(--status-critical) 15%, transparent);
+}
+
+.src-mark {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.source-loading,
+.source-note {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
 /* --------------------------------------------------------- Panel dock */
 /*
  * The dock shares the bottom strip's row, sitting to its right, so it never covers the
@@ -2010,6 +2160,24 @@ button.primary {
   border-color: transparent;
   background: transparent;
   color: var(--ink-3);
+}
+
+.panel-back {
+  margin-right: 6px;
+  padding: 0 6px;
+  font-size: 12px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.panel-back:hover:not(:disabled) {
+  color: var(--ink-1);
+}
+
+.panel-back:disabled {
+  opacity: 0.45;
 }
 
 .edge-panel {
@@ -3730,4 +3898,74 @@ table.change-metrics td:first-child .link {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   pointer-events: none;
+}
+
+/* The reading route: a step-through control, then each unit's summary above its files. */
+.route-panel {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.route-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.route-counter {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.route-summary,
+.route-truncated {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+
+.route-unit {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.route-unit h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.route-unit-why {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.route-step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  word-break: break-all;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+}
+
+.route-step.is-current {
+  background: var(--veiled-surface);
+  outline: 1px solid var(--line);
+}
+
+.route-unreached {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.route-unreached-file {
+  padding: 2px 0;
+  word-break: break-all;
 }

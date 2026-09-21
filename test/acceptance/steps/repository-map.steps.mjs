@@ -396,6 +396,25 @@ Then('the review panel reports a working-tree review', async function () {
   assert.match(panel, /Unstaged \(\d+\)/);
 });
 
+Then('the review panel offers Back with nothing behind it', async function () {
+  const back = this.page.locator('#review-panel [data-role="panel-back"]');
+  assert.equal(await back.count(), 1, 'the review panel should offer Back');
+  assert.equal(await back.isDisabled(), true, 'Back should be disabled with no earlier review');
+});
+
+Then('the review panel can step back to the working-tree review', async function () {
+  const back = this.page.locator('#review-panel [data-role="panel-back"]');
+  assert.equal(await back.isDisabled(), false, 'Back should be enabled after a commit review');
+  await back.click();
+  await this.page.waitForFunction(
+    () => /Working tree review/.test(document.getElementById('review-panel')?.textContent ?? ''),
+    undefined,
+    { timeout: 15_000 },
+  );
+  const disabled = await this.page.locator('#review-panel [data-role="panel-back"]').isDisabled();
+  assert.equal(disabled, true, 'Back should be disabled again at the start of the history');
+});
+
 Then('the change passport reports a cohesion delta', async function () {
   await this.page.waitForSelector('#review-panel [data-role="change-passport"]', {
     timeout: 15_000,

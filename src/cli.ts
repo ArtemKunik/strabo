@@ -1,9 +1,67 @@
+import { pathToFileURL } from 'node:url';
+
+import { runCheckCommand } from './cli/check.ts';
+import { runExportCommand } from './cli/export.ts';
 import { configFromEnv, readEnv } from './config.ts';
+import { startMcpServer } from './mcp/server.ts';
 import { createStraboServer } from './server.ts';
 
-/** Start the standalone Strabo server from its path argument and environment. */
-export function start(): void {
-  const argv = process.argv.slice(2);
+const USAGE = `strabo — map a repository's files, dependencies, and change impact
+
+Usage:
+  strabo [path]                       start the standalone server
+  strabo serve [path]                 same, with an explicit subcommand
+  strabo export [path] --format=<fmt> write a portable graph (json, dot, mermaid, svg)
+  strabo check [path] [rules]         run headless checks for CI
+  strabo mcp                          serve the recorded analysis over MCP (stdio)
+
+Export options:
+  --format=json|dot|mermaid|svg   output format (default json)
+  --out=<file>                    write to a file instead of stdout
+  --view=file|block|system        view to render for svg (default file)
+  --include-declare               draw declare edges (dashed), off by default
+
+Check rules (only the ones named can fail the build):
+  --fail-on-cycles
+  --fail-on-layer-violations
+  --fail-on-new-smells
+  --fail-on-health-regression[=pct]
+  --baseline=<file>               baseline to compare against
+  --write-baseline                record the current findings as the baseline
+  --format=json                   machine-readable result
+
+Environment: STRABO_ROOT, STRABO_CONFIG, STRABO_SCAN_CEILING, STRABO_STATE_DIR,
+STRABO_AUTO_REBUILD, PORT, STRABO_HOST
+`;
+
+export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  const [command, ...rest] = argv;
+  switch (command) {
+    case 'export':
+      return runExportCommand(rest);
+    case 'check':
+      return runCheckCommand(rest);
+    case 'mcp':
+      return runMcp(rest);
+    case 'serve':
+      return startServer(rest);
+    case 'help':
+    case '--help':
+    case '-h':
+      process.stdout.write(USAGE);
+      return 0;
+    default:
+      return startServer(argv);
+  }
+}
+
+function runMcp(argv: readonly string[]): number {
+  const config = configFromEnv(process.env, argv);
+  startMcpServer(config);
+  return 0;
+}
+
+function startServer(argv: readonly string[]): number {
   const env = readEnv(process.env, argv);
   const config = configFromEnv(process.env, argv);
   const app = createStraboServer(config);
@@ -17,6 +75,19 @@ export function start(): void {
       );
     }
   });
+  return 0;
 }
 
-start();
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
+  void main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error: unknown) => {
+      process.stderr.write(
+        `[strabo] ${error instanceof Error ? error.message : 'command failed'}\n`,
+      );
+      process.exitCode = 1;
+    });
+}

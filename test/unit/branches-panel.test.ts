@@ -190,3 +190,37 @@ test('renderReview shows a branch review with conflicts and code that moved unde
   assert.ok(target.querySelector('[data-role="review-group-branch"]'));
   assert.ok(target.querySelector('[data-role="review-branch-graph"]'));
 });
+
+test('renderReview offers Back to the previous review, disabled when there is none', () => {
+  const review = {
+    available: true,
+    kind: 'commit',
+    commit: { shortHash: 'abc1234', author: 'Ada', date: '2026-09-21T00:00:00Z', subject: 'Change' },
+    files: [],
+    totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+    impact: { affected: [], outsideGraph: [] },
+  };
+  let backs = 0;
+  const onBack = () => {
+    backs += 1;
+  };
+
+  const first = document.createElement('div');
+  renderReview(first, review, { onBack, canGoBack: false });
+  const disabled = first.querySelector('[data-role="panel-back"]') as HTMLButtonElement;
+  assert.equal(disabled.disabled, true);
+  disabled.click();
+  assert.equal(backs, 0);
+
+  const deeper = document.createElement('div');
+  renderReview(deeper, review, { onBack, canGoBack: true });
+  const back = deeper.querySelector('[data-role="panel-back"]') as HTMLButtonElement;
+  assert.equal(back.disabled, false);
+  back.click();
+  assert.equal(backs, 1);
+
+  const loading = document.createElement('div');
+  renderReviewLoading(loading, { onBack, canGoBack: true });
+  (loading.querySelector('[data-role="panel-back"]') as HTMLButtonElement).click();
+  assert.equal(backs, 2);
+});

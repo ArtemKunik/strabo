@@ -301,3 +301,38 @@ test('the workspace endpoint reports the single configured root', async () => {
   assert.deepEqual(services.endpoints, []);
   assert.deepEqual(services.flows, []);
 });
+
+test('the co-change endpoint serves the edges, their evidence, and the thresholds', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const repository = `?repository=${encodeURIComponent(path.join(fixtures, 'change-repo'))}`;
+
+  const report = (await (await fetch(`${base}/api/strabo/analysis/co-change${repository}`)).json()) as {
+    repository: string;
+    edges: Array<{ source: string; target: string; commits: unknown[]; hidden: boolean }>;
+    skippedCommits: unknown[];
+    unavailable: boolean;
+    thresholds: { minCommits: number; minRatio: number };
+  };
+  assert.equal(report.repository, 'change-repo');
+  assert.ok(Array.isArray(report.edges));
+  assert.ok(Array.isArray(report.skippedCommits));
+  // Every drawn edge names its commits, whatever the fixture's history holds.
+  assert.ok(report.edges.every((edge) => edge.commits.length > 0));
+  assert.equal(report.thresholds.minCommits, 3);
+  assert.equal(report.thresholds.minRatio, 0.5);
+});
+
+test('the co-change endpoint honours a lower coupling threshold', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const repository = encodeURIComponent(path.join(fixtures, 'change-repo'));
+
+  const report = (await (
+    await fetch(`${base}/api/strabo/analysis/co-change?repository=${repository}&minCommits=1&ratio=0.1`)
+  ).json()) as { thresholds: { minCommits: number; minRatio: number } };
+  assert.equal(report.thresholds.minCommits, 1);
+  assert.equal(report.thresholds.minRatio, 0.1);
+});

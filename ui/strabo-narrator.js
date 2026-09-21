@@ -287,6 +287,130 @@ export function buildNarratorEvidence(result) {
 }
 
 /**
+ * The instruction for narrating one change set from its recorded files, sizes, and impact.
+ *
+ * The reply is prose about what the change appears to do for the app, not a restatement of the
+ * counts already on screen. Changed paths, their statuses, and the recorded dependents are
+ * evidence, so the narrator may read meaning from them, but it must word that as a reading
+ * ("appears to") and never claim behaviour the recorded evidence does not show.
+ */
+export const REVIEW_NARRATION_INSTRUCTION =
+  'In three to six sentences of plain prose, explain this change set as a function of the app: ' +
+  'what capability or behaviour it appears to add, change, or remove for a user of the app, ' +
+  'not just which files and lines moved. Do not use lists, headings, or markdown, and do not ' +
+  'repeat counts the reader can already see. The changed paths, their statuses, and the ' +
+  'recorded dependents are evidence and may be read for meaning; word that as a reading ' +
+  '("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and ' +
+  'say so briefly when something is not recorded.';
+
+/** One changed file as a recorded line, with a rename spelled out and missing counts named. */
+function reviewFileLine(file) {
+  const shown = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+  const counts =
+    file.insertions === null || file.deletions === null
+      ? 'line counts unavailable'
+      : `+${file.insertions} −${file.deletions}`;
+  return `- ${shown} (${file.status}, ${counts}, ${file.inGraph ? 'in graph' : 'outside the scanned graph'})`;
+}
+
+/**
+ * Build the recorded evidence sent to the narrator for one Git review.
+ *
+ * Only recorded facts are included: the review kind and revision, the commit metadata, the
+ * totals, each changed file's path, status, line counts, and graph membership, the recorded
+ * impact distances, and the change metrics and cohesion when the caller computed them. Long
+ * lists are bounded with a stated remainder, and unrecorded values are named as such rather
+ * than guessed at.
+ */
+export function buildReviewNarrationEvidence(result) {
+  const files = Array.isArray(result?.files) ? result.files : [];
+  const lines = [];
+  const kind =
+    result?.kind === 'branch'
+      ? 'Branch review'
+      : result?.kind === 'working-tree'
+        ? 'Working-tree review'
+        : 'Commit review';
+  lines.push(kind);
+  if (result?.commit) {
+    lines.push(
+      `Commit: ${result.commit.subject} (${result.commit.shortHash} by ${result.commit.author}, ${String(result.commit.date ?? '').slice(0, 10)})`,
+    );
+  }
+  if (result?.ref) {
+    lines.push(`Revision: ${result.ref}`);
+  }
+  if (result?.branch) {
+    lines.push(
+      `Branch "${result.branch.branch}" is ${result.branch.ahead} commit(s) ahead of and ` +
+        `${result.branch.behind} behind ${result.branch.base}`,
+    );
+    if (result.branch.conflicts?.available === true) {
+      lines.push(
+        result.branch.conflicts.clean
+          ? `A trial merge with ${result.branch.base} is clean`
+          : `A trial merge with ${result.branch.base} conflicts in ${result.branch.conflicts.paths.length} file(s)`,
+      );
+    }
+  }
+
+  const totals = result?.totals;
+  if (totals) {
+    const uncounted = totals.uncounted > 0 ? `, ${totals.uncounted} uncounted` : '';
+    lines.push(
+      `Changed: ${totals.files} file(s), +${totals.insertions} −${totals.deletions} lines${uncounted}`,
+    );
+  }
+
+  lines.push(`Changed files (${files.length}):`);
+  if (files.length === 0) {
+    lines.push('- none recorded');
+  }
+  for (const file of files.slice(0, 50)) {
+    lines.push(reviewFileLine(file));
+  }
+  if (files.length > 50) {
+    lines.push(`- … and ${files.length - 50} more.`);
+  }
+
+  const affected = (result?.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+  lines.push(`Recorded dependents the change can reach: ${affected.length}`);
+  for (const entry of affected.slice(0, 20)) {
+    lines.push(`- ${entry.id} (distance ${entry.distance})`);
+  }
+  if (affected.length > 20) {
+    lines.push(`- … and ${affected.length - 20} more.`);
+  }
+  const outside = result?.impact?.outsideGraph ?? [];
+  if (outside.length > 0) {
+    lines.push(`Changed paths outside the scanned graph: ${outside.length}`);
+  }
+
+  const totalsMetrics = result?.metrics?.totals;
+  if (totalsMetrics) {
+    const complexity =
+      totalsMetrics.measured > 0
+        ? `complexity +${totalsMetrics.complexity.added} −${totalsMetrics.complexity.removed} ` +
+          `(${totalsMetrics.complexity.before} → ${totalsMetrics.complexity.after})`
+        : 'complexity not measured';
+    lines.push(`Change metrics: ${complexity}; coupling +${totalsMetrics.coupling.added} −${totalsMetrics.coupling.removed} import(s)`);
+  }
+
+  const cohesionFiles = result?.cohesion?.files ?? [];
+  if (cohesionFiles.length > 0) {
+    const baseline = result.cohesion.baseline ? ` compared with ${result.cohesion.baseline}` : '';
+    lines.push(`Cohesion from recorded member wiring${baseline}:`);
+    for (const file of cohesionFiles.slice(0, 20)) {
+      const before = file.before === null ? '—' : file.before;
+      const after = file.after === null ? '—' : file.after;
+      lines.push(`- ${file.path}: cohesion ${before} → ${after}${file.note ? ` (${file.note})` : ''}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Split a model reply into displayable blocks: paragraphs, and ordered or bulleted lists.
  *
  * Small models return light markdown even when told not to. Each block is a list of inline

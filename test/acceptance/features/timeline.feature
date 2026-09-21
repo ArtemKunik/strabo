@@ -38,6 +38,44 @@ Feature: Timeline and compare versions
     When I open the working-tree review
     Then the review panel reports a working-tree review
 
+  @review @back
+  Scenario: Stepping back through the reviews the panel has shown
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    When I open the working-tree review
+    Then the review panel offers Back with nothing behind it
+    When I open the timeline
+    And I select the most recent change
+    Then the review panel reports the commit and its changed files
+    And the review panel can step back to the working-tree review
+
+  @review @narrator
+  Scenario: The review panel offers the narrator and stays inert without configuration
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    And I open the timeline
+    When I select the most recent change
+    Then the review panel offers the narrator and reports it is off
+
+  @review @narrator
+  Scenario: The narrator explains a commit's change set against a loopback stub
+    Given a loopback narrator stub is running
+    When I open the Settings window
+    And I set the narrator endpoint to the stub and model "stub-model"
+    And I save the narrator settings
+    And I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    And I open the timeline
+    When I select the most recent change
+    And I narrate the change set
+    Then the review narrative reports the stub reply
+
   @review @change-passport
   Scenario: The Change passport reports the cohesion a change made
     When I open the folder dialog

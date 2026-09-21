@@ -65,9 +65,11 @@ import {
 import {
   GROUP_NAMING_INSTRUCTION,
   MEMBER_NARRATION_INSTRUCTION,
+  REVIEW_NARRATION_INSTRUCTION,
   buildGroupNamingEvidence,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
+  buildReviewNarrationEvidence,
   narrativeBlocks,
   narratorDisabledReason,
   narratorKeyLabel,
@@ -611,6 +613,7 @@ test('shortcutSheet carries the gestures the legend no longer mixes in', () => {
   const keys = shortcutSheet().map((entry) => entry.keys);
   assert.ok(keys.includes('?'));
   assert.ok(keys.includes('C'));
+  assert.ok(keys.includes('S'));
   assert.ok(keys.some((key) => key.includes('hover')));
 });
 
@@ -1304,6 +1307,61 @@ test('the narration instruction asks for short prose, allows a hedged reading, a
   assert.match(MEMBER_NARRATION_INSTRUCTION, /never invent/);
 });
 
+test('buildReviewNarrationEvidence lists the recorded change set only', () => {
+  const evidence = buildReviewNarrationEvidence({
+    kind: 'commit',
+    commit: { shortHash: '9f98c81', author: 'opencode', date: '2026-09-21T10:00:00Z', subject: 'fix(android): remove negative padding' },
+    totals: { files: 1, insertions: 0, deletions: 1, uncounted: 0 },
+    files: [
+      { path: 'app/CommuteComponents.kt', status: 'modified', group: 'commit', insertions: 0, deletions: 1, inGraph: true },
+    ],
+    impact: { affected: [{ id: 'app/HomeScreen.kt', distance: 2 }], outsideGraph: [] },
+    metrics: {
+      totals: {
+        measured: 1,
+        files: 1,
+        complexity: { before: 24, after: 24, added: 0, removed: 0 },
+        coupling: { added: 0, removed: 0 },
+      },
+    },
+    cohesion: { baseline: 'HEAD', files: [{ path: 'app/CommuteComponents.kt', before: 0, after: 0, note: '' }] },
+  });
+  assert.match(evidence, /^Commit review/);
+  assert.match(evidence, /Commit: fix\(android\): remove negative padding \(9f98c81 by opencode, 2026-09-21\)/);
+  assert.match(evidence, /Changed: 1 file\(s\), \+0 −1 lines/);
+  assert.match(evidence, /- app\/CommuteComponents\.kt \(modified, \+0 −1, in graph\)/);
+  assert.match(evidence, /Recorded dependents the change can reach: 1/);
+  assert.match(evidence, /- app\/HomeScreen\.kt \(distance 2\)/);
+  assert.match(evidence, /Change metrics: complexity \+0 −0 \(24 → 24\); coupling \+0 −0 import\(s\)/);
+  assert.match(evidence, /Cohesion from recorded member wiring compared with HEAD:/);
+  assert.match(evidence, /- app\/CommuteComponents\.kt: cohesion 0 → 0/);
+});
+
+test('buildReviewNarrationEvidence names missing counts and empty change sets', () => {
+  const evidence = buildReviewNarrationEvidence({
+    kind: 'working-tree',
+    totals: { files: 1, insertions: 0, deletions: 0, uncounted: 1 },
+    files: [{ path: 'logo.png', status: 'untracked', group: 'untracked', insertions: null, deletions: null, inGraph: false }],
+    impact: { affected: [], outsideGraph: ['logo.png'] },
+  });
+  assert.match(evidence, /^Working-tree review/);
+  assert.match(evidence, /1 uncounted/);
+  assert.match(evidence, /- logo\.png \(untracked, line counts unavailable, outside the scanned graph\)/);
+  assert.match(evidence, /Recorded dependents the change can reach: 0/);
+  assert.match(evidence, /Changed paths outside the scanned graph: 1/);
+  assert.doesNotMatch(evidence, /Change metrics/);
+
+  const empty = buildReviewNarrationEvidence({ kind: 'commit', files: [], totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 }, impact: { affected: [], outsideGraph: [] } });
+  assert.match(empty, /Changed files \(0\):\n- none recorded/);
+});
+
+test('the review narration instruction asks what the change does for the app', () => {
+  assert.match(REVIEW_NARRATION_INSTRUCTION, /three to six sentences/);
+  assert.match(REVIEW_NARRATION_INSTRUCTION, /capability or behaviour/);
+  assert.match(REVIEW_NARRATION_INSTRUCTION, /appears to/);
+  assert.match(REVIEW_NARRATION_INSTRUCTION, /never invent/);
+});
+
 test('narrativeBlocks turns light markdown into paragraphs, lists, and inline runs', () => {
   const blocks = narrativeBlocks(
     'It wraps `virtualRange` and is **hot**.\n\nNotes:\n1. first\n2) second\n- a\n\n## Heading\nDone',
@@ -1445,4 +1503,22 @@ test('crossRepoNodeIds keeps only recorded files the current graph actually drew
   assert.deepEqual(crossRepoNodeIds(report, nodes), ['src/client.ts', 'src/uses-api.ts']);
   assert.deepEqual(crossRepoNodeIds(null, nodes), []);
   assert.deepEqual(crossRepoNodeIds(report, []), []);
+});
+
+test('buildElements qualifies a file name that another file shares, and only that one', () => {
+  const elements = buildElements({
+    nodes: [
+      { id: 'portfolio/types.rs', kind: 'module' },
+      { id: 'market/types.rs', kind: 'module' },
+      { id: 'market/engine.rs', kind: 'module' },
+      { id: 'README.md', kind: 'module' },
+    ],
+    edges: [],
+    positions: [],
+  });
+  const labels = Object.fromEntries(elements.nodes.map((node) => [node.data.id, node.data.label]));
+  assert.equal(labels['portfolio/types.rs'], 'portfolio/types.rs');
+  assert.equal(labels['market/types.rs'], 'market/types.rs');
+  assert.equal(labels['market/engine.rs'], 'engine.rs');
+  assert.equal(labels['README.md'], 'README.md');
 });

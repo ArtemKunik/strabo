@@ -20,15 +20,20 @@ globalThis.ResizeObserver = class {
 };
 
 const {
+  renderChangesWith,
   renderDiagnostics,
   renderFolderList,
   renderFunctions,
   renderImpactPassport,
+  renderInspector,
   renderLegend,
+  renderMemberMap,
   renderNarrationPanel,
   renderNarrativeReply,
   renderOverlayPanel,
+  renderReview,
   renderShortcuts,
+  renderSource,
   renderWorkspace,
 } = await import('../../ui/strabo-panels.js');
 const { createVirtualList } = await import('../../ui/strabo-virtual.js');
@@ -361,6 +366,62 @@ test('renderNarrationPanel shows loading, the reply, and a way to the settings w
   assert.match(target.textContent, /Narrator unavailable: boom/);
 });
 
+test('renderReview offers the change-set narrator only when a handler is supplied', () => {
+  const review = {
+    available: true,
+    kind: 'commit',
+    commit: { shortHash: 'abc1234', author: 'a', date: '2026-01-01T00:00:00Z', subject: 'Change' },
+    files: [],
+    totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+    impact: { affected: [], outsideGraph: [] },
+  };
+
+  const inert = container();
+  renderReview(inert, review, {});
+  assert.equal(inert.querySelector('#narrate-change'), null);
+
+  const off = container();
+  renderReview(off, review, {
+    narratorStatus: { configured: false, reason: 'not-configured' },
+    onNarrate: async () => ({ available: false }),
+  });
+  const offButton = off.querySelector('#narrate-change');
+  assert.equal(offButton.disabled, true);
+  assert.match(offButton.title, /off/i);
+
+  const ready = container();
+  renderReview(ready, review, {
+    narratorStatus: { configured: true, model: 'gpt-x', requestBudget: 20, remaining: 19 },
+    onNarrate: async () => ({ available: true, text: 'It removes a crash.' }),
+  });
+  const button = ready.querySelector('#narrate-change');
+  assert.equal(button.textContent, 'Narrate change');
+  assert.equal(button.disabled, false);
+});
+
+test('renderReview sends the change set to the narrator and renders the reply', async () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'commit',
+      commit: { shortHash: 'abc1234', author: 'a', date: '2026-01-01T00:00:00Z', subject: 'Change' },
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+    },
+    {
+      narratorStatus: { configured: true, model: 'gpt-x', requestBudget: 20, remaining: 19 },
+      onNarrate: async () => ({ available: true, text: 'It removes a crash.' }),
+    },
+  );
+  target.querySelector('#narrate-change').click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(target.querySelector('[data-role="narrative"]').textContent, /It removes a crash\./);
+  assert.match(target.querySelector('.narrator-attribution').textContent, /not recorded evidence/);
+});
+
 test('renderImpactPassport renders the file card with its cells, signals, and functions', () => {
   const target = container();
   renderImpactPassport(target, {
@@ -467,4 +528,208 @@ test('renderImpactPassport rolls a change set up and lists each file', () => {
   assert.equal(target.querySelector('[data-role="impact-totals"] [data-role="impact-risk"] .impact-cell-value').textContent, 'MODERATE 40/100');
   assert.equal(target.querySelector('[data-role="impact-files"] button.link').dataset.path, 'a.ts');
   assert.match(target.querySelector('[data-role="impact-files"] .impact-risk-band').textContent, /MODERATE 40/);
+});
+
+test('renderSource shows a file line by line, numbered and marked at the evidence line', () => {
+  const target = container();
+  renderSource(target, {
+    file: 'src/a.ts',
+    ref: null,
+    mode: 'content',
+    loading: false,
+    error: null,
+    content: 'const a = 1;\nconst b = 2;\n',
+    line: 2,
+    hasDiff: false,
+  });
+
+  assert.equal(target.querySelector('.source-path').textContent, 'src/a.ts');
+  const rows = [...target.querySelectorAll('.src-line')];
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => [row.querySelector('.src-no').textContent, row.querySelector('.src-code').textContent]),
+    [
+      ['1', 'const a = 1;'],
+      ['2', 'const b = 2;'],
+    ],
+  );
+  assert.equal(rows[1].classList.contains('src-mark'), true);
+  assert.equal(rows[0].classList.contains('src-mark'), false);
+  assert.equal(target.querySelectorAll('.source-mode').length, 0);
+});
+
+test('renderSource reports an empty file, a loading panel, and an unavailable one', () => {
+  const empty = container();
+  renderSource(empty, { file: 'a.ts', mode: 'content', loading: false, content: '' });
+  assert.match(empty.textContent, /empty/i);
+
+  const loading = container();
+  renderSource(loading, { file: 'a.ts', mode: 'content', loading: true });
+  assert.equal(loading.querySelector('[data-role="source-loading"]') !== null, true);
+
+  const failed = container();
+  renderSource(failed, { file: 'a.ts', mode: 'content', loading: false, error: 'not readable as text' });
+  assert.equal(failed.querySelector('[data-role="source-unavailable"]').textContent, 'Unavailable: not readable as text');
+});
+
+test('renderSource draws a diff with both line numbers and offers the other side', () => {
+  const target = container();
+  renderSource(
+    target,
+    {
+      file: 'src/a.ts',
+      ref: 'abc123',
+      mode: 'diff',
+      loading: false,
+      status: 'modified',
+      hasDiff: true,
+      diff: {
+        file: 'src/a.ts',
+        header: [],
+        added: 1,
+        removed: 1,
+        binary: false,
+        hunks: [
+          {
+            header: '@@ -1,2 +1,2 @@',
+            oldStart: 1,
+            oldLines: 2,
+            newStart: 1,
+            newLines: 2,
+            lines: [
+              { kind: 'context', text: 'one', oldLine: 1, newLine: 1 },
+              { kind: 'del', text: 'two', oldLine: 2, newLine: null },
+              { kind: 'add', text: 'TWO', oldLine: null, newLine: 2 },
+            ],
+          },
+        ],
+      },
+    },
+    { onShowFile: () => {} },
+  );
+
+  assert.equal(target.querySelector('.source-counts').textContent, '+1 −1');
+  assert.match(target.querySelector('.src-hunk').textContent, /@@ -1,2 \+1,2 @@/);
+  const del = target.querySelector('.src-del');
+  assert.deepEqual([...del.querySelectorAll('.src-no')].map((node) => node.textContent), ['2', '']);
+  const add = target.querySelector('.src-add');
+  assert.deepEqual([...add.querySelectorAll('.src-no')].map((node) => node.textContent), ['', '2']);
+  assert.deepEqual([...target.querySelectorAll('.source-mode')].map((button) => button.textContent), ['File']);
+});
+
+test('renderSource names a binary and an unchanged file instead of leaving the viewer blank', () => {
+  const binary = container();
+  renderSource(binary, {
+    file: 'logo.png',
+    mode: 'diff',
+    loading: false,
+    hasDiff: true,
+    diff: { file: 'logo.png', header: [], added: 0, removed: 0, binary: true, hunks: [] },
+  });
+  assert.equal(binary.querySelector('[data-role="source-binary"]') !== null, true);
+
+  const same = container();
+  renderSource(same, {
+    file: 'a.ts',
+    mode: 'diff',
+    loading: false,
+    hasDiff: true,
+    diff: { file: 'a.ts', header: [], added: 0, removed: 0, binary: false, hunks: [] },
+  });
+  assert.match(same.textContent, /No change between the two sides/);
+});
+
+test('renderInspector offers Back to the map', () => {
+  const target = container();
+  let backs = 0;
+  renderInspector(
+    target,
+    {
+      nodes: [{ id: 'a.ts', label: 'a.ts', kind: 'module', transitiveDependents: 2, transitiveDependencies: 1, lines: 12 }],
+      edges: [],
+    },
+    'a.ts',
+    { onBack: () => { backs += 1; } },
+  );
+
+  const back = target.querySelector('[data-role="panel-back"]') as HTMLButtonElement;
+  assert.equal(back.disabled, false);
+  assert.match(back.getAttribute('aria-label') ?? '', /map/);
+  back.click();
+  assert.equal(backs, 1);
+});
+
+test('renderChangesWith lists a partner with its commits and flags hidden coupling', () => {
+  const target = container();
+  let selected = null;
+  renderChangesWith(
+    target,
+    {
+      available: true,
+      partners: [
+        {
+          file: 'src/config.ts',
+          hidden: true,
+          ratio: 0.6,
+          commitsShared: 3,
+          commits: [
+            { hash: 'abcdef1234', date: '2026-01-05', subject: 'retune port' },
+            { hash: 'abcdef5678', date: '2026-01-04', subject: 'retune port again' },
+          ],
+        },
+      ],
+    },
+    { onSelect: (id) => { selected = id; } },
+  );
+
+  const list = target.querySelector('[data-role="changes-with-list"]');
+  assert.ok(list);
+  assert.match(target.textContent, /config\.ts/);
+  assert.match(target.textContent, /3 shared commit\(s\) · ratio 0\.6/);
+  assert.match(target.textContent, /hidden coupling/);
+  assert.match(target.textContent, /abcdef12 · 2026-01-05 · retune port/);
+  list.querySelector('button.link').click();
+  assert.equal(selected, 'src/config.ts');
+});
+
+test('renderChangesWith says so when there is no evidence', () => {
+  const empty = container();
+  renderChangesWith(empty, { available: true, partners: [] });
+  assert.match(empty.textContent, /No recorded commits changed this file together/);
+
+  const unavailable = container();
+  renderChangesWith(unavailable, { available: false, detail: 'no Git history' });
+  assert.match(unavailable.textContent, /no Git history/);
+});
+
+test('renderInspector includes a Changes with section', () => {
+  const target = container();
+  renderInspector(
+    target,
+    {
+      nodes: [{ id: 'a.ts', label: 'a.ts', kind: 'module', transitiveDependents: 0, transitiveDependencies: 0 }],
+      edges: [],
+    },
+    'a.ts',
+    {},
+  );
+
+  assert.ok(target.querySelector('[data-role="changes-with"]'));
+  assert.match(target.querySelector('[data-role="changes-with"]').textContent, /Changes with/);
+});
+
+test('renderMemberMap offers Back to the module passport', () => {  const target = container();
+  let backs = 0;
+  renderMemberMap(
+    target,
+    { file: 'a.ts', repository: 'acme', memberMap: { types: [], dataFlow: { available: false } } },
+    {},
+    { onBack: () => { backs += 1; } },
+  );
+
+  const back = target.querySelector('[data-role="panel-back"]') as HTMLButtonElement;
+  assert.equal(back.disabled, false);
+  assert.match(back.getAttribute('aria-label') ?? '', /module passport/);
+  back.click();
+  assert.equal(backs, 1);
 });

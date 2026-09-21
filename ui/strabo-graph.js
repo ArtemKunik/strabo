@@ -120,9 +120,40 @@ export function passportFor(model, id) {
   };
 }
 
+/**
+ * The "Changes with" partners for one file, from an `/analysis/co-change` report.
+ *
+ * Only edges with a listable commit are returned, heavy pairs first, and every partner
+ * carries the exact commits behind it. A pair outside the report yields an empty list, so
+ * the passport can say so rather than showing an invented relationship.
+ */
+export function coChangePartnersFor(report, file, limit = 20) {
+  const edges = (report?.edges ?? []).filter(
+    (edge) =>
+      (edge.source === file || edge.target === file) &&
+      Array.isArray(edge.commits) &&
+      edge.commits.length > 0,
+  );
+  return edges
+    .sort(
+      (a, b) =>
+        (b.commitsShared ?? 0) - (a.commitsShared ?? 0) ||
+        (a.source === file ? a.target : a.source).localeCompare(
+          b.source === file ? b.target : b.source,
+        ),
+    )
+    .slice(0, limit)
+    .map((edge) => ({
+      file: edge.source === file ? edge.target : edge.source,
+      hidden: edge.hidden === true,
+      ratio: edge.ratio,
+      commitsShared: edge.commitsShared ?? edge.commits.length,
+      commits: edge.commits,
+    }));
+}
+
 /** Counts for the tests / components strip, in file, block, or system mode. */
-export function mapCounts(model) {
-  const isBlock = model.prefixLength !== undefined || model.system === true;
+export function mapCounts(model) {  const isBlock = model.prefixLength !== undefined || model.system === true;
   const byKey = new Map();
   let tests = 0;
   let modules = 0;
@@ -192,6 +223,8 @@ export function shortcutSheet() {
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
     { keys: 'C', action: 'Show recorded function calls instead of imports' },
+    { keys: 'H', action: 'Show co-change coupling (commits that changed files together)' },
+    { keys: 'S', action: 'View the selected file’s source' },
     { keys: 'T', action: 'Timeline' },
     { keys: 'N', action: 'Branches' },
     { keys: 'R', action: 'Review working-tree changes' },
@@ -343,10 +376,41 @@ export function buildGraphQuery(state, options = {}) {
   return query ? `?${query}` : '';
 }
 
+/**
+ * Ids whose bare file name is shared with another file node.
+ *
+ * `mod.rs` or `types.rs` says nothing when a dozen directories hold one, so those labels
+ * carry their parent directory. Only plain path ids qualify: a block or unit node already
+ * has a server-supplied label, and a `#support` roll-up is not a file.
+ */
+function ambiguousFileIds(model) {
+  const byName = new Map();
+  for (const node of model.nodes ?? []) {
+    if (node.label || model.directoryLabels?.[node.id] || node.kind === 'unit' || node.kind === 'shelf') {
+      continue;
+    }
+    const segments = node.id.split('/');
+    if (segments.length < 2) {
+      continue;
+    }
+    const name = segments[segments.length - 1];
+    const ids = byName.get(name);
+    if (ids) ids.push(node.id);
+    else byName.set(name, [node.id]);
+  }
+  return new Set([...byName.values()].filter((ids) => ids.length > 1).flat());
+}
+
+/** `parent/name` for a path id: enough to tell `portfolio/types.rs` from `market/types.rs`. */
+function qualifiedName(id) {
+  return id.split('/').slice(-2).join('/');
+}
+
 /** Join API nodes to metrics and positions. */
 export function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
+  const ambiguous = ambiguousFileIds(model);
 
   const nodes = (model.nodes ?? []).map((node) => ({
     group: 'nodes',
@@ -355,7 +419,10 @@ export function buildElements(model) {
       id: node.id,
       // A block node has no path tail to fall back on, so the server's compressed,
       // unit-anchored label is preferred before the bare last segment.
-      label: node.label ?? model.directoryLabels?.[node.id] ?? node.id.split('/').pop(),
+      label:
+        node.label ??
+        model.directoryLabels?.[node.id] ??
+        (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split('/').pop()),
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
@@ -385,10 +452,54 @@ export function buildElements(model) {
       // In a System drill-down, `unit` edges are hidden until their file is selected;
       // `outside` edges are the L17 links and stay visible.
       scope: edge.scope,
+      // A co-change edge is drawn only in the off-by-default coupling lens, as a dashed
+      // relationship; the true value keeps the lens able to hide it without dropping it.
+      coChange: edge.coChange === true,
     },
   }));
 
   return { nodes, edges };
+}
+
+/**
+ * Build the `{ nodes, edges }` pair for the co-change lens from an `/analysis/co-change`
+ * report. Edges run between files already in the graph; a report naming a file outside it
+ * is skipped rather than inventing a node. The commit count rides on the stroke and the
+ * evidence rides on the data, so an edge is never drawn without a listable commit.
+ */
+export function buildCoChangeElements(model, report, startIndex = 0) {
+  const ids = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = [];
+  (report?.edges ?? []).forEach((edge, offset) => {
+    if (!ids.has(edge.source) || !ids.has(edge.target)) {
+      return;
+    }
+    if (!Array.isArray(edge.commits) || edge.commits.length === 0) {
+      return;
+    }
+    edges.push({
+      group: 'edges',
+      data: {
+        id: `coh${startIndex + offset}`,
+        source: edge.source,
+        target: edge.target,
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        kind: 'co-change',
+        weight: edge.commitsShared ?? edge.commits.length,
+        edgeWidth: edgeStrokeWidth(edge.commitsShared ?? edge.commits.length),
+        evidenceLine: null,
+        evidenceSpecifier: `${edge.commitsShared} shared commit(s)`,
+        scope: undefined,
+        coChange: true,
+        hidden: edge.hidden === true,
+        ratio: edge.ratio,
+        commitsShared: edge.commitsShared,
+        commits: edge.commits,
+      },
+    });
+  });
+  return edges;
 }
 
 /** Cytoscape positions are `{ x, y }`; never leak the `id` field from the API. */

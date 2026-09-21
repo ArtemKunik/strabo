@@ -91,6 +91,26 @@ import { Fragment, h, host, mount } from './view.js';
 /** Unique ids so each tab and its panel can point at each other with ARIA. */
 let inspectorSeq = 0;
 
+/**
+ * The in-panel Back control: a drill-in view steps down to the view it was opened from.
+ *
+ * `handlers.canGoBack === false` renders it disabled, for a view with nothing behind it;
+ * `handlers.backTitle` names the destination in the tooltip and for screen readers.
+ */
+function backButton(handlers, fallbackTitle) {
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'panel-back';
+  back.dataset.role = 'panel-back';
+  back.textContent = '← Back';
+  back.disabled = handlers.canGoBack === false;
+  const title = handlers.backTitle ?? fallbackTitle;
+  back.title = title;
+  back.setAttribute('aria-label', title);
+  back.addEventListener('click', () => handlers.onBack?.());
+  return back;
+}
+
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
   const passport = passportFor(model, id);
@@ -109,6 +129,9 @@ export function renderInspector(container, model, id, handlers = {}) {
   title.append(chip);
   title.append(document.createTextNode(node?.label ?? id));
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, 'Back to the map'));
+  }
 
   const path = document.createElement('p');
   path.className = 'passport-path';
@@ -133,6 +156,14 @@ export function renderInspector(container, model, id, handlers = {}) {
     open.addEventListener('click', () => handlers.onOpenWorkspace(id));
     actions.append(open);
   }
+  if (handlers.onViewSource) {
+    const source = document.createElement('button');
+    source.type = 'button';
+    source.className = 'source-open';
+    source.textContent = 'View source';
+    source.addEventListener('click', () => handlers.onViewSource(id));
+    actions.append(source);
+  }
   if (handlers.onOpenMemberMap) {
     const memberMap = document.createElement('button');
     memberMap.type = 'button';
@@ -141,6 +172,16 @@ export function renderInspector(container, model, id, handlers = {}) {
     memberMap.textContent = 'Member map';
     memberMap.addEventListener('click', () => handlers.onOpenMemberMap(id));
     actions.append(memberMap);
+  }
+  if (handlers.onOpenRoute) {
+    const route = document.createElement('button');
+    route.type = 'button';
+    route.className = 'route-open';
+    route.id = 'open-route';
+    route.textContent = 'Read next';
+    route.title = 'Step through the repository reading route from its entry points';
+    route.addEventListener('click', () => handlers.onOpenRoute(id));
+    actions.append(route);
   }
   const copy = document.createElement('button');
   copy.type = 'button';
@@ -285,6 +326,20 @@ export function renderInspector(container, model, id, handlers = {}) {
   selectTab(0);
   container.append(tabs, panels);
 
+  // K4: the "Changes with" section lists the files this one changes together with, from
+  // recorded commits. It is filled on demand by the server's co-change report, and says so
+  // while loading rather than showing an invented relationship.
+  const changesWith = document.createElement('section');
+  changesWith.dataset.role = 'changes-with';
+  const changesWithTitle = document.createElement('h3');
+  changesWithTitle.textContent = 'Changes with';
+  changesWith.append(changesWithTitle);
+  const changesWithBody = document.createElement('p');
+  changesWithBody.className = 'unavailable';
+  changesWithBody.textContent = 'Loading co-change…';
+  changesWith.append(changesWithBody);
+  container.append(changesWith);
+
   const trace = document.createElement('p');
   trace.className = 'trace';
   trace.dataset.role = 'trace';
@@ -340,13 +395,85 @@ function appendFact(list, term, value) {
 }
 
 /**
+ * Render the "Changes with" section: the partners this file changes together with, each
+ * showing the commits behind the pair. Only an edge with a listable commit is shown, so the
+ * section never states a relationship the history did not record; a report that is not for
+ * this file, or that has no partner, says so rather than showing an empty list.
+ */
+export function renderChangesWith(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement('h3');
+  title.textContent = 'Changes with';
+  container.append(title);
+
+  if (!result || result.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = result?.detail ?? 'Co-change is unavailable: no Git history was read.';
+    container.append(note);
+    return;
+  }
+
+  const partners = result.partners ?? [];
+  if (partners.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent =
+      'No recorded commits changed this file together with another in the window.';
+    container.append(note);
+    return;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'passport-list';
+  list.dataset.role = 'changes-with-list';
+  for (const partner of partners) {
+    const item = document.createElement('li');
+    item.dataset.delegateNode = partner.file;
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'link';
+    open.textContent = partner.file;
+    open.addEventListener('click', () => handlers.onSelect?.(partner.file));
+    item.append(open);
+
+    const badge = document.createElement('span');
+    badge.className = 'evidence';
+    badge.hidden = !partner.hidden;
+    badge.textContent = 'hidden coupling';
+    item.append(badge);
+
+    const summary = document.createElement('span');
+    summary.className = 'evidence';
+    summary.textContent = `${partner.commitsShared} shared commit(s) · ratio ${partner.ratio}`;
+    item.append(summary);
+
+    const commits = document.createElement('ul');
+    commits.className = 'cochange-commits';
+    for (const commit of partner.commits.slice(0, 5)) {
+      const line = document.createElement('li');
+      line.textContent = `${commit.hash.slice(0, 8)} · ${commit.date} · ${commit.subject}`;
+      commits.append(line);
+    }
+    if (partner.commits.length > 5) {
+      const more = document.createElement('li');
+      more.className = 'unavailable';
+      more.textContent = `+${partner.commits.length - 5} more commit(s)`;
+      commits.append(more);
+    }
+    item.append(commits);
+    list.append(item);
+  }
+  container.append(list);
+}
+
+/**
  * Render the Member map: members grouped by type, then the data-flow panels.
  *
  * Wiring is shown only where the scan recorded field references in this file; when none
  * were recorded the panels say so instead of showing empty lists.
  */
-export function renderMembers(container, result) {
-  container.replaceChildren();
+export function renderMembers(container, result) {  container.replaceChildren();
   const symbols = result?.symbols ?? [];
   const title = document.createElement('h3');
   title.textContent = `Members (${symbols.length})`;
@@ -1662,6 +1789,16 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
         ),
   );
 
+  if (handlers.onOpenRoute) {
+    const route = document.createElement('button');
+    route.type = 'button';
+    route.id = 'open-route';
+    route.textContent = 'Read next';
+    route.title = 'Step through the outward route from the declared entry points';
+    route.addEventListener('click', () => handlers.onOpenRoute());
+    container.append(route);
+  }
+
   if (handlers.onClose) {
     const close = document.createElement('button');
     close.type = 'button';
@@ -2152,6 +2289,15 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   appendFact(facts, 'Resolution', evidence.resolutionLabel);
   container.append(facts);
 
+  if (handlers.onViewSource) {
+    const source = document.createElement('button');
+    source.type = 'button';
+    source.className = 'source-open';
+    source.textContent = 'View source';
+    source.addEventListener('click', () => handlers.onViewSource(evidence.source, evidence.line ?? null));
+    container.append(source);
+  }
+
   if (handlers.onTrace) {
     const trace = document.createElement('button');
     trace.type = 'button';
@@ -2587,6 +2733,9 @@ export function renderReviewLoading(container, handlers = {}) {
   const title = document.createElement('h3');
   title.textContent = 'Review';
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, 'Back to the previous review'));
+  }
   if (handlers.onClose) {
     const dismiss = document.createElement('button');
     dismiss.type = 'button';
@@ -2622,6 +2771,9 @@ export function renderReview(container, result, handlers = {}) {
         ? `Branch review · ${result.ref}`
         : 'Working tree review';
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, 'Back to the previous review'));
+  }
   if (handlers.onClose) {
     const dismiss = document.createElement('button');
     dismiss.type = 'button';
@@ -2659,6 +2811,14 @@ export function renderReview(container, result, handlers = {}) {
     totals.uncounted > 0 ? ` · ${totals.uncounted} uncounted` : ''
   }`;
   container.append(summary);
+
+  // The opt-in narrator may explain the change set; it never alters the recorded review.
+  const narrator = document.createElement('div');
+  narrator.className = 'review-narrator';
+  appendNarratorBlock(narrator, handlers, { id: 'narrate-change', label: 'Narrate change' });
+  if (narrator.childElementCount > 0) {
+    container.append(narrator);
+  }
 
   if (result.branch) {
     renderBranchDivergence(container, result.branch, handlers);
@@ -2708,6 +2868,16 @@ export function renderReview(container, result, handlers = {}) {
           ? 'line counts unavailable'
           : `+${file.insertions} −${file.deletions}`;
       item.append(counts);
+      if (handlers.onOpenDiff) {
+        const diff = document.createElement('button');
+        diff.type = 'button';
+        diff.className = 'link review-diff';
+        diff.dataset.path = file.path;
+        diff.textContent = 'Diff';
+        diff.title = `Show the change to ${file.path}`;
+        diff.addEventListener('click', () => handlers.onOpenDiff(file.path, file));
+        item.append(diff);
+      }
       list.append(item);
     }
     container.append(list);
@@ -3354,8 +3524,23 @@ export function renderMemberMap(container, data, view, handlers = {}) {
       h(
         'header',
         { className: 'member-header', key: 'header' },
-        h('p', { className: 'member-crumb' }, `${data?.repository ?? 'repository'} / ${data?.file ?? ''}`),
-        h('h2', null, 'Member map'),
+        handlers.onBack
+          ? h(
+              'button',
+              {
+                key: 'back',
+                type: 'button',
+                className: 'panel-back',
+                dataset: { role: 'panel-back' },
+                title: handlers.backTitle ?? 'Back to the module passport',
+                'aria-label': handlers.backTitle ?? 'Back to the module passport',
+                onClick: () => handlers.onBack?.(),
+              },
+              '← Back',
+            )
+          : null,
+        h('p', { className: 'member-crumb', key: 'crumb' }, `${data?.repository ?? 'repository'} / ${data?.file ?? ''}`),
+        h('h2', { key: 'title' }, 'Member map'),
       ),
       memberToolbar(view, handlers),
       memberWalkthrough(steps, stepIndex, handlers),
@@ -4112,6 +4297,176 @@ function buildConstellation(memberMap, consumerIds) {
   caption.textContent = 'Fields, methods, and repository consumers are shown when current scan data provides them.';
   section.append(caption);
   return section;
+}
+
+/* --------------------------------------------------------------- File viewer */
+
+/** The most rendered lines before the viewer says it is truncating. */
+const SOURCE_LINE_CAP = 2000;
+
+/**
+ * The in-page file viewer: a file's lines, or a change's hunks, each with its numbers.
+ *
+ * `view` is the controller's own state — `{ file, ref, mode, loading, error, content, diff,
+ * status, line, hasDiff }`. It renders exactly what the server returned; a missing side is
+ * named rather than shown as an empty file, so an empty view is never mistaken for "no lines".
+ */
+export function renderSource(container, view, handlers = {}) {
+  container.replaceChildren();
+  const data = view ?? {};
+
+  const head = document.createElement('div');
+  head.className = 'source-head';
+
+  const path = document.createElement('span');
+  path.className = 'source-path';
+  path.textContent = data.file ?? 'No file selected';
+  head.append(path);
+
+  if (data.ref) {
+    const ref = document.createElement('span');
+    ref.className = 'source-ref';
+    ref.textContent = `at ${data.ref}`;
+    head.append(ref);
+  }
+  if (data.status) {
+    const status = document.createElement('span');
+    status.className = 'review-status';
+    status.textContent = data.status;
+    head.append(status);
+  }
+  if (data.mode === 'diff' && data.diff && !data.loading) {
+    const counts = document.createElement('span');
+    counts.className = 'source-counts';
+    counts.textContent = `+${data.diff.added} −${data.diff.removed}`;
+    head.append(counts);
+  }
+
+  if (data.hasDiff) {
+    const modes = document.createElement('span');
+    modes.className = 'source-modes';
+    if (handlers.onShowFile) modes.append(sourceModeButton('File', 'content', handlers.onShowFile));
+    if (handlers.onShowDiff) modes.append(sourceModeButton('Changes', 'diff', handlers.onShowDiff));
+    if (modes.childElementCount > 0) head.append(modes);
+  }
+
+  if (handlers.onClose) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'panel-dismiss';
+    close.setAttribute('aria-label', 'Close source');
+    close.textContent = '×';
+    close.addEventListener('click', () => handlers.onClose());
+    head.append(close);
+  }
+  container.append(head);
+
+  if (data.loading) {
+    container.append(sourceNote('Loading…', 'source-loading', 'source-loading'));
+    return;
+  }
+  if (data.error) {
+    container.append(sourceNote(`Unavailable: ${data.error}`, 'source-note', 'source-unavailable'));
+    return;
+  }
+
+  const body = document.createElement('div');
+  body.className = 'source-body';
+  if (data.mode === 'diff') {
+    renderDiffBody(body, data);
+  } else {
+    renderContentBody(body, data);
+  }
+  container.append(body);
+}
+
+function sourceModeButton(label, mode, handler) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'source-mode';
+  button.dataset.mode = mode;
+  button.textContent = label;
+  button.addEventListener('click', () => handler());
+  return button;
+}
+
+function sourceNote(text, className, role) {
+  const note = document.createElement('p');
+  note.className = className;
+  if (role) note.dataset.role = role;
+  note.textContent = text;
+  return note;
+}
+
+/** One numbered line. `gutters` is `[old, new]` for a diff and `[line]` for a file. */
+function sourceLine(kind, gutters, text, mark) {
+  const row = document.createElement('div');
+  row.className = `src-line src-${kind}`;
+  if (mark) row.classList.add('src-mark');
+  for (const gutter of gutters) {
+    const number = document.createElement('span');
+    number.className = 'src-no';
+    number.textContent = gutter === null || gutter === undefined ? '' : String(gutter);
+    row.append(number);
+  }
+  const code = document.createElement('span');
+  code.className = 'src-code';
+  code.textContent = text === '' ? '\u00a0' : text;
+  row.append(code);
+  return row;
+}
+
+function renderContentBody(body, data) {
+  const content = typeof data.content === 'string' ? data.content : null;
+  if (content === null || content === '') {
+    body.append(sourceNote('This file is empty.', 'source-note', 'source-empty'));
+    return;
+  }
+  const lines = content.replace(/\n$/, '').split('\n');
+  const shown = lines.slice(0, SOURCE_LINE_CAP);
+  lines.slice(0, SOURCE_LINE_CAP).forEach((line, index) => {
+    body.append(sourceLine('context', [index + 1], line, data.line === index + 1));
+  });
+  if (lines.length > shown.length) {
+    body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} of ${lines.length} lines.`, 'source-note'));
+  }
+}
+
+function renderDiffBody(body, data) {
+  const diff = data.diff;
+  if (!diff) {
+    body.append(sourceNote('No change to show.', 'source-note'));
+    return;
+  }
+  if (diff.binary) {
+    body.append(sourceNote('Binary file — Git reports no textual diff.', 'source-note', 'source-binary'));
+    return;
+  }
+  if (diff.hunks.length === 0) {
+    body.append(sourceNote('No change between the two sides.', 'source-note', 'source-empty'));
+    return;
+  }
+  let budget = SOURCE_LINE_CAP;
+  let truncated = false;
+  for (const hunk of diff.hunks) {
+    body.append(sourceNote(hunk.header, 'src-hunk'));
+    for (const line of hunk.lines) {
+      if (budget <= 0) {
+        truncated = true;
+        break;
+      }
+      budget -= 1;
+      const marked =
+        data.line !== null &&
+        data.line !== undefined &&
+        (line.newLine === data.line || line.oldLine === data.line);
+      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked));
+    }
+    if (truncated) break;
+  }
+  if (truncated) {
+    body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} lines of this change.`, 'source-note'));
+  }
 }
 
 function svgElement(name, attributes) {

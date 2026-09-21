@@ -1,7 +1,12 @@
 import { Router } from 'express';
 
+import { computeRepositoryPassport } from '../../analysis/passport.ts';
+import { computeReadingRoute } from '../../analysis/route.ts';
+import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
+import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { createNarratorClient, type NarratorClient } from '../../narrator/client.ts';
 import { resolveNarratorConfig } from '../../narrator/config.ts';
+import { buildTourRequest } from '../../narrator/tour.ts';
 import {
   effectiveNarratorConfig,
   endpointHostOf,
@@ -100,6 +105,19 @@ export function createNarratorRouter(
     };
   };
 
+  /** Resolve the repository the tour reads, honouring the same ceiling as the analyses. */
+  const resolve = (request: { query: Record<string, unknown>; body?: Record<string, unknown> }) =>
+    resolveRepositoryRoot({
+      workspaceRoot: config.workspaceRoot,
+      scanCeiling: config.scanCeiling ?? config.workspaceRoot,
+      requested:
+        typeof request.query.repository === 'string'
+          ? request.query.repository
+          : typeof request.body?.repository === 'string'
+            ? request.body.repository
+            : undefined,
+    });
+
   router.get('/narrator', (_request, response) => {
     try {
       const effective = readEffective();
@@ -140,6 +158,27 @@ export function createNarratorRouter(
       const instruction = typeof body.instruction === 'string' ? body.instruction : '';
       const source = typeof body.source === 'string' ? body.source : undefined;
       response.json(await narrator.narrate({ instruction, evidence, ...(source ? { source } : {}) }));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The opt-in guided tour: the repository passport plus the reading route become the recorded
+   * evidence for a five-to-seven-paragraph onboarding narrative. Like every narrator call it is
+   * inert until an endpoint and model are configured, and only recorded facts are sent.
+   */
+  router.post('/narrator/tour', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const passport = computeRepositoryPassport(
+        repository.name,
+        cached.report.graph,
+        cached.report.extensionCounts,
+      );
+      const route = computeReadingRoute(repository.root, repository.name, cached.report.graph);
+      response.json(await narrator.narrate(buildTourRequest(passport, route)));
     } catch (error) {
       sendError(response, error);
     }

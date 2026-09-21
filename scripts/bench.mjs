@@ -1,0 +1,310 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { performance } from 'node:perf_hooks';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { buildAdjacency, computeGraphMetrics } from '../src/analysis/analysis.ts';
+import { clearHistoryCache, collectHistory } from '../src/analysis/history.ts';
+import { computeRepositoryPassport } from '../src/analysis/passport.ts';
+import {
+  cacheRoot,
+  clearDiskCache,
+  clearMemoryCache,
+  fingerprint,
+  getCachedGraph,
+} from '../src/cache/graph-cache.ts';
+import { describeRepository } from '../src/repository.ts';
+import { scanJsTsCalls } from '../src/scan/calls.ts';
+import { looksMinified } from '../src/scan/exclusions.ts';
+import { findGitIgnoredFiles } from '../src/scan/gitignore.ts';
+import { scanJsTsEdges } from '../src/scan/scan-js.ts';
+import { isPolyglotSource, scanPolyglotEdges } from '../src/scan/scan-polyglot.ts';
+import { collectSourceFiles, isSourceExtension } from '../src/scan/scan.ts';
+
+/**
+ * Phase 18 P1: report where a scan's time goes, cold and warm, and record it.
+ *
+ * The stages below are timed by calling the nearest production function. `scanRepository`
+ * has no per-stage seam, so parse, extract, and resolve are the enclosing edge passes and
+ * overlap: each of `scanPolyglotEdges`, `scanJsTsEdges`, and `scanJsTsCalls` also performs
+ * the other two steps. Numbers are never split or invented to fake a clean partition, and
+ * `approximate` on a stage says so. Warm is a real `getCachedGraph` hit, never a bypass.
+ */
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** scan.ts refuses files past this size; mirrored here so the harness reads the same set. */
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+export const STAGE_NAMES = ['walk', 'read', 'parse', 'extract', 'resolve', 'metrics', 'analysis', 'history'];
+
+export function benchDirectory() {
+  const configured = process.env.STRABO_BENCH_DIR?.trim();
+  return configured ? path.resolve(configured) : path.join(cacheRoot(), 'bench');
+}
+
+function timed(work) {
+  const started = performance.now();
+  return Promise.resolve()
+    .then(work)
+    .then((value) => ({ ms: performance.now() - started, value }));
+}
+
+function resolveRoot(input) {
+  const candidate = path.resolve(input?.trim() || repoRoot);
+  let stat;
+  try {
+    stat = fs.statSync(candidate);
+  } catch {
+    throw new Error(`Repository path does not exist: ${candidate}`);
+  }
+  if (!stat.isDirectory()) {
+    throw new Error(`Repository path is not a directory: ${candidate}`);
+  }
+  return candidate;
+}
+
+function isInsideRoot(target, root) {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function measureScanStages(root) {
+  const exclusions = [];
+  const diagnostics = [];
+
+  const walk = await timed(() => collectSourceFiles(root, exclusions, diagnostics));
+
+  const read = await timed(async () => {
+    const ignored = await findGitIgnoredFiles(root, walk.value);
+    const contentByFile = new Map();
+    for (const file of walk.value) {
+      if (ignored.has(file) || !isSourceExtension(file)) {
+        continue;
+      }
+      const absolute = path.join(root, file);
+      let stat;
+      try {
+        stat = fs.statSync(absolute);
+      } catch {
+        continue;
+      }
+      if (stat.size > MAX_FILE_BYTES) {
+        continue;
+      }
+      const content = fs.readFileSync(absolute, 'utf8');
+      if (looksMinified(content)) {
+        continue;
+      }
+      contentByFile.set(file, content);
+    }
+    return contentByFile;
+  });
+
+  const contentByFile = read.value;
+  const files = [...contentByFile.keys()].sort();
+
+  const extract = await timed(() => scanJsTsEdges(files, contentByFile, { root }));
+  const parse = await timed(() => scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile));
+  const resolve = await timed(() => scanJsTsCalls(files, contentByFile, { root }));
+
+  return {
+    files,
+    ms: { walk: walk.ms, read: read.ms, extract: extract.ms, parse: parse.ms, resolve: resolve.ms },
+  };
+}
+
+export async function runBenchmark(repoArg) {
+  const root = resolveRoot(repoArg);
+  const repository = await describeRepository(root);
+  const rev = await fingerprint(root);
+  const benchDir = benchDirectory();
+
+  // Empty every cache the measured paths read before the cold pass.
+  clearMemoryCache(root);
+  clearDiskCache(root);
+  clearHistoryCache();
+
+  const scan = await measureScanStages(root);
+
+  const historyCold = await timed(() => collectHistory(root, scan.files));
+  const historyWarm = await timed(() => collectHistory(root, scan.files));
+
+  // The cold miss is timed here, after the stage pass, so the parser runtime is already warm;
+  // one-time grammar loading lands in the stage pass's parse/resolve rows, not this number.
+  clearMemoryCache(root);
+  clearDiskCache(root);
+  const cold = await timed(() => getCachedGraph(root));
+  const memory = await timed(() => getCachedGraph(root));
+  clearMemoryCache(root);
+  const disk = await timed(() => getCachedGraph(root));
+
+  const report = cold.value.report;
+  const metrics = await timed(() => computeGraphMetrics(report.graph, buildAdjacency(report.graph)));
+  const analysis = await timed(() => computeRepositoryPassport(root, report.graph, report.extensionCounts));
+
+  const measured = {
+    walk: { coldMs: scan.ms.walk, approximate: false, source: 'collectSourceFiles', includes: 'directory walk' },
+    read: {
+      coldMs: scan.ms.read,
+      approximate: true,
+      source: 'harness read loop (mirrors scan.ts:44-76)',
+      includes: 'git check-ignore, stat, size cap, readFileSync, minified check',
+    },
+    parse: {
+      coldMs: scan.ms.parse,
+      approximate: true,
+      source: 'scanPolyglotEdges',
+      includes: 'polyglot extract and resolve',
+    },
+    extract: {
+      coldMs: scan.ms.extract,
+      approximate: true,
+      source: 'scanJsTsEdges',
+      includes: 'JS/TS reference extraction and resolve',
+    },
+    resolve: {
+      coldMs: scan.ms.resolve,
+      approximate: true,
+      source: 'scanJsTsCalls',
+      includes: 'JS/TS call parse and extract',
+    },
+    metrics: {
+      coldMs: metrics.ms,
+      approximate: false,
+      source: 'buildAdjacency + computeGraphMetrics',
+      includes: 'adjacency and transitive reach',
+    },
+    analysis: {
+      coldMs: analysis.ms,
+      approximate: false,
+      source: 'computeRepositoryPassport',
+      includes: 'passport; recomputes metrics, cycles, and coverage',
+    },
+    history: {
+      coldMs: historyCold.ms,
+      approximate: false,
+      source: 'collectHistory',
+      includes: 'one bounded git log --numstat window',
+    },
+  };
+
+  const stages = STAGE_NAMES.map((stage) => ({
+    stage,
+    coldMs: measured[stage].coldMs,
+    warmMs: stage === 'history' ? historyWarm.ms : null,
+    approximate: measured[stage].approximate,
+    source: measured[stage].source,
+    includes: measured[stage].includes,
+  }));
+
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    root,
+    rootName: repository.name,
+    revision: { head: repository.head, dirty: repository.dirty, gitUrl: repository.gitUrl },
+    fingerprint: rev,
+    cacheDir: benchDir,
+    files: {
+      scanned: report.graph.nodes.length,
+      edges: report.graph.edges.length,
+      diagnostics: report.graph.diagnostics.length,
+      excluded: report.graph.excluded.length,
+    },
+    graphCache: {
+      cold: { status: cold.value.status, ms: cold.ms },
+      memory: { status: memory.value.status, ms: memory.ms },
+      disk: { status: disk.value.status, ms: disk.ms },
+    },
+    history: {
+      available: historyCold.value.available,
+      windowDays: historyCold.value.windowDays,
+      commitsScanned: historyCold.value.commitsScanned,
+    },
+    stages,
+    notes: [
+      'Stage rows call the nearest production function; scanRepository exposes no per-stage seam.',
+      'parse, extract, and resolve overlap: each enclosing edge pass also performs the other two steps, so the rows are not additive.',
+      'The cold graph-cache miss is timed after the cold stage pass, so its parser runtime is warm; one-time grammar loading is inside the stage pass, not that number.',
+      'Node construction (entry points, line counts) and external-import collection are not separately measured.',
+    ],
+  };
+}
+
+function padRight(value, width) {
+  return String(value).padEnd(width);
+}
+
+function milliseconds(value) {
+  return value === null ? '-' : value.toFixed(1);
+}
+
+export function formatBenchmark(result) {
+  const lines = [];
+  lines.push('Strabo scan benchmark');
+  lines.push(`repo         ${result.rootName} (${result.root})`);
+  lines.push(`revision     ${result.revision.head ?? 'no git'}${result.revision.dirty ? ' (dirty)' : ''}`);
+  lines.push(`fingerprint  ${result.fingerprint ?? 'none (no git)'}`);
+  lines.push(`generated    ${result.generatedAt}`);
+  lines.push(`results      ${result.cacheDir}`);
+  lines.push('');
+
+  lines.push('Graph cache (real getCachedGraph):');
+  lines.push(`  ${padRight('tier', 8)} ${padRight('status', 10)} ${padRight('ms', 10)}`);
+  for (const [tier, entry] of Object.entries(result.graphCache)) {
+    lines.push(`  ${padRight(tier, 8)} ${padRight(entry.status, 10)} ${padRight(milliseconds(entry.ms), 10)}`);
+  }
+  lines.push('');
+
+  lines.push('Scan stages (cold pass, nearest enclosing call):');
+  lines.push(`  ${padRight('stage', 9)} ${padRight('cold ms', 10)} ${padRight('warm ms', 10)} ${padRight('approx', 7)} source`);
+  for (const stage of result.stages) {
+    lines.push(
+      `  ${padRight(stage.stage, 9)} ${padRight(milliseconds(stage.coldMs), 10)} ${padRight(
+        milliseconds(stage.warmMs),
+        10,
+      )} ${padRight(stage.approximate ? 'yes' : 'no', 7)} ${stage.source}`,
+    );
+  }
+  lines.push('');
+  lines.push(
+    `Files: ${result.files.scanned} scanned, ${result.files.edges} edges, ` +
+      `${result.files.diagnostics} diagnostics, ${result.files.excluded} excluded`,
+  );
+  lines.push(
+    `History: ${result.history.available ? `${result.history.commitsScanned} commits` : 'unavailable'}, ` +
+      `${result.history.windowDays}-day window`,
+  );
+  lines.push('');
+  lines.push('approx yes = that number is the enclosing call, which also performs the other sub-steps.');
+
+  return lines.join('\n');
+}
+
+function writeResult(result) {
+  fs.mkdirSync(result.cacheDir, { recursive: true });
+  const stamp = result.generatedAt.replace(/[:.]/g, '-');
+  const slug = result.rootName.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'repo';
+  const file = path.join(result.cacheDir, `bench-${slug}-${stamp}.json`);
+  fs.writeFileSync(file, JSON.stringify(result, null, 2));
+  return file;
+}
+
+async function main(repoArg) {
+  const result = await runBenchmark(repoArg);
+  if (isInsideRoot(result.cacheDir, result.root)) {
+    process.stderr.write(
+      `Warning: bench results land inside the scanned tree (${result.cacheDir}); set STRABO_BENCH_DIR outside it.\n`,
+    );
+  }
+  process.stdout.write(`${formatBenchmark(result)}\n`);
+  const file = writeResult(result);
+  process.stdout.write(`\nJSON written to ${file}\n`);
+}
+
+const entry = process.argv[1];
+const isDirectRun = entry !== undefined && import.meta.url === pathToFileURL(path.resolve(entry)).href;
+if (isDirectRun) {
+  await main(process.argv[2]);
+}

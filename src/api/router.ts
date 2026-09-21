@@ -7,7 +7,9 @@ import { createRepositoryStore, type RepositoryStore } from '../state/repository
 import { createSettingsStore, type SettingsStore } from '../state/settings-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
 import { createDelegateRouter } from './routes/delegate.ts';
+import { createFilesRouter } from './routes/files.ts';
 import { createGraphRouter } from './routes/graph.ts';
+import { createInteropRouter } from './routes/interop.ts';
 import { createLineageRouter } from './routes/lineage.ts';
 import { createNarratorRouter } from './routes/narrator.ts';
 import { createRepositoriesRouter } from './routes/repositories.ts';
@@ -70,6 +72,8 @@ export function createStraboRouter(
     keyStore: narratorKeyStore,
   };
   router.use(createGraphRouter(config));
+  router.use(createInteropRouter(config));
+  router.use(createFilesRouter(config));
   router.use(createAnalysisRouter(config));
   router.use(createRiskRouter(config));
   router.use(createDelegateRouter(config));

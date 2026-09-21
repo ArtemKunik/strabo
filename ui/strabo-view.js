@@ -6,14 +6,22 @@
  * construction lives in `strabo-core.js`, the layers and lenses in their own modules.
  */
 
-import { islandBounds } from './strabo-core.js';
+import {
+  applyIslandOffsets,
+  islandBounds,
+  islandsApply,
+  normalizeIslandOffsets,
+  shiftIslandOffset,
+} from './strabo-core.js';
 import { createIslandLayer } from './strabo-island-layer.js';
 import { createCytoscape } from './strabo-cytoscape.js';
 import { createUnitCardLayer } from './strabo-unit-card-layer.js';
 import { applyGraphDiff } from './strabo-graph-sync.js';
+import { buildCoChangeElements } from './strabo-core.js';
 import { createEdgeFocus } from './strabo-edge-focus.js';
 import { createEdgeHighlight } from './strabo-edge-highlight.js';
 import {
+  applyCoChange,
   applyEdgeKind,
   applyTier,
   applyTierDirections,
@@ -33,22 +41,177 @@ import {
 export { labelFontSize } from './strabo-labels.js';
 
 export function createView(container) {
-  const islands = createIslandLayer(container);
+  const islands = createIslandLayer(container, {
+    onDragMove: shiftIsland,
+    onDragEnd: endIslandDrag,
+    isOverNodeAt: isOverNode,
+    isHoveringNode: () => hoveredNode,
+  });
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
   const cards = createUnitCardLayer(container, cy, openCard);
   const edgeFocus = createEdgeFocus(cy);
   const edgeHighlight = createEdgeHighlight(cy);
   let lastModel = null;
+  // The server's model, unshifted, and the same model with the operator's island moves
+  // replayed over it. Kept apart so resetting the layout needs no rescan and so a fresh
+  // scan always lays the map out where the layout put it before the moves are replayed.
+  let baseModel = null;
+  let islandModel = null;
+  // The island displacement per directory, in model units: the source of truth for every
+  // re-render, and what `onIslandLayout` reports for persistence.
+  let offsetsByDirectory = {};
+  // directory → its member node ids, rebuilt whenever the rendered model changes.
+  let directoryMembers = new Map();
+  // Whether the pointer is on a node, tracked from Cytoscape's own hover so the per-move
+  // cursor test stays O(1) rather than scanning every node on every pointer move.
+  let hoveredNode = false;
+  const layoutHandlers = [];
   // Model-coordinate bounds, recomputed only when the node set changes; pan and zoom
   // just re-project them.
-  let islandModel = null;
   let islandVisible = null;
   // The element set from the last render, so a re-render can update only what changed.
   let renderedElements = { nodes: [], edges: [] };
   // The edge kind being read ('imports' | 'calls'); reapplied after every render because an
   // incremental diff clears the classes the lens put on the edges.
   let edgeKind = 'imports';
+  // The last `/analysis/co-change` report and whether its lens is on. The report is merged
+  // into the rendered model as extra dashed edges; the lens only shows or hides them.
+  let coChangeReport = null;
+  let coChangeOn = false;
+
+  /** Rebuild the rendered model, replaying the operator's island moves over `baseModel`. */
+  function renderModel() {
+    if (!baseModel) {
+      return;
+    }
+    islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
+    // Co-change edges are drawn only when the coupling lens is on, so the default map pays
+    // for nothing. They end at nodes already in the model; a stale report for another
+    // repository finds no node and contributes no edge.
+    if (coChangeOn && coChangeReport) {
+      islandModel = {
+        ...islandModel,
+        edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport)],
+      };
+    }
+    lastModel = islandModel;
+    directoryMembers = membersByDirectory(islandModel);
+    renderedElements = applyGraphDiff(cy, islandModel, renderedElements);
+    islandVisible = null;
+    repaintIslands();
+    cards.apply(islandModel);
+    edgeFocus.apply();
+    applyEdgeKind(cy, edgeKind);
+    applyCoChange(cy, coChangeOn);
+    applyLabelBudget(cy, true);
+    // Removal doesn't fire unselect events, so the old node ids would otherwise linger
+    // in whatever last read the group — tell listeners the slate is clean.
+    notifyGroup();
+  }
+
+  /** Whether a device-space point lands on a visible node, so Cytoscape keeps that press. */
+  function isOverNode(clientX, clientY) {
+    const bounds = container.getBoundingClientRect();
+    const x = clientX - bounds.left;
+    const y = clientY - bounds.top;
+    return cy.nodes(':visible').some((node) => {
+      const box = node.renderedBoundingBox();
+      return x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2;
+    });
+  }
+
+  /** Every directory's member ids, so a drag can move exactly one group's nodes. */
+  function membersByDirectory(model) {
+    const map = new Map();
+    if (!islandsApply(model)) {
+      return map;
+    }
+    for (const node of model.nodes ?? []) {
+      const directory = node.directory ?? '.';
+      const list = map.get(directory);
+      if (list) {
+        list.push(node.id);
+      } else {
+        map.set(directory, [node.id]);
+      }
+    }
+    return map;
+  }
+
+  /** Move one directory's nodes by a model-space delta; called on every drag frame. */
+  function shiftIsland(directory, dx, dy) {
+    if (!directory || !islandModel || !islandsApply(islandModel)) {
+      return;
+    }
+    offsetsByDirectory = shiftIslandOffset(offsetsByDirectory, directory, dx, dy);
+    const ids = directoryMembers.get(directory) ?? [];
+    const members = new Set(ids);
+    cy.batch(() => {
+      for (const id of ids) {
+        const element = cy.getElementById(id);
+        if (element.empty()) {
+          continue;
+        }
+        const position = element.position();
+        element.position({ x: position.x + dx, y: position.y + dy });
+      }
+    });
+    // The plates are drawn from the model, not from live node positions, so it has to be
+    // shifted in step or the plate would trail its nodes during the drag.
+    islandModel = {
+      ...islandModel,
+      positions: (islandModel.positions ?? []).map((position) =>
+        members.has(position.id)
+          ? { ...position, x: position.x + dx, y: position.y + dy }
+          : position,
+      ),
+    };
+    lastModel = islandModel;
+    repaintIslands();
+  }
+
+  /** The selection a default background tap would clear, since a plate press claims the tap. */
+  function clearBackgroundSelection() {
+    cy.elements(':selected').unselect();
+    edgeHighlight.select(null);
+    for (const handler of edgeHandlers) {
+      handler(null);
+    }
+  }
+
+  /** Persist a finished drag; a press that never moved is the click the plate intercepted. */
+  function endIslandDrag(directory, moved) {
+    if (!directory) {
+      return;
+    }
+    if (!moved) {
+      clearBackgroundSelection();
+      return;
+    }
+    const snapshot = {};
+    for (const [key, value] of Object.entries(offsetsByDirectory)) {
+      snapshot[key] = { ...value };
+    }
+    for (const handler of layoutHandlers) {
+      handler(snapshot);
+    }
+  }
+
+  /** Replace the stored moves; a repository switch passes its own, a reset passes `{}`. */
+  function setIslandOffsets(offsets) {
+    offsetsByDirectory = normalizeIslandOffsets(offsets);
+    renderModel();
+  }
+
+  /** A defensive copy of the stored moves, so a caller cannot mutate them in place. */
+  function islandOffsets() {
+    const snapshot = {};
+    for (const [key, value] of Object.entries(offsetsByDirectory)) {
+      snapshot[key] = { ...value };
+    }
+    return snapshot;
+  }
 
   function repaintIslands() {
     islands.paint(
@@ -137,10 +300,12 @@ export function createView(container) {
     }
   });
   cy.on('mouseover', 'node', (event) => {
+    hoveredNode = true;
     edgeHighlight.fade(event.target);
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
   cy.on('mouseout', 'node', () => {
+    hoveredNode = false;
     edgeHighlight.fade(null);
     for (const handler of hoverHandlers) handler(null);
   });
@@ -183,18 +348,8 @@ export function createView(container) {
       setLabelsVisibleState(cy, visible);
     },
     render(model) {
-      renderedElements = applyGraphDiff(cy, model, renderedElements);
-      islandModel = model;
-      lastModel = model;
-      islandVisible = null;
-      repaintIslands();
-      cards.apply(model);
-      edgeFocus.apply();
-      applyEdgeKind(cy, edgeKind);
-      applyLabelBudget(cy, true);
-      // Removal doesn't fire unselect events, so the old node ids would otherwise linger
-      // in whatever last read the group — tell listeners the slate is clean.
-      notifyGroup();
+      baseModel = model;
+      renderModel();
     },
     highlight(ids) {
       dimOutside(cy, ids);
@@ -217,6 +372,18 @@ export function createView(container) {
     setEdgeKind(mode) {
       edgeKind = mode === 'calls' ? 'calls' : 'imports';
       applyEdgeKind(cy, edgeKind);
+    },
+    /**
+     * Draw the co-change coupling edges from an `/analysis/co-change` report.
+     *
+     * The report is merged into the model as dashed edges and the lens is applied; pass
+     * `null` or `{ on: false }` to hide them. This is a re-render, not a rescan: the report
+     * is fetched separately so the default map never pays for a history pass.
+     */
+    setCoChange(report, on = true) {
+      coChangeReport = report;
+      coChangeOn = on === true && report !== null;
+      renderModel();
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
@@ -258,10 +425,27 @@ export function createView(container) {
     },
     /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */
     setUnitCards(unitCards) {
-      if (lastModel) {
-        lastModel = { ...lastModel, unitCards };
-        cards.apply(lastModel);
+      if (islandModel) {
+        islandModel = { ...islandModel, unitCards };
+        lastModel = islandModel;
+        cards.apply(islandModel);
       }
+    },
+    /** Replace the persisted island moves for the current repository (pass `{}` to reset). */
+    setIslandOffsets(offsets) {
+      setIslandOffsets(offsets);
+    },
+    /** A copy of the current island moves, keyed by directory. */
+    islandOffsets() {
+      return islandOffsets();
+    },
+    /** Drop every move and lay the map out where the computed layout put it. */
+    resetIslandOffsets() {
+      setIslandOffsets({});
+    },
+    /** Subscribe to a finished island drag, receiving the full offsets map to persist. */
+    onIslandLayout(handler) {
+      layoutHandlers.push(handler);
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
@@ -308,6 +492,10 @@ export function createView(container) {
       return islandBounds(islandModel, { visible: islandVisible }).map(
         (island) => island.directory,
       );
+    },
+    /** The painted plate boxes from the last frame, in device space, for hit-test callers. */
+    islandBoxes() {
+      return islands.boxes();
     },
   };
 }

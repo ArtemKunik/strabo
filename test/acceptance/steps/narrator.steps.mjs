@@ -160,6 +160,31 @@ Then('the narrative reports the stub reply', async function () {
   assert.match(reply, /Model-generated narrative/);
 });
 
+When('I narrate the change set', async function () {
+  // Settings and the first-visit passport would otherwise cover the review panel; the review
+  // is a floating window too, so it is kept open while the others are dismissed.
+  await closeFloatingPanels(this.page, 'review');
+  await this.page.waitForSelector('#review-panel #narrate-change', { timeout: 15_000 });
+  await this.page.waitForFunction(
+    () => document.getElementById('narrate-change')?.disabled === false,
+    undefined,
+    { timeout: 15_000 },
+  );
+  await this.page.click('#review-panel #narrate-change');
+});
+
+Then('the review narrative reports the stub reply', async function () {
+  await this.page.waitForFunction(
+    () => /stub says the wiring is recorded/i.test(
+      document.querySelector('#review-panel [data-role="narrative"]')?.textContent ?? '',
+    ),
+    undefined,
+    { timeout: 20_000 },
+  );
+  const reply = (await this.page.textContent('#review-panel [data-role="narrative"]')) ?? '';
+  assert.match(reply, /Model-generated narrative/);
+});
+
 Then('the inspector offers the narrator and reports it is off', async function () {
   await closeFloatingPanels(this.page);
   await this.openInspectorTab('functions');
@@ -174,5 +199,20 @@ Then('the inspector offers the narrator and reports it is off', async function (
     return { disabled: button?.disabled === true, title: button?.title ?? '' };
   });
   assert.equal(disabled.disabled, true, 'Narrate should be disabled while the narrator is off');
+  assert.match(disabled.title, /off|set it up/i);
+});
+
+Then('the review panel offers the narrator and reports it is off', async function () {
+  await this.page.waitForSelector('#review-panel .review-narrator .narrator-note', { timeout: 15_000 });
+  const note = (await this.page.textContent('#review-panel .review-narrator .narrator-note')) ?? '';
+  assert.match(note, /off/i);
+
+  // One call to action, and the Narrate change button is disabled with the reason as its tooltip.
+  await this.page.waitForSelector('#review-panel [data-role="narrator-setup"]', { timeout: 15_000 });
+  const disabled = await this.page.evaluate(() => {
+    const button = document.getElementById('narrate-change');
+    return { disabled: button?.disabled === true, title: button?.title ?? '' };
+  });
+  assert.equal(disabled.disabled, true, 'Narrate change should be disabled while the narrator is off');
   assert.match(disabled.title, /off|set it up/i);
 });

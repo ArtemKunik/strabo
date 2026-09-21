@@ -49,6 +49,38 @@ directory. The resolved root and scan ceiling are printed at startup, so a run a
 the wrong directory is visible rather than silent. Use `STRABO_SCAN_CEILING` to allow
 scanning repositories outside the start root; see [Environment](#environment).
 
+## Headless use: export, check, and MCP
+
+The same scan backs the server, a CLI, and an agent tool surface. Starting the server is
+the default; the rest are explicit subcommands:
+
+```sh
+# portable graph: json (a versioned envelope), dot, mermaid, or svg
+node bin/strabo.js export /path/to/repo --format=mermaid
+node bin/strabo.js export --format=svg --view=system --out=map.svg
+
+# headless checks for CI; only the rules you name can fail the build
+node bin/strabo.js check --fail-on-cycles --fail-on-layer-violations
+node bin/strabo.js check --write-baseline        # record today's findings
+node bin/strabo.js check --fail-on-new-smells    # then fail only on new ones
+
+# the recorded analysis over MCP (stdio), read-only
+node bin/strabo.js mcp
+```
+
+`check` exits non-zero only when a finding is absent from the baseline, so a pre-existing
+problem does not block adoption. A fact the scan did not record is a warning, never a
+failure. The same facts are on the HTTP surface: `GET /api/strabo/export?format=...` and
+`GET /api/strabo/status`, which reports the revision the graph was indexed at, the current
+`HEAD`, and how many commits the two differ by. `strabo export --site --out=<dir>` writes a
+static site of one map per repository, for publishing demo maps without an install. The MCP
+tools, their client config, and the read-only boundary are documented in
+[docs/MCP.md](docs/MCP.md).
+
+Environment: `STRABO_AUTO_REBUILD=0` stops the server from rebuilding a stale graph in the
+background when a request observes `HEAD` moving; the map is then rebuilt only on
+**Refresh**.
+
 ## Getting started
 
 Requires Node 22+ and npm.
@@ -76,7 +108,8 @@ See [Running Strabo](#running-strabo) to start the server.
 | `STRABO_ALLOW_CEILING_WIDENING` | Startup-only `1`/`true` (or `--allow-ceiling-widening`) permits **Settings** to widen `scanCeiling` beyond its startup value. Off by default; never accepted from a request and never persisted, so a request cannot grant itself a wider boundary. |
 | `STRABO_HOST` | Interface the server binds (`--host` overrides it). Defaults to `127.0.0.1`; set `0.0.0.0` only to expose the server deliberately. |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
-| `STRABO_STATE_DIR`   | Where known repositories are persisted. Defaults to `STRABO_CACHE_DIR`. |
+| `STRABO_STATE_DIR`   | Where known repositories, settings, and check baselines are persisted. Defaults to `STRABO_CACHE_DIR`. |
+| `STRABO_AUTO_REBUILD`| `0`/`false`/`off` stops the server from rebuilding a stale graph in the background when a request observes `HEAD` moving. On by default. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
 | `STRABO_RISK`        | `1` or `online` enables CVE/license lookup via OSV.dev and deps.dev. Off by default. |
 | `STRABO_RISK_DENY`   | Comma-separated SPDX ids the license policy denies. Defaults to strong copyleft. |
@@ -240,6 +273,23 @@ content, so it is read from the baseline revision with `git show <base>:<path>` 
 the working tree, the first parent for a commit — and re-extracted for the reviewed copy. A
 file whose language has no extractor, is new, or was deleted names the missing side rather
 than showing a fabricated score.
+
+## Source viewer
+
+The **Source** window (`S`, or **View source** in the Module Passport and the Edge panel)
+reads one file inline instead of opening a browser tab: `/source?file=` returns the working
+tree and `/source?file=&ref=` a past version read with `git show`. Lines are numbered, the
+evidence line is marked, and a file Git cannot return as text (binary, or over the size cap)
+is named rather than shown as empty.
+
+Each file row in **Review changes** carries a **Diff** action that opens the same window on
+the change, through `/diff`. The route mirrors the review's own two sides rather than guessing
+them — `ref=<hash>` for a commit, `base=<mergeBase>&head=<tipHash>` for a branch, `staged=1`
+or the default unstaged working tree, and `untracked=1` for a file Git does not track (read
+whole, as additions). The unified diff is parsed into hunks with an old and a new line number
+per line, so an added line carries only a new number and a removed line only an old one.
+Binary and unchanged files say so; the viewer never shows "no changes" for a file it could
+not read.
 
 ## Change impact passport
 
@@ -526,6 +576,13 @@ clicking an entry filters the map. The zoom controls on the canvas adjust the vi
 the status bar reports the diagnostics and exclusion counts, the node kinds on screen, and
 the active renderer (WebGL2 or canvas).
 
+In file mode each directory is drawn as a plate behind its files. Dragging a plate moves the
+whole directory as one group, so the map can be re-arranged; a press that lands on a file
+still selects or drags that file, so the plate's padding and the gaps between nodes are the
+handle. The arrangement is stored per repository in `localStorage` and replayed on the next
+visit, and **Reset map layout** on the empty-canvas right-click menu restores the computed
+positions.
+
 **Calls** (toolbar `C`, file mode) swaps the map from import coupling to the recorded
 function-call graph: a dashed edge means the source file calls a function the target file
 declares. The switch is a change of reading, not of reachability — a call edge always sits
@@ -555,6 +612,12 @@ double-click the header (or use `–`) to collapse it to its title bar, and clos
 The **dock** along the bottom restores any window, showing a solid chip for an open window,
 an outlined chip for a collapsed one, and a plain chip for a closed one. Position and
 collapsed state are remembered per panel in `localStorage`, so a layout survives a reload.
+
+A drill-in view carries an in-panel **← Back** that steps down to the view it replaced:
+the Review panel walks back through the reviews shown this session (working tree, then
+each commit or branch, disabled at the start of the history), the Module Passport returns
+to the module it was opened from and then to the map, and the Member map returns to the
+Module Passport it was opened from.
 
 Selecting a node opens the **Module Passport**: direct importers, blast radius, direct
 imports, depends-on (all), plus Imports and Used by with source evidence and an

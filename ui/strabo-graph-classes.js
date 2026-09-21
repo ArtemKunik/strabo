@@ -22,6 +22,7 @@ export const RESET_CLASSES = [
   'dimmed',
   'edge-faded',
   'edge-kind-hidden',
+  'edge-cochange-hidden',
   'label-hidden',
   'filtered-out',
   'tier-hidden',

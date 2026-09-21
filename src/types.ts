@@ -886,6 +886,11 @@ export interface StraboConfig {
    * cannot grow its own read boundary without an explicit opt-in.
    */
   allowCeilingWidening?: boolean;
+  /**
+   * Rebuild a stale graph in the background when a request observes that HEAD moved.
+   * Defaults to true; `STRABO_AUTO_REBUILD=0` turns it off so a scan only runs on demand.
+   */
+  autoRebuild?: boolean;
   integrations?: StraboIntegrations;
   /**
    * Dependency-risk lookup. Online advisory/license calls are opt-in and off by default;

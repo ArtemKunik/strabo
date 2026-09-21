@@ -101,6 +101,81 @@ export function islandBounds(model, options = {}) {
 }
 
 /**
+ * A validated `directory → { dx, dy }` map, rebuilt from stored JSON.
+ *
+ * Persisted layout is operator input read back from localStorage, so nothing is trusted:
+ * a non-object, a non-string key, or a non-finite pair is dropped rather than applied, and
+ * a zero move is dropped because it says nothing. The result is always a plain object.
+ */
+export function normalizeIslandOffsets(raw) {
+  const offsets = {};
+  if (!raw || typeof raw !== 'object') {
+    return offsets;
+  }
+  for (const [directory, value] of Object.entries(raw)) {
+    if (!directory || !value || typeof value !== 'object') {
+      continue;
+    }
+    const dx = Number(value.dx);
+    const dy = Number(value.dy);
+    if (Number.isFinite(dx) && Number.isFinite(dy) && (dx !== 0 || dy !== 0)) {
+      offsets[directory] = { dx, dy };
+    }
+  }
+  return offsets;
+}
+
+/** The recorded move for one directory, or null when it sits where the layout put it. */
+export function islandOffset(offsets, directory) {
+  const entry = offsets?.[directory];
+  return entry ? { dx: entry.dx, dy: entry.dy } : null;
+}
+
+/** Whether any directory has been moved. */
+export function hasIslandOffsets(offsets) {
+  return Object.keys(offsets ?? {}).length > 0;
+}
+
+/**
+ * A new offsets map with `directory` moved `dx`/`dy` further from wherever it already sits.
+ *
+ * The offset is the island's whole displacement from the computed layout, so a live drag
+ * accumulates: each pointer move adds to it rather than replacing it.
+ */
+export function shiftIslandOffset(offsets, directory, dx, dy) {
+  if (!directory || !Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) {
+    return offsets ?? {};
+  }
+  const previous = offsets?.[directory] ?? { dx: 0, dy: 0 };
+  return { ...offsets, [directory]: { dx: previous.dx + dx, dy: previous.dy + dy } };
+}
+
+/**
+ * Replay the operator's island moves onto a fresh model.
+ *
+ * The unit that moves is the directory, but a position is per file, so a stored offset has
+ * to be applied on every render — after a rescan, a filter change, or a mode toggle — or a
+ * reload would snap every plate back. A model whose islands do not apply (block or System
+ * mode), or one with no offsets, is returned untouched so a caller can cheaply skip it.
+ */
+export function applyIslandOffsets(model, offsets) {
+  if (!model || !islandsApply(model) || !hasIslandOffsets(offsets)) {
+    return model;
+  }
+  const directoryById = new Map(
+    (model.nodes ?? []).map((node) => [node.id, node.directory ?? '.']),
+  );
+  const positions = (model.positions ?? []).map((position) => {
+    const offset = islandOffset(offsets, directoryById.get(position.id));
+    if (!offset) {
+      return position;
+    }
+    return { ...position, x: position.x + offset.dx, y: position.y + offset.dy };
+  });
+  return { ...model, positions };
+}
+
+/**
  * Project a model-coordinate island onto the viewport.
  *
  * Cytoscape's transform is `rendered = model * zoom + pan`, so islands hold their place
@@ -114,6 +189,72 @@ export function projectIsland(island, viewport) {
     width: island.width * zoom,
     height: island.height * zoom,
   };
+}
+
+/** Rendered label box: 11px type sitting `LABEL_BASELINE_GAP` above the plate's top edge. */
+export const LABEL_HEIGHT = 12;
+export const LABEL_BASELINE_GAP = 6;
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/**
+ * Which plates may keep their label once labels are held at one device size.
+ *
+ * Plates shrink with zoom but their labels do not, so a zoomed-out map runs out of gap
+ * above each plate and the title lands on the plate above it, or on the title next to it.
+ * Plates are walked in order (largest first) and a label survives only if its box clears
+ * every other plate and every label already kept; the rest stay silent and the hover
+ * caption still names them. `texts[i]` is the text island `i` would draw ('' for none).
+ * Returns, per island, whether its label may be drawn.
+ */
+export function labelsThatFit(boxes, texts) {
+  // A pan repaints every plate each frame, so neighbours come from a bucket grid instead
+  // of an all-pairs scan.
+  const bucket = 128;
+  const plateGrid = new Map();
+  const labelGrid = new Map();
+  const cellsOf = (rect) => {
+    const cells = [];
+    for (let cx = Math.floor(rect.x / bucket); cx <= Math.floor((rect.x + rect.width) / bucket); cx += 1) {
+      for (let cy = Math.floor(rect.y / bucket); cy <= Math.floor((rect.y + rect.height) / bucket); cy += 1) {
+        cells.push(`${cx},${cy}`);
+      }
+    }
+    return cells;
+  };
+  const add = (grid, rect, owner) => {
+    for (const key of cellsOf(rect)) {
+      const list = grid.get(key);
+      if (list) list.push({ rect, owner });
+      else grid.set(key, [{ rect, owner }]);
+    }
+  };
+  const hits = (grid, rect, owner) =>
+    cellsOf(rect).some((key) =>
+      (grid.get(key) ?? []).some((entry) => entry.owner !== owner && rectsOverlap(rect, entry.rect)),
+    );
+
+  boxes.forEach((box, index) => add(plateGrid, box, index));
+
+  return boxes.map((box, index) => {
+    const text = texts[index];
+    if (!text) {
+      return false;
+    }
+    const label = {
+      x: box.x + LABEL_INSET,
+      y: box.y - LABEL_BASELINE_GAP - LABEL_HEIGHT + 2,
+      width: text.length * LABEL_CHAR_WIDTH,
+      height: LABEL_HEIGHT,
+    };
+    if (hits(plateGrid, label, index) || hits(labelGrid, label, index)) {
+      return false;
+    }
+    add(labelGrid, label, index);
+    return true;
+  });
 }
 
 /** Below this rendered size a plate has no room for its name, so the label is dropped. */
@@ -138,6 +279,29 @@ export function islandHit(boxes, x, y) {
     if (!box.trimmed) {
       continue;
     }
+    if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
+      continue;
+    }
+    const area = box.width * box.height;
+    if (area < bestArea) {
+      best = box;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * The plate under a pointer when the intent is to drag it: any plate, trimmed or not.
+ *
+ * The hover caption only serves a plate whose label was cut short, so `islandHit` skips the
+ * rest; a drag has no such reason to. Overlap resolves the same way — smallest wins, so a
+ * plate nested inside another moves on its own rather than taking the larger one with it.
+ */
+export function islandHitAny(boxes, x, y) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const box of boxes) {
     if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
       continue;
     }

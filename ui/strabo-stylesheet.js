@@ -89,6 +89,10 @@ export function stylesheet() {
     { selector: 'node.tier-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-kind-hidden', style: { display: 'none' } },
+    // A co-change edge is a changed-together relationship, not a dependency: dashed so the
+    // reading survives next to an import, and hidden until the off-by-default lens is on.
+    { selector: 'edge[kind = "co-change"]', style: { 'line-style': 'dashed', opacity: 0.85 } },
+    { selector: 'edge.edge-cochange-hidden', style: { display: 'none' } },
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { 'line-style': 'dashed' } },

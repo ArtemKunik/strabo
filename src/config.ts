@@ -10,6 +10,7 @@ export interface CliEnv {
   port: number;
   riskOnline: boolean;
   allowCeilingWidening: boolean;
+  autoRebuild: boolean;
   deniedLicenses?: string[];
   narratorEndpoint?: string;
   narratorModel?: string;
@@ -48,6 +49,9 @@ export function readEnv(
     // Runtime ceiling widening is a startup-only opt-in. It is never accepted from a
     // request, so a request cannot grant itself a wider read boundary.
     allowCeilingWidening: isEnabled(env.STRABO_ALLOW_CEILING_WIDENING) || hasFlag(argv, 'allow-ceiling-widening'),
+    // Background rebuilds are on unless the operator turns them off; a status poll can then
+    // observe HEAD moving without forcing a synchronous scan on the next request.
+    autoRebuild: !isDisabled(env.STRABO_AUTO_REBUILD),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // The narrator is a second opt-in provider; without an endpoint and model it is inert.
     narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
@@ -95,6 +99,11 @@ function isEnabled(value: string | undefined): boolean {
   return value === '1' || value?.toLowerCase() === 'online' || value?.toLowerCase() === 'true';
 }
 
+function isDisabled(value: string | undefined): boolean {
+  const normalised = value?.toLowerCase();
+  return normalised === '0' || normalised === 'false' || normalised === 'off';
+}
+
 /** Build the server configuration object from resolved environment values. */
 export function configFromEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -107,6 +116,7 @@ export function configFromEnv(
     host,
     riskOnline,
     allowCeilingWidening,
+    autoRebuild,
     deniedLicenses,
     narratorEndpoint,
     narratorModel,
@@ -130,6 +140,7 @@ export function configFromEnv(
     scanCeiling,
     host,
     allowCeilingWidening,
+    autoRebuild,
     risk: {
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),

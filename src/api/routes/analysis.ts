@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 
+import { findDirectedPath } from '../../analysis/analysis.ts';
 import { computeCoverage } from '../../analysis/coverage.ts';
 import { computeChangePassport } from '../../analysis/change-passport.ts';
 import {
@@ -17,6 +18,7 @@ import { computeFileHealth } from '../../analysis/file-health.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
+import { computeReadingRoute } from '../../analysis/route.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
@@ -26,6 +28,8 @@ import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
+import { buildCoChangeEdges } from '../../analysis/co-change.ts';
+import { collectHistory } from '../../analysis/history.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
@@ -71,6 +75,33 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(computeCycles(cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The shortest recorded dependency path between two files, breadth-first and bounded.
+   * A missing path is a recorded answer (`found: false`), not an error.
+   */
+  router.get('/analysis/dependency-path', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const from = typeof request.query.from === 'string' ? request.query.from : '';
+      const to = typeof request.query.to === 'string' ? request.query.to : '';
+      if (!from || !to) {
+        response.status(400).json({ error: 'from and to query parameters are required.' });
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      const path = findDirectedPath(cached.report.graph, from, to);
+      response.json({
+        from,
+        to,
+        found: path !== null,
+        path: path ?? [],
+        hops: path ? path.length - 1 : null,
+      });
     } catch (error) {
       sendError(response, error);
     }
@@ -130,6 +161,25 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(buildSystemReport(repository.root, repository.name, cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The reading route: an outward topological walk from every declared entry point, each
+   * file naming the importer and depth that reached it, its recorded fan-in, tier, and unit.
+   * The walk follows recorded import edges only, and files no entry point reaches are returned
+   * separately rather than forced into the order. A per-layer `limit` bounds a wide layer.
+   */
+  router.get('/analysis/route', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const layerLimit = parsePositiveInt(request.query.limit, 25) ?? 25;
+      response.json(
+        computeReadingRoute(repository.root, repository.name, cached.report.graph, { layerLimit }),
+      );
     } catch (error) {
       sendError(response, error);
     }
@@ -492,5 +542,39 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     }
   });
 
+  /**
+   * Co-change edges: files that change together, each edge carrying the commits behind it.
+   *
+   * `minCommits` and `ratio` are the knobs (both default conservative). A pair with no
+   * listable commits is not drawn, and a pair no import path joins in either direction is
+   * flagged `hidden` for the review overlay. Mass commits are named in `skippedCommits`.
+   */
+  router.get('/analysis/co-change', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const files = cached.report.graph.nodes.map((node) => node.id);
+      const summary = await collectHistory(repository.root, files, {
+        windowDays: parsePositiveInt(request.query.window, 365) ?? 365,
+      });
+      const report = buildCoChangeEdges(summary, cached.report.graph, {
+        minCommits: parsePositiveInt(request.query.minCommits, 3),
+        minRatio: parseRatio(request.query.ratio),
+      });
+      response.json({ repository: repository.name, ...report });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   return router;
+}
+
+/** A 0-1 ratio query parameter, or undefined so the builder's default stands. */
+function parseRatio(value: unknown): number | undefined {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : undefined;
 }

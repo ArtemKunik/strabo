@@ -10,10 +10,12 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
+import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
+import { createFreshnessBadge } from './strabo-freshness.js';
 import {
   renderBreadcrumb,
   renderDiagnostics,
@@ -24,6 +26,7 @@ import {
   renderInspector,
   renderLegend,
   renderBranches,
+  renderChangesWith,
   renderMemberMap,
   renderMembers,
   renderNarrationPanel,
@@ -33,19 +36,30 @@ import {
   renderReviewLoading,
   renderRisk,
   renderShortcuts,
+  renderSource,
   renderTestsStrip,
   renderTimeline,
   renderWorkspace,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
+import {
+  clampRouteIndex,
+  readRouteProgress,
+  renderRoutePanel,
+  routeIndexOf,
+  routeSteps,
+  writeRouteProgress,
+} from './strabo-route.js';
 import { tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
   MEMBER_NARRATION_INSTRUCTION,
+  REVIEW_NARRATION_INSTRUCTION,
   buildGroupNamingEvidence,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
+  buildReviewNarrationEvidence,
   narratorMenuState,
 } from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
@@ -81,6 +95,8 @@ const store = createStore({
     overlay: 'none',
     /** The edge lens: 'imports' for module coupling, 'calls' for recorded function calls. */
     edgeKind: 'imports',
+    /** The co-change coupling lens: off by default, since it needs a git history pass. */
+    coChange: false,
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: 'off',
     pathMode: false,
@@ -152,6 +168,9 @@ function readViewPrefs(repository) {
     if (parsed.edgeKind === 'calls' || parsed.edgeKind === 'imports') {
       prefs.edgeKind = parsed.edgeKind;
     }
+    if (parsed.coChange === true) {
+      prefs.coChange = true;
+    }
     return prefs;
   } catch {
     return null;
@@ -167,6 +186,7 @@ function writeViewPrefs() {
         overlay: state.overlay,
         filter: state.filter,
         edgeKind: state.edgeKind,
+        coChange: state.coChange,
       }),
     );
   } catch {
@@ -186,6 +206,8 @@ function schedulePrefsSave() {
 
 /** Apply saved settings for the current repository; call before the first scan. */
 function applyViewPrefs() {
+  // The island arrangement is per repository too, and applies even when no view prefs exist.
+  view.setIslandOffsets(readIslandLayout(state.repository));
   const prefs = readViewPrefs(state.repository);
   if (!prefs) {
     return;
@@ -211,9 +233,20 @@ function applyViewPrefs() {
   if (prefs.edgeKind === 'calls' && state.mode === 'file') {
     state.edgeKind = 'calls';
   }
+  // The co-change lens is remembered, but its report is only fetched when file mode draws it.
+  if (prefs.coChange) {
+    state.coChange = true;
+  }
 }
 
 const view = createView(document.getElementById('graph'));
+
+// A finished island drag writes the arrangement under the repository it belongs to; a later
+// visit to that repository replays it. The view owns the offsets at runtime, so this only
+// persists what a drag just produced.
+view.onIslandLayout((offsets) => {
+  writeIslandLayout(state.repository, offsets);
+});
 
 /**
  * Client preferences, read once and re-applied on every change. `applyAppearance` sets the
@@ -250,6 +283,7 @@ const elements = {
   legend: document.getElementById('legend'),
   breadcrumb: document.getElementById('breadcrumb'),
   status: document.getElementById('status'),
+  freshness: document.getElementById('freshness'),
   inspector: document.getElementById('inspector'),
   strip: document.getElementById('strip'),
   hover: document.getElementById('hover'),
@@ -268,6 +302,7 @@ const elements = {
   tbPath: document.getElementById('tb-path'),
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbCalls: document.getElementById('tb-calls'),
+  tbCoChange: document.getElementById('tb-cochange'),
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
@@ -295,6 +330,8 @@ const elements = {
   settingsPanel: document.getElementById('settings-panel'),
   workspacePanel: document.getElementById('workspace-panel'),
   passportPanel: document.getElementById('passport-panel'),
+  routePanel: document.getElementById('route-panel'),
+  sourcePanel: document.getElementById('source-panel'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -307,6 +344,18 @@ let branchBase = null;
 /** True while a branch fetch/push/sync is in flight, so the panel disables its actions. */
 let branchesBusy = false;
 
+/** Reviews shown in the Review panel, oldest first, so Back can step down to one. */
+let reviewHistory = [];
+/** The review the panel is showing, so the next navigation can push it onto the history. */
+let currentReviewRequest = null;
+/** Module Passport selections, oldest first, so Back can step down to one. */
+let passportHistory = [];
+/** True while Back is re-selecting, so the step it makes is not itself pushed. */
+let passportGoingBack = false;
+/** The reading route the panel is showing, and the step it is on, so a step can focus the map. */
+let currentRoute = null;
+let routeIndex = 0;
+
 let browsedFolder = null;
 
 async function request(path) {
@@ -317,6 +366,13 @@ async function request(path) {
   }
   return response.json();
 }
+
+/** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
+const freshness = createFreshnessBadge(elements.freshness, {
+  request,
+  onRebuild: () => scan({ refresh: true }),
+  repository: () => state.repository,
+});
 
 async function loadCatalogue() {
   const catalogue = await request('/repositories');
@@ -413,6 +469,7 @@ async function scan({ refresh = false } = {}) {
     applyFilterToView();
     applyTierLens();
     applyEdgeKindLens();
+    applyCoChangeLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -432,10 +489,12 @@ async function scan({ refresh = false } = {}) {
     applyModeChrome();
     updateUnitsButton();
     updateEdgeKindButton();
+    updateCoChangeButton();
     updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
+    void freshness.refresh({ repository: state.repository });
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
     updateSystemNote(model);
@@ -607,8 +666,14 @@ function selectNode(id) {
     return;
   }
 
+  const previousSelection = selected;
   selected = id;
   store.set('ui', { node: id });
+  if (!passportGoingBack && previousSelection && previousSelection !== id) {
+    // Keep the module the passport is leaving, so Back can step down to it. Re-selecting
+    // the node already on screen (or a Back step) does not grow the history.
+    passportHistory.push(previousSelection);
+  }
   view.clearEdge();
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
@@ -624,6 +689,11 @@ function selectNode(id) {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
+    onBack: passportBack,
+    backTitle: passportHistory.length > 0 ? 'Back to the previously selected module' : 'Back to the map',
+    ...(isFileNode(id) ? { onViewSource: (target) => viewSource(target) } : {}),
+    // The reading route is repository-wide; a Module Passport opens it at its own file.
+    ...(isFileNode(id) ? { onOpenRoute: (target) => showRoute(target) } : {}),
     onOpenMemberMap: (target) => {
       // The member map is a drill-down from the passport. Open it through its window
       // controller (so it centres, raises above the passport, and takes focus), then
@@ -660,7 +730,8 @@ async function loadMembers(id) {
   const membersSection = elements.inspector.querySelector('[data-role="members"]');
   const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
   const impactSection = elements.inspector.querySelector('[data-role="impact"]');
-  if (!membersSection && !functionsSection && !impactSection) {
+  const changesWithSection = elements.inspector.querySelector('[data-role="changes-with"]');
+  if (!membersSection && !functionsSection && !impactSection && !changesWithSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -680,10 +751,12 @@ async function loadMembers(id) {
       ? await symbolsResponse.json()
       : { available: false, detail: 'Symbols are unavailable for this file.' };
     const impact = impactResponse.ok ? await impactResponse.json() : null;
+    const changesWith = changesWithSection ? await loadChangesWith(id) : null;
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
       if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
       if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
+      if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
     }
   } catch {
     if (selected === id) {
@@ -691,8 +764,32 @@ async function loadMembers(id) {
       if (membersSection) renderMembers(membersSection, fallback);
       if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
       if (impactSection) renderImpactPassport(impactSection, null);
+      if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: 'Co-change could not be loaded.' });
     }
   }
+}
+
+/**
+ * The "Changes with" partners for one file, fetched once per repository and reused.
+ *
+ * `unavailable` is reported honestly when Git history was not read, so the passport says so
+ * rather than showing an empty list as if nothing coupled.
+ */
+async function loadChangesWith(id) {
+  const repository = state.repository ?? null;
+  if (!coChangeReport || coChangeRepository !== repository) {
+    try {
+      const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
+      coChangeReport = await request(`/analysis/co-change${query}`);
+      coChangeRepository = repository;
+    } catch (error) {
+      return { available: false, detail: error.message };
+    }
+  }
+  if (coChangeReport?.unavailable) {
+    return { available: false, detail: coChangeReport.detail };
+  }
+  return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
 }
 
 /** Wrap a single file's passport in the set shape the shared card renderer reads. */
@@ -772,6 +869,16 @@ async function narrateMemberMap() {
 }
 
 /**
+ * Ask the narrator to explain one Git review's recorded change set.
+ *
+ * Only the recorded review is sent; the reply is narrative, rendered under the
+ * model-generated attribution, and never changes the recorded view.
+ */
+async function narrateReview(result) {
+  return postNarration(REVIEW_NARRATION_INSTRUCTION, buildReviewNarrationEvidence(result));
+}
+
+/**
  * The recorded evidence for narrating one file: its members, wiring, functions, and import
  * neighbours when it declares members, else its function inventory. `source` is anything with
  * `memberMap` and `functions`, such as a `/symbols` result or the open member map's data.
@@ -836,6 +943,35 @@ async function narrateNode(id) {
   }
 }
 
+/**
+ * Ask the opt-in narrator for the guided tour: passport plus reading route become the evidence.
+ *
+ * The tour is model-generated narrative, shown in the Narrator window under the same
+ * attribution as every other reply, and never changes the route or the map.
+ */
+async function narrateRouteTour() {
+  const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+  const showPanel = (panelState) => {
+    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
+  };
+  showPanel({ label: 'Guided tour', phase: 'loading' });
+  floatingWindows.find((controller) => controller.key === 'narration')?.open();
+  try {
+    const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(state.repository ? { repository: state.repository } : {}),
+    });
+    const reply = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
+    }
+    showPanel({ label: 'Guided tour', phase: 'done', reply });
+  } catch (error) {
+    showPanel({ label: 'Guided tour', phase: 'error', message: error.message });
+  }
+}
+
 /** POST recorded evidence to the narrator and return its reply. */
 async function postNarration(instruction, evidence) {
   const response = await fetch(`${API_PATH}/narrator`, {
@@ -852,6 +988,7 @@ async function postNarration(instruction, evidence) {
 
 function clearSelection() {
   selected = null;
+  passportHistory = [];
   store.set('ui', { node: null });
   state.pathFrom = null;
   state.pathMode = false;
@@ -870,6 +1007,33 @@ function clearSelection() {
   view.clearGroupSelection();
   updateFocusButton();
   refreshDock();
+}
+
+/**
+ * Step the Module Passport back to the module it was opened from, or to the map when it is
+ * the first one this session. The step is marked so re-selecting does not push it again.
+ */
+function passportBack() {
+  const previous = passportHistory.pop();
+  passportGoingBack = true;
+  try {
+    if (previous) {
+      selectNode(previous);
+    } else {
+      clearSelection();
+    }
+  } finally {
+    passportGoingBack = false;
+  }
+}
+
+/** Step the Member map back to the Module Passport it was opened from. */
+function memberMapBack() {
+  const file = memberData?.file;
+  closeMemberMap();
+  if (file) {
+    selectNode(file);
+  }
 }
 
 /** Load the member map, repository health, and consumers, then open the full view. */
@@ -966,6 +1130,7 @@ function renderMemberMapView() {
       });
     },
     onPlay: () => toggleMemberPlay(),
+    onBack: () => memberMapBack(),
     onClose: () => closeMemberMap(),
   });
 }
@@ -1159,6 +1324,8 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
+  else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
+  else if (key === 's' && selected && isFileNode(selected)) viewSource(selected);
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
   else if (key === 'v') elements.tbRisk.click();
@@ -1304,20 +1471,30 @@ async function selectCommit(commit) {
  *
  * `query` is either empty (working tree) or `?base=<ref>` (that commit's own changes).
  * The review result is rendered verbatim; a file outside the graph is reported as such
- * instead of being drawn as if it had impact.
+ * instead of being drawn as if it had impact. Each navigation pushes the review it
+ * replaces, so the panel's Back steps down through the reviews this session has shown.
  */
-async function showReview(query, commit = null, branchName = null) {
+async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
+  const entry = { query, commit, branchName };
+  if (!fromHistory && currentReviewRequest) {
+    reviewHistory.push(currentReviewRequest);
+  }
+  currentReviewRequest = entry;
+  const navigation = {
+    canGoBack: reviewHistory.length > 0,
+    onBack: reviewBack,
+  };
   const separator = query ? '&' : '?';
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
   const ticket = ++reviewTicket;
   elements.reviewPanel.hidden = false;
-  renderReviewLoading(elements.reviewPanel, { onClose: closeReview });
+  renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
   let data;
   try {
     data = await request(`/analysis/review${query}${repository}`);
   } catch (error) {
     if (ticket === reviewTicket) {
-      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview });
+      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
     }
     throw error;
   }
@@ -1327,19 +1504,44 @@ async function showReview(query, commit = null, branchName = null) {
   currentReview = data;
   if (data.available === false) {
     elements.reviewPanel.hidden = false;
-    renderReview(elements.reviewPanel, data, { onClose: closeReview });
+    renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
     return;
   }
+
+  // The review's narrator affordance needs the status before it renders.
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  // The panel was closed, or another review started, during the status fetch.
+  if (ticket !== reviewTicket) return;
 
   const overlay = reviewOverlay(data);
   view.overlay(overlay.classes);
   elements.reviewPanel.hidden = false;
   renderReview(elements.reviewPanel, data, {
     onClose: closeReview,
+    ...navigation,
     onSelect: (id) => selectNode(id),
+    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+    narratorStatus,
+    onNarrate: () => narrateReview(data),
+    onOpenNarratorSettings: openNarratorSettings,
   });
   const label = branchName ?? (commit ? commit.shortHash : 'working tree');
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
+}
+
+/** Step the Review panel down to the review it replaced, if any. */
+async function reviewBack() {
+  const previous = reviewHistory.pop();
+  if (!previous) {
+    return;
+  }
+  try {
+    await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  }
 }
 
 /** Bumped by every review request and by closing, so a late response can tell it is stale. */
@@ -1348,6 +1550,8 @@ let reviewTicket = 0;
 function closeReview() {
   reviewTicket += 1;
   currentReview = null;
+  reviewHistory = [];
+  currentReviewRequest = null;
   elements.reviewPanel.hidden = true;
   elements.reviewPanel.replaceChildren();
 }
@@ -1666,6 +1870,7 @@ async function showPassport() {
     const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
     renderRepositoryPassport(elements.passportPanel, report, {
       onSelect: (id) => selectNode(id),
+      onOpenRoute: () => showRoute(),
       onClose: closePassport,
     });
   } catch (error) {
@@ -1680,6 +1885,78 @@ async function showPassport() {
 
 function closePassport() {
   elements.passportPanel.hidden = true;
+  refreshDock();
+}
+
+/**
+ * Open the reading route: the ordered outward walk from the repository's entry points.
+ *
+ * The route is server-computed from recorded import edges, so the panel cannot order a file
+ * ahead of one that imports it. The step is remembered per repository in localStorage, and a
+ * file passed in from a Module Passport (opt-in) starts the walk there when it is routed.
+ */
+async function showRoute(preferredFile) {
+  elements.routePanel.hidden = false;
+  try {
+    const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+    currentRoute = report;
+    const steps = routeSteps(report);
+    const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
+    routeIndex =
+      preferred >= 0
+        ? clampRouteIndex(preferred, steps.length)
+        : clampRouteIndex(readRouteProgress(window.localStorage, state.repository) ?? 0, steps.length);
+    renderRouteView();
+  } catch (error) {
+    currentRoute = null;
+    renderRoutePanel(elements.routePanel, null, {}, {});
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = error.message;
+    elements.routePanel.append(note);
+  }
+  refreshDock();
+}
+
+function renderRouteView() {
+  renderRoutePanel(elements.routePanel, currentRoute, {
+    index: routeIndex,
+    ...(narratorStatus?.configured === false ? { narratorConfigured: false } : {}),
+  }, {
+    onStep: (index) => stepRoute(index),
+    onFocus: (file) => focusRouteFile(file),
+    onNarrateTour: () => narrateRouteTour(),
+  });
+}
+
+/** Move to a step, remember it, redraw, and put the file's node on the map. */
+function stepRoute(index) {
+  const steps = routeSteps(currentRoute);
+  routeIndex = clampRouteIndex(index, steps.length);
+  writeRouteProgress(window.localStorage, state.repository, routeIndex);
+  renderRouteView();
+  const step = steps[routeIndex];
+  if (step) {
+    focusRouteFile(step.file);
+  }
+}
+
+/**
+ * Select a routed file, so the map and the Module Passport follow the step. A file the current
+ * view does not draw (for example a file inside a collapsed unit) is named in the status line
+ * rather than silently selected off-screen.
+ */
+function focusRouteFile(file) {
+  const visible = (current?.nodes ?? []).some((node) => node.id === file);
+  if (!visible) {
+    elements.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
+    return;
+  }
+  selectNode(file);
+}
+
+function closeRoute() {
+  elements.routePanel.hidden = true;
   refreshDock();
 }
 
@@ -1760,6 +2037,9 @@ function selectEdge(edgeId) {
   renderEdgeEvidence(elements.edgePanel, evidence, {
     onSelect: (id) => selectNode(id),
     onTrace: (from, to) => tracePath(from, to),
+    ...(evidence && isFileNode(evidence.source)
+      ? { onViewSource: (file, line) => viewSource(file, { line }) }
+      : {}),
     onClear: () => {
       view.clearEdge();
       selectedEdgeId = null;
@@ -2001,6 +2281,20 @@ function applyEdgeKindLens() {
 }
 
 /**
+ * Re-apply the co-change lens after a render. The report travels with the view, so this
+ * only reflects the mode: outside file mode the co-change edges are hidden.
+ */
+function applyCoChangeLens() {
+  if (state.mode !== 'file' || !state.coChange) {
+    view.setCoChange(null, false);
+    return;
+  }
+  if (coChangeReport) {
+    view.setCoChange(coChangeReport, true);
+  }
+}
+
+/**
  * Toggle the calls lens. It applies without a rescan: call edges are already in the model,
  * so this only changes which kind the map draws.
  */
@@ -2022,6 +2316,52 @@ function updateEdgeKindButton() {
   const showCalls = state.mode === 'file' && state.edgeKind === 'calls';
   elements.tbCalls.classList.toggle('active', showCalls);
   elements.tbCalls.setAttribute('aria-pressed', String(showCalls));
+}
+
+/** The co-change report, fetched once per repository when the lens is first turned on. */
+let coChangeReport = null;
+let coChangeRepository = null;
+
+/**
+ * Toggle the co-change coupling lens.
+ *
+ * Off by default because it needs a git history pass, so this fetches the report the first
+ * time the lens is turned on for a repository and reuses it after. A map with no report for
+ * the repository shows no co-change edges rather than inventing them.
+ */
+async function toggleCoChange() {
+  state.coChange = !state.coChange;
+  updateCoChangeButton();
+  schedulePrefsSave();
+  if (!state.coChange) {
+    view.setCoChange(null, false);
+    return;
+  }
+  const repository = state.repository ?? null;
+  if (!coChangeReport || coChangeRepository !== repository) {
+    try {
+      const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
+      coChangeReport = await request(`/analysis/co-change${query}`);
+      coChangeRepository = repository;
+    } catch (error) {
+      state.coChange = false;
+      updateCoChangeButton();
+      elements.status.textContent = `Error: ${error.message}`;
+      return;
+    }
+  }
+  view.setCoChange(coChangeReport, true);
+}
+
+/** The co-change button appears in file mode; its pressed state follows the lens. */
+function updateCoChangeButton() {
+  if (!elements.tbCoChange) {
+    return;
+  }
+  const shown = state.mode === 'file';
+  elements.tbCoChange.hidden = !shown;
+  elements.tbCoChange.classList.toggle('active', shown && state.coChange);
+  elements.tbCoChange.setAttribute('aria-pressed', String(shown && state.coChange));
 }
 
 /** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
@@ -2072,7 +2412,7 @@ function applyModeChrome() {
 
 /**
  * Double-click drills: opens a block, a System unit, or a file. At System L0 a double-click
- * opens the unit; inside a unit a double-click on a file opens it in the workspace.
+ * opens the unit; on a file it opens the source viewer.
  */
 function onDrill(id) {
   if (state.mode === 'system') {
@@ -2081,7 +2421,7 @@ function onDrill(id) {
       return;
     }
     if (node.systemUnit) {
-      if (!id.endsWith('#support')) openFile(id);
+      if (!id.endsWith('#support')) viewSource(id);
       return;
     }
     openUnit(id);
@@ -2094,7 +2434,7 @@ function onDrill(id) {
     scan();
     return;
   }
-  openFile(id);
+  viewSource(id);
 }
 
 function openFile(id) {
@@ -2109,6 +2449,114 @@ function openFile(id) {
     return;
   }
   elements.status.textContent = `No opener available for ${id}`;
+}
+
+/* --------------------------------------------------------------- File viewer */
+
+/** The viewer's current target: the file, the two sides, and what has been fetched. */
+let sourceView = null;
+
+/** True when `id` is a file the viewer can read, not a directory block, unit, or shelf. */
+function isFileNode(id) {
+  const node = (current?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node || node.kind === 'unit' || node.kind === 'shelf') {
+    return false;
+  }
+  return state.mode === 'file' || Boolean(node.systemUnit && !id.endsWith('#support'));
+}
+
+/** Open the viewer on a file, at `line` when given. A `diffSpec` opens it on the change. */
+function viewSource(file, options = {}) {
+  sourceView = {
+    file,
+    ref: options.ref ?? null,
+    line: options.line ?? null,
+    status: options.status ?? null,
+    diffSpec: options.diffSpec ?? null,
+    hasDiff: Boolean(options.diffSpec),
+    mode: options.diffSpec ? 'diff' : 'content',
+    loading: true,
+    error: null,
+    content: null,
+    diff: null,
+  };
+  floatingWindows.find((controller) => controller.key === 'source')?.open();
+  loadSource(sourceView.mode).catch(() => {});
+}
+
+/** Open the viewer straight on a change; `spec` names the two sides for `/diff`. */
+function viewDiff(file, spec, options = {}) {
+  viewSource(file, { ...options, diffSpec: spec });
+}
+
+/** Fetch the side the viewer is showing; a late response is dropped if the target moved. */
+async function loadSource(mode) {
+  const view = sourceView;
+  if (!view) {
+    return;
+  }
+  view.mode = mode;
+  view.loading = true;
+  view.error = null;
+  sourceRender();
+  const query = new URLSearchParams({ file: view.file });
+  if (state.repository) {
+    query.set('repository', state.repository);
+  }
+  try {
+    if (mode === 'diff') {
+      for (const [key, value] of Object.entries(view.diffSpec ?? {})) {
+        query.set(key, String(value));
+      }
+      const body = await request(`/diff?${query.toString()}`);
+      if (sourceView !== view) return;
+      if (body.available === false) view.error = body.detail ?? body.reason;
+      else view.diff = body.diff;
+    } else {
+      if (view.ref) query.set('ref', view.ref);
+      const body = await request(`/source?${query.toString()}`);
+      if (sourceView !== view) return;
+      view.content = body.content;
+    }
+  } catch (error) {
+    if (sourceView !== view) return;
+    view.error = error.message;
+  } finally {
+    if (sourceView === view) {
+      view.loading = false;
+      sourceRender();
+    }
+  }
+}
+
+function sourceRender() {
+  if (!sourceView) {
+    return;
+  }
+  renderSource(elements.sourcePanel, sourceView, {
+    onClose: () => floatingWindows.find((controller) => controller.key === 'source')?.close(),
+    onShowFile: sourceView.hasDiff && sourceView.mode === 'diff' ? () => loadSource('content') : null,
+    onShowDiff: sourceView.hasDiff && sourceView.mode === 'content' ? () => loadSource('diff') : null,
+  });
+}
+
+/** Clear the panel but keep the target, so the dock chip can reopen the last file. */
+function closeSource() {
+  elements.sourcePanel.hidden = true;
+  elements.sourcePanel.replaceChildren();
+}
+
+/** Which two sides a review row's change is between. */
+function reviewDiffSpec(result, file) {
+  if (result?.kind === 'commit' && result.ref) {
+    return { ref: result.ref };
+  }
+  if (result?.kind === 'branch' && result.branch) {
+    return { base: result.branch.mergeBase, head: result.branch.tipHash };
+  }
+  if (file?.group === 'staged') return { staged: 1 };
+  if (file?.group === 'untracked') return { untracked: 1 };
+  return {};
 }
 
 elements.repository.addEventListener('change', () => {
@@ -2330,6 +2778,13 @@ elements.tbBoundaries.addEventListener('click', () => {
 });
 if (elements.tbCalls) {
   elements.tbCalls.addEventListener('click', toggleEdgeKind);
+}
+if (elements.tbCoChange) {
+  elements.tbCoChange.addEventListener('click', () => {
+    toggleCoChange().catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  });
 }
 elements.tbBranches.addEventListener('click', () => {
   toggleBranches().catch((error) => {
@@ -2724,6 +3179,26 @@ function narrateMenuItems(target) {
   ];
 }
 
+/** Drop every stored island move for the current repository and repaint the computed layout. */
+function resetMapLayout() {
+  view.resetIslandOffsets();
+  writeIslandLayout(state.repository, {});
+  // A re-render drops the visible set the filter published, so republish it.
+  applyFilterToView();
+  showToast('Map layout reset to the computed arrangement.');
+}
+
+/** A reset entry, offered only where a view actually has a moved layout to restore. */
+function layoutMenuItems(target) {
+  if (target?.kind !== 'view' || Object.keys(view.islandOffsets()).length === 0) {
+    return [];
+  }
+  return [
+    { label: '↺ Reset map layout', hint: 'computed positions', action: resetMapLayout },
+    { separator: true },
+  ];
+}
+
 /** Right-click menu for one delegated item: launch, or copy the prompt. */
 function openDelegateMenu(target, x, y) {
   if (!target) {
@@ -2738,6 +3213,7 @@ function openDelegateMenu(target, x, y) {
     title: menuTitle,
     items: [
       ...narrateMenuItems(target),
+      ...layoutMenuItems(target),
       { label: '▶ Delegate to OpenCode', hint: 'opens TUI', action: () => delegateToAgent('opencode', target) },
       { label: '▶ Delegate to Claude', hint: 'opens TUI', action: () => delegateToAgent('claude', target) },
       { separator: true },
@@ -2950,6 +3426,21 @@ const floatingWindows = initFloatingWindows({
       onClose: () => selectEdge(null),
     },
     {
+      key: 'source',
+      element: elements.sourcePanel,
+      title: 'Source',
+      dockLabel: 'Source',
+      width: 720,
+      height: 640,
+      canOpen: () => Boolean(sourceView),
+      blockedTitle: 'Select a file to view its source',
+      onBlocked: () => {
+        elements.status.textContent = 'Select a file first — no source to show.';
+      },
+      onOpen: () => sourceRender(),
+      onClose: () => closeSource(),
+    },
+    {
       key: 'legend',
       element: elements.legend,
       title: 'Legend',
@@ -3051,6 +3542,17 @@ const floatingWindows = initFloatingWindows({
       },
       onClose: () => closePassport(),
     },
+    {
+      key: 'route',
+      element: elements.routePanel,
+      title: 'Reading route',
+      dockLabel: 'Route',
+      width: 440,
+      onOpen: () => {
+        showRoute().catch(() => {});
+      },
+      onClose: () => closeRoute(),
+    },
   ],
 });
 
@@ -3096,8 +3598,13 @@ if (window.STRABO_TEST) {
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
     islands: () => view.islandDirectories(),
+    islandBoxes: () => view.islandBoxes(),
+    islandOffsets: () => view.islandOffsets(),
+    setIslandLayout: (offsets) => view.setIslandOffsets(offsets),
+    resetIslandLayout: resetMapLayout,
     workspace: () => showWorkspace(),
     passport: () => showPassport(),
+    route: (file) => showRoute(file),
   };
 }
 

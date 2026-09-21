@@ -30,6 +30,18 @@ Feature: Member map
     And I select the "src/main/kotlin/com/acme/app/Plain.kt" node
     Then the data flow reports wiring is not recorded
 
+  @member-view @back
+  Scenario: The member map steps back to the Module Passport
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    When I step the member map back
+    Then the member map is closed and the module passport is shown for "Counter.kt"
+
   @member-view
   Scenario: Member map view with a flow walkthrough
     When I open the folder dialog

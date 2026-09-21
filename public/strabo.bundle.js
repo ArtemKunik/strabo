@@ -235,6 +235,7 @@ function shortcutSheet() {
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
     { keys: "C", action: "Show recorded function calls instead of imports" },
+    { keys: "S", action: "View the selected file\u2019s source" },
     { keys: "T", action: "Timeline" },
     { keys: "N", action: "Branches" },
     { keys: "R", action: "Review working-tree changes" },
@@ -336,9 +337,30 @@ function buildGraphQuery(state2, options = {}) {
   const query = params.toString();
   return query ? `?${query}` : "";
 }
+function ambiguousFileIds(model) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const node of model.nodes ?? []) {
+    if (node.label || model.directoryLabels?.[node.id] || node.kind === "unit" || node.kind === "shelf") {
+      continue;
+    }
+    const segments = node.id.split("/");
+    if (segments.length < 2) {
+      continue;
+    }
+    const name = segments[segments.length - 1];
+    const ids = byName.get(name);
+    if (ids) ids.push(node.id);
+    else byName.set(name, [node.id]);
+  }
+  return new Set([...byName.values()].filter((ids) => ids.length > 1).flat());
+}
+function qualifiedName(id) {
+  return id.split("/").slice(-2).join("/");
+}
 function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
+  const ambiguous = ambiguousFileIds(model);
   const nodes = (model.nodes ?? []).map((node) => ({
     group: "nodes",
     classes: `kind-${node.kind}`,
@@ -346,7 +368,7 @@ function buildElements(model) {
       id: node.id,
       // A block node has no path tail to fall back on, so the server's compressed,
       // unit-anchored label is preferred before the bare last segment.
-      label: node.label ?? model.directoryLabels?.[node.id] ?? node.id.split("/").pop(),
+      label: node.label ?? model.directoryLabels?.[node.id] ?? (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split("/").pop()),
       path: node.id,
       kind: node.kind,
       // Fill is one neutral surface for every node; directory is carried by position
@@ -605,6 +627,53 @@ function islandBounds(model, options = {}) {
     (a, b) => b.width * b.height - a.width * a.height || a.directory.localeCompare(b.directory)
   );
 }
+function normalizeIslandOffsets(raw) {
+  const offsets = {};
+  if (!raw || typeof raw !== "object") {
+    return offsets;
+  }
+  for (const [directory, value] of Object.entries(raw)) {
+    if (!directory || !value || typeof value !== "object") {
+      continue;
+    }
+    const dx = Number(value.dx);
+    const dy = Number(value.dy);
+    if (Number.isFinite(dx) && Number.isFinite(dy) && (dx !== 0 || dy !== 0)) {
+      offsets[directory] = { dx, dy };
+    }
+  }
+  return offsets;
+}
+function islandOffset(offsets, directory) {
+  const entry = offsets?.[directory];
+  return entry ? { dx: entry.dx, dy: entry.dy } : null;
+}
+function hasIslandOffsets(offsets) {
+  return Object.keys(offsets ?? {}).length > 0;
+}
+function shiftIslandOffset(offsets, directory, dx, dy) {
+  if (!directory || !Number.isFinite(dx) || !Number.isFinite(dy) || dx === 0 && dy === 0) {
+    return offsets ?? {};
+  }
+  const previous = offsets?.[directory] ?? { dx: 0, dy: 0 };
+  return { ...offsets, [directory]: { dx: previous.dx + dx, dy: previous.dy + dy } };
+}
+function applyIslandOffsets(model, offsets) {
+  if (!model || !islandsApply(model) || !hasIslandOffsets(offsets)) {
+    return model;
+  }
+  const directoryById = new Map(
+    (model.nodes ?? []).map((node) => [node.id, node.directory ?? "."])
+  );
+  const positions = (model.positions ?? []).map((position) => {
+    const offset = islandOffset(offsets, directoryById.get(position.id));
+    if (!offset) {
+      return position;
+    }
+    return { ...position, x: position.x + offset.dx, y: position.y + offset.dy };
+  });
+  return { ...model, positions };
+}
 function projectIsland(island, viewport) {
   const zoom = viewport.zoom;
   return {
@@ -613,6 +682,53 @@ function projectIsland(island, viewport) {
     width: island.width * zoom,
     height: island.height * zoom
   };
+}
+var LABEL_HEIGHT = 12;
+var LABEL_BASELINE_GAP = 6;
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+function labelsThatFit(boxes, texts) {
+  const bucket = 128;
+  const plateGrid = /* @__PURE__ */ new Map();
+  const labelGrid = /* @__PURE__ */ new Map();
+  const cellsOf = (rect) => {
+    const cells = [];
+    for (let cx = Math.floor(rect.x / bucket); cx <= Math.floor((rect.x + rect.width) / bucket); cx += 1) {
+      for (let cy = Math.floor(rect.y / bucket); cy <= Math.floor((rect.y + rect.height) / bucket); cy += 1) {
+        cells.push(`${cx},${cy}`);
+      }
+    }
+    return cells;
+  };
+  const add = (grid, rect, owner) => {
+    for (const key of cellsOf(rect)) {
+      const list = grid.get(key);
+      if (list) list.push({ rect, owner });
+      else grid.set(key, [{ rect, owner }]);
+    }
+  };
+  const hits = (grid, rect, owner) => cellsOf(rect).some(
+    (key) => (grid.get(key) ?? []).some((entry) => entry.owner !== owner && rectsOverlap(rect, entry.rect))
+  );
+  boxes.forEach((box, index) => add(plateGrid, box, index));
+  return boxes.map((box, index) => {
+    const text = texts[index];
+    if (!text) {
+      return false;
+    }
+    const label = {
+      x: box.x + LABEL_INSET,
+      y: box.y - LABEL_BASELINE_GAP - LABEL_HEIGHT + 2,
+      width: text.length * LABEL_CHAR_WIDTH,
+      height: LABEL_HEIGHT
+    };
+    if (hits(plateGrid, label, index) || hits(labelGrid, label, index)) {
+      return false;
+    }
+    add(labelGrid, label, index);
+    return true;
+  });
 }
 var LABEL_MIN_WIDTH = 64;
 var LABEL_MIN_HEIGHT = 28;
@@ -626,6 +742,21 @@ function islandHit(boxes, x, y) {
     if (!box.trimmed) {
       continue;
     }
+    if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
+      continue;
+    }
+    const area = box.width * box.height;
+    if (area < bestArea) {
+      best = box;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+function islandHitAny(boxes, x, y) {
+  let best = null;
+  let bestArea = Infinity;
+  for (const box of boxes) {
     if (x < box.x || y < box.y || x > box.x + box.width || y > box.y + box.height) {
       continue;
     }
@@ -1438,9 +1569,8 @@ function buildAgentPrompt({ agent, repository, target }) {
 
 // ui/strabo-island-layer.js
 var SVG_NS = "http://www.w3.org/2000/svg";
-var LABEL_BASELINE_GAP = 6;
 var LABEL_MIN_TOP = 12;
-function createIslandLayer(container) {
+function createIslandLayer(container, handlers = {}) {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.classList.add("island-layer");
   svg.setAttribute("aria-hidden", "true");
@@ -1453,15 +1583,28 @@ function createIslandLayer(container) {
   tooltip.hidden = true;
   container.appendChild(tooltip);
   let boxes = [];
+  let lastViewport = { pan: { x: 0, y: 0 }, zoom: 1 };
+  let drag = null;
   function hideTooltip2() {
     if (!tooltip.hidden) {
       tooltip.hidden = true;
     }
   }
-  container.addEventListener("pointermove", (event) => {
+  function pointerIn(event) {
     const bounds = container.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const y = event.clientY - bounds.top;
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+  function setDragging(active) {
+    container.classList.toggle("island-dragging", active);
+  }
+  container.addEventListener("pointermove", (event) => {
+    if (drag) {
+      return;
+    }
+    const { x, y } = pointerIn(event);
+    const over = islandHitAny(boxes, x, y);
+    const overNode = Boolean(over) && Boolean(handlers.isHoveringNode?.());
+    container.classList.toggle("island-grab", Boolean(over) && !overNode);
     const hit = islandHit(boxes, x, y);
     if (!hit) {
       hideTooltip2();
@@ -1472,16 +1615,80 @@ function createIslandLayer(container) {
     tooltip.style.left = `${x + 14}px`;
     tooltip.style.top = `${y + 14}px`;
   });
-  container.addEventListener("pointerleave", hideTooltip2);
+  container.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== void 0 && event.button !== 0) {
+        return;
+      }
+      const { x, y } = pointerIn(event);
+      const hit = islandHitAny(boxes, x, y);
+      if (!hit || handlers.isOverNodeAt?.(event.clientX, event.clientY)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      drag = {
+        directory: hit.directory,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false
+      };
+      hideTooltip2();
+      container.classList.remove("island-grab");
+      setDragging(true);
+    },
+    true
+  );
+  window.addEventListener("pointermove", (event) => {
+    if (!drag) {
+      return;
+    }
+    const dx = event.clientX - drag.clientX;
+    const dy = event.clientY - drag.clientY;
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+    drag.clientX = event.clientX;
+    drag.clientY = event.clientY;
+    drag.moved = true;
+    const zoom = lastViewport.zoom || 1;
+    handlers.onDragMove?.(drag.directory, dx / zoom, dy / zoom);
+  });
+  window.addEventListener("pointerup", () => {
+    if (!drag) {
+      return;
+    }
+    const finished = drag;
+    drag = null;
+    setDragging(false);
+    handlers.onDragEnd?.(finished.directory, finished.moved);
+  });
+  container.addEventListener("pointerleave", () => {
+    if (!drag) {
+      hideTooltip2();
+      container.classList.remove("island-grab");
+    }
+  });
   return {
+    /** The plate boxes from the last paint, in device space. `directory` names each one. */
+    boxes() {
+      return boxes.map((box) => ({ ...box }));
+    },
     /** Draw `islands` (model coordinates) under the given viewport transform. */
     paint(islands, viewport) {
       hideTooltip2();
+      lastViewport = viewport;
       sync(plates, "rect", islands.length);
       sync(labels, "text", islands.length);
+      const projected = islands.map((island) => projectIsland(island, viewport));
+      const candidates = projected.map(
+        (box, index) => islandLabelFits(box) ? fitLabel(islands[index].label, box.width) : ""
+      );
+      const fits = labelsThatFit(projected, candidates);
       boxes = [];
       islands.forEach((island, index) => {
-        const box = projectIsland(island, viewport);
+        const box = projected[index];
         const rect = plates.childNodes[index];
         rect.setAttribute("x", String(box.x));
         rect.setAttribute("y", String(box.y));
@@ -1489,7 +1696,7 @@ function createIslandLayer(container) {
         rect.setAttribute("height", String(Math.max(0, box.height)));
         rect.setAttribute("class", "island-plate");
         const label = labels.childNodes[index];
-        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : "";
+        const text = fits[index] ? candidates[index] : "";
         label.setAttribute("class", text ? "island-label" : "island-label is-hidden");
         label.setAttribute("x", String(box.x + LABEL_INSET));
         const above = box.y - LABEL_BASELINE_GAP;
@@ -1578,17 +1785,73 @@ function applyLabelBudget(cy, force = false) {
     cy.scratch("_straboLabelHidden", false);
     force = true;
   }
-  const detailed = cy.zoom() > LABEL_DETAIL_ZOOM;
-  if (!force && detailed === cy.scratch("_straboLabelDetail")) {
+  const zoom = cy.zoom();
+  const detailed = zoom > LABEL_DETAIL_ZOOM;
+  const lastZoom = cy.scratch("_straboLabelBudgetZoom");
+  const zoomed = typeof lastZoom !== "number" || Math.abs(zoom - lastZoom) >= lastZoom * 0.02;
+  if (!force && !zoomed && detailed === cy.scratch("_straboLabelDetail")) {
     return;
   }
   cy.scratch("_straboLabelDetail", detailed);
+  cy.scratch("_straboLabelBudgetZoom", zoom);
+  const wanted = cy.nodes().filter((node) => node.visible() && node.data("kind") !== "unit" && node.data("kind") !== "shelf").filter((node) => detailed || node.data("hub") || node.selected()).toArray();
+  const shown = chooseLabels(wanted, zoom);
   cy.batch(() => {
     cy.nodes().forEach((node) => {
-      const show = detailed || node.data("hub") || node.selected();
-      node.toggleClass("label-hidden", !show);
+      node.toggleClass("label-hidden", !shown.has(node.id()));
     });
   });
+}
+var LABEL_BOX_HEIGHT = 15;
+var LABEL_NODE_GAP = 4;
+var LABEL_GLYPH_PX = 0.6;
+function chooseLabels(nodes, zoom) {
+  const ranked = nodes.map((node) => {
+    const hub = Boolean(node.data("hub"));
+    const devicePx = hub ? HUB_LABEL_DEVICE_PX : LABEL_DEVICE_PX;
+    const center = node.renderedPosition();
+    const radius = (node.data("diameter") ?? 0) * zoom / 2;
+    const text = String(node.data("label") ?? "");
+    const width = text.length * devicePx * LABEL_GLYPH_PX;
+    return {
+      id: node.id(),
+      selected: node.selected(),
+      weight: node.data("diameter") ?? 0,
+      rect: {
+        x: center.x - width / 2,
+        y: center.y + radius + LABEL_NODE_GAP,
+        width,
+        height: LABEL_BOX_HEIGHT
+      }
+    };
+  }).sort((a, b) => Number(b.selected) - Number(a.selected) || b.weight - a.weight || a.id.localeCompare(b.id));
+  const bucket = 96;
+  const grid = /* @__PURE__ */ new Map();
+  const shown = /* @__PURE__ */ new Set();
+  for (const candidate of ranked) {
+    const { rect } = candidate;
+    const cells = [];
+    for (let cx = Math.floor(rect.x / bucket); cx <= Math.floor((rect.x + rect.width) / bucket); cx += 1) {
+      for (let cy = Math.floor(rect.y / bucket); cy <= Math.floor((rect.y + rect.height) / bucket); cy += 1) {
+        cells.push(`${cx},${cy}`);
+      }
+    }
+    const clear = !cells.some(
+      (key) => (grid.get(key) ?? []).some(
+        (other) => rect.x < other.x + other.width && other.x < rect.x + rect.width && rect.y < other.y + other.height && other.y < rect.y + rect.height
+      )
+    );
+    if (!clear && !candidate.selected) {
+      continue;
+    }
+    shown.add(candidate.id);
+    for (const key of cells) {
+      const list = grid.get(key);
+      if (list) list.push(rect);
+      else grid.set(key, [rect]);
+    }
+  }
+  return shown;
 }
 
 // ui/strabo-stylesheet.js
@@ -2234,17 +2497,128 @@ function applyTierDirections(cy, directions) {
 
 // ui/strabo-view.js
 function createView(container) {
-  const islands = createIslandLayer(container);
+  const islands = createIslandLayer(container, {
+    onDragMove: shiftIsland,
+    onDragEnd: endIslandDrag,
+    isOverNodeAt: isOverNode,
+    isHoveringNode: () => hoveredNode
+  });
   const cy = createCytoscape(container);
   const gpu = Boolean(cy.renderer()?.webgl);
   const cards = createUnitCardLayer(container, cy, openCard);
   const edgeFocus = createEdgeFocus(cy);
   const edgeHighlight = createEdgeHighlight(cy);
   let lastModel = null;
+  let baseModel = null;
   let islandModel = null;
+  let offsetsByDirectory = {};
+  let directoryMembers = /* @__PURE__ */ new Map();
+  let hoveredNode = false;
+  const layoutHandlers = [];
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
   let edgeKind = "imports";
+  function renderModel() {
+    if (!baseModel) {
+      return;
+    }
+    islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
+    lastModel = islandModel;
+    directoryMembers = membersByDirectory(islandModel);
+    renderedElements = applyGraphDiff(cy, islandModel, renderedElements);
+    islandVisible = null;
+    repaintIslands();
+    cards.apply(islandModel);
+    edgeFocus.apply();
+    applyEdgeKind(cy, edgeKind);
+    applyLabelBudget(cy, true);
+    notifyGroup();
+  }
+  function isOverNode(clientX, clientY) {
+    const bounds = container.getBoundingClientRect();
+    const x = clientX - bounds.left;
+    const y = clientY - bounds.top;
+    return cy.nodes(":visible").some((node) => {
+      const box = node.renderedBoundingBox();
+      return x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2;
+    });
+  }
+  function membersByDirectory(model) {
+    const map = /* @__PURE__ */ new Map();
+    if (!islandsApply(model)) {
+      return map;
+    }
+    for (const node of model.nodes ?? []) {
+      const directory = node.directory ?? ".";
+      const list = map.get(directory);
+      if (list) {
+        list.push(node.id);
+      } else {
+        map.set(directory, [node.id]);
+      }
+    }
+    return map;
+  }
+  function shiftIsland(directory, dx, dy) {
+    if (!directory || !islandModel || !islandsApply(islandModel)) {
+      return;
+    }
+    offsetsByDirectory = shiftIslandOffset(offsetsByDirectory, directory, dx, dy);
+    const ids = directoryMembers.get(directory) ?? [];
+    const members = new Set(ids);
+    cy.batch(() => {
+      for (const id of ids) {
+        const element2 = cy.getElementById(id);
+        if (element2.empty()) {
+          continue;
+        }
+        const position = element2.position();
+        element2.position({ x: position.x + dx, y: position.y + dy });
+      }
+    });
+    islandModel = {
+      ...islandModel,
+      positions: (islandModel.positions ?? []).map(
+        (position) => members.has(position.id) ? { ...position, x: position.x + dx, y: position.y + dy } : position
+      )
+    };
+    lastModel = islandModel;
+    repaintIslands();
+  }
+  function clearBackgroundSelection() {
+    cy.elements(":selected").unselect();
+    edgeHighlight.select(null);
+    for (const handler of edgeHandlers) {
+      handler(null);
+    }
+  }
+  function endIslandDrag(directory, moved) {
+    if (!directory) {
+      return;
+    }
+    if (!moved) {
+      clearBackgroundSelection();
+      return;
+    }
+    const snapshot = {};
+    for (const [key, value] of Object.entries(offsetsByDirectory)) {
+      snapshot[key] = { ...value };
+    }
+    for (const handler of layoutHandlers) {
+      handler(snapshot);
+    }
+  }
+  function setIslandOffsets(offsets) {
+    offsetsByDirectory = normalizeIslandOffsets(offsets);
+    renderModel();
+  }
+  function islandOffsets() {
+    const snapshot = {};
+    for (const [key, value] of Object.entries(offsetsByDirectory)) {
+      snapshot[key] = { ...value };
+    }
+    return snapshot;
+  }
   function repaintIslands() {
     islands.paint(
       islandBounds(islandModel, {
@@ -2317,10 +2691,12 @@ function createView(container) {
     }
   });
   cy.on("mouseover", "node", (event) => {
+    hoveredNode = true;
     edgeHighlight.fade(event.target);
     for (const handler of hoverHandlers) handler(event.target.id(), event.originalEvent);
   });
   cy.on("mouseout", "node", () => {
+    hoveredNode = false;
     edgeHighlight.fade(null);
     for (const handler of hoverHandlers) handler(null);
   });
@@ -2354,16 +2730,8 @@ function createView(container) {
       setLabelsVisible(cy, visible);
     },
     render(model) {
-      renderedElements = applyGraphDiff(cy, model, renderedElements);
-      islandModel = model;
-      lastModel = model;
-      islandVisible = null;
-      repaintIslands();
-      cards.apply(model);
-      edgeFocus.apply();
-      applyEdgeKind(cy, edgeKind);
-      applyLabelBudget(cy, true);
-      notifyGroup();
+      baseModel = model;
+      renderModel();
     },
     highlight(ids) {
       dimOutside(cy, ids);
@@ -2427,10 +2795,27 @@ function createView(container) {
     },
     /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */
     setUnitCards(unitCards) {
-      if (lastModel) {
-        lastModel = { ...lastModel, unitCards };
-        cards.apply(lastModel);
+      if (islandModel) {
+        islandModel = { ...islandModel, unitCards };
+        lastModel = islandModel;
+        cards.apply(islandModel);
       }
+    },
+    /** Replace the persisted island moves for the current repository (pass `{}` to reset). */
+    setIslandOffsets(offsets) {
+      setIslandOffsets(offsets);
+    },
+    /** A copy of the current island moves, keyed by directory. */
+    islandOffsets() {
+      return islandOffsets();
+    },
+    /** Drop every move and lay the map out where the computed layout put it. */
+    resetIslandOffsets() {
+      setIslandOffsets({});
+    },
+    /** Subscribe to a finished island drag, receiving the full offsets map to persist. */
+    onIslandLayout(handler) {
+      layoutHandlers.push(handler);
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
@@ -2477,8 +2862,41 @@ function createView(container) {
       return islandBounds(islandModel, { visible: islandVisible }).map(
         (island) => island.directory
       );
+    },
+    /** The painted plate boxes from the last frame, in device space, for hit-test callers. */
+    islandBoxes() {
+      return islands.boxes();
     }
   };
+}
+
+// ui/strabo-island-layout.js
+var ISLAND_LAYOUT_PREFIX = "strabo.islands.";
+function islandLayoutKey(repository) {
+  return `${ISLAND_LAYOUT_PREFIX}${repository ?? "default"}`;
+}
+function readIslandLayout(repository, storage = globalThis.localStorage) {
+  try {
+    const raw = storage?.getItem(islandLayoutKey(repository));
+    if (!raw) {
+      return {};
+    }
+    return normalizeIslandOffsets(JSON.parse(raw));
+  } catch {
+    return {};
+  }
+}
+function writeIslandLayout(repository, offsets, storage = globalThis.localStorage) {
+  const normalized = normalizeIslandOffsets(offsets);
+  try {
+    if (Object.keys(normalized).length === 0) {
+      storage?.removeItem(islandLayoutKey(repository));
+    } else {
+      storage?.setItem(islandLayoutKey(repository), JSON.stringify(normalized));
+    }
+  } catch {
+  }
+  return normalized;
 }
 
 // ui/strabo-delegate.js
@@ -3047,6 +3465,60 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   return controllers;
 }
 
+// ui/strabo-freshness.js
+function createFreshnessBadge(element2, options = {}) {
+  if (!element2) {
+    return { refresh: async () => null, render: () => {
+    }, status: () => null };
+  }
+  const request2 = options.request;
+  let last = null;
+  function short(revision) {
+    return revision ? revision.slice(0, 7) : "unknown";
+  }
+  function render(status) {
+    last = status;
+    const revision = status?.indexed?.revision;
+    if (!revision) {
+      element2.hidden = true;
+      element2.textContent = "";
+      return;
+    }
+    const behind = typeof status.behind === "number" ? status.behind : null;
+    const stale = Boolean(status.stale);
+    element2.hidden = false;
+    element2.classList.toggle("is-stale", stale);
+    element2.textContent = stale ? `indexed at ${short(revision)}${behind ? ` (${behind} behind)` : ""} \xB7 Rebuild` : `indexed at ${short(revision)}`;
+    element2.title = stale ? "HEAD moved since this map was indexed; click to rebuild." : "The map matches the indexed revision.";
+  }
+  async function refresh({ repository } = {}) {
+    if (typeof request2 !== "function") {
+      return null;
+    }
+    try {
+      const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
+      render(await request2(`/status${query}`));
+    } catch {
+      element2.hidden = true;
+    }
+    return last;
+  }
+  element2.addEventListener("click", async () => {
+    if (!element2.classList.contains("is-stale")) {
+      return;
+    }
+    element2.disabled = true;
+    element2.textContent = "Rebuilding\u2026";
+    try {
+      await options.onRebuild?.();
+      await refresh({ repository: options.repository?.() });
+    } finally {
+      element2.disabled = false;
+    }
+  });
+  return { refresh, render, status: () => last };
+}
+
 // ui/strabo-functions.js
 function functionLabel(entry) {
   return entry?.owner ? `${entry.owner}.${entry.name}` : entry?.name ?? "";
@@ -3307,6 +3779,81 @@ function buildNarratorEvidence(result) {
     }
     if (Array.isArray(entry.calls) && entry.calls.length > 0) {
       lines.push(`  calls: ${entry.calls.map((call) => `${call.name} (L${call.line})`).join(", ")}`);
+    }
+  }
+  return lines.join("\n");
+}
+var REVIEW_NARRATION_INSTRUCTION = 'In three to six sentences of plain prose, explain this change set as a function of the app: what capability or behaviour it appears to add, change, or remove for a user of the app, not just which files and lines moved. Do not use lists, headings, or markdown, and do not repeat counts the reader can already see. The changed paths, their statuses, and the recorded dependents are evidence and may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
+function reviewFileLine(file) {
+  const shown = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
+  const counts = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} \u2212${file.deletions}`;
+  return `- ${shown} (${file.status}, ${counts}, ${file.inGraph ? "in graph" : "outside the scanned graph"})`;
+}
+function buildReviewNarrationEvidence(result) {
+  const files = Array.isArray(result?.files) ? result.files : [];
+  const lines = [];
+  const kind = result?.kind === "branch" ? "Branch review" : result?.kind === "working-tree" ? "Working-tree review" : "Commit review";
+  lines.push(kind);
+  if (result?.commit) {
+    lines.push(
+      `Commit: ${result.commit.subject} (${result.commit.shortHash} by ${result.commit.author}, ${String(result.commit.date ?? "").slice(0, 10)})`
+    );
+  }
+  if (result?.ref) {
+    lines.push(`Revision: ${result.ref}`);
+  }
+  if (result?.branch) {
+    lines.push(
+      `Branch "${result.branch.branch}" is ${result.branch.ahead} commit(s) ahead of and ${result.branch.behind} behind ${result.branch.base}`
+    );
+    if (result.branch.conflicts?.available === true) {
+      lines.push(
+        result.branch.conflicts.clean ? `A trial merge with ${result.branch.base} is clean` : `A trial merge with ${result.branch.base} conflicts in ${result.branch.conflicts.paths.length} file(s)`
+      );
+    }
+  }
+  const totals = result?.totals;
+  if (totals) {
+    const uncounted = totals.uncounted > 0 ? `, ${totals.uncounted} uncounted` : "";
+    lines.push(
+      `Changed: ${totals.files} file(s), +${totals.insertions} \u2212${totals.deletions} lines${uncounted}`
+    );
+  }
+  lines.push(`Changed files (${files.length}):`);
+  if (files.length === 0) {
+    lines.push("- none recorded");
+  }
+  for (const file of files.slice(0, 50)) {
+    lines.push(reviewFileLine(file));
+  }
+  if (files.length > 50) {
+    lines.push(`- \u2026 and ${files.length - 50} more.`);
+  }
+  const affected = (result?.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+  lines.push(`Recorded dependents the change can reach: ${affected.length}`);
+  for (const entry of affected.slice(0, 20)) {
+    lines.push(`- ${entry.id} (distance ${entry.distance})`);
+  }
+  if (affected.length > 20) {
+    lines.push(`- \u2026 and ${affected.length - 20} more.`);
+  }
+  const outside = result?.impact?.outsideGraph ?? [];
+  if (outside.length > 0) {
+    lines.push(`Changed paths outside the scanned graph: ${outside.length}`);
+  }
+  const totalsMetrics = result?.metrics?.totals;
+  if (totalsMetrics) {
+    const complexity = totalsMetrics.measured > 0 ? `complexity +${totalsMetrics.complexity.added} \u2212${totalsMetrics.complexity.removed} (${totalsMetrics.complexity.before} \u2192 ${totalsMetrics.complexity.after})` : "complexity not measured";
+    lines.push(`Change metrics: ${complexity}; coupling +${totalsMetrics.coupling.added} \u2212${totalsMetrics.coupling.removed} import(s)`);
+  }
+  const cohesionFiles = result?.cohesion?.files ?? [];
+  if (cohesionFiles.length > 0) {
+    const baseline = result.cohesion.baseline ? ` compared with ${result.cohesion.baseline}` : "";
+    lines.push(`Cohesion from recorded member wiring${baseline}:`);
+    for (const file of cohesionFiles.slice(0, 20)) {
+      const before = file.before === null ? "\u2014" : file.before;
+      const after = file.after === null ? "\u2014" : file.after;
+      lines.push(`- ${file.path}: cohesion ${before} \u2192 ${after}${file.note ? ` (${file.note})` : ""}`);
     }
   }
   return lines.join("\n");
@@ -4012,6 +4559,19 @@ function setAttribute(dom, name, value) {
 
 // ui/strabo-panels.js
 var inspectorSeq = 0;
+function backButton(handlers, fallbackTitle) {
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "panel-back";
+  back.dataset.role = "panel-back";
+  back.textContent = "\u2190 Back";
+  back.disabled = handlers.canGoBack === false;
+  const title = handlers.backTitle ?? fallbackTitle;
+  back.title = title;
+  back.setAttribute("aria-label", title);
+  back.addEventListener("click", () => handlers.onBack?.());
+  return back;
+}
 function renderInspector(container, model, id, handlers = {}) {
   const passport = passportFor(model, id);
   if (!passport) {
@@ -4028,6 +4588,9 @@ function renderInspector(container, model, id, handlers = {}) {
   title.append(chip);
   title.append(document.createTextNode(node?.label ?? id));
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the map"));
+  }
   const path = document.createElement("p");
   path.className = "passport-path";
   path.textContent = node?.workspacePath ?? id;
@@ -4047,6 +4610,14 @@ function renderInspector(container, model, id, handlers = {}) {
     open.textContent = "Open in Workspace";
     open.addEventListener("click", () => handlers.onOpenWorkspace(id));
     actions.append(open);
+  }
+  if (handlers.onViewSource) {
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "source-open";
+    source.textContent = "View source";
+    source.addEventListener("click", () => handlers.onViewSource(id));
+    actions.append(source);
   }
   if (handlers.onOpenMemberMap) {
     const memberMap = document.createElement("button");
@@ -5723,6 +6294,14 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
   appendFact(facts, "Resolution", evidence.resolutionLabel);
   container.append(facts);
+  if (handlers.onViewSource) {
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "source-open";
+    source.textContent = "View source";
+    source.addEventListener("click", () => handlers.onViewSource(evidence.source, evidence.line ?? null));
+    container.append(source);
+  }
   if (handlers.onTrace) {
     const trace = document.createElement("button");
     trace.type = "button";
@@ -6087,6 +6666,9 @@ function renderReviewLoading(container, handlers = {}) {
   const title = document.createElement("h3");
   title.textContent = "Review";
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the previous review"));
+  }
   if (handlers.onClose) {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
@@ -6107,6 +6689,9 @@ function renderReview(container, result, handlers = {}) {
   const title = document.createElement("h3");
   title.textContent = result?.kind === "commit" ? "Commit review" : result?.kind === "branch" ? `Branch review \xB7 ${result.ref}` : "Working tree review";
   container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the previous review"));
+  }
   if (handlers.onClose) {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
@@ -6137,6 +6722,12 @@ function renderReview(container, result, handlers = {}) {
   summary.dataset.role = "review-summary";
   summary.textContent = `${totals.files} file(s) \xB7 +${totals.insertions} \u2212${totals.deletions}${totals.uncounted > 0 ? ` \xB7 ${totals.uncounted} uncounted` : ""}`;
   container.append(summary);
+  const narrator = document.createElement("div");
+  narrator.className = "review-narrator";
+  appendNarratorBlock(narrator, handlers, { id: "narrate-change", label: "Narrate change" });
+  if (narrator.childElementCount > 0) {
+    container.append(narrator);
+  }
   if (result.branch) {
     renderBranchDivergence(container, result.branch, handlers);
   }
@@ -6174,6 +6765,16 @@ function renderReview(container, result, handlers = {}) {
       counts.className = "evidence";
       counts.textContent = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} \u2212${file.deletions}`;
       item.append(counts);
+      if (handlers.onOpenDiff) {
+        const diff = document.createElement("button");
+        diff.type = "button";
+        diff.className = "link review-diff";
+        diff.dataset.path = file.path;
+        diff.textContent = "Diff";
+        diff.title = `Show the change to ${file.path}`;
+        diff.addEventListener("click", () => handlers.onOpenDiff(file.path, file));
+        item.append(diff);
+      }
       list.append(item);
     }
     container.append(list);
@@ -6695,8 +7296,21 @@ function renderMemberMap(container, data, view2, handlers = {}) {
       h(
         "header",
         { className: "member-header", key: "header" },
-        h("p", { className: "member-crumb" }, `${data?.repository ?? "repository"} / ${data?.file ?? ""}`),
-        h("h2", null, "Member map")
+        handlers.onBack ? h(
+          "button",
+          {
+            key: "back",
+            type: "button",
+            className: "panel-back",
+            dataset: { role: "panel-back" },
+            title: handlers.backTitle ?? "Back to the module passport",
+            "aria-label": handlers.backTitle ?? "Back to the module passport",
+            onClick: () => handlers.onBack?.()
+          },
+          "\u2190 Back"
+        ) : null,
+        h("p", { className: "member-crumb", key: "crumb" }, `${data?.repository ?? "repository"} / ${data?.file ?? ""}`),
+        h("h2", { key: "title" }, "Member map")
       ),
       memberToolbar(view2, handlers),
       memberWalkthrough(steps, stepIndex, handlers),
@@ -7372,6 +7986,148 @@ function buildConstellation(memberMap, consumerIds) {
   caption.textContent = "Fields, methods, and repository consumers are shown when current scan data provides them.";
   section2.append(caption);
   return section2;
+}
+var SOURCE_LINE_CAP = 2e3;
+function renderSource(container, view2, handlers = {}) {
+  container.replaceChildren();
+  const data = view2 ?? {};
+  const head = document.createElement("div");
+  head.className = "source-head";
+  const path = document.createElement("span");
+  path.className = "source-path";
+  path.textContent = data.file ?? "No file selected";
+  head.append(path);
+  if (data.ref) {
+    const ref = document.createElement("span");
+    ref.className = "source-ref";
+    ref.textContent = `at ${data.ref}`;
+    head.append(ref);
+  }
+  if (data.status) {
+    const status = document.createElement("span");
+    status.className = "review-status";
+    status.textContent = data.status;
+    head.append(status);
+  }
+  if (data.mode === "diff" && data.diff && !data.loading) {
+    const counts = document.createElement("span");
+    counts.className = "source-counts";
+    counts.textContent = `+${data.diff.added} \u2212${data.diff.removed}`;
+    head.append(counts);
+  }
+  if (data.hasDiff) {
+    const modes = document.createElement("span");
+    modes.className = "source-modes";
+    if (handlers.onShowFile) modes.append(sourceModeButton("File", "content", handlers.onShowFile));
+    if (handlers.onShowDiff) modes.append(sourceModeButton("Changes", "diff", handlers.onShowDiff));
+    if (modes.childElementCount > 0) head.append(modes);
+  }
+  if (handlers.onClose) {
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "panel-dismiss";
+    close.setAttribute("aria-label", "Close source");
+    close.textContent = "\xD7";
+    close.addEventListener("click", () => handlers.onClose());
+    head.append(close);
+  }
+  container.append(head);
+  if (data.loading) {
+    container.append(sourceNote("Loading\u2026", "source-loading", "source-loading"));
+    return;
+  }
+  if (data.error) {
+    container.append(sourceNote(`Unavailable: ${data.error}`, "source-note", "source-unavailable"));
+    return;
+  }
+  const body = document.createElement("div");
+  body.className = "source-body";
+  if (data.mode === "diff") {
+    renderDiffBody(body, data);
+  } else {
+    renderContentBody(body, data);
+  }
+  container.append(body);
+}
+function sourceModeButton(label, mode, handler) {
+  const button2 = document.createElement("button");
+  button2.type = "button";
+  button2.className = "source-mode";
+  button2.dataset.mode = mode;
+  button2.textContent = label;
+  button2.addEventListener("click", () => handler());
+  return button2;
+}
+function sourceNote(text, className, role) {
+  const note2 = document.createElement("p");
+  note2.className = className;
+  if (role) note2.dataset.role = role;
+  note2.textContent = text;
+  return note2;
+}
+function sourceLine(kind, gutters, text, mark) {
+  const row = document.createElement("div");
+  row.className = `src-line src-${kind}`;
+  if (mark) row.classList.add("src-mark");
+  for (const gutter of gutters) {
+    const number = document.createElement("span");
+    number.className = "src-no";
+    number.textContent = gutter === null || gutter === void 0 ? "" : String(gutter);
+    row.append(number);
+  }
+  const code = document.createElement("span");
+  code.className = "src-code";
+  code.textContent = text === "" ? "\xA0" : text;
+  row.append(code);
+  return row;
+}
+function renderContentBody(body, data) {
+  const content = typeof data.content === "string" ? data.content : null;
+  if (content === null || content === "") {
+    body.append(sourceNote("This file is empty.", "source-note", "source-empty"));
+    return;
+  }
+  const lines = content.replace(/\n$/, "").split("\n");
+  const shown = lines.slice(0, SOURCE_LINE_CAP);
+  lines.slice(0, SOURCE_LINE_CAP).forEach((line, index) => {
+    body.append(sourceLine("context", [index + 1], line, data.line === index + 1));
+  });
+  if (lines.length > shown.length) {
+    body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} of ${lines.length} lines.`, "source-note"));
+  }
+}
+function renderDiffBody(body, data) {
+  const diff = data.diff;
+  if (!diff) {
+    body.append(sourceNote("No change to show.", "source-note"));
+    return;
+  }
+  if (diff.binary) {
+    body.append(sourceNote("Binary file \u2014 Git reports no textual diff.", "source-note", "source-binary"));
+    return;
+  }
+  if (diff.hunks.length === 0) {
+    body.append(sourceNote("No change between the two sides.", "source-note", "source-empty"));
+    return;
+  }
+  let budget = SOURCE_LINE_CAP;
+  let truncated = false;
+  for (const hunk of diff.hunks) {
+    body.append(sourceNote(hunk.header, "src-hunk"));
+    for (const line of hunk.lines) {
+      if (budget <= 0) {
+        truncated = true;
+        break;
+      }
+      budget -= 1;
+      const marked = data.line !== null && data.line !== void 0 && (line.newLine === data.line || line.oldLine === data.line);
+      body.append(sourceLine(line.kind, [line.oldLine, line.newLine], line.text, marked));
+    }
+    if (truncated) break;
+  }
+  if (truncated) {
+    body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} lines of this change.`, "source-note"));
+  }
 }
 function svgElement(name, attributes) {
   const element2 = document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -8174,6 +8930,7 @@ function schedulePrefsSave() {
   }, 300);
 }
 function applyViewPrefs() {
+  view.setIslandOffsets(readIslandLayout(state.repository));
   const prefs = readViewPrefs(state.repository);
   if (!prefs) {
     return;
@@ -8199,6 +8956,9 @@ function applyViewPrefs() {
   }
 }
 var view = createView(document.getElementById("graph"));
+view.onIslandLayout((offsets) => {
+  writeIslandLayout(state.repository, offsets);
+});
 var clientPrefs = readSettings();
 function applyClientPrefs() {
   applyAppearance(clientPrefs);
@@ -8226,6 +8986,7 @@ var elements = {
   legend: document.getElementById("legend"),
   breadcrumb: document.getElementById("breadcrumb"),
   status: document.getElementById("status"),
+  freshness: document.getElementById("freshness"),
   inspector: document.getElementById("inspector"),
   strip: document.getElementById("strip"),
   hover: document.getElementById("hover"),
@@ -8270,7 +9031,8 @@ var elements = {
   settingsToggle: document.getElementById("settings-toggle"),
   settingsPanel: document.getElementById("settings-panel"),
   workspacePanel: document.getElementById("workspace-panel"),
-  passportPanel: document.getElementById("passport-panel")
+  passportPanel: document.getElementById("passport-panel"),
+  sourcePanel: document.getElementById("source-panel")
 };
 var memberData = null;
 var memberTimer = null;
@@ -8278,6 +9040,10 @@ var selectedCommitHash = null;
 var selectedBranchName = null;
 var branchBase = null;
 var branchesBusy = false;
+var reviewHistory = [];
+var currentReviewRequest = null;
+var passportHistory = [];
+var passportGoingBack = false;
 var browsedFolder = null;
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
@@ -8287,6 +9053,11 @@ async function request(path) {
   }
   return response.json();
 }
+var freshness = createFreshnessBadge(elements.freshness, {
+  request,
+  onRebuild: () => scan({ refresh: true }),
+  repository: () => state.repository
+});
 async function loadCatalogue() {
   const catalogue = await request("/repositories");
   renderRepositoryOptions(catalogue.repositories, catalogue.active);
@@ -8386,6 +9157,7 @@ async function scan({ refresh = false } = {}) {
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
+    void freshness.refresh({ repository: state.repository });
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
     updateSystemNote(model);
@@ -8526,8 +9298,12 @@ function selectNode(id) {
     view.highlight(path ?? [from, id]);
     return;
   }
+  const previousSelection = selected;
   selected = id;
   store.set("ui", { node: id });
+  if (!passportGoingBack && previousSelection && previousSelection !== id) {
+    passportHistory.push(previousSelection);
+  }
   view.clearEdge();
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
@@ -8542,6 +9318,9 @@ function selectNode(id) {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
+    onBack: passportBack,
+    backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
+    ...isFileNode(id) ? { onViewSource: (target) => viewSource(target) } : {},
     onOpenMemberMap: (target) => {
       openMemberMap(target).then(() => {
         floatingWindows.find((controller) => controller.key === "inspector")?.close();
@@ -8648,6 +9427,9 @@ async function narrateMemberMap() {
     fileNarrationEvidence(memberData?.file, memberData, memberData?.importIds, memberData?.consumerIds)
   );
 }
+async function narrateReview(result) {
+  return postNarration(REVIEW_NARRATION_INSTRUCTION, buildReviewNarrationEvidence(result));
+}
 function fileNarrationEvidence(file, source, imports, usedBy) {
   if (source?.memberMap?.types?.length > 0) {
     return buildMemberNarratorEvidence(source.memberMap, {
@@ -8712,6 +9494,7 @@ async function postNarration(instruction, evidence) {
 }
 function clearSelection() {
   selected = null;
+  passportHistory = [];
   store.set("ui", { node: null });
   state.pathFrom = null;
   state.pathMode = false;
@@ -8730,6 +9513,26 @@ function clearSelection() {
   view.clearGroupSelection();
   updateFocusButton();
   refreshDock();
+}
+function passportBack() {
+  const previous = passportHistory.pop();
+  passportGoingBack = true;
+  try {
+    if (previous) {
+      selectNode(previous);
+    } else {
+      clearSelection();
+    }
+  } finally {
+    passportGoingBack = false;
+  }
+}
+function memberMapBack() {
+  const file = memberData?.file;
+  closeMemberMap();
+  if (file) {
+    selectNode(file);
+  }
 }
 async function openMemberMap(id) {
   const params = new URLSearchParams({ file: id });
@@ -8816,6 +9619,7 @@ function renderMemberMapView() {
       });
     },
     onPlay: () => toggleMemberPlay(),
+    onBack: () => memberMapBack(),
     onClose: () => closeMemberMap()
   });
 }
@@ -8976,6 +9780,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "p") elements.tbPath.click();
   else if (key === "b") elements.tbBoundaries.click();
   else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
+  else if (key === "s" && selected && isFileNode(selected)) viewSource(selected);
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
   else if (key === "v") elements.tbRisk.click();
@@ -9090,18 +9895,27 @@ async function selectCommit(commit) {
   selectedCommitHash = commit.hash;
   await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
 }
-async function showReview(query, commit = null, branchName = null) {
+async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
+  const entry = { query, commit, branchName };
+  if (!fromHistory && currentReviewRequest) {
+    reviewHistory.push(currentReviewRequest);
+  }
+  currentReviewRequest = entry;
+  const navigation = {
+    canGoBack: reviewHistory.length > 0,
+    onBack: reviewBack
+  };
   const separator = query ? "&" : "?";
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : "";
   const ticket = ++reviewTicket;
   elements.reviewPanel.hidden = false;
-  renderReviewLoading(elements.reviewPanel, { onClose: closeReview });
+  renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
   let data;
   try {
     data = await request(`/analysis/review${query}${repository}`);
   } catch (error) {
     if (ticket === reviewTicket) {
-      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview });
+      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
     }
     throw error;
   }
@@ -9109,23 +9923,45 @@ async function showReview(query, commit = null, branchName = null) {
   currentReview = data;
   if (data.available === false) {
     elements.reviewPanel.hidden = false;
-    renderReview(elements.reviewPanel, data, { onClose: closeReview });
+    renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
     return;
   }
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  if (ticket !== reviewTicket) return;
   const overlay = reviewOverlay(data);
   view.overlay(overlay.classes);
   elements.reviewPanel.hidden = false;
   renderReview(elements.reviewPanel, data, {
     onClose: closeReview,
-    onSelect: (id) => selectNode(id)
+    ...navigation,
+    onSelect: (id) => selectNode(id),
+    onOpenDiff: (file, entry2) => viewDiff(file, reviewDiffSpec(data, entry2), { status: entry2.status }),
+    narratorStatus,
+    onNarrate: () => narrateReview(data),
+    onOpenNarratorSettings: openNarratorSettings
   });
   const label = branchName ?? (commit ? commit.shortHash : "working tree");
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
+}
+async function reviewBack() {
+  const previous = reviewHistory.pop();
+  if (!previous) {
+    return;
+  }
+  try {
+    await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  }
 }
 var reviewTicket = 0;
 function closeReview() {
   reviewTicket += 1;
   currentReview = null;
+  reviewHistory = [];
+  currentReviewRequest = null;
   elements.reviewPanel.hidden = true;
   elements.reviewPanel.replaceChildren();
 }
@@ -9468,6 +10304,7 @@ function selectEdge(edgeId) {
   renderEdgeEvidence(elements.edgePanel, evidence, {
     onSelect: (id) => selectNode(id),
     onTrace: (from, to) => tracePath(from, to),
+    ...evidence && isFileNode(evidence.source) ? { onViewSource: (file, line) => viewSource(file, { line }) } : {},
     onClear: () => {
       view.clearEdge();
       selectedEdgeId = null;
@@ -9706,7 +10543,7 @@ function onDrill(id) {
       return;
     }
     if (node.systemUnit) {
-      if (!id.endsWith("#support")) openFile(id);
+      if (!id.endsWith("#support")) viewSource(id);
       return;
     }
     openUnit(id);
@@ -9719,7 +10556,7 @@ function onDrill(id) {
     scan();
     return;
   }
-  openFile(id);
+  viewSource(id);
 }
 function openFile(id) {
   const adapters = window.straboAdapters ?? {};
@@ -9733,6 +10570,98 @@ function openFile(id) {
     return;
   }
   elements.status.textContent = `No opener available for ${id}`;
+}
+var sourceView = null;
+function isFileNode(id) {
+  const node = (current?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node || node.kind === "unit" || node.kind === "shelf") {
+    return false;
+  }
+  return state.mode === "file" || Boolean(node.systemUnit && !id.endsWith("#support"));
+}
+function viewSource(file, options = {}) {
+  sourceView = {
+    file,
+    ref: options.ref ?? null,
+    line: options.line ?? null,
+    status: options.status ?? null,
+    diffSpec: options.diffSpec ?? null,
+    hasDiff: Boolean(options.diffSpec),
+    mode: options.diffSpec ? "diff" : "content",
+    loading: true,
+    error: null,
+    content: null,
+    diff: null
+  };
+  floatingWindows.find((controller) => controller.key === "source")?.open();
+  loadSource(sourceView.mode).catch(() => {
+  });
+}
+function viewDiff(file, spec, options = {}) {
+  viewSource(file, { ...options, diffSpec: spec });
+}
+async function loadSource(mode) {
+  const view2 = sourceView;
+  if (!view2) {
+    return;
+  }
+  view2.mode = mode;
+  view2.loading = true;
+  view2.error = null;
+  sourceRender();
+  const query = new URLSearchParams({ file: view2.file });
+  if (state.repository) {
+    query.set("repository", state.repository);
+  }
+  try {
+    if (mode === "diff") {
+      for (const [key, value] of Object.entries(view2.diffSpec ?? {})) {
+        query.set(key, String(value));
+      }
+      const body = await request(`/diff?${query.toString()}`);
+      if (sourceView !== view2) return;
+      if (body.available === false) view2.error = body.detail ?? body.reason;
+      else view2.diff = body.diff;
+    } else {
+      if (view2.ref) query.set("ref", view2.ref);
+      const body = await request(`/source?${query.toString()}`);
+      if (sourceView !== view2) return;
+      view2.content = body.content;
+    }
+  } catch (error) {
+    if (sourceView !== view2) return;
+    view2.error = error.message;
+  } finally {
+    if (sourceView === view2) {
+      view2.loading = false;
+      sourceRender();
+    }
+  }
+}
+function sourceRender() {
+  if (!sourceView) {
+    return;
+  }
+  renderSource(elements.sourcePanel, sourceView, {
+    onClose: () => floatingWindows.find((controller) => controller.key === "source")?.close(),
+    onShowFile: sourceView.hasDiff && sourceView.mode === "diff" ? () => loadSource("content") : null,
+    onShowDiff: sourceView.hasDiff && sourceView.mode === "content" ? () => loadSource("diff") : null
+  });
+}
+function closeSource() {
+  elements.sourcePanel.hidden = true;
+  elements.sourcePanel.replaceChildren();
+}
+function reviewDiffSpec(result, file) {
+  if (result?.kind === "commit" && result.ref) {
+    return { ref: result.ref };
+  }
+  if (result?.kind === "branch" && result.branch) {
+    return { base: result.branch.mergeBase, head: result.branch.tipHash };
+  }
+  if (file?.group === "staged") return { staged: 1 };
+  if (file?.group === "untracked") return { untracked: 1 };
+  return {};
 }
 elements.repository.addEventListener("change", () => {
   const root = elements.repository.value;
@@ -10251,6 +11180,21 @@ function narrateMenuItems(target) {
     { separator: true }
   ];
 }
+function resetMapLayout() {
+  view.resetIslandOffsets();
+  writeIslandLayout(state.repository, {});
+  applyFilterToView();
+  showToast("Map layout reset to the computed arrangement.");
+}
+function layoutMenuItems(target) {
+  if (target?.kind !== "view" || Object.keys(view.islandOffsets()).length === 0) {
+    return [];
+  }
+  return [
+    { label: "\u21BA Reset map layout", hint: "computed positions", action: resetMapLayout },
+    { separator: true }
+  ];
+}
 function openDelegateMenu(target, x, y) {
   if (!target) {
     return;
@@ -10264,6 +11208,7 @@ function openDelegateMenu(target, x, y) {
     title: menuTitle,
     items: [
       ...narrateMenuItems(target),
+      ...layoutMenuItems(target),
       { label: "\u25B6 Delegate to OpenCode", hint: "opens TUI", action: () => delegateToAgent("opencode", target) },
       { label: "\u25B6 Delegate to Claude", hint: "opens TUI", action: () => delegateToAgent("claude", target) },
       { separator: true },
@@ -10450,6 +11395,21 @@ var floatingWindows = initFloatingWindows({
       onClose: () => selectEdge(null)
     },
     {
+      key: "source",
+      element: elements.sourcePanel,
+      title: "Source",
+      dockLabel: "Source",
+      width: 720,
+      height: 640,
+      canOpen: () => Boolean(sourceView),
+      blockedTitle: "Select a file to view its source",
+      onBlocked: () => {
+        elements.status.textContent = "Select a file first \u2014 no source to show.";
+      },
+      onOpen: () => sourceRender(),
+      onClose: () => closeSource()
+    },
+    {
       key: "legend",
       element: elements.legend,
       title: "Legend",
@@ -10590,6 +11550,10 @@ if (window.STRABO_TEST) {
     groupSelection: () => groupSelection,
     floatingWindows: () => floatingWindows,
     islands: () => view.islandDirectories(),
+    islandBoxes: () => view.islandBoxes(),
+    islandOffsets: () => view.islandOffsets(),
+    setIslandLayout: (offsets) => view.setIslandOffsets(offsets),
+    resetIslandLayout: resetMapLayout,
     workspace: () => showWorkspace(),
     passport: () => showPassport()
   };

@@ -18,12 +18,40 @@ export interface HistoryOptions {
   maxFilesPerCommit?: number;
   /** Upper bound on commits read, so a long history cannot stall the request. */
   maxCommits?: number;
+  /** Cap on the pairs whose commit list is retained; a pair past it is still co-change. */
+  maxCoChangePairs?: number;
+  /** Cap on the commits kept per pair, newest first. */
+  maxKeptCommitsPerPair?: number;
 }
 
 /** A commit left out of co-change because it touched too many files. */
 export interface SkippedCommit {
   hash: string;
   files: number;
+}
+
+/**
+ * One commit behind a co-change pair: enough to name the evidence, never the diff.
+ *
+ * `subject` is truncated so one commit cannot bloat the summary.
+ */
+export interface CoChangeCommit {
+  hash: string;
+  /** Author date, `YYYY-MM-DD` in the author's own timezone. */
+  date: string;
+  subject: string;
+}
+
+/** Two files that changed in the same commits, with a bounded list of those commits. */
+export interface CoChangePair {
+  /** First endpoint, the smaller path. */
+  a: string;
+  /** Second endpoint, the larger path. */
+  b: string;
+  /** Commits the two shared, newest first, capped at `maxKeptCommitsPerPair`. */
+  commits: CoChangeCommit[];
+  /** Commits the two shared in the window; at least `commits.length`. */
+  commitsShared: number;
 }
 
 export interface HistorySummary {
@@ -33,10 +61,20 @@ export interface HistorySummary {
   authors: Map<string, { authors: string[]; commits: number }>;
   /** Files that changed in the same commit as the key, within the window. */
   coChange: Map<string, Set<string>>;
+  /**
+   * The commit evidence behind each 1-hop co-change pair, keyed by
+   * `` `${file}\u0000${file}` `` with `file < file` so the pair is stored once.
+   *
+   * Absent for a pair whose commits were not retained (the pair cap was reached), so a
+   * caller that reads it either finds the commits or draws no edge.
+   */
+  coChangeCommits: Map<string, CoChangePair>;
   windowDays: number;
   commitsScanned: number;
   /** Mass commits excluded from co-change, with how many files each touched. */
   skippedCommits: SkippedCommit[];
+  /** How many commits a pair may keep; the report says so, and every edge carries ≤ this. */
+  maxKeptCommitsPerPair: number;
   /** False when the directory is not a Git repository or `git` is unavailable. */
   available: boolean;
 }
@@ -44,6 +82,17 @@ export interface HistorySummary {
 const DEFAULT_WINDOW_DAYS = 90;
 const DEFAULT_MAX_FILES_PER_COMMIT = 50;
 const DEFAULT_MAX_COMMITS = 2000;
+/**
+ * Evidence budget. On a 50k-file repository a window can hold ~10^5 co-change pairs and
+ * ~4·10^5 pair-commit occurrences, so the discount rate is deliberate: a commit is kept
+ * only when its pair is already known or the pair map is below the cap, and each pair
+ * keeps at most `MAX_KEPT_COMMITS_PER_PAIR` commits. Heap words stay bounded by
+ * `MAX_COCHANGE_PAIRS · (MAX_KEPT_COMMITS_PER_PAIR + 2)`, and the drop is counted so a
+ * partial list is never mistaken for the whole.
+ */
+const DEFAULT_MAX_COCHANGE_PAIRS = 2000;
+const DEFAULT_MAX_KEPT_COMMITS_PER_PAIR = 20;
+const MAX_SUBJECT_LENGTH = 120;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const CACHE_LIMIT = 4;
 
@@ -59,9 +108,11 @@ function emptySummary(windowDays: number, available: boolean): HistorySummary {
     churn: new Map(),
     authors: new Map(),
     coChange: new Map(),
+    coChangeCommits: new Map(),
     windowDays,
     commitsScanned: 0,
     skippedCommits: [],
+    maxKeptCommitsPerPair: DEFAULT_MAX_KEPT_COMMITS_PER_PAIR,
     available,
   };
 }
@@ -75,6 +126,8 @@ export async function collectHistory(
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS;
   const maxFilesPerCommit = options.maxFilesPerCommit ?? DEFAULT_MAX_FILES_PER_COMMIT;
   const maxCommits = options.maxCommits ?? DEFAULT_MAX_COMMITS;
+  const maxCoChangePairs = options.maxCoChangePairs ?? DEFAULT_MAX_COCHANGE_PAIRS;
+  const maxKeptCommitsPerPair = options.maxKeptCommitsPerPair ?? DEFAULT_MAX_KEPT_COMMITS_PER_PAIR;
 
   let head: string;
   try {
@@ -83,7 +136,7 @@ export async function collectHistory(
     return emptySummary(windowDays, false);
   }
 
-  const key = `${head}\u0000${windowDays}\u0000${maxFilesPerCommit}\u0000${hashFiles(files)}`;
+  const key = `${head}\u0000${windowDays}\u0000${maxFilesPerCommit}\u0000${maxCoChangePairs}\u0000${maxKeptCommitsPerPair}\u0000${hashFiles(files)}`;
   const cached = cache.get(key);
   if (cached) {
     return cached;
@@ -98,7 +151,8 @@ export async function collectHistory(
         `--since=${windowDays} days ago`,
         `--max-count=${maxCommits}`,
         '--no-merges',
-        '--format=%x1e%H%x1f%an',
+        '--format=%x1e%H%x1f%an%x1f%ad%x1f%s',
+        '--date=short',
         '--numstat',
       ],
       { cwd: root, maxBuffer: MAX_BUFFER },
@@ -107,7 +161,14 @@ export async function collectHistory(
     return emptySummary(windowDays, false);
   }
 
-  const summary = parseHistory(stdout, new Set(files), windowDays, maxFilesPerCommit);
+  const summary = parseHistory(
+    stdout,
+    new Set(files),
+    windowDays,
+    maxFilesPerCommit,
+    maxCoChangePairs,
+    maxKeptCommitsPerPair,
+  );
   cache.set(key, summary);
   while (cache.size > CACHE_LIMIT) {
     const oldest = cache.keys().next().value;
@@ -117,34 +178,75 @@ export async function collectHistory(
   return summary;
 }
 
-/** Parse `--format=%x1e%H%x1f%an --numstat` output: records split on \x1e, fields on \x1f. */
+/**
+ * Parse `--format=%x1e%H%x1f%an%x1f%ad%x1f%s --numstat` output: records split on \x1e,
+ * header fields on \x1f, then one numstat line per file.
+ *
+ * A commit touching more than `maxFilesPerCommit` files is a mass change: it is reported
+ * in `skippedCommits` and excluded from churn, authorship, and co-change alike, so a
+ * rename or format commit cannot invent coupling. Old format output with no date or
+ * subject still parses, with those fields empty rather than guessed.
+ */
 export function parseHistory(
   stdout: string,
   fileSet: ReadonlySet<string>,
   windowDays: number,
   maxFilesPerCommit: number,
+  maxCoChangePairs = DEFAULT_MAX_COCHANGE_PAIRS,
+  maxKeptCommitsPerPair = DEFAULT_MAX_KEPT_COMMITS_PER_PAIR,
 ): HistorySummary {
   const churn = new Map<string, number>();
   const authors = new Map<string, { authors: string[]; commits: number }>();
   const coChange = new Map<string, Set<string>>();
+  const coChangeCommits = new Map<string, CoChangePair>();
+  const foundPairs: string[] = [];
+  const foundPairsSet = new Set<string>();
   const skippedCommits: SkippedCommit[] = [];
   let commitsScanned = 0;
 
-  for (const record of stdout.split('\u001e')) {
-    const body = record.replace(/^\n+/, '');
-    if (body === '') {
-      continue;
+  /** Record one commit against every pair it touched, still bounded by the evidence caps. */
+  const addPairCommits = (changed: Set<string>, commit: CoChangeCommit): void => {
+    const files = [...changed].sort();
+    for (let left = 0; left < files.length; left += 1) {
+      for (let rightFile = left + 1; rightFile < files.length; rightFile += 1) {
+        const key = `${files[left]}\u0000${files[rightFile]}`;
+        const pair = coChangeCommits.get(key);
+        if (pair) {
+          if (pair.commits.length < maxKeptCommitsPerPair) {
+            pair.commits.push(commit);
+          }
+          continue;
+        }
+        // A pair past the cap keeps its co-change set membership but no commit list, so the
+        // edge builder drops it rather than drawing an edge with no evidence.
+        if (foundPairsSet.size >= maxCoChangePairs) {
+          continue;
+        }
+        coChangeCommits.set(key, {
+          a: files[left] as string,
+          b: files[rightFile] as string,
+          commits: [commit],
+          commitsShared: 1,
+        });
+        foundPairsSet.add(key);
+        foundPairs.push(key);
+      }
     }
-    const newline = body.indexOf('\n');
-    const header = newline === -1 ? body : body.slice(0, newline);
-    const [hash = '', author = ''] = header.split('\u001f');
-    if (hash === '') {
-      continue;
-    }
+  };
+
+  /** Churn and authorship count every commit; a mass commit is dropped from co-change only. */
+  const applyCommit = (
+    hash: string,
+    author: string,
+    date: string,
+    subject: string,
+    body: string,
+    headerEnd: number,
+  ): void => {
     commitsScanned += 1;
 
     const changed = new Set<string>();
-    for (const line of newline === -1 ? [] : body.slice(newline + 1).split('\n')) {
+    for (const line of headerEnd === -1 ? [] : body.slice(headerEnd + 1).split('\n')) {
       const path = numstatPath(line);
       if (path !== null && fileSet.has(path)) {
         changed.add(path);
@@ -161,12 +263,13 @@ export function parseHistory(
       authors.set(file, entry);
     }
 
-    const touched = countNumstatPaths(body, newline);
+    const touched = countNumstatPaths(body, headerEnd);
     if (touched > maxFilesPerCommit) {
       // A mass rename or format commit says nothing about coupling; report it, skip the join.
       skippedCommits.push({ hash, files: touched });
-      continue;
+      return;
     }
+
     for (const file of changed) {
       const partners = coChange.get(file) ?? new Set<string>();
       for (const other of changed) {
@@ -176,15 +279,40 @@ export function parseHistory(
       }
       coChange.set(file, partners);
     }
+    addPairCommits(changed, { hash, date, subject });
+  };
+
+  for (const record of stdout.split('\u001e')) {
+    const body = record.replace(/^\n+/, '');
+    if (body === '') {
+      continue;
+    }
+    const newline = body.indexOf('\n');
+    const header = newline === -1 ? body : body.slice(0, newline);
+    const [hash = '', author = '', date = '', ...rest] = header.split('\u001f');
+    if (hash === '') {
+      continue;
+    }
+    // `git log` walks newest first, so each pair's list is retained newest first.
+    applyCommit(hash, author, date, rest.join('\u001f').slice(0, MAX_SUBJECT_LENGTH), body, newline);
+  }
+
+  for (const key of foundPairs) {
+    const pair = coChangeCommits.get(key);
+    if (pair) {
+      pair.commitsShared = pair.commits.length;
+    }
   }
 
   return {
     churn,
     authors,
     coChange,
+    coChangeCommits,
     windowDays,
     commitsScanned,
     skippedCommits,
+    maxKeptCommitsPerPair,
     available: true,
   };
 }

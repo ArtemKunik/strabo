@@ -211,6 +211,38 @@ export type {
   SmellRule,
   SmellsReport,
 } from './analysis/quality.ts';
+export { computeReadingRoute, DEFAULT_ROUTE_LAYER_LIMIT } from './analysis/route.ts';
+export type {
+  ReadingRoute,
+  ReadingRouteOptions,
+  RouteEntryPoint,
+  RouteStep,
+  RouteTier,
+  RouteUnreached,
+  RouteUnit,
+  RouteUnitSummary,
+} from './analysis/route.ts';
+export {
+  buildCoChangeEdges,
+  DEFAULT_MIN_COMMITS,
+  DEFAULT_MIN_RATIO,
+  DEFAULT_MAX_COMMITS_PER_EDGE,
+  DEFAULT_MAX_EDGES,
+} from './analysis/co-change.ts';
+export type {
+  CoChangeEdge,
+  CoChangeOptions,
+  CoChangeReport,
+  CoChangeSkippedCommit,
+} from './analysis/co-change.ts';
+export { parseHistory, collectHistory, clearHistoryCache } from './analysis/history.ts';
+export type {
+  CoChangeCommit,
+  CoChangePair,
+  HistoryOptions,
+  HistorySummary,
+  SkippedCommit,
+} from './analysis/history.ts';
 export { computeRepositoryPassport } from './analysis/passport.ts';
 export type {
   RepositoryPassport,
@@ -332,6 +364,8 @@ export type {
   NarratorPrompt,
 } from './narrator/client.ts';
 export { collectPolyglotExternalImports, mavenCoordinateMatches } from './scan/external-polyglot.ts';
+export { buildTourRequest, TOUR_INSTRUCTION } from './narrator/tour.ts';
+export type { TourRequest } from './narrator/tour.ts';
 
 export { buildViewModel, buildSystemViewModel, buildSystemUnitViewModel } from './view/view-model.ts';
 
@@ -346,7 +380,42 @@ export {
 } from './cache/graph-cache.ts';
 
 export { createStraboRouter } from './api/router.ts';
+export { createApiDispatch } from './api/dispatch.ts';
+export type { ApiDispatch, DispatchResult } from './api/dispatch.ts';
 export { isAllowedHost, isSameOriginRequest } from './api/http.ts';
+
+export { exportGraph, GRAPH_EXPORT_VERSION } from './export/graph-export.ts';
+export type { GraphExportEnvelope, GraphExportFormat, GraphExportOptions } from './export/graph-export.ts';
+export { renderViewModelSvg } from './export/svg.ts';
+export type { SvgExportOptions } from './export/svg.ts';
+export { selectViewModel } from './export/select-view.ts';
+export type { ExportViewMode, SelectViewModelOptions } from './export/select-view.ts';
+export { exportSite } from './export/site.ts';
+export type { SiteExportOptions, SitePage } from './export/site.ts';
+
+export { computeFreshness, revisionFromFingerprint } from './status.ts';
+export type { Freshness } from './status.ts';
+
+export { runCheck, buildBaseline, collectFindings, CHECK_RULES } from './check/check.ts';
+export type { CheckFinding, CheckOptions, CheckResult, CheckRule, CheckWarning } from './check/check.ts';
+export {
+  readBaseline,
+  writeBaseline,
+  defaultBaselinePath,
+  BASELINE_VERSION,
+} from './check/baseline.ts';
+export type { CheckBaseline } from './check/baseline.ts';
+
+export { createMcpHandler, startMcpServer, MCP_PROTOCOL_VERSION, MCP_SERVER_NAME } from './mcp/server.ts';
+export type { McpHandler } from './mcp/server.ts';
+export { createTools } from './mcp/tools.ts';
+export type { McpTool, McpToolResult } from './mcp/tools.ts';
+
+export { main } from './cli.ts';
+export { runExportCommand } from './cli/export.ts';
+export type { ExportIo } from './cli/export.ts';
+export { runCheckCommand } from './cli/check.ts';
+export type { CheckIo } from './cli/check.ts';
 
 export { createStraboServer } from './server.ts';
 

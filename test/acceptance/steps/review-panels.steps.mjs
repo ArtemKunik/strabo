@@ -307,6 +307,45 @@ Then('the member map is open for {string}', async function (id) {
   );
 });
 
+When('I step the module passport back', async function () {
+  await this.page.click('#inspector [data-role="panel-back"]');
+});
+
+When('I open the first inspector dependency', async function () {
+  const link = this.page.locator('#inspector .inspector-panels button.link').first();
+  const id = ((await link.textContent()) ?? '').trim();
+  await link.click();
+  await this.page.waitForFunction(
+    (target) => (document.getElementById('inspector')?.textContent ?? '').includes(target),
+    id,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the module passport is closed', async function () {
+  await this.page.waitForFunction(
+    () => document.getElementById('inspector')?.hidden === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+When('I step the member map back', async function () {
+  await this.page.click('#member-view [data-role="panel-back"]');
+});
+
+Then('the member map is closed and the module passport is shown for {string}', async function (id) {
+  await this.page.waitForFunction(
+    (target) => {
+      const member = document.getElementById('member-view');
+      const inspector = document.getElementById('inspector');
+      return member?.hidden === true && !inspector.hidden && (inspector.textContent ?? '').includes(target);
+    },
+    id,
+    { timeout: 15_000 },
+  );
+});
+
 /**
  * The view layer is supposed to reuse the card nodes: mark one, advance a step, and the mark
  * must survive. A full `replaceChildren()` rebuild would drop the marker with the old node.

@@ -2,23 +2,26 @@
  * The SVG plane the directory plates are drawn on.
  *
  * Kept apart from `strabo-view.js` because it is a self-contained DOM layer: it owns its
- * own SVG elements, its own hover caption, and its own hit-testing, and needs only the
- * geometry helpers from `strabo-core.js`.
+ * own SVG elements, its own hover caption, its own hit-testing, and the pointer handling
+ * that lets a directory plate be dragged, and needs only the geometry helpers from
+ * `strabo-core.js`.
  */
 
 import {
+  LABEL_BASELINE_GAP,
   LABEL_INSET,
   fitLabel,
   islandHit,
+  islandHitAny,
   islandLabelFits,
   islandTooltipText,
+  labelsThatFit,
   projectIsland,
 } from './strabo-core.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** Baseline offset above a plate's top edge, and the viewport margin it needs to sit there. */
-const LABEL_BASELINE_GAP = 6;
+/** The viewport margin a label needs to sit above a plate's top edge. */
 const LABEL_MIN_TOP = 12;
 
 /**
@@ -29,11 +32,16 @@ const LABEL_MIN_TOP = 12;
  * also survives the opt-in WebGL renderer, which sets an opaque inline background colour
  * on the container: a layer outside the container would disappear behind it.
  *
- * Plates are decoration for a structure the nodes already carry, so the layer is
- * `aria-hidden` and never takes pointer events — clicking "an island" means clicking the
- * canvas beneath it, which is what clears the selection.
+ * The SVG is `aria-hidden` and `pointer-events: none`. A press outside every plate still
+ * reaches the canvas beneath and clears the selection. Dragging is read at the container
+ * instead: `pointerdown` in the capture phase hit-tests the painted plates and claims a
+ * press that lands on one, so it neither pans the map nor selects a file. A press over a
+ * node is left to Cytoscape, so files keep their own select and drag. `handlers.onDragMove`
+ * `(directory, dx, dy)` receives the move in model units (screen pixels divided by the live
+ * zoom); `handlers.onDragEnd(directory, moved)` fires once on release, and a press that
+ * never moved is the click the plate claimed — the caller clears the selection it stands for.
  */
-export function createIslandLayer(container) {
+export function createIslandLayer(container, handlers = {}) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.classList.add('island-layer');
   svg.setAttribute('aria-hidden', 'true');
@@ -42,17 +50,20 @@ export function createIslandLayer(container) {
   svg.append(plates, labels);
   container.prepend(svg);
 
-  // The hover caption is the one interactive affordance of an otherwise inert layer. It
-  // lives outside the SVG so it is not clipped by the layer's `overflow: hidden`, and it is
-  // driven by hit-testing the painted boxes rather than by pointer events on the plates —
-  // the layer must keep passing clicks through to the canvas so a click on "an island"
-  // still clears the selection.
+  // The hover caption names a plate whose label was trimmed; it lives outside the SVG so it
+  // is not clipped by the layer's `overflow: hidden`, and is driven by hit-testing the
+  // painted boxes rather than by pointer events on the plates. It takes no pointer events
+  // itself, so it never stands between the pointer and a drag.
   const tooltip = document.createElement('div');
   tooltip.className = 'island-tooltip';
   tooltip.hidden = true;
   container.appendChild(tooltip);
 
   let boxes = [];
+  // The last viewport painted, so a screen-pixel drag can be converted to model units.
+  let lastViewport = { pan: { x: 0, y: 0 }, zoom: 1 };
+  // The plate being dragged; null when the pointer is only hovering.
+  let drag = null;
 
   function hideTooltip() {
     if (!tooltip.hidden) {
@@ -60,10 +71,28 @@ export function createIslandLayer(container) {
     }
   }
 
-  container.addEventListener('pointermove', (event) => {
+  /** A pointer's position inside `container`, in device pixels. */
+  function pointerIn(event) {
     const bounds = container.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const y = event.clientY - bounds.top;
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  }
+
+  function setDragging(active) {
+    container.classList.toggle('island-dragging', active);
+  }
+
+  container.addEventListener('pointermove', (event) => {
+    if (drag) {
+      // The window handler owns the drag; this one only runs the hover caption.
+      return;
+    }
+    const { x, y } = pointerIn(event);
+    const over = islandHitAny(boxes, x, y);
+    // A node sitting on a plate keeps its own press (select, drag one file), so the grab
+    // cursor and the drag never claim a point a node owns. Cytoscape's hover is read for
+    // the cursor so this stays O(1) on every move; the press below hit-tests exactly.
+    const overNode = Boolean(over) && Boolean(handlers.isHoveringNode?.());
+    container.classList.toggle('island-grab', Boolean(over) && !overNode);
     const hit = islandHit(boxes, x, y);
     if (!hit) {
       hideTooltip();
@@ -74,22 +103,99 @@ export function createIslandLayer(container) {
     tooltip.style.left = `${x + 14}px`;
     tooltip.style.top = `${y + 14}px`;
   });
-  container.addEventListener('pointerleave', hideTooltip);
+
+  // Capture phase: a press on a plate is claimed here, before Cytoscape's own listeners on
+  // the canvas beneath can start a pan or a box-select. `preventDefault` also suppresses the
+  // compatibility mouse events Cytoscape listens for.
+  container.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      const { x, y } = pointerIn(event);
+      const hit = islandHitAny(boxes, x, y);
+      if (!hit || handlers.isOverNodeAt?.(event.clientX, event.clientY)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      drag = {
+        directory: hit.directory,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false,
+      };
+      hideTooltip();
+      container.classList.remove('island-grab');
+      setDragging(true);
+    },
+    true,
+  );
+
+  window.addEventListener('pointermove', (event) => {
+    if (!drag) {
+      return;
+    }
+    const dx = event.clientX - drag.clientX;
+    const dy = event.clientY - drag.clientY;
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+    drag.clientX = event.clientX;
+    drag.clientY = event.clientY;
+    drag.moved = true;
+    const zoom = lastViewport.zoom || 1;
+    handlers.onDragMove?.(drag.directory, dx / zoom, dy / zoom);
+  });
+
+  window.addEventListener('pointerup', () => {
+    if (!drag) {
+      return;
+    }
+    const finished = drag;
+    drag = null;
+    setDragging(false);
+    handlers.onDragEnd?.(finished.directory, finished.moved);
+  });
+
+  container.addEventListener('pointerleave', () => {
+    if (!drag) {
+      hideTooltip();
+      container.classList.remove('island-grab');
+    }
+  });
 
   return {
+    /** The plate boxes from the last paint, in device space. `directory` names each one. */
+    boxes() {
+      return boxes.map((box) => ({ ...box }));
+    },
     /** Draw `islands` (model coordinates) under the given viewport transform. */
     paint(islands, viewport) {
       // A pan, zoom, or resize moves the plates out from under any caption, so the next
       // pointermove recomputes it.
       hideTooltip();
+      lastViewport = viewport;
       // Reuse elements across frames: a pan repaints every island, and replacing the DOM
       // each time would churn a node per directory per frame.
       sync(plates, 'rect', islands.length);
       sync(labels, 'text', islands.length);
 
+      const projected = islands.map((island) => projectIsland(island, viewport));
+      // The label is chrome, not part of the map, so it holds one device size at every
+      // zoom instead of growing with the plate, and is trimmed to what the plate can
+      // hold rather than overflowing into the next island. Zoomed out there is no gap
+      // left for it either, so a title that would land on a neighbouring plate or title
+      // is dropped (the hover caption still names the plate).
+      const candidates = projected.map((box, index) =>
+        islandLabelFits(box) ? fitLabel(islands[index].label, box.width) : '',
+      );
+      const fits = labelsThatFit(projected, candidates);
+
       boxes = [];
       islands.forEach((island, index) => {
-        const box = projectIsland(island, viewport);
+        const box = projected[index];
         const rect = plates.childNodes[index];
         rect.setAttribute('x', String(box.x));
         rect.setAttribute('y', String(box.y));
@@ -98,10 +204,7 @@ export function createIslandLayer(container) {
         rect.setAttribute('class', 'island-plate');
 
         const label = labels.childNodes[index];
-        // The label is chrome, not part of the map, so it holds one device size at every
-        // zoom instead of growing with the plate, and is trimmed to what the plate can
-        // hold rather than overflowing into the next island.
-        const text = islandLabelFits(box) ? fitLabel(island.label, box.width) : '';
+        const text = fits[index] ? candidates[index] : '';
         label.setAttribute('class', text ? 'island-label' : 'island-label is-hidden');
         label.setAttribute('x', String(box.x + LABEL_INSET));
         // Above the plate, in the gap the layout already leaves between islands: the
