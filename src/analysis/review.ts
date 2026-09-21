@@ -5,12 +5,12 @@ import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
-import type { ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
+import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
 
 const run = promisify(execFile);
 
-export type { CohesionChange, ReviewFile, ReviewGroup, ReviewStatus } from './review-types.ts';
+export type { BranchDivergence, CohesionChange, ReviewFile, ReviewGroup, ReviewStatus } from './review-types.ts';
 
 export interface ReviewTotals {
   files: number;
@@ -28,10 +28,13 @@ export interface ReviewImpact {
 export type ReviewResult =
   | {
       available: true;
-      kind: 'commit' | 'working-tree';
-      /** Present for commit reviews. */
+      kind: 'commit' | 'working-tree' | 'branch';
+      /** Present for commit and branch reviews. */
       ref?: string;
+      /** The reviewed commit, or a branch's tip. */
       commit?: TimelineCommit;
+      /** Present for branch reviews. */
+      branch?: BranchDivergence;
       files: ReviewFile[];
       totals: ReviewTotals;
       impact: ReviewImpact;
@@ -183,7 +186,7 @@ export async function getCommit(root: string, ref: string): Promise<TimelineComm
  * Without this, a non-repo `git diff --cached` exits with an option error rather than a
  * "not a git repository" message, which would be misreported as a generic git failure.
  */
-async function assertRepository(root: string): Promise<void> {
+export async function assertRepository(root: string): Promise<void> {
   try {
     const stdout = await git(root, ['rev-parse', '--is-inside-work-tree']);
     if (stdout.trim() !== 'true') {
@@ -282,7 +285,7 @@ function parseNullList(stdout: string): string[] {
   return stdout.split('\0').filter((entry) => entry !== '');
 }
 
-function mergeChanges(
+export function mergeChanges(
   changes: ParsedChange[],
   counts: Map<string, { insertions: number | null; deletions: number | null }>,
   graph: Graph,
@@ -305,7 +308,7 @@ function mergeChanges(
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-function totalChanges(files: ReviewFile[]): ReviewTotals {
+export function totalChanges(files: ReviewFile[]): ReviewTotals {
   let insertions = 0;
   let deletions = 0;
   let uncounted = 0;
@@ -349,7 +352,7 @@ function countLines(file: string): number | null {
   }
 }
 
-function gitFailure(error: unknown): ReviewResult {
+export function gitFailure(error: unknown): ReviewResult {
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof NoGitError || /not a git repository|dubious ownership|does not have any commits/i.test(message)) {
     return { available: false, reason: 'no-git', detail: firstLine(message) };

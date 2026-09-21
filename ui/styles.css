@@ -2367,6 +2367,20 @@ table.change-metrics td:first-child .link {
   background: var(--bg-2);
 }
 
+.member-narrator {
+  margin: 8px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.member-narrator .narrator-block {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+}
+
 .member-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
@@ -3140,6 +3154,16 @@ table.change-metrics td:first-child .link {
   pointer-events: none;
 }
 
+/* At overview zoom the layer keeps only the header, so full cards cannot pile up on the map. */
+.unit-card-layer[data-density="compact"] .unit-card-why,
+.unit-card-layer[data-density="compact"] .unit-card-stats,
+.unit-card-layer[data-density="compact"] .unit-card-layers,
+.unit-card-layer[data-density="compact"] .unit-card-reach,
+.unit-card-layer[data-density="compact"] .unit-shelf,
+.unit-card-layer[data-density="compact"] .unit-shelf-more {
+  display: none;
+}
+
 .unit-card {
   position: absolute;
   transform: translateX(-50%);
@@ -3237,6 +3261,10 @@ table.change-metrics td:first-child .link {
 
 .unit-layer-count {
   text-align: right;
+}
+
+.unit-layer-more {
+  color: var(--ink-3);
 }
 
 .unit-shelf {

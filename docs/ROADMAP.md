@@ -25,7 +25,7 @@ record is reported as `unavailable`, never invented.
     `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
-| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 done (in-app narrator setup) |
+| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution; Member-map Narrate from the recorded members and data flow); follow-ups N1-N5 done (in-app narrator setup) |
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q8 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run) |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
@@ -635,6 +635,12 @@ evidence (`buildNarratorEvidence`) and the captions (`narratorStatusLabel`,
 "model-generated narrative — not recorded evidence" attribution, and an unconfigured narrator
 says so instead of failing. A browser scenario (`module-passport.feature` `@narrator`) asserts
 the inert path; it needs no endpoint, so it also proves nothing is contacted when unset.
+**A10 (done)** the Member-map affordance: the same block sits under the walkthrough, and
+`buildMemberNarratorEvidence` sends only the type's recorded fields, methods, and read/write
+data flow (naming an unrecorded type or flow as such). The block is `host`ed on the narrator's
+configured identity, so a reply survives a find keystroke or a walkthrough step. The
+`member-map.feature` `@narrator` scenario asserts the inert path against the `member-repo`
+fixture.
 
 ### Follow-ups: in-app narrator setup
 

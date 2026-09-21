@@ -127,11 +127,12 @@ export {
   parseNameStatus,
   parseNumstat,
 } from './analysis/review.ts';
-export type { ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
+export type { BranchDivergence, ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
 export { computeChangePassport } from './analysis/change-passport.ts';
 export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
 export {
   computeCommitMetrics,
+  computeRangeMetrics,
   computeWorkingTreeMetrics,
   computeMetricsHistory,
   clearChangeMetricsCache,
@@ -160,6 +161,15 @@ export type { FunctionSignal, FunctionSignalKind } from './analysis/signals.ts';
 export { rankHotspots } from './analysis/hotspots.ts';
 export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
+export {
+  listBranches,
+  reviewBranch,
+  movedUnderneath,
+  parseMergeTreeConflicts,
+  parseRefs,
+  parseTrack,
+} from './analysis/branches.ts';
+export type { BranchBase, BranchesResult, BranchSummary, BranchSync } from './analysis/branches.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 export { computeQualityScorecard, smellsFromScorecard, SMELL_RULES } from './analysis/quality.ts';
 export type {

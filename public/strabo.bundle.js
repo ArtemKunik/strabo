@@ -1817,6 +1817,7 @@ function createCytoscape(container) {
 }
 
 // ui/strabo-unit-cards.js
+var MAX_LAYER_BARS = 4;
 function formatCount(value) {
   const number = Math.max(0, Math.round(Number(value) || 0));
   if (number < 1e3) {
@@ -1887,7 +1888,8 @@ function unitCardElement(card, options = {}) {
   stats.append(element("span", "unit-stat", `${languages} lang${languages === 1 ? "" : "s"}`));
   root.append(stats);
   const layers = element("div", "unit-card-layers");
-  for (const bar of layerBars(card.layers)) {
+  const bars = layerBars(card.layers);
+  for (const bar of bars.slice(0, MAX_LAYER_BARS)) {
     const row = element("div", "unit-layer");
     row.append(element("span", "unit-layer-name", bar.name));
     const track = element("span", "unit-layer-track");
@@ -1896,6 +1898,11 @@ function unitCardElement(card, options = {}) {
     track.append(fill);
     row.append(track, element("span", "unit-layer-count", String(bar.files)));
     layers.append(row);
+  }
+  if (bars.length > MAX_LAYER_BARS) {
+    layers.append(
+      element("div", "unit-layer-more", `+${bars.length - MAX_LAYER_BARS} more layers`)
+    );
   }
   if (card.layers?.length) {
     root.append(layers);
@@ -1933,6 +1940,10 @@ function unitCardElement(card, options = {}) {
 }
 
 // ui/strabo-unit-card-layer.js
+var COMPACT_ZOOM = 0.7;
+function cardDensity(zoom) {
+  return zoom < COMPACT_ZOOM ? "compact" : "full";
+}
 function createUnitCardLayer(container, cy, onOpen) {
   const layer = document.createElement("div");
   layer.className = "unit-card-layer";
@@ -1940,6 +1951,7 @@ function createUnitCardLayer(container, cy, onOpen) {
   const elements2 = /* @__PURE__ */ new Map();
   const signatures = /* @__PURE__ */ new Map();
   function repaint() {
+    layer.dataset.density = cardDensity(cy.zoom());
     if (elements2.size === 0) {
       return;
     }
@@ -3160,6 +3172,46 @@ function buildGroupNamingEvidence(model, id) {
     `Recorded imports: ${imports.length > 0 ? imports.join(", ") : "none recorded"}`,
     `Recorded used-by: ${usedBy.length > 0 ? usedBy.join(", ") : "none recorded"}`
   ];
+  return lines.join("\n");
+}
+var MEMBER_NARRATION_INSTRUCTION = "Explain this type's recorded members and data flow in plain language, using only the recorded evidence. Do not infer behaviour from names, and say when something is not recorded.";
+function recordedList(items) {
+  return Array.isArray(items) && items.length > 0 ? items.join(", ") : "none recorded";
+}
+function buildMemberNarratorEvidence(memberMap) {
+  const types = memberMap?.types ?? [];
+  if (types.length === 0) {
+    return "No type is recorded for this file.";
+  }
+  const lines = [];
+  for (const type of types) {
+    lines.push(`Type: ${type.name} (${type.visibility ?? "visibility not recorded"})`);
+    lines.push(`Fields: ${(type.fields ?? []).length}`);
+    for (const field2 of type.fields ?? []) {
+      const mutable = field2.mutable === false ? "readonly" : "mutable";
+      const declared = field2.declaredIn ? ` \xB7 declared in ${field2.declaredIn}` : "";
+      lines.push(
+        `- ${field2.name}: ${field2.type ?? "unrecorded type"} \xB7 ${field2.visibility ?? "unknown"} \xB7 ${mutable} \xB7 reads ${field2.reads ?? 0} \xB7 writes ${field2.writes ?? 0}${declared}`
+      );
+    }
+    lines.push(`Methods: ${(type.methods ?? []).length}`);
+    for (const method of type.methods ?? []) {
+      const params = method.parameters ?? 0;
+      const typeName = method.type ? `: ${method.type}` : "";
+      lines.push(`- ${method.name}(${params})${typeName} \xB7 ${method.visibility ?? "unknown"}`);
+      lines.push(`  reads: ${recordedList(method.reads)}`);
+      lines.push(`  writes: ${recordedList(method.writes)}`);
+    }
+  }
+  const flow = memberMap?.dataFlow;
+  if (!flow || flow.available === false) {
+    lines.push(`Data flow: not recorded${flow?.detail ? ` \u2014 ${flow.detail}` : ""}`);
+  } else {
+    lines.push(`Data flow sources: ${recordedList(flow.sources)}`);
+    lines.push(`Data flow resources: ${recordedList(flow.resources)}`);
+    lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
+    lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
+  }
   return lines.join("\n");
 }
 function buildNarratorEvidence(result) {
@@ -5425,6 +5477,12 @@ function renderRisk(container, report, handlers = {}) {
     container.append(caveats);
   }
 }
+function narratorBlockKey(status) {
+  if (!status || status.configured !== true) {
+    return "off";
+  }
+  return `on:${status.model ?? ""}:${status.reason ?? ""}`;
+}
 function renderMemberMap(container, data, view2, handlers = {}) {
   const memberMap = data?.memberMap;
   const steps = memberMapSteps(memberMap, {
@@ -5467,6 +5525,14 @@ function renderMemberMap(container, data, view2, handlers = {}) {
         { className: "member-explain", key: "explain", dataset: { role: "explain" } },
         explainClass(memberMap)
       ) : null,
+      // Hosted, so a reply survives a find keystroke or a walkthrough step; it is rebuilt for a
+      // different file, or when the narrator's configured identity changes.
+      handlers.onNarrate ? host(`narrator:${data?.file ?? ""}:${narratorBlockKey(handlers.narratorStatus)}`, () => {
+        const narrator = document.createElement("div");
+        narrator.className = "member-narrator";
+        appendNarratorBlock(narrator, handlers, { id: "narrate-member", label: "Narrate" });
+        return narrator;
+      }) : null,
       h(
         "div",
         { className: "member-body", key: "body" },
@@ -6981,6 +7047,7 @@ var elements = {
   tbFocus: document.getElementById("tb-focus"),
   tbImpact: document.getElementById("tb-impact"),
   tbOutside: document.getElementById("tb-outside"),
+  tbUnits: document.getElementById("tb-units"),
   tbPath: document.getElementById("tb-path"),
   tbBoundaries: document.getElementById("tb-boundaries"),
   tbTimeline: document.getElementById("tb-timeline"),
@@ -7111,6 +7178,7 @@ async function scan({ refresh = false } = {}) {
     });
     updateOutsideButton();
     applyModeChrome();
+    updateUnitsButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -7373,6 +7441,21 @@ async function narrateFile(result) {
   }
   return body;
 }
+async function narrateMemberMap() {
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      instruction: MEMBER_NARRATION_INSTRUCTION,
+      evidence: buildMemberNarratorEvidence(memberData?.memberMap)
+    })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
+}
 function clearSelection() {
   selected = null;
   store.set("ui", { node: null });
@@ -7418,6 +7501,9 @@ async function openMemberMap(id) {
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null
   };
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
   store.set("ui", { memberOpen: true, node: id });
   store.set("member", { stepIndex: 0, find: "" });
   floatingWindows.find((controller) => controller.key === "member")?.open();
@@ -7462,6 +7548,10 @@ function renderMemberMapView() {
       dim: false
     }),
     onDataFlow: (value) => store.set("member", { dataFlow: value }),
+    // The member map may ask the opt-in narrator to explain the recorded members and data flow.
+    narratorStatus,
+    onNarrate: () => narrateMemberMap(),
+    onOpenNarratorSettings: openNarratorSettings,
     onStep: (delta) => {
       stopMemberPlay();
       store.set("member", {
@@ -7625,6 +7715,7 @@ document.addEventListener("keydown", (event) => {
   if (key === "f" && selected) focus(view.cy, selected);
   else if (key === "i") elements.tbImpact.click();
   else if (key === "o" && state.mode === "system" && state.systemUnit) elements.tbOutside.click();
+  else if (key === "u" && state.mode === "system" && state.systemUnit) closeUnit();
   else if (key === "p") elements.tbPath.click();
   else if (key === "b") elements.tbBoundaries.click();
   else if (key === "t") elements.tbTimeline.click();
@@ -8149,6 +8240,12 @@ function updateOutsideButton() {
   elements.tbOutside.classList.toggle("active", state.showOutside);
   elements.tbOutside.setAttribute("aria-pressed", String(state.showOutside));
 }
+function updateUnitsButton() {
+  if (!elements.tbUnits) {
+    return;
+  }
+  elements.tbUnits.hidden = !(state.mode === "system" && Boolean(state.systemUnit));
+}
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
 }
@@ -8369,6 +8466,9 @@ elements.tbImpact.addEventListener("click", () => {
 });
 if (elements.tbOutside) {
   elements.tbOutside.addEventListener("click", () => toggleOutsideLinks());
+}
+if (elements.tbUnits) {
+  elements.tbUnits.addEventListener("click", () => closeUnit());
 }
 elements.tbPath.addEventListener("click", () => {
   state.pathMode = !state.pathMode;

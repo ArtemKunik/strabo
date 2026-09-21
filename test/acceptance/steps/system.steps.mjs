@@ -258,6 +258,28 @@ When('I press Escape', async function () {
   });
 });
 
+Then('the toolbar offers a way back to the unit map', async function () {
+  await this.page.waitForFunction(
+    () => {
+      const button = document.getElementById('tb-units');
+      return Boolean(button && !button.hidden);
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+When('I press the back-to-units shortcut', async function () {
+  await this.page.keyboard.press('u');
+  await this.page.waitForFunction(() => window.straboTest?.state.systemUnit == null, undefined, {
+    timeout: 15_000,
+  });
+  // The control is only for an open unit, so it goes away with it.
+  await this.page.waitForFunction(() => Boolean(document.getElementById('tb-units')?.hidden), undefined, {
+    timeout: 15_000,
+  });
+});
+
 When('I show outside links', async function () {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
   // The inspector action is the primary affordance; the toolbar button is behind the panel.

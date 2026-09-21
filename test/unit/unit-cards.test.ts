@@ -8,7 +8,10 @@ const { window } = dom;
 globalThis.document = window.document;
 globalThis.window = window as unknown as typeof globalThis.window;
 
-const { unitCardElement, formatCount, layerBars } = await import('../../ui/strabo-unit-cards.js');
+const { unitCardElement, formatCount, layerBars, MAX_LAYER_BARS } = await import(
+  '../../ui/strabo-unit-cards.js'
+);
+const { cardDensity, COMPACT_ZOOM } = await import('../../ui/strabo-unit-card-layer.js');
 const { unitHoverFacts, shelfHoverText, shelfStripText, withUnitHotspots } = await import(
   '../../ui/strabo-core.js'
 );
@@ -82,6 +85,23 @@ test('the shelf footer expands in place on click', () => {
   const more = card.querySelector('.unit-shelf-more') as HTMLElement;
   assert.equal(more.hasAttribute('hidden'), false);
   assert.match(more.textContent ?? '', /3 tests/);
+});
+
+test('the card folds layers past the cap into a "+N more layers" row', () => {
+  const layers = Array.from({ length: MAX_LAYER_BARS + 3 }, (_, index) => ({
+    name: `layer-${index}`,
+    order: index,
+    files: MAX_LAYER_BARS + 3 - index,
+  }));
+  const card = unitCardElement(sampleCard({ layers }));
+  assert.equal(card.querySelectorAll('.unit-layer').length, MAX_LAYER_BARS);
+  assert.match(card.querySelector('.unit-layer-more')?.textContent ?? '', /\+3 more layers/);
+});
+
+test('cardDensity keeps full cards only past the overview zoom', () => {
+  assert.equal(cardDensity(0.4), 'compact');
+  assert.equal(cardDensity(COMPACT_ZOOM), 'full');
+  assert.equal(cardDensity(1.2), 'full');
 });
 
 test('a card header opens the unit when given an onOpen handler', () => {

@@ -1,5 +1,6 @@
 /**
- * Pure helpers for the narrator affordance in the Functions tab.
+ * Pure helpers for the narrator affordance: the Functions tab, the System-view group
+ * naming, and the Member map.
  *
  * The narrator returns model-generated narrative, which is not recorded evidence; these
  * helpers build the evidence that is sent and keep that distinction in the captions and in
@@ -144,6 +145,65 @@ export function buildGroupNamingEvidence(model, id) {
     `Recorded imports: ${imports.length > 0 ? imports.join(', ') : 'none recorded'}`,
     `Recorded used-by: ${usedBy.length > 0 ? usedBy.join(', ') : 'none recorded'}`,
   ];
+  return lines.join('\n');
+}
+
+/**
+ * The instruction for explaining a file's member map. The narrator describes the recorded
+ * members and data flow only; it never claims wiring the scan did not record.
+ */
+export const MEMBER_NARRATION_INSTRUCTION =
+  'Explain this type\'s recorded members and data flow in plain language, using only the ' +
+  'recorded evidence. Do not infer behaviour from names, and say when something is not recorded.';
+
+/** A recorded list as prose, or an explicit "none recorded" rather than an empty string. */
+function recordedList(items) {
+  return Array.isArray(items) && items.length > 0 ? items.join(', ') : 'none recorded';
+}
+
+/**
+ * Build the recorded evidence sent to the narrator from a file's member map.
+ *
+ * Only recorded facts are included: each type's fields and methods with their visibility and
+ * recorded read/write wiring, and the data-flow panels. An unrecorded type, member, or flow
+ * is named as such rather than guessed at.
+ */
+export function buildMemberNarratorEvidence(memberMap) {
+  const types = memberMap?.types ?? [];
+  if (types.length === 0) {
+    return 'No type is recorded for this file.';
+  }
+  const lines = [];
+  for (const type of types) {
+    lines.push(`Type: ${type.name} (${type.visibility ?? 'visibility not recorded'})`);
+    lines.push(`Fields: ${(type.fields ?? []).length}`);
+    for (const field of type.fields ?? []) {
+      const mutable = field.mutable === false ? 'readonly' : 'mutable';
+      const declared = field.declaredIn ? ` · declared in ${field.declaredIn}` : '';
+      lines.push(
+        `- ${field.name}: ${field.type ?? 'unrecorded type'} · ${field.visibility ?? 'unknown'} · ` +
+          `${mutable} · reads ${field.reads ?? 0} · writes ${field.writes ?? 0}${declared}`,
+      );
+    }
+    lines.push(`Methods: ${(type.methods ?? []).length}`);
+    for (const method of type.methods ?? []) {
+      const params = method.parameters ?? 0;
+      const typeName = method.type ? `: ${method.type}` : '';
+      lines.push(`- ${method.name}(${params})${typeName} · ${method.visibility ?? 'unknown'}`);
+      lines.push(`  reads: ${recordedList(method.reads)}`);
+      lines.push(`  writes: ${recordedList(method.writes)}`);
+    }
+  }
+
+  const flow = memberMap?.dataFlow;
+  if (!flow || flow.available === false) {
+    lines.push(`Data flow: not recorded${flow?.detail ? ` — ${flow.detail}` : ''}`);
+  } else {
+    lines.push(`Data flow sources: ${recordedList(flow.sources)}`);
+    lines.push(`Data flow resources: ${recordedList(flow.resources)}`);
+    lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
+    lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
+  }
   return lines.join('\n');
 }
 

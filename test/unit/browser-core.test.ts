@@ -64,7 +64,9 @@ import {
 } from '../../ui/strabo-functions.js';
 import {
   GROUP_NAMING_INSTRUCTION,
+  MEMBER_NARRATION_INSTRUCTION,
   buildGroupNamingEvidence,
+  buildMemberNarratorEvidence,
   buildNarratorEvidence,
   narratorDisabledReason,
   narratorKeyLabel,
@@ -1164,6 +1166,54 @@ test('buildNarratorEvidence lists recorded metrics, signals, and calls only', ()
     buildNarratorEvidence({ functions: { available: true, functions: [] } }),
     'No function inventory is recorded for this file.',
   );
+});
+
+test('buildMemberNarratorEvidence lists recorded members and data flow only', () => {
+  const evidence = buildMemberNarratorEvidence({
+    types: [
+      {
+        name: 'Counter',
+        visibility: 'public',
+        fields: [
+          { name: 'value', visibility: 'private', type: 'int', mutable: true, reads: 2, writes: 1 },
+          { name: 'label', visibility: 'public', type: undefined, mutable: false, reads: 0, writes: 0 },
+        ],
+        methods: [
+          { name: 'increment', visibility: 'public', parameters: 0, reads: ['value'], writes: ['value'] },
+          { name: 'reset', visibility: 'private', parameters: 1, type: 'void', reads: [], writes: [] },
+        ],
+      },
+    ],
+    dataFlow: {
+      available: true,
+      sources: [],
+      resources: ['value'],
+      transforms: ['Counter.increment'],
+      sinks: [],
+    },
+  });
+  assert.match(evidence, /Type: Counter \(public\)/);
+  assert.match(evidence, /- value: int · private · mutable · reads 2 · writes 1/);
+  assert.match(evidence, /- label: unrecorded type · public · readonly · reads 0 · writes 0/);
+  assert.match(evidence, /- increment\(0\) · public/);
+  assert.match(evidence, /reads: value/);
+  assert.match(evidence, /- reset\(1\): void · private/);
+  assert.match(evidence, /reads: none recorded/);
+  assert.match(evidence, /Data flow resources: value/);
+  assert.match(evidence, /Data flow transforms: Counter\.increment/);
+  assert.match(evidence, /Data flow sources: none recorded/);
+
+  assert.equal(buildMemberNarratorEvidence({ types: [] }), 'No type is recorded for this file.');
+  const noFlow = buildMemberNarratorEvidence({
+    types: [{ name: 'Plain', visibility: 'public', fields: [], methods: [] }],
+    dataFlow: { available: false, detail: 'No field references were recorded in this file.' },
+  });
+  assert.match(noFlow, /Data flow: not recorded — No field references were recorded/);
+});
+
+test('the member narration instruction forbids inferring beyond recorded evidence', () => {
+  assert.match(MEMBER_NARRATION_INSTRUCTION, /recorded evidence/);
+  assert.match(MEMBER_NARRATION_INSTRUCTION, /not recorded/);
 });
 
 test('workspaceSummary reports the recorded counts or says it is unrecorded', () => {

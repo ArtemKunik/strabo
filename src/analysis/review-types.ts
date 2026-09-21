@@ -18,8 +18,8 @@ export type ReviewStatus =
   | 'unmerged'
   | 'untracked';
 
-/** Which side of a review a path belongs to. Commit reviews report `commit`. */
-export type ReviewGroup = 'commit' | 'staged' | 'unstaged' | 'untracked';
+/** Which side of a review a path belongs to. Commit reviews report `commit`, branch reviews `branch`. */
+export type ReviewGroup = 'commit' | 'branch' | 'staged' | 'unstaged' | 'untracked';
 
 /** One path in a change set, with the line counts Git recorded for it. */
 export interface ReviewFile {
@@ -149,4 +149,38 @@ export interface ChangePassport {
   baseline: string | null;
   /** True when there were more changed files than were measured. */
   capped: boolean;
+}
+
+/**
+ * How a branch stands against the base it is compared with.
+ *
+ * Every field is read from Git or from the scanned graph. `conflicts` comes from a real
+ * trial merge (`git merge-tree --write-tree`), never from guessing at overlapping paths;
+ * when the installed Git cannot run one it is reported as unavailable.
+ */
+export interface BranchDivergence {
+  branch: string;
+  base: string;
+  tipHash: string;
+  baseHash: string;
+  mergeBase: string;
+  /** Commits on the branch that the base does not have. */
+  ahead: number;
+  /** Commits on the base that the branch does not have. */
+  behind: number;
+  /** Paths the base changed since the merge base; bounded, see `baseChangedCapped`. */
+  baseChanged: string[];
+  baseChangedCapped: boolean;
+  /** Paths both sides changed since the merge base. */
+  overlap: string[];
+  conflicts:
+    | { available: true; clean: boolean; paths: string[] }
+    | { available: false; detail: string };
+  /**
+   * Base-side changes the branch's changed files depend on, through the checked-out graph:
+   * code that moved underneath the branch. `via` is the nearest branch file that reaches it.
+   */
+  movedUnderneath: Array<{ id: string; via: string; distance: number }>;
+  /** True when the branch tip is what is checked out, so the map is the branch's own graph. */
+  checkedOut: boolean;
 }

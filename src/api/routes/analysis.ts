@@ -6,8 +6,10 @@ import { computeChangePassport } from '../../analysis/change-passport.ts';
 import {
   computeCommitMetrics,
   computeMetricsHistory,
+  computeRangeMetrics,
   computeWorkingTreeMetrics,
 } from '../../analysis/change-metrics.ts';
+import { listBranches, reviewBranch } from '../../analysis/branches.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
@@ -255,16 +257,48 @@ export function createAnalysisRouter(config: StraboConfig): Router {
    });
 
   /**
-   * Review a commit's own changes, or the working tree.
+   * Branches with their upstream sync and their divergence from a base branch. `base`
+   * names the branch to compare with; by default the remote's default branch.
+   */
+  router.get('/analysis/branches', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' && request.query.base ? request.query.base : undefined;
+      response.json(await listBranches(repository.root, base));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Review a commit's own changes, a branch against a base, or the working tree.
    *
-   * `base` reviews that revision against its first parent; omitting it reviews the working
-   * tree, split into staged, unstaged, and untracked. Either way the result carries the
+   * `base` reviews that revision against its first parent; `branch` reviews that branch's
+   * work since it left `against` (default: the remote's default branch); neither reviews
+   * the working tree, split into staged, unstaged, and untracked. Every shape carries the
    * same reverse-dependency impact the change-impact overlay computes.
    */
   router.get('/analysis/review', async (request, response) => {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
+      const branch = typeof request.query.branch === 'string' ? request.query.branch : '';
+      if (branch) {
+        const against = typeof request.query.against === 'string' && request.query.against ? request.query.against : undefined;
+        const review = await reviewBranch(repository.root, cached.report.graph, branch, against);
+        if (!review.available || !review.branch) {
+          response.json(review);
+          return;
+        }
+        // The passport reads the after side from the working tree, so it is only honest
+        // when the branch is what is checked out.
+        const cohesion = review.branch.checkedOut
+          ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph)
+          : undefined;
+        const metrics = await computeRangeMetrics(repository.root, review.branch.mergeBase, review.branch.tipHash);
+        response.json({ ...review, ...(cohesion ? { cohesion } : {}), metrics });
+        return;
+      }
       const base = typeof request.query.base === 'string' ? request.query.base : '';
       const review = base
         ? await reviewCommit(repository.root, cached.report.graph, base)

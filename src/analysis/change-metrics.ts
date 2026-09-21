@@ -105,8 +105,8 @@ export interface MetricTotals {
 
 export interface ChangeMetrics {
   available: true;
-  kind: 'commit' | 'working-tree';
-  /** Resolved commit hash, for commit metrics. */
+  kind: 'commit' | 'working-tree' | 'range';
+  /** Resolved commit hash, for commit metrics; the tip, for range metrics. */
   ref?: string;
   /** The revision the change set is compared against; null for a root commit. */
   baseline: string | null;
@@ -158,34 +158,61 @@ export async function computeCommitMetrics(root: string, ref: string): Promise<C
 
   try {
     const nameStatus = await git(root, ['show', '--first-parent', '--format=', '--name-status', '-z', '-M', hash]);
-    const changes = parseNameStatus(nameStatus);
-    const [beforeFiles, afterFiles] = await Promise.all([
-      parent ? listTree(root, parent) : Promise.resolve(new Set<string>()),
-      listTree(root, hash),
-    ]);
-    const measured = changes.slice(0, MAX_FILES);
-    const blobs = await readBlobs(root, [
-      ...(parent ? measured.filter((c) => c.status !== 'added').map((c) => `${parent}:${c.previousPath ?? c.path}`) : []),
-      ...measured.filter((c) => c.status !== 'deleted').map((c) => `${hash}:${c.path}`),
-    ]);
-    const sides: ChangeSide[] = measured.map((change) => ({
-      path: change.path,
-      ...(change.previousPath ? { previousPath: change.previousPath } : {}),
-      status: change.status,
-      before: parent && change.status !== 'added' ? (blobs.get(`${parent}:${change.previousPath ?? change.path}`) ?? null) : null,
-      after: change.status === 'deleted' ? null : (blobs.get(`${hash}:${change.path}`) ?? null),
-    }));
-    const result = await measureChangeSet(root, sides, beforeFiles, afterFiles, {
-      kind: 'commit',
-      ref: hash,
-      baseline: parent,
-      capped: changes.length > measured.length,
-    });
+    const result = await measureRevisions(root, parseNameStatus(nameStatus), parent, hash, 'commit');
     store.set(hash, result);
     return result;
   } catch (error) {
     return gitFailure(error, ref);
   }
+}
+
+/**
+ * Metrics for everything between two revisions, `from` exclusive and `to` inclusive: a
+ * branch measured from its merge base. Both must already be resolved commit hashes.
+ * Not cached, since a range is rarely asked for twice at the same pair of tips.
+ */
+export async function computeRangeMetrics(root: string, from: string, to: string): Promise<ChangeMetricsResult> {
+  if (!isSafeRevision(from) || !isSafeRevision(to)) {
+    return { available: false, reason: 'unknown-revision', detail: `Unknown revision "${from}..${to}".` };
+  }
+  try {
+    const nameStatus = await git(root, ['diff', '--name-status', '-z', '-M', from, to]);
+    return await measureRevisions(root, parseNameStatus(nameStatus), from, to, 'range');
+  } catch (error) {
+    return gitFailure(error, `${from}..${to}`);
+  }
+}
+
+/** Measure a change set whose two sides are both recorded revisions. */
+async function measureRevisions(
+  root: string,
+  changes: ReturnType<typeof parseNameStatus>,
+  before: string | null,
+  after: string,
+  kind: 'commit' | 'range',
+): Promise<ChangeMetrics> {
+  const [beforeFiles, afterFiles] = await Promise.all([
+    before ? listTree(root, before) : Promise.resolve(new Set<string>()),
+    listTree(root, after),
+  ]);
+  const measured = changes.slice(0, MAX_FILES);
+  const blobs = await readBlobs(root, [
+    ...(before ? measured.filter((c) => c.status !== 'added').map((c) => `${before}:${c.previousPath ?? c.path}`) : []),
+    ...measured.filter((c) => c.status !== 'deleted').map((c) => `${after}:${c.path}`),
+  ]);
+  const sides: ChangeSide[] = measured.map((change) => ({
+    path: change.path,
+    ...(change.previousPath ? { previousPath: change.previousPath } : {}),
+    status: change.status,
+    before: before && change.status !== 'added' ? (blobs.get(`${before}:${change.previousPath ?? change.path}`) ?? null) : null,
+    after: change.status === 'deleted' ? null : (blobs.get(`${after}:${change.path}`) ?? null),
+  }));
+  return measureChangeSet(root, sides, beforeFiles, afterFiles, {
+    kind,
+    ref: after,
+    baseline: before,
+    capped: changes.length > measured.length,
+  });
 }
 
 /**

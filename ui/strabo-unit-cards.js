@@ -11,6 +11,9 @@
  * only inline style (a data value, not a hue).
  */
 
+/** Layer bars shown before the card folds the rest into a "+N more layers" row. */
+export const MAX_LAYER_BARS = 4;
+
 /** Compact file/line counts: 1200 reads as `1.2k`. */
 export function formatCount(value) {
   const number = Math.max(0, Math.round(Number(value) || 0));
@@ -97,7 +100,8 @@ export function unitCardElement(card, options = {}) {
   root.append(stats);
 
   const layers = element('div', 'unit-card-layers');
-  for (const bar of layerBars(card.layers)) {
+  const bars = layerBars(card.layers);
+  for (const bar of bars.slice(0, MAX_LAYER_BARS)) {
     const row = element('div', 'unit-layer');
     row.append(element('span', 'unit-layer-name', bar.name));
     const track = element('span', 'unit-layer-track');
@@ -106,6 +110,11 @@ export function unitCardElement(card, options = {}) {
     track.append(fill);
     row.append(track, element('span', 'unit-layer-count', String(bar.files)));
     layers.append(row);
+  }
+  if (bars.length > MAX_LAYER_BARS) {
+    layers.append(
+      element('div', 'unit-layer-more', `+${bars.length - MAX_LAYER_BARS} more layers`),
+    );
   }
   if (card.layers?.length) {
     root.append(layers);

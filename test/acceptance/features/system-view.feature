@@ -46,6 +46,15 @@ Feature: System view
     When I press Escape
     Then the System view draws units only
 
+  @back
+  Scenario: The toolbar offers a way back to the unit map
+    Given I open the polyglot fixture repository
+    When I switch to system detail
+    And I open the unit "beta"
+    Then the toolbar offers a way back to the unit map
+    When I press the back-to-units shortcut
+    Then the System view draws units only
+
   @unit-edges
   Scenario: Selecting a file draws only its in-unit edges
     Given I open the polyglot fixture repository

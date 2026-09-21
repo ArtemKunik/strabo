@@ -271,6 +271,23 @@ When('I open the member map', async function () {
   );
 });
 
+Then('the member map offers the narrator and reports it is off', async function () {
+  await this.page.waitForSelector('#member-view .member-narrator .narrator-note', { timeout: 15_000 });
+  const note = (await this.page.textContent('#member-view .member-narrator .narrator-note')) ?? '';
+  assert.match(note, /off/i);
+
+  // One call to action, and the Narrate button is disabled with the reason as its tooltip.
+  await this.page.waitForSelector('#member-view .member-narrator [data-role="narrator-setup"]', {
+    timeout: 15_000,
+  });
+  const disabled = await this.page.evaluate(() => {
+    const button = document.getElementById('narrate-member');
+    return { disabled: button?.disabled === true, title: button?.title ?? '' };
+  });
+  assert.equal(disabled.disabled, true, 'Narrate should be disabled while the narrator is off');
+  assert.match(disabled.title, /off|set it up/i);
+});
+
 When('I reload the page', async function () {
   await this.page.reload();
   await this.page.waitForFunction(() => window.straboTest?.model?.() != null, undefined, {

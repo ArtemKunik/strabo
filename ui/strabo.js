@@ -38,7 +38,9 @@ import { renderTierPanel } from './strabo-tier-panel.js';
 import { tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
+  MEMBER_NARRATION_INSTRUCTION,
   buildGroupNamingEvidence,
+  buildMemberNarratorEvidence,
   buildNarratorEvidence,
 } from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
@@ -243,6 +245,7 @@ const elements = {
   tbFocus: document.getElementById('tb-focus'),
   tbImpact: document.getElementById('tb-impact'),
   tbOutside: document.getElementById('tb-outside'),
+  tbUnits: document.getElementById('tb-units'),
   tbPath: document.getElementById('tb-path'),
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbTimeline: document.getElementById('tb-timeline'),
@@ -397,6 +400,7 @@ async function scan({ refresh = false } = {}) {
     });
     updateOutsideButton();
     applyModeChrome();
+    updateUnitsButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -723,6 +727,28 @@ async function narrateFile(result) {
   return body;
 }
 
+/**
+ * Ask the narrator to explain one file's recorded members and data flow.
+ *
+ * Only the recorded member map is sent; the reply is narrative, rendered under the
+ * model-generated attribution, and never changes the recorded view.
+ */
+async function narrateMemberMap() {
+  const response = await fetch(`${API_PATH}/narrator`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      instruction: MEMBER_NARRATION_INSTRUCTION,
+      evidence: buildMemberNarratorEvidence(memberData?.memberMap),
+    }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+  }
+  return body;
+}
+
 function clearSelection() {
   selected = null;
   store.set('ui', { node: null });
@@ -770,6 +796,10 @@ async function openMemberMap(id) {
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
   };
+  // The member map's narrator affordance needs the status before it renders.
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
   store.set('ui', { memberOpen: true, node: id });
   store.set('member', { stepIndex: 0, find: '' });
   // Open through the window controller, not `memberView.hidden = false` directly: the
@@ -821,6 +851,10 @@ function renderMemberMapView() {
         dim: false,
       }),
     onDataFlow: (value) => store.set('member', { dataFlow: value }),
+    // The member map may ask the opt-in narrator to explain the recorded members and data flow.
+    narratorStatus,
+    onNarrate: () => narrateMemberMap(),
+    onOpenNarratorSettings: openNarratorSettings,
     onStep: (delta) => {
       stopMemberPlay();
       store.set('member', {
@@ -1017,6 +1051,7 @@ document.addEventListener('keydown', (event) => {
   if (key === 'f' && selected) focus(view.cy, selected);
   else if (key === 'i') elements.tbImpact.click();
   else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
+  else if (key === 'u' && state.mode === 'system' && state.systemUnit) closeUnit();
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 't') elements.tbTimeline.click();
@@ -1668,6 +1703,19 @@ function updateOutsideButton() {
 }
 
 /**
+ * The explicit way back to the unit map (L20).
+ *
+ * Esc and the breadcrumb both leave a unit, but neither is visible on the canvas, so a
+ * reader who has just opened a unit needs a control that names where it goes.
+ */
+function updateUnitsButton() {
+  if (!elements.tbUnits) {
+    return;
+  }
+  elements.tbUnits.hidden = !(state.mode === 'system' && Boolean(state.systemUnit));
+}
+
+/**
  * Show only the toolbar controls the current mode can act on (L20).
  *
  * Tier and Review are per-file lenses, and Impact / Path / Boundaries are file-map tools; a
@@ -1920,6 +1968,9 @@ elements.tbImpact.addEventListener('click', () => {
 });
 if (elements.tbOutside) {
   elements.tbOutside.addEventListener('click', () => toggleOutsideLinks());
+}
+if (elements.tbUnits) {
+  elements.tbUnits.addEventListener('click', () => closeUnit());
 }
 elements.tbPath.addEventListener('click', () => {
   state.pathMode = !state.pathMode;

@@ -96,3 +96,14 @@ Feature: Member map
     And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
     And I open the member map
     Then stepping the walkthrough keeps the member card nodes
+
+  @member-view @narrator
+  Scenario: The member map offers the narrator and stays inert without configuration
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "member-repo" folder
+    And I use the selected folder
+    And I switch to file detail
+    And I select the "src/main/kotlin/com/acme/app/Counter.kt" node
+    And I open the member map
+    Then the member map offers the narrator and reports it is off

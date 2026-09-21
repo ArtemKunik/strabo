@@ -8,6 +8,17 @@
 
 import { unitCardElement } from './strabo-unit-cards.js';
 
+/**
+ * Below this zoom a unit map is a wide overview, so full cards would pile up and bury the
+ * edges. The layer flips to a header-only density until the reader zooms back in.
+ */
+export const COMPACT_ZOOM = 0.7;
+
+/** The card density for a zoom level: a header-only `compact` chip, or the full `card`. */
+export function cardDensity(zoom) {
+  return zoom < COMPACT_ZOOM ? 'compact' : 'full';
+}
+
 export function createUnitCardLayer(container, cy, onOpen) {
   const layer = document.createElement('div');
   layer.className = 'unit-card-layer';
@@ -17,6 +28,7 @@ export function createUnitCardLayer(container, cy, onOpen) {
 
   /** Anchor each card under its node, hiding it when the node is gone or filtered out. */
   function repaint() {
+    layer.dataset.density = cardDensity(cy.zoom());
     if (elements.size === 0) {
       return;
     }
