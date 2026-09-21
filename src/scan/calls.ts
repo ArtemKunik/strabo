@@ -183,6 +183,10 @@ function collectExports(statement: Node, callableExports: Set<string>): void {
   if (statement.childForFieldName('source')) {
     return;
   }
+  // `export type { X }` re-exports a type; a type is not callable and not a call target.
+  if (hasToken(statement, 'type')) {
+    return;
+  }
   if (hasToken(statement, 'default')) {
     callableExports.add('default');
     return;
@@ -199,7 +203,7 @@ function collectExports(statement: Node, callableExports: Set<string>): void {
     return;
   }
   for (const specifier of clause.namedChildren) {
-    if (specifier.type !== 'export_specifier') {
+    if (specifier.type !== 'export_specifier' || hasToken(specifier, 'type')) {
       continue;
     }
     const exported =

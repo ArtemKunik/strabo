@@ -22,6 +22,8 @@ export interface CSharpUsing {
   kind: 'simple' | 'static' | 'alias';
   /** Dotted namespace (simple) or fully-qualified type (static/alias). */
   target: string;
+  /** Local name an `alias` using binds (`using H = Acme.Util.Helper`). */
+  alias?: string;
   line: number;
 }
 
@@ -36,12 +38,22 @@ export interface CSharpTypeReference {
   line: number;
 }
 
+/** A call site whose callee the syntax proves: `Foo(...)` or `Type.Foo(...)`. */
+export interface CSharpCall {
+  name: string;
+  qualifier?: string;
+  line: number;
+}
+
 export interface CSharpFileFacts {
   file: string;
   namespace: string;
   usings: CSharpUsing[];
   types: CSharpTypeDeclaration[];
   typeReferences: CSharpTypeReference[];
+  /** Method names the file declares, so a call can be proven against this file. */
+  methods: string[];
+  calls: CSharpCall[];
 }
 
 export interface CSharpExtraction {
@@ -70,6 +82,8 @@ export async function extractCSharpFacts(file: string, content: string): Promise
       usings: [],
       types: [],
       typeReferences: [],
+      methods: [],
+      calls: [],
     };
     const diagnostics: Diagnostic[] = [];
 
@@ -98,6 +112,8 @@ export async function extractCSharpFacts(file: string, content: string): Promise
     const references: CSharpTypeReference[] = [];
     collectTypeReferences(tree.rootNode, references);
     facts.typeReferences = dedupeReferences(references);
+    collectMethods(tree.rootNode, facts.methods);
+    collectCalls(tree.rootNode, facts.calls);
 
     if (tree.rootNode.hasError) {
       diagnostics.push({
@@ -142,7 +158,7 @@ function parseUsing(text: string, line: number): CSharpUsing | null {
     return { kind: 'static', target, line };
   }
   if (match[2]) {
-    return { kind: 'alias', target, line };
+    return { kind: 'alias', alias: match[2], target, line };
   }
   return { kind: 'simple', target, line };
 }
@@ -238,6 +254,53 @@ function dedupeReferences(references: CSharpTypeReference[]): CSharpTypeReferenc
     }
   }
   return [...byName.values()];
+}
+
+/** Collect declared method names, so a call can be proven against this file. */
+function collectMethods(root: import('web-tree-sitter').Node, out: string[]): void {
+  for (const node of walk(root)) {
+    if (node.type === 'method_declaration') {
+      const name = node.childForFieldName('name')?.text;
+      if (name) {
+        out.push(name);
+      }
+    }
+  }
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `Foo(...)` is bare; `Type.Foo(...)` names the receiver. `this.Foo()` is skipped (same-file)
+ * and `obj.Foo()` is not recorded because the receiver's type is unknown here.
+ */
+function collectCalls(root: import('web-tree-sitter').Node, out: CSharpCall[]): void {
+  for (const node of walk(root)) {
+    if (node.type !== 'invocation_expression') {
+      continue;
+    }
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      continue;
+    }
+    const line = node.startPosition.row + 1;
+    if (fn.type === 'identifier') {
+      out.push({ name: fn.text, line });
+      continue;
+    }
+    if (fn.type !== 'member_access_expression') {
+      continue;
+    }
+    const expression = fn.childForFieldName('expression');
+    const name = fn.childForFieldName('name');
+    if (
+      name &&
+      expression?.type === 'identifier' &&
+      looksLikeTypeName(expression.text)
+    ) {
+      out.push({ name: name.text, qualifier: expression.text, line });
+    }
+  }
 }
 
 interface CSharpIndex {
@@ -708,5 +771,72 @@ export function resolveCSharp(facts: CSharpFileFacts[]): CSharpResolution {
     }
   }
 
+  appendCallEdges(facts, index, edges);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to the file that declares its method.
+ *
+ * `Type.Foo()` resolves `Type` through an alias import, a namespace import that names the
+ * type, or a same-namespace type. A bare `Foo()` resolves a `using static Type` import. The
+ * target file must declare `Foo`; anything ambiguous or unresolved is left unclaimed.
+ */
+function appendCallEdges(
+  facts: readonly CSharpFileFacts[],
+  index: CSharpIndex,
+  edges: GraphEdge[],
+): void {
+  const declaredMethods = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    declaredMethods.set(fact.file, new Set(fact.methods ?? []));
+  }
+  const declares = (file: string, name: string): boolean =>
+    declaredMethods.get(file)?.has(name) ?? false;
+  const seen = new Set<string>();
+
+  for (const fact of facts) {
+    for (const call of fact.calls ?? []) {
+      let target: string | undefined;
+      if (call.qualifier) {
+        for (const entry of fact.usings) {
+          if (entry.kind === 'alias' && entry.alias === call.qualifier) {
+            target ??= index.qualifiedTypes.get(entry.target);
+          } else if (entry.kind === 'simple') {
+            target ??= index.qualifiedTypes.get(`${entry.target}.${call.qualifier}`);
+          }
+        }
+        if (!target) {
+          const sameNamespace = index.simpleTypesByNamespace.get(fact.namespace)?.get(call.qualifier);
+          target = sameNamespace && sameNamespace.size === 1 ? ([...sameNamespace][0] as string) : undefined;
+        }
+      } else {
+        for (const entry of fact.usings) {
+          if (entry.kind !== 'static') {
+            continue;
+          }
+          const candidate = index.qualifiedTypes.get(entry.target);
+          if (candidate && declares(candidate, call.name)) {
+            target = candidate;
+          }
+        }
+      }
+      if (!target || target === fact.file || !declares(target, call.name)) {
+        continue;
+      }
+      const specifier = call.qualifier ? `${call.qualifier}.${call.name}` : call.name;
+      const key = `${fact.file}\u0000${target}\u0000${call.line}\u0000call`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: fact.file,
+        target,
+        kind: 'call',
+        role: 'use',
+        evidence: { line: call.line, specifier, resolution: 'exact' },
+      });
+    }
+  }
 }

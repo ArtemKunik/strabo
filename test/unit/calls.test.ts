@@ -97,6 +97,18 @@ test('a type-only import call is not claimed', async () => {
   assert.deepEqual(pairs(result.edges), []);
 });
 
+test('a type-only export is not a call target', async () => {
+  const result = await scanJsTsCalls(
+    ['src/a.ts', 'src/b.ts'],
+    content({
+      'src/a.ts': 'type Foo = () => void;\nexport type { Foo };\n',
+      'src/b.ts': "import { Foo } from './a';\nFoo();\n",
+    }),
+  );
+
+  assert.deepEqual(pairs(result.edges), []);
+});
+
 test('a call to an external package function is not an internal edge', async () => {
   const result = await scanJsTsCalls(
     ['src/b.ts'],

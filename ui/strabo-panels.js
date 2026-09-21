@@ -59,14 +59,33 @@ import {
   narratorStatusLabel,
 } from './strabo-narrator.js';
 import {
+  compatRows,
   contractRows,
+  databaseRows,
   driftRows,
   flowRows,
+  liveDriftRows,
+  preflightRows,
+  probeConsent,
   repositoryRows,
+  schemaDriftRows,
+  schemaGapRows,
+  schemaRows,
   serviceEndpointRows,
   serviceFlowRows,
+  usageCaption,
+  usageFindingRows,
   workspaceSummary,
 } from './strabo-workspace.js';
+import {
+  complexityValue,
+  filePassportCells,
+  impactFunctionLabel,
+  passportHeading,
+  riskBandLabel,
+  riskTone,
+  totalsPassportCells,
+} from './strabo-impact.js';
 import { Fragment, h, host, mount } from './view.js';
 
 /** Unique ids so each tab and its panel can point at each other with ARIA. */
@@ -200,11 +219,22 @@ export function renderInspector(container, model, id, handlers = {}) {
   functionsBody.textContent = 'Loading functions…';
   functions.append(functionsBody);
 
+  const impact = document.createElement('section');
+  impact.dataset.role = 'impact';
+  const impactTitle = document.createElement('h3');
+  impactTitle.textContent = 'Impact';
+  impact.append(impactTitle);
+  const impactBody = document.createElement('p');
+  impactBody.className = 'unavailable';
+  impactBody.textContent = 'Loading impact…';
+  impact.append(impactBody);
+
   const tabDefs = [
     ['deps', `Dependencies (${passport.imports.length})`, depsSection],
     ['dependents', `Dependents (${passport.usedBy.length})`, dependentsSection],
     ['members', 'Members', members],
     ['functions', 'Functions', functions],
+    ['impact', 'Impact', impact],
   ];
   const base = `inspector-${(inspectorSeq += 1)}`;
   const tabButtons = [];
@@ -1201,6 +1231,66 @@ export function renderWorkspace(container, report, handlers = {}) {
         }),
   );
 
+  const tables = schemaRows(report);
+  container.append(workspaceHeading('Database schema', tables.length));
+  container.append(
+    tables.length === 0
+      ? workspaceNote('No SQL schema recorded.')
+      : workspaceList('workspace-schema', tables, (item, table) => {
+          item.textContent = table.label;
+          const detail = document.createElement('div');
+          detail.className = 'workspace-detail';
+          detail.textContent = table.detail;
+          item.append(detail);
+        }),
+  );
+  const gaps = schemaGapRows(report);
+  if (gaps.length > 0) {
+    container.append(workspaceHeading('Schema gaps', gaps.length));
+    container.append(
+      workspaceList('workspace-schema-gaps', gaps, (item, gap) => {
+        item.textContent = gap.label;
+        const detail = document.createElement('div');
+        detail.className = 'workspace-detail';
+        detail.textContent = `not applied: ${gap.reason}`;
+        item.append(detail);
+      }),
+    );
+  }
+
+  const schemaDrift = schemaDriftRows(report);
+  if (schemaDrift.length > 0) {
+    container.append(workspaceHeading('Table drift', schemaDrift.length));
+    container.append(
+      workspaceList('workspace-table-drift', schemaDrift, (item, entry) => {
+        item.textContent = entry.label;
+        const detail = document.createElement('div');
+        detail.className = 'workspace-detail';
+        detail.textContent = entry.clean ? 'clean — declarations match' : entry.deviations.join('; ');
+        item.append(detail);
+      }),
+    );
+  }
+
+  const findings = usageFindingRows(report);
+  container.append(workspaceHeading('Code against schema', findings.length));
+  container.append(workspaceNote(usageCaption(report)));
+  if (findings.length > 0) {
+    container.append(
+      workspaceList('workspace-usage', findings, (item, finding) => {
+        item.textContent = finding.label;
+        const detail = document.createElement('div');
+        detail.className = 'workspace-detail';
+        detail.textContent = finding.detail;
+        item.append(detail);
+      }),
+    );
+  }
+
+  if (handlers.tools) {
+    renderWorkspaceTools(container, handlers.tools, handlers);
+  }
+
   if (handlers.onClose) {
     const close = document.createElement('button');
     close.type = 'button';
@@ -1208,6 +1298,219 @@ export function renderWorkspace(container, report, handlers = {}) {
     close.textContent = 'Close';
     close.addEventListener('click', () => handlers.onClose());
     container.append(close);
+  }
+}
+
+function workspaceButton(label, action, onClick, disabled = false) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.dataset.action = action;
+  button.disabled = disabled;
+  button.addEventListener('click', () => onClick?.());
+  return button;
+}
+
+function workspaceLine(className, text) {
+  const line = document.createElement('div');
+  line.className = className;
+  line.textContent = text;
+  return line;
+}
+
+/**
+ * The compatibility, preflight and live-database part of the Workspace panel.
+ *
+ * Everything shown is what a route recorded: a revision that could not be read says so, a
+ * check that did not run says "not run", and a check that could not run is never drawn as a
+ * pass. Running against a database is a two-step action that states what it will do first.
+ */
+export function renderWorkspaceTools(container, tools, handlers = {}) {
+  const busy = Boolean(tools.busy);
+  const section = document.createElement('section');
+  section.className = 'workspace-tools';
+  container.append(section);
+
+  const heading = document.createElement('h4');
+  heading.textContent = 'Compatibility and migrations';
+  section.append(heading);
+
+  const form = document.createElement('div');
+  form.className = 'workspace-tools-form';
+  const label = document.createElement('label');
+  label.textContent = 'Compare with ';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'workspace-base';
+  input.value = tools.base ?? 'HEAD';
+  input.placeholder = 'HEAD, a branch, a tag or a commit';
+  input.spellcheck = false;
+  input.addEventListener('input', () => handlers.onBase?.(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      handlers.onCompat?.();
+    }
+  });
+  label.append(input);
+  form.append(label);
+  form.append(workspaceButton('Compare', 'compat', handlers.onCompat, busy));
+  form.append(workspaceButton('Preflight queries', 'preflight', handlers.onPreflight, busy));
+  if (tools.scriptHref) {
+    const link = document.createElement('a');
+    link.href = tools.scriptHref;
+    link.textContent = 'SQL script';
+    link.download = 'strabo-preflight.sql';
+    link.className = 'workspace-script-link';
+    form.append(link);
+  }
+  section.append(form);
+
+  if (tools.busy) {
+    section.append(workspaceNote(`Working: ${tools.busy}…`));
+  }
+  if (tools.error) {
+    const error = workspaceNote(tools.error);
+    error.classList.add('workspace-error');
+    section.append(error);
+  }
+
+  for (const group of compatRows(tools.compat)) {
+    section.append(workspaceLine('workspace-group', group.repository));
+    section.append(workspaceNote(group.caption));
+    if (group.rows.length > 0) {
+      section.append(
+        workspaceList('workspace-compat', group.rows, (item, row) => {
+          const badge = document.createElement('span');
+          badge.className = `compat-badge compat-${row.compatibility}`;
+          badge.textContent = row.badge;
+          item.append(badge, ` ${row.label}`);
+          item.append(workspaceLine('workspace-detail', row.reason));
+          if (row.detail.length > 0) {
+            item.append(workspaceLine('workspace-detail', row.detail.join(' · ')));
+          }
+        }),
+      );
+    }
+  }
+
+  const preflightGroups = preflightRows(tools.preflight);
+  for (const group of preflightGroups) {
+    section.append(workspaceLine('workspace-group', `${group.repository} · preflight`));
+    section.append(workspaceNote(group.caption));
+    if (group.checks.length > 0) {
+      section.append(
+        workspaceList('workspace-preflight', group.checks, (item, check) => {
+          const details = document.createElement('details');
+          const summary = document.createElement('summary');
+          const badge = document.createElement('span');
+          badge.className = `compat-badge preflight-${check.status}`;
+          badge.textContent = check.severity === 'data-loss' ? 'data loss' : 'blocks';
+          summary.append(badge, ` ${check.label} — ${check.result}`);
+          details.append(summary);
+          details.append(workspaceLine('workspace-detail', `A count above zero means: ${check.failsWhen}`));
+          if (check.approximate) {
+            details.append(workspaceLine('workspace-detail', 'Approximate: the engine has the final say.'));
+          }
+          if (check.references.length > 0) {
+            details.append(workspaceLine('workspace-detail', `Code that still uses it: ${check.references.join(', ')}`));
+          }
+          const sql = document.createElement('pre');
+          sql.className = 'workspace-sql';
+          sql.textContent = check.sql;
+          details.append(sql);
+          item.append(details);
+        }),
+      );
+    }
+    if (group.skipped.length > 0) {
+      section.append(
+        workspaceList('workspace-preflight-skipped', group.skipped, (item, entry) => {
+          item.textContent = `not checked: ${entry.label}`;
+          item.append(workspaceLine('workspace-detail', entry.reason));
+        }),
+      );
+    }
+  }
+
+  const databases = databaseRows(tools.databases);
+  const liveHeading = document.createElement('h4');
+  liveHeading.textContent = `Live database (${databases.length})`;
+  section.append(liveHeading);
+  if (databases.length === 0) {
+    section.append(
+      workspaceNote('No database is declared. Add databases to the workspace config, naming an environment variable, to probe one read-only.'),
+    );
+  }
+  const checkCount = preflightGroups.reduce((total, group) => total + group.checks.length, 0);
+  for (const database of databases) {
+    const row = document.createElement('div');
+    row.className = 'workspace-database';
+    row.append(workspaceLine('workspace-name', database.label));
+    row.append(workspaceLine('workspace-detail', database.note));
+    const actions = document.createElement('div');
+    actions.className = 'workspace-tools-form';
+    actions.append(
+      workspaceButton(
+        'Run preflight checks…',
+        'run-preflight',
+        () => handlers.onConfirmRun?.(database.name),
+        busy || !database.configured || checkCount === 0,
+      ),
+      workspaceButton('Read live schema', 'live-schema', () => handlers.onLive?.(database.name), busy || !database.configured),
+    );
+    row.append(actions);
+    if (database.configured && checkCount === 0) {
+      row.append(workspaceLine('workspace-detail', 'Build the preflight queries first.'));
+    }
+    if (tools.confirming === database.name) {
+      const consent = document.createElement('div');
+      consent.className = 'workspace-consent';
+      consent.append(workspaceLine('workspace-detail', probeConsent(database.name, checkCount)));
+      const buttons = document.createElement('div');
+      buttons.className = 'workspace-tools-form';
+      buttons.append(
+        workspaceButton('Run', 'confirm-run', () => handlers.onRun?.(database.name), busy),
+        workspaceButton('Cancel', 'cancel-run', () => handlers.onCancelRun?.()),
+      );
+      consent.append(buttons);
+      row.append(consent);
+    }
+    section.append(row);
+  }
+
+  if (tools.live) {
+    const drift = liveDriftRows(tools.live);
+    const tableCount = tools.live.tables;
+    section.append(
+      workspaceLine(
+        'workspace-group',
+        `${tools.live.database} · live schema (${tableCount} table${tableCount === 1 ? '' : 's'}, read ${tools.live.capturedAt})`,
+      ),
+    );
+    section.append(
+      drift.length === 0
+        ? workspaceNote('The live database and the migrations agree.')
+        : workspaceList('workspace-live-drift', drift, (item, entry) => {
+            item.textContent = entry.label;
+            item.append(workspaceLine('workspace-detail', entry.text));
+          }),
+    );
+  }
+
+  const runs = tools.databases?.runs ?? [];
+  if (runs.length > 0) {
+    section.append(workspaceLine('workspace-group', 'Recent probe runs'));
+    section.append(
+      workspaceList('workspace-runs', runs, (item, run) => {
+        item.textContent =
+          `${run.at} · ${run.database} · ${run.kind}` +
+          (run.error
+            ? ` · refused: ${run.error}`
+            : run.kind === 'preflight'
+              ? ` · ${run.checks} checks, ${run.violations} with violations, ${run.errors} errors`
+              : ` · ${run.checks} tables`);
+      }),
+    );
   }
 }
 
@@ -1987,6 +2290,19 @@ export function branchTags(branch, now = Date.now()) {
   return tags;
 }
 
+/** A small action button shared by the branch panel's header and rows. */
+function branchActionButton(role, text, title, handler, busy) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'branch-action';
+  button.dataset.role = role;
+  button.textContent = text;
+  button.title = title;
+  button.disabled = Boolean(busy);
+  button.addEventListener('click', () => handler());
+  return button;
+}
+
 /**
  * Branches against a base: commits ahead and behind, sync with the upstream, and age.
  * Selecting one opens its branch review. Counts are as fresh as the last fetch, and the
@@ -2056,6 +2372,28 @@ export function renderBranches(container, result, handlers = {}) {
   }`;
   container.append(summary);
 
+  const actions = document.createElement('div');
+  actions.className = 'branch-actions';
+  actions.dataset.role = 'branch-actions';
+  if (handlers.onFetch) {
+    actions.append(branchActionButton('branch-fetch', 'Fetch', 'Update the remote-tracking refs', handlers.onFetch, handlers.busy));
+  }
+  if (handlers.onSync && result.current) {
+    actions.append(
+      branchActionButton('branch-sync', `Sync ${result.current}`, `Fetch, fast-forward, then push ${result.current}`, handlers.onSync, handlers.busy),
+    );
+  }
+  if (actions.childElementCount > 0) {
+    if (handlers.busy) {
+      const running = document.createElement('span');
+      running.className = 'evidence';
+      running.dataset.role = 'branch-busy';
+      running.textContent = 'Running…';
+      actions.append(running);
+    }
+    container.append(actions);
+  }
+
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0)),
@@ -2106,6 +2444,23 @@ export function renderBranches(container, result, handlers = {}) {
         tagLine.append(chip);
       }
       item.append(tagLine);
+    }
+
+    const pushCount = branch.upstream?.ahead ?? 0;
+    const publish = branch.kind === 'local' && !branch.isBase && (!branch.upstream || branch.upstream.gone);
+    if (handlers.onPush && branch.kind === 'local' && !branch.isBase && (pushCount > 0 || publish)) {
+      const push = document.createElement('button');
+      push.type = 'button';
+      push.className = 'branch-action';
+      push.dataset.role = 'branch-push';
+      push.dataset.branch = branch.name;
+      push.textContent = pushCount > 0 ? `Push ↑${pushCount}` : 'Publish';
+      push.title = pushCount > 0
+        ? `Push ${branch.name} to ${branch.upstream?.name ?? 'its remote'}`
+        : `Publish ${branch.name} to the remote`;
+      push.disabled = Boolean(handlers.busy);
+      push.addEventListener('click', () => handlers.onPush(branch));
+      item.append(push);
     }
     list.append(item);
   }
@@ -2223,6 +2578,32 @@ function renderBranchDivergence(container, branch, handlers = {}) {
 }
 
 /**
+ * Show that a review is being computed. The panel's window opens before the request
+ * settles, and a full review of a large change can take tens of seconds, so without this
+ * the window would show whatever the previous render left behind.
+ */
+export function renderReviewLoading(container, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement('h3');
+  title.textContent = 'Review';
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Close review');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => handlers.onClose());
+    title.append(dismiss);
+  }
+  const note = document.createElement('p');
+  note.className = 'evidence';
+  note.dataset.role = 'review-loading';
+  note.textContent = 'Reviewing changes…';
+  container.append(note);
+}
+
+/**
  * Render a Git review: what changed, by how much, and what the change can reach.
  *
  * A commit review names its revision; a working-tree review groups staged, unstaged, and
@@ -2334,6 +2715,12 @@ export function renderReview(container, result, handlers = {}) {
 
   renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
+  if (result.impactPassport) {
+    const impactSection = document.createElement('div');
+    impactSection.className = 'impact-passport-section';
+    container.append(impactSection);
+    renderImpactPassport(impactSection, result.impactPassport, handlers);
+  }
 
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
   const impactHeading = document.createElement('h4');
@@ -2543,6 +2930,151 @@ function renderChangePassport(container, passport) {
     note.textContent = 'Only the first files in the change set were measured.';
     container.append(note);
   }
+}
+
+/**
+ * The Change impact passport: the current-graph risk surface plus the deltas a change
+ * produced. Rendered for one file, or rolled up for a change set or revision. Every value
+ * comes from the server's recorded facts; a missing measure is a dash with its reason.
+ */
+export function renderImpactPassport(container, set, handlers = {}) {
+  container.replaceChildren();
+  if (!set || !Array.isArray(set.files) || set.files.length === 0) {
+    container.append(unavailableNote('No impact passport was recorded.'));
+    return;
+  }
+
+  const heading = document.createElement('h4');
+  heading.textContent = passportHeading(set.scope);
+  container.append(heading);
+
+  const caption = document.createElement('p');
+  caption.className = 'unavailable';
+  caption.textContent = set.baseline
+    ? `Current graph; compared with ${set.baseline}.`
+    : 'Current graph; no baseline revision was available.';
+  container.append(caption);
+
+  if (set.scope === 'file') {
+    container.append(impactCard(set.files[0], false));
+    return;
+  }
+
+  container.append(impactCard(set.totals, true));
+  const list = document.createElement('ul');
+  list.className = 'impact-files';
+  list.dataset.role = 'impact-files';
+  for (const file of set.files) {
+    list.append(impactFileRow(file, handlers));
+  }
+  container.append(list);
+
+  if (set.capped) {
+    container.append(unavailableNote('Only the first files in the change set were measured.'));
+  }
+}
+
+function impactCard(card, totals) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'impact-card';
+  wrapper.dataset.role = totals ? 'impact-totals' : 'impact-file-card';
+
+  const grid = document.createElement('div');
+  grid.className = 'impact-grid';
+  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
+  for (const cell of cells) {
+    const item = document.createElement('div');
+    item.className = 'impact-cell';
+    item.dataset.role = `impact-${cell.key}`;
+    const label = document.createElement('div');
+    label.className = 'impact-cell-label';
+    label.textContent = cell.label;
+    const value = document.createElement('div');
+    value.className = `impact-cell-value ${cell.tone ?? 'none'}`;
+    value.textContent = cell.value;
+    const detail = document.createElement('div');
+    detail.className = 'impact-cell-detail';
+    detail.textContent = cell.detail;
+    item.append(label, value, detail);
+    grid.append(item);
+  }
+  wrapper.append(grid);
+
+  wrapper.append(
+    impactList(
+      'Risk signals',
+      (card?.signals ?? []).map((signal) => ({ text: signal.label, detail: signal.detail })),
+      'impact-signals',
+    ),
+  );
+  wrapper.append(
+    impactList(
+      'Most complex functions',
+      (card?.mostComplex ?? []).map((fn) => ({
+        text: impactFunctionLabel(fn),
+        detail: `C${fn.complexity}${fn.delta ? ` (${fn.delta > 0 ? '+' : '−'}C${Math.abs(fn.delta)})` : ''}`,
+      })),
+      'impact-most-complex',
+    ),
+  );
+
+  return wrapper;
+}
+
+function impactList(title, entries, role) {
+  const section = document.createElement('div');
+  section.className = 'impact-list';
+  const heading = document.createElement('h5');
+  heading.textContent = title;
+  section.append(heading);
+  if (entries.length === 0) {
+    section.append(unavailableNote('None recorded.'));
+    section.dataset.role = role;
+    return section;
+  }
+  const list = document.createElement('ul');
+  list.dataset.role = role;
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    const text = document.createElement('span');
+    text.textContent = entry.text;
+    item.append(text);
+    if (entry.detail) {
+      const detail = document.createElement('span');
+      detail.className = 'evidence';
+      detail.textContent = entry.detail;
+      item.append(detail);
+    }
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+function impactFileRow(file, handlers) {
+  const item = document.createElement('li');
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'link';
+  link.dataset.path = file.path;
+  link.textContent = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+  if (handlers.onSelect) {
+    link.addEventListener('click', () => handlers.onSelect(file.path));
+  } else {
+    link.disabled = true;
+  }
+  item.append(link);
+
+  const risk = document.createElement('span');
+  risk.className = `impact-risk-band ${file.risk ? riskTone(file.risk.band) : 'none'}`;
+  risk.textContent = file.risk ? `${riskBandLabel(file.risk.band)} ${file.risk.score}` : '—';
+  item.append(risk);
+
+  const cx = document.createElement('span');
+  cx.className = 'evidence';
+  cx.textContent = `${complexityValue(file.complexity?.maxAfter)} · coherence ${file.coherence ? `${file.coherence.score}/100` : '—'}`;
+  item.append(cx);
+  return item;
 }
 
 export { graphSummary };

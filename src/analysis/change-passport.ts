@@ -1,21 +1,25 @@
 import { execFile } from 'node:child_process';
-import fs from 'node:fs';
 import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
-import { buildAdjacency } from './analysis.ts';
+import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
 import { computeCoverage, computeTestReachByFile } from './coverage.ts';
-import { assertReadable } from '../boundary/repository-root.ts';
+import { contentAtRevision, readWorkingFile } from './git-content.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
+import type { SymbolExtraction } from '../scan/languages/symbols.ts';
 import { computeMemberCohesion } from './file-health.ts';
 import { buildFunctions } from './functions.ts';
 import type { FunctionEntry } from './functions.ts';
+import {
+  buildFileImpactPassport,
+  functionFacts,
+  snapshotFor,
+} from './impact-passport.ts';
 import { isSafeRevision } from './impact.ts';
 import type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
 
 const run = promisify(execFile);
 const MAX_FILES = 40;
-const MAX_BYTES = 4 * 1024 * 1024;
 
 export type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './review-types.ts';
 
@@ -28,12 +32,13 @@ export async function computeChangePassport(
   const safeBaseline = baseline && isSafeRevision(baseline) ? baseline : null;
   const measured = files.slice(0, MAX_FILES);
   const changes: CohesionChange[] = [];
-  const { backward } = buildAdjacency(graph);
+  const { forward, backward } = buildAdjacency(graph);
+  const graphMetrics = computeGraphMetrics(graph);
   const coverage = computeCoverage(graph);
   const reached = new Set([...coverage.reached, ...coverage.testFiles]);
   const testsByFile = computeTestReachByFile(graph);
   for (const file of measured) {
-    changes.push(await cohesionChange(root, file, safeBaseline, graph, backward, testsByFile, reached));
+    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, reached));
   }
   return { files: changes, baseline: safeBaseline, capped: files.length > measured.length };
 }
@@ -43,7 +48,9 @@ async function cohesionChange(
   file: ReviewFile,
   baseline: string | null,
   graph: Graph,
-  backward: Map<string, string[]>,
+  forward: ReadonlyMap<string, string[]>,
+  backward: ReadonlyMap<string, string[]>,
+  blastRadius: ReadonlyMap<string, number>,
   testsByFile: Map<string, string[]>,
   reached: Set<string>,
 ): Promise<CohesionChange> {
@@ -52,6 +59,7 @@ async function cohesionChange(
     status: file.status,
     ...(file.previousPath ? { previousPath: file.previousPath } : {}),
   };
+  const snapshot = snapshotFor(file.path, forward, backward, blastRadius);
 
   // Which tests to run, and which dependents no test reaches, are answered for every file,
   // even one whose language has no extractor.
@@ -60,36 +68,72 @@ async function cohesionChange(
     .filter((dependent) => !reached.has(dependent))
     .sort();
 
+  const emptyPassport = (note: string) =>
+    buildFileImpactPassport({
+      ...base,
+      snapshot,
+      before: null,
+      after: null,
+      changedFunctions: [],
+      changedTypes: [],
+      impact: null,
+      testsToRun,
+      untestedDependents,
+      note,
+    });
+
   const extractor = symbolExtractorFor(file.path);
   if (!extractor) {
-    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null };
+    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
   }
   if (extractor.tracksAccess === false) {
-    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null };
+    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('this language records no member access') };
   }
 
   const sourcePath = file.previousPath ?? file.path;
   const beforeContent = baseline ? await contentAtRevision(root, baseline, sourcePath) : null;
   const afterContent = file.status === 'deleted' ? null : readWorkingFile(root, file.path);
-  const before = beforeContent === null ? null : await cohesionOf(extractor, sourcePath, beforeContent);
-  const after = afterContent === null ? null : await cohesionOf(extractor, file.path, afterContent);
+  const beforeExtraction = beforeContent === null ? null : await safeExtract(extractor, sourcePath, beforeContent);
+  const afterExtraction = afterContent === null ? null : await safeExtract(extractor, file.path, afterContent);
+  const before = beforeExtraction === null ? null : cohesionOf(beforeExtraction);
+  const after = afterExtraction === null ? null : cohesionOf(afterExtraction);
 
-  const functions = await computeFunctionChanges(extractor, root, file, baseline, beforeContent, afterContent);
-  const publicSurface = await computePublicSurfaceDiff(extractor, root, file, baseline, beforeContent, afterContent);
+  const functions = await computeFunctionChanges(extractor, root, file, baseline, beforeExtraction, afterExtraction);
+  const publicSurface = computePublicSurfaceDiff(extractor, beforeExtraction, afterExtraction);
   const impact = computeTieredImpact(file.path, file, graph, backward, functions);
   const risk = computeChangeRisk(file.path, functions, impact, reached);
+  const note = noteFor({ file, baseline, beforeContent, before, after });
+
+  const factsBefore = beforeExtraction === null ? null : functionFacts(sourcePath, beforeExtraction.symbols, beforeExtraction.calls ?? []);
+  const factsAfter = afterExtraction === null ? null : functionFacts(file.path, afterExtraction.symbols, afterExtraction.calls ?? []);
+  const impactPassport = buildFileImpactPassport({
+    ...base,
+    snapshot,
+    before: factsBefore,
+    after: factsAfter,
+    changedFunctions: functions.map((fn) => ({ owner: fn.owner, name: fn.name })),
+    changedTypes: publicSurface
+      .flatMap((surface) => surface.symbols)
+      .filter((symbol) => symbol.change !== 'unchanged')
+      .map((symbol) => ({ name: symbol.name })),
+    impact,
+    testsToRun,
+    untestedDependents,
+    note,
+  });
 
   return {
     ...base,
     before,
     after,
-    note: noteFor({ file, baseline, beforeContent, before, after }),
+    note,
     functions,
     publicSurface,
     impact,
     testsToRun,
     untestedDependents,
     risk,
+    impactPassport,
   };
 }
 
@@ -135,7 +179,7 @@ function computeTieredImpact(
   filePath: string,
   file: ReviewFile,
   graph: Graph,
-  backward: Map<string, string[]>,
+  backward: ReadonlyMap<string, string[]>,
   functions: FunctionChange[],
 ): TieredImpact | null {
   const changedSymbolNames = new Set(functions.map((f) => `${f.owner}\u0000${f.name}`));
@@ -190,20 +234,17 @@ function computeTieredImpact(
   };
 }
 
-async function computePublicSurfaceDiff(
+function computePublicSurfaceDiff(
   extractor: SymbolExtractor,
-  root: string,
-  file: ReviewFile,
-  baseline: string | null,
-  beforeContent: string | null,
-  afterContent: string | null,
-): Promise<PublicSurfaceChange[]> {
-  if (beforeContent === null && afterContent === null) {
+  beforeExtraction: SymbolExtraction | null,
+  afterExtraction: SymbolExtraction | null,
+): PublicSurfaceChange[] {
+  if (beforeExtraction === null && afterExtraction === null) {
     return [];
   }
 
-  const beforeSymbols = beforeContent !== null ? await extractPublicSymbols(extractor, file.path, beforeContent) : [];
-  const afterSymbols = afterContent !== null ? await extractPublicSymbols(extractor, file.path, afterContent) : [];
+  const beforeSymbols = beforeExtraction !== null ? publicSymbols(beforeExtraction) : [];
+  const afterSymbols = afterExtraction !== null ? publicSymbols(afterExtraction) : [];
 
   if (beforeSymbols.length === 0 && afterSymbols.length === 0) {
     return [];
@@ -247,31 +288,22 @@ async function computePublicSurfaceDiff(
   return [{ language: extractor.language, symbols }];
 }
 
-async function extractPublicSymbols(
-  extractor: SymbolExtractor,
-  file: string,
-  content: string,
-): Promise<SymbolChange[]> {
-  try {
-    const result = await extractor.extract(file, content);
-    const symbols: SymbolChange[] = [];
-    for (const sym of result.symbols) {
-      if (sym.visibility === 'public' || sym.visibility === 'export' || sym.visibility === 'pub') {
-        symbols.push({
-          name: sym.name,
-          owner: sym.owner,
-          change: 'unchanged',
-          typeBefore: sym.type ?? null,
-          typeAfter: null,
-          parametersBefore: sym.parameters ?? null,
-          parametersAfter: null,
-        });
-      }
+function publicSymbols(extraction: SymbolExtraction): SymbolChange[] {
+  const symbols: SymbolChange[] = [];
+  for (const sym of extraction.symbols) {
+    if (sym.visibility === 'public' || sym.visibility === 'export' || sym.visibility === 'pub') {
+      symbols.push({
+        name: sym.name,
+        owner: sym.owner,
+        change: 'unchanged',
+        typeBefore: sym.type ?? null,
+        typeAfter: null,
+        parametersBefore: sym.parameters ?? null,
+        parametersAfter: null,
+      });
     }
-    return symbols;
-  } catch {
-    return [];
   }
+  return symbols;
 }
 
 async function computeFunctionChanges(
@@ -279,25 +311,25 @@ async function computeFunctionChanges(
   root: string,
   file: ReviewFile,
   baseline: string | null,
-  beforeContent: string | null,
-  afterContent: string | null,
+  beforeExtraction: SymbolExtraction | null,
+  afterExtraction: SymbolExtraction | null,
 ): Promise<FunctionChange[]> {
-  if (beforeContent === null && afterContent === null) {
+  if (beforeExtraction === null && afterExtraction === null) {
     return [];
   }
 
-  const beforeFunctions: FunctionEntry[] = beforeContent !== null ? await extractFunctions(extractor, file.path, beforeContent) : [];
-  const afterFunctions: FunctionEntry[] = afterContent !== null ? await extractFunctions(extractor, file.path, afterContent) : [];
+  const beforeFunctions: FunctionEntry[] = beforeExtraction !== null ? functionsOf(file.path, beforeExtraction) : [];
+  const afterFunctions: FunctionEntry[] = afterExtraction !== null ? functionsOf(file.path, afterExtraction) : [];
 
   if (beforeFunctions.length === 0 && afterFunctions.length === 0) {
     return [];
   }
 
-  const hunks = baseline && beforeContent !== null
+  const hunks = baseline && beforeExtraction !== null
     ? await getDiffHunks(root, baseline, file.path)
     : [];
 
-  if (hunks.length === 0 && beforeContent !== null && afterContent !== null) {
+  if (hunks.length === 0 && beforeExtraction !== null && afterExtraction !== null) {
     const beforeNames = new Set(beforeFunctions.map((f) => `${f.owner}\u0000${f.name}`));
     const afterNames = new Set(afterFunctions.map((f) => `${f.owner}\u0000${f.name}`));
     const added = afterFunctions.filter((f) => !beforeNames.has(`${f.owner}\u0000${f.name}`));
@@ -348,18 +380,8 @@ async function computeFunctionChanges(
   return [];
 }
 
-async function extractFunctions(
-  extractor: SymbolExtractor,
-  file: string,
-  content: string,
-): Promise<FunctionEntry[]> {
-  try {
-    const result = await extractor.extract(file, content);
-    const built = buildFunctions(file, result.symbols, result.calls ?? []);
-    return built.functions;
-  } catch {
-    return [];
-  }
+function functionsOf(file: string, extraction: SymbolExtraction): FunctionEntry[] {
+  return buildFunctions(file, extraction.symbols, extraction.calls ?? []).functions;
 }
 
 function functionChangeFromEntry(fn: FunctionEntry): FunctionChange {
@@ -449,41 +471,18 @@ function noteFor(options: {
   return `compared with ${baseline}`;
 }
 
-async function cohesionOf(
+function cohesionOf(extraction: SymbolExtraction): number | null {
+  return computeMemberCohesion(extraction.symbols, extraction.accesses ?? []).value;
+}
+
+/** Extract once, returning null on a parse failure so the side is named rather than empty. */
+async function safeExtract(
   extractor: SymbolExtractor,
   file: string,
   content: string,
-): Promise<number | null> {
+): Promise<SymbolExtraction | null> {
   try {
-    const result = await extractor.extract(file, content);
-    return computeMemberCohesion(result.symbols, result.accesses ?? []).value;
-  } catch {
-    return null;
-  }
-}
-
-async function contentAtRevision(root: string, ref: string, file: string): Promise<string | null> {
-  try {
-    const { stdout } = await run('git', ['show', `${ref}:${file}`], {
-      cwd: root,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    const content = typeof stdout === 'string' ? stdout : String(stdout);
-    return content.includes('\0') ? null : content;
-  } catch {
-    return null;
-  }
-}
-
-function readWorkingFile(root: string, file: string): string | null {
-  try {
-    const resolved = assertReadable(root, file);
-    const stat = fs.statSync(resolved);
-    if (!stat.isFile() || stat.size > MAX_BYTES) {
-      return null;
-    }
-    const content = fs.readFileSync(resolved);
-    return content.includes(0) ? null : content.toString('utf8');
+    return await extractor.extract(file, content);
   } catch {
     return null;
   }

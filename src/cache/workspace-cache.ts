@@ -2,14 +2,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type {
+  CodeDataUse,
   ContractDefinition,
   PublishedCoordinate,
+  SchemaSnapshot,
   ServiceCall,
   ServiceEndpoint,
 } from '../types.ts';
 import { cacheRoot } from './graph-cache.ts';
 
-export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-3';
+export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-5';
 
 /** The per-repository facts that are expensive to recompute and cheap to store. */
 export interface CachedRepoFacts {
@@ -17,6 +19,10 @@ export interface CachedRepoFacts {
   contracts: ContractDefinition[];
   endpoints: ServiceEndpoint[];
   calls: ServiceCall[];
+  /** The schema the repository's SQL files describe, or null when it has none. */
+  schema: SchemaSnapshot | null;
+  /** Tables and columns the repository's source code names. */
+  dataUses: CodeDataUse[];
 }
 
 interface StoreEntry extends CachedRepoFacts {
@@ -66,6 +72,8 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
         contracts: entry.contracts,
         endpoints: entry.endpoints,
         calls: entry.calls,
+        schema: entry.schema,
+        dataUses: entry.dataUses,
       };
     },
 
@@ -79,6 +87,8 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
         contracts: facts.contracts,
         endpoints: facts.endpoints,
         calls: facts.calls,
+        schema: facts.schema,
+        dataUses: facts.dataUses,
       };
       dirty = true;
     },
@@ -124,6 +134,8 @@ function readStore(file: string): StoreFile {
         contracts: entry.contracts,
         endpoints: entry.endpoints,
         calls: entry.calls,
+        schema: isSchema(entry.schema) ? entry.schema : null,
+        dataUses: Array.isArray(entry.dataUses) ? entry.dataUses : [],
       };
     }
     return { version: WORKSPACE_CACHE_VERSION, entries };
@@ -151,5 +163,14 @@ function isCoordinate(value: unknown): value is PublishedCoordinate {
     typeof (value as PublishedCoordinate).ecosystem === 'string' &&
     typeof (value as PublishedCoordinate).name === 'string' &&
     typeof (value as PublishedCoordinate).source === 'string'
+  );
+}
+
+function isSchema(value: unknown): value is SchemaSnapshot {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as SchemaSnapshot).tables) &&
+    Array.isArray((value as SchemaSnapshot).files)
   );
 }

@@ -3,7 +3,9 @@ import { getCachedGraph } from '../cache/graph-cache.ts';
 import { openWorkspaceCache, type WorkspaceCache } from '../cache/workspace-cache.ts';
 import { describeRepository } from '../repository.ts';
 import type {
+  CodeDataUse,
   ContractDefinition,
+  SchemaSnapshot,
   ServiceCall,
   ServiceEndpoint,
   WorkspaceReport,
@@ -11,8 +13,11 @@ import type {
 } from '../types.ts';
 import { computeContractDrift, extractContracts } from './contracts.ts';
 import { readPublishedCoordinate } from './coordinate.ts';
+import { extractDataUses } from './data-usage.ts';
 import { extractLanguageContracts } from './dto.ts';
 import { computeCrossRepoFlows, type RepoFlowFact } from './flows.ts';
+import { extractSchema } from './schema.ts';
+import { computeSchemaUsage } from './schema-usage.ts';
 import {
   computeServiceFlows,
   extractServiceCalls,
@@ -30,6 +35,8 @@ interface RepoAnalysis extends RepoFlowFact, RepoServiceFact {
   contracts: ContractDefinition[];
   endpoints: ServiceEndpoint[];
   calls: ServiceCall[];
+  schema: SchemaSnapshot | null;
+  dataUses: CodeDataUse[];
 }
 
 /**
@@ -60,6 +67,8 @@ export async function analyzeWorkspace(
       ],
       endpoints: extractServiceEndpoints(repository.root, repository.name),
       calls: extractServiceCalls(repository.root),
+      schema: extractSchema(repository.root, repository.name),
+      dataUses: extractDataUses(repository.root, repository.name),
     };
     if (!stored) {
       cache.set(repository.root, cached.fingerprint, facts);
@@ -71,6 +80,8 @@ export async function analyzeWorkspace(
       contracts: facts.contracts,
       endpoints: facts.endpoints,
       calls: facts.calls,
+      schema: facts.schema,
+      dataUses: facts.dataUses,
       descriptor: {
         name: repository.name,
         root: repository.root,
@@ -89,6 +100,11 @@ export async function analyzeWorkspace(
   const serviceEndpoints = analyses.flatMap((analysis) => analysis.endpoints);
   const serviceFlows = computeServiceFlows(analyses);
   const descriptor = analyses.map((analysis) => analysis.descriptor);
+  const schemas = analyses.flatMap((analysis) => (analysis.schema ? [analysis.schema] : []));
+  const usage = computeSchemaUsage(
+    schemas,
+    analyses.flatMap((analysis) => analysis.dataUses),
+  );
 
   return {
     name,
@@ -98,12 +114,15 @@ export async function analyzeWorkspace(
     drift,
     serviceEndpoints,
     serviceFlows,
+    schemas,
+    usage,
     summary: {
       repositories: descriptor.length,
       flows: flows.length,
       contracts: contracts.length,
       drifting: drift.filter((entry) => entry.deviations.length > 0).length,
       serviceFlows: serviceFlows.length,
+      tables: schemas.reduce((total, schema) => total + schema.tables.length, 0),
     },
   };
 }

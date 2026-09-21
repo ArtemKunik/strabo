@@ -2,12 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { resolveRepositoryRoot, StraboScopeError, type ResolvedRepository } from '../boundary/repository-root.ts';
-import type { StraboConfig } from '../types.ts';
+import type { DatabaseConfig, StraboConfig } from '../types.ts';
 
 /** A workspace declared in the config file. Roots are resolved against the scan ceiling. */
 export interface WorkspaceConfig {
   name: string;
   repositories: string[];
+  /** Databases the operator declared, by name and environment variable; never a URL. */
+  databases: DatabaseConfig[];
   /** Directory the config path was resolved against, for relative roots. */
   baseDir: string;
 }
@@ -49,7 +51,57 @@ export function readWorkspaceConfig(configPath: string | undefined): WorkspaceCo
     typeof parsed.name === 'string' && parsed.name.trim() !== ''
       ? parsed.name.trim()
       : path.basename(path.dirname(resolvedPath));
-  return { name, repositories, baseDir: path.dirname(resolvedPath) };
+  return {
+    name,
+    repositories,
+    databases: readDatabases(parsed.databases, resolvedPath),
+    baseDir: path.dirname(resolvedPath),
+  };
+}
+
+/**
+ * Read the `databases` block.
+ *
+ * A database is declared by name and by the *name of the environment variable* that holds its
+ * connection string. The string itself is refused in the file: a config is committed and
+ * shared, a credential must not travel with it.
+ */
+function readDatabases(value: unknown, configPath: string): DatabaseConfig[] {
+  if (value === undefined) {
+    return [];
+  }
+  const where = `Workspace config "${configPath}"`;
+  if (!Array.isArray(value)) {
+    throw new StraboScopeError(`${where} needs databases to be an array.`);
+  }
+  const seen = new Set<string>();
+  return value.map((entry, index): DatabaseConfig => {
+    const label = `database #${index + 1}`;
+    if (!isRecord(entry)) {
+      throw new StraboScopeError(`${where} ${label} is not an object.`);
+    }
+    if ('url' in entry || 'connectionString' in entry || 'password' in entry) {
+      throw new StraboScopeError(
+        `${where} ${label} holds a connection string; name an environment variable with urlEnv instead.`,
+      );
+    }
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(name)) {
+      throw new StraboScopeError(`${where} ${label} needs a simple name.`);
+    }
+    if (seen.has(name)) {
+      throw new StraboScopeError(`${where} declares the database "${name}" twice.`);
+    }
+    seen.add(name);
+    if (entry.dialect !== 'postgres') {
+      throw new StraboScopeError(`${where} database "${name}": only the dialect "postgres" can be probed.`);
+    }
+    const urlEnv = typeof entry.urlEnv === 'string' ? entry.urlEnv.trim() : '';
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(urlEnv)) {
+      throw new StraboScopeError(`${where} database "${name}" needs urlEnv, the name of an environment variable.`);
+    }
+    return { name, dialect: 'postgres', urlEnv };
+  });
 }
 
 /**

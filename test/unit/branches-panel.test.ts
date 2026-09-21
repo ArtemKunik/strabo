@@ -8,7 +8,7 @@ globalThis.document = dom.window.document;
 globalThis.window = dom.window as unknown as typeof globalThis.window;
 globalThis.HTMLElement = dom.window.HTMLElement;
 
-const { branchTags, formatAge, renderBranches, renderReview } = await import('../../ui/strabo-panels.js');
+const { branchTags, formatAge, renderBranches, renderReview, renderReviewLoading } = await import('../../ui/strabo-panels.js');
 
 const NOW = Date.parse('2026-09-21T12:00:00Z');
 const tip = (date: string) => ({ hash: 'h', shortHash: 'h', author: 'Ada', date, subject: 's' });
@@ -77,6 +77,81 @@ test('renderBranches says why no branches are listed', () => {
   const target = document.createElement('div');
   renderBranches(target, { available: false, reason: 'no-git', detail: 'not a git repository' });
   assert.equal(target.querySelector('[data-role="branches-unavailable"]')?.textContent, 'No branches: not a git repository');
+});
+
+test('renderBranches offers Fetch and Sync, and Push only for a branch that is ahead', () => {
+  const target = document.createElement('div');
+  const actions: string[] = [];
+  renderBranches(
+    target,
+    {
+      available: true,
+      current: 'main',
+      head: 'h',
+      base: { name: 'main', hash: 'h', source: 'conventional' },
+      capped: false,
+      branches: [
+        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 2, behind: 0, gone: false }, againstBase: null },
+        { name: 'in-sync', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/in-sync', ahead: 0, behind: 0, gone: false }, againstBase: null },
+        { name: 'unpublished', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+      ],
+    },
+    {
+      onFetch: () => actions.push('fetch'),
+      onSync: () => actions.push('sync'),
+      onPush: (branch: { name: string }) => actions.push(`push:${branch.name}`),
+    },
+  );
+
+  const fetch = target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement;
+  const sync = target.querySelector('[data-role="branch-sync"]') as HTMLButtonElement;
+  assert.ok(fetch && sync);
+  fetch.click();
+  sync.click();
+  assert.deepEqual(actions, ['fetch', 'sync']);
+
+  const pushes = [...target.querySelectorAll('[data-role="branch-push"]')] as HTMLButtonElement[];
+  assert.deepEqual(pushes.map((button) => button.dataset.branch), ['feature', 'unpublished']);
+  assert.equal(pushes[0]?.textContent, 'Push ↑2');
+  assert.equal(pushes[1]?.textContent, 'Publish');
+  pushes[0]?.click();
+  assert.equal(actions.at(-1), 'push:feature');
+});
+
+test('renderBranches disables branch actions while one is running', () => {
+  const target = document.createElement('div');
+  renderBranches(
+    target,
+    {
+      available: true,
+      current: 'main',
+      head: 'h',
+      base: { name: 'main', hash: 'h', source: 'conventional' },
+      capped: false,
+      branches: [
+        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 1, behind: 0, gone: false }, againstBase: null },
+      ],
+    },
+    { onFetch: () => {}, onSync: () => {}, onPush: () => {}, busy: true },
+  );
+  assert.equal((target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement).disabled, true);
+  assert.equal((target.querySelector('[data-role="branch-sync"]') as HTMLButtonElement).disabled, true);
+  assert.equal((target.querySelector('[data-role="branch-push"]') as HTMLButtonElement).disabled, true);
+  assert.ok(target.querySelector('[data-role="branch-busy"]'));
+});
+
+test('renderReviewLoading says the review is computing instead of claiming Git is missing', () => {
+  const target = document.createElement('div');
+  renderReview(target, null, {});
+  assert.match(target.textContent ?? '', /no Git metadata/);
+
+  renderReviewLoading(target, { onClose: () => {} });
+  assert.ok(target.querySelector('[data-role="review-loading"]'));
+  assert.equal(target.querySelector('[data-role="review-unavailable"]'), null);
+  assert.doesNotMatch(target.textContent ?? '', /no Git metadata/);
+  assert.ok(target.querySelector('.panel-dismiss'));
 });
 
 test('renderReview shows a branch review with conflicts and code that moved underneath', () => {

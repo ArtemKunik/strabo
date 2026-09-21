@@ -191,6 +191,7 @@ export function shortcutSheet() {
     { keys: 'O', action: 'Show the selected file’s links to other units' },
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
+    { keys: 'C', action: 'Show recorded function calls instead of imports' },
     { keys: 'T', action: 'Timeline' },
     { keys: 'N', action: 'Branches' },
     { keys: 'R', action: 'Review working-tree changes' },

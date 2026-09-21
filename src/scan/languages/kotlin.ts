@@ -38,12 +38,22 @@ export interface KotlinTypeReference {
   line: number;
 }
 
+/** A call site whose callee the syntax proves: `foo(...)` or `Type.foo(...)`. */
+export interface KotlinCall {
+  name: string;
+  qualifier?: string;
+  line: number;
+}
+
 export interface KotlinFileFacts {
   file: string;
   package: string;
   imports: KotlinImport[];
   types: KotlinTypeDeclaration[];
   typeReferences: KotlinTypeReference[];
+  /** Function names the file declares, so a call can be proven against this file. */
+  functions: string[];
+  calls: KotlinCall[];
 }
 
 export interface KotlinExtraction {
@@ -62,7 +72,15 @@ const KOTLIN_TYPE_DECLARATIONS = new Set([
 /** Parse one Kotlin file into its package, imports, declared types, and type references. */
 export async function extractKotlinFacts(file: string, content: string): Promise<KotlinExtraction> {
   return withParser(KOTLIN_LANGUAGE, (parser) => {
-    const facts: KotlinFileFacts = { file, package: '', imports: [], types: [], typeReferences: [] };
+    const facts: KotlinFileFacts = {
+      file,
+      package: '',
+      imports: [],
+      types: [],
+      typeReferences: [],
+      functions: [],
+      calls: [],
+    };
     const diagnostics: Diagnostic[] = [];
 
     const tree = parser.parse(content);
@@ -96,6 +114,8 @@ export async function extractKotlinFacts(file: string, content: string): Promise
     const references: KotlinTypeReference[] = [];
     collectTypeReferences(tree.rootNode, references);
     facts.typeReferences = dedupeReferences(references);
+    collectFunctions(tree.rootNode, facts.functions);
+    collectCalls(tree.rootNode, facts.calls);
 
     if (tree.rootNode.hasError) {
       diagnostics.push({
@@ -175,6 +195,58 @@ function dedupeReferences(references: KotlinTypeReference[]): KotlinTypeReferenc
     }
   }
   return [...byName.values()];
+}
+
+/** The local name an import binds: its alias when present, else the last segment. */
+function kotlinLocalName(reference: KotlinImport): string {
+  if (reference.alias) {
+    return reference.alias;
+  }
+  return reference.name.slice(reference.name.lastIndexOf('.') + 1);
+}
+
+/** Collect declared function names, so a call can be proven against this file. */
+function collectFunctions(node: Node, out: string[]): void {
+  if (node.type === 'function_declaration') {
+    const name = node.namedChildren.find((child) => child.type === 'simple_identifier')?.text;
+    if (name) {
+      out.push(name);
+    }
+    return;
+  }
+  for (const child of node.namedChildren) {
+    collectFunctions(child, out);
+  }
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `foo(...)` is bare; `Type.foo(...)` names the receiver. `this.foo()` is skipped (same-file)
+ * and `obj.foo()` is not recorded because the receiver's type is unknown here.
+ */
+function collectCalls(node: Node, out: KotlinCall[]): void {
+  if (node.type === 'call_expression') {
+    const callee = node.namedChildren[0];
+    if (callee?.type === 'simple_identifier') {
+      out.push({ name: callee.text, line: node.startPosition.row + 1 });
+    } else if (callee?.type === 'navigation_expression') {
+      const receiver = callee.namedChildren[0];
+      const suffix = callee.namedChildren.find((child) => child.type === 'navigation_suffix');
+      const property = suffix?.namedChildren.find((child) => child.type === 'simple_identifier');
+      if (
+        receiver?.type === 'simple_identifier' &&
+        property &&
+        looksLikeTypeName(receiver.text)
+      ) {
+        out.push({ name: property.text, qualifier: receiver.text, line: node.startPosition.row + 1 });
+      }
+    }
+    return;
+  }
+  for (const child of node.namedChildren) {
+    collectCalls(child, out);
+  }
 }
 
 interface KotlinIndex {
@@ -331,7 +403,75 @@ export function resolveKotlin(facts: KotlinFileFacts[]): KotlinResolution {
     }
   }
 
+  appendCallEdges(facts, index, edges);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to the file that declares its function.
+ *
+ * `Type.foo()` resolves `Type` through an import (or a same-package type) and requires the
+ * target file to declare `foo`. A bare `foo()` resolves a top-level function import by the
+ * same last-segment rule the import resolver uses. Ambiguous or unimported receivers are left
+ * unclaimed.
+ */
+function appendCallEdges(
+  facts: readonly KotlinFileFacts[],
+  index: KotlinIndex,
+  edges: GraphEdge[],
+): void {
+  const declaredFunctions = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    declaredFunctions.set(fact.file, new Set(fact.functions ?? []));
+  }
+  const declares = (file: string, name: string): boolean =>
+    declaredFunctions.get(file)?.has(name) ?? false;
+  const seen = new Set<string>();
+
+  for (const fact of facts) {
+    for (const call of fact.calls ?? []) {
+      let target: string | undefined;
+      if (call.qualifier) {
+        const imported = fact.imports.find(
+          (entry) => !entry.wildcard && kotlinLocalName(entry) === call.qualifier,
+        );
+        target = imported ? index.qualifiedTypes.get(imported.name) : undefined;
+        if (!target) {
+          const samePackage = index.simpleTypesByPackage.get(fact.package)?.get(call.qualifier);
+          target = samePackage && samePackage.size === 1 ? ([...samePackage][0] as string) : undefined;
+        }
+      } else {
+        for (const entry of fact.imports) {
+          if (entry.wildcard || kotlinLocalName(entry) !== call.name) {
+            continue;
+          }
+          // A top-level function import names the function; its file is the parent path's type
+          // or module, which the import resolver already matched.
+          const parent = entry.name.slice(0, entry.name.lastIndexOf('.'));
+          const candidate = index.qualifiedTypes.get(entry.name) ?? index.qualifiedTypes.get(parent);
+          if (candidate && declares(candidate, call.name)) {
+            target = candidate;
+          }
+        }
+      }
+      if (!target || target === fact.file || !declares(target, call.name)) {
+        continue;
+      }
+      const specifier = call.qualifier ? `${call.qualifier}.${call.name}` : call.name;
+      const key = `${fact.file}\u0000${target}\u0000${call.line}\u0000call`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: fact.file,
+        target,
+        kind: 'call',
+        role: 'use',
+        evidence: { line: call.line, specifier, resolution: 'exact' },
+      });
+    }
+  }
 }
 
 function unresolved(file: string, line: number, specifier: string): Diagnostic {

@@ -529,6 +529,20 @@ test('a unit edge widens with the file count it rolled up', () => {
   assert.ok(edgeStrokeWidth(40) <= 4);
 });
 
+test('buildElements carries the edge kind so the calls lens can filter on it', () => {
+  const { edges } = buildElements({
+    nodes: [{ id: 'a', kind: 'module' }, { id: 'b', kind: 'module' }],
+    edges: [
+      { source: 'a', target: 'b', kind: 'import', evidence: { line: 1, specifier: './b', resolution: 'exact' } },
+      { source: 'a', target: 'b', kind: 'call', evidence: { line: 2, specifier: 'b', resolution: 'exact' } },
+    ],
+    positions: [],
+  });
+
+  assert.equal(edges[0].data.kind, 'import');
+  assert.equal(edges[1].data.kind, 'call');
+});
+
 test('buildGroupNamingEvidence reports only recorded unit facts', () => {
   const systemModel = {
     system: true,
@@ -596,6 +610,7 @@ test('mapCounts lists units in system mode', () => {
 test('shortcutSheet carries the gestures the legend no longer mixes in', () => {
   const keys = shortcutSheet().map((entry) => entry.keys);
   assert.ok(keys.includes('?'));
+  assert.ok(keys.includes('C'));
   assert.ok(keys.some((key) => key.includes('hover')));
 });
 

@@ -10,6 +10,7 @@ import {
   computeWorkingTreeMetrics,
 } from '../../analysis/change-metrics.ts';
 import { listBranches, reviewBranch } from '../../analysis/branches.ts';
+import { fetchBranches, pushBranch, syncBranch } from '../../analysis/branch-actions.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
@@ -19,6 +20,7 @@ import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
+import { computeFileImpactPassport, rollUpImpactPassports } from '../../analysis/impact-passport.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
@@ -30,7 +32,7 @@ import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import type { StraboConfig } from '../../types.ts';
-import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
+import { parseBoolean, parsePositiveInt, isSameOriginRequest, sendError } from '../http.ts';
 
 /** Review-focused analyses. All of them inherit the scanner's scope. */
 export function createAnalysisRouter(config: StraboConfig): Router {
@@ -271,6 +273,61 @@ export function createAnalysisRouter(config: StraboConfig): Router {
   });
 
   /**
+   * Git actions that write: fetch, push, and fast-forward sync. They are state-changing, so
+   * they are accepted only from the Strabo page's own origin (see `isSameOriginRequest`), and
+   * the analysis module validates every ref before it reaches Git and never force-pushes.
+   */
+  router.post('/analysis/branches/fetch', async (request, response) => {
+    try {
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
+        return;
+      }
+      const repository = resolve(request);
+      const remote = typeof request.body?.remote === 'string' && request.body.remote ? request.body.remote : undefined;
+      response.json(await fetchBranches(repository.root, remote));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.post('/analysis/branches/push', async (request, response) => {
+    try {
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
+        return;
+      }
+      const repository = resolve(request);
+      const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
+      if (!branch) {
+        response.status(400).json({ error: 'branch is required.' });
+        return;
+      }
+      response.json(await pushBranch(repository.root, branch));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.post('/analysis/branches/sync', async (request, response) => {
+    try {
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
+        return;
+      }
+      const repository = resolve(request);
+      const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
+      if (!branch) {
+        response.status(400).json({ error: 'branch is required.' });
+        return;
+      }
+      response.json(await syncBranch(repository.root, branch));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
    * Review a commit's own changes, a branch against a base, or the working tree.
    *
    * `base` reviews that revision against its first parent; `branch` reviews that branch's
@@ -296,7 +353,22 @@ export function createAnalysisRouter(config: StraboConfig): Router {
           ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph)
           : undefined;
         const metrics = await computeRangeMetrics(repository.root, review.branch.mergeBase, review.branch.tipHash);
-        response.json({ ...review, ...(cohesion ? { cohesion } : {}), metrics });
+        response.json({
+          ...review,
+          ...(cohesion ? { cohesion } : {}),
+          metrics,
+          ...(cohesion
+            ? {
+                impactPassport: rollUpImpactPassports(
+                  cached.report.graph,
+                  cohesion.files.map((change) => change.impactPassport),
+                  'revision',
+                  cohesion.baseline,
+                  cohesion.capped,
+                ),
+              }
+            : {}),
+        });
         return;
       }
       const base = typeof request.query.base === 'string' ? request.query.base : '';
@@ -314,7 +386,34 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const metrics = base
         ? await computeCommitMetrics(repository.root, base)
         : await computeWorkingTreeMetrics(repository.root, review.files);
-      response.json({ ...review, cohesion, metrics });
+      const impactPassport = rollUpImpactPassports(
+        cached.report.graph,
+        cohesion.files.map((change) => change.impactPassport),
+        'change-set',
+        cohesion.baseline,
+        cohesion.capped,
+      );
+      response.json({ ...review, cohesion, metrics, impactPassport });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The Change impact passport for one file: its current-graph snapshot (blast radius,
+   * importers, imports), complexity, signals, and most complex functions, with the deltas
+   * against HEAD when the file has pending changes. The Module Passport reads this.
+   */
+  router.get('/analysis/impact-passport', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const file = typeof request.query.file === 'string' ? request.query.file : '';
+      if (!file) {
+        response.status(400).json({ error: 'file query parameter is required.' });
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      response.json(await computeFileImpactPassport(repository.root, cached.report.graph, file));
     } catch (error) {
       sendError(response, error);
     }

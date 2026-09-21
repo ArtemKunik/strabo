@@ -218,6 +218,14 @@ body[data-mode="system"] #tb-boundaries {
   display: none;
 }
 
+/* Calls are a file-mode lens: directory and unit edges are not function calls. */
+#tb-calls {
+  display: none;
+}
+body[data-mode="file"] #tb-calls {
+  display: inline-flex;
+}
+
 .tb-spacer {
   flex: 1;
   min-width: 0;
@@ -521,6 +529,13 @@ button.primary {
   justify-content: center;
   font-size: 15px;
   line-height: 1;
+}
+
+/* A hidden toolbar button must actually hide: the `display: inline-flex` above outranks the
+   user-agent `[hidden]` rule, so without this the back-to-units control lingers in file mode
+   and reads as a button that does nothing. */
+.graph-toolbar button[hidden] {
+  display: none;
 }
 
 .tb-divider {
@@ -1223,6 +1238,97 @@ button.primary {
   margin-top: 2px;
 }
 
+/* compatibility, preflight and live database. Every status carries its word, never hue alone. */
+.workspace-tools {
+  margin-top: 12px;
+}
+
+.workspace-tools-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+
+.workspace-tools-form input {
+  min-width: 14ch;
+}
+
+.workspace-group {
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.workspace-error {
+  color: var(--status-critical);
+  font-style: normal;
+}
+
+.workspace-compat,
+.workspace-preflight,
+.workspace-preflight-skipped,
+.workspace-live-drift,
+.workspace-runs {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.compat-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compat-breaking,
+.preflight-violations {
+  border-color: var(--status-critical);
+  border-style: solid;
+}
+
+.compat-conditional,
+.preflight-error {
+  border-color: var(--status-warning);
+  border-style: dashed;
+}
+
+.compat-safe,
+.preflight-ok {
+  border-color: var(--status-good);
+  border-style: dotted;
+}
+
+.workspace-sql {
+  margin: 4px 0 0;
+  padding: 6px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+
+.workspace-database {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-consent {
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.workspace-script-link {
+  font-size: 11px;
+}
+
 .passport-panel {
   max-height: 70vh;
   overflow: auto;
@@ -1706,6 +1812,36 @@ button.primary {
   border: 1px solid var(--line);
 }
 
+/* Fetch / Sync in the header, Push on a row: the only branch actions that write. */
+.branch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.branch-action {
+  padding: 1px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.branch-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.branch-action:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
 .divergence {
   display: inline-flex;
   align-items: center;
@@ -1924,6 +2060,100 @@ button.primary {
   font-family: var(--font-mono);
   word-break: break-all;
 }
+
+/* Change impact passport: the current-graph risk surface and the deltas a change made. */
+.impact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.impact-cell {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+}
+
+.impact-cell-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.impact-cell-value {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1);
+}
+
+.impact-cell-value.good { color: var(--status-good); }
+.impact-cell-value.warning { color: var(--status-warning); }
+.impact-cell-value.serious { color: var(--status-serious); }
+.impact-cell-value.critical { color: var(--status-critical); }
+.impact-cell-value.grown { color: var(--status-serious); }
+.impact-cell-value.shed { color: var(--status-good); }
+.impact-cell-value.flat { color: var(--ink-2); }
+.impact-cell-value.none { color: var(--ink-3); }
+
+.impact-cell-detail {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.impact-list h5 {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.impact-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.impact-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.impact-files {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.impact-files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.impact-risk-band {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.impact-risk-band.good { color: var(--status-good); border-color: var(--status-good); }
+.impact-risk-band.warning { color: var(--status-warning); border-color: var(--status-warning); }
+.impact-risk-band.serious { color: var(--status-serious); border-color: var(--status-serious); }
+.impact-risk-band.critical { color: var(--status-critical); border-color: var(--status-critical); }
+.impact-risk-band.none { color: var(--ink-3); }
 
 .health-delta {
   padding: 0 6px;

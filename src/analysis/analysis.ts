@@ -71,7 +71,8 @@ export function computeGraphMetrics(graph: Graph, adjacency?: Adjacency): GraphM
   return { fanIn, fanOut, transitiveDependents, transitiveDependencies };
 }
 
-function reachableSize(start: string, adjacency: Map<string, string[]>): number {
+/** Distinct nodes reachable from `start` over one adjacency direction, cycles included. */
+export function reachableSize(start: string, adjacency: Map<string, string[]>): number {
   const seen = new Set<string>();
   const stack = [...(adjacency.get(start) ?? [])];
   while (stack.length > 0) {

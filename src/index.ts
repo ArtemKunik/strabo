@@ -133,6 +133,26 @@ export type { BranchDivergence, ReviewFile, ReviewResult, ReviewStatus, ReviewGr
 export { computeChangePassport } from './analysis/change-passport.ts';
 export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
 export {
+  buildFileImpactPassport,
+  computeFileImpactPassport,
+  computeRisk,
+  functionFacts,
+  riskBandFor,
+  rollUpImpactPassports,
+} from './analysis/impact-passport.ts';
+export type {
+  ComplexitySummary,
+  CoherenceSummary,
+  FileImpactPassport,
+  ImpactFunction,
+  ImpactPassportSet,
+  ImpactRisk,
+  ImpactSignal,
+  ImpactSnapshot,
+  ImpactTotals,
+  RiskBand,
+} from './analysis/impact-passport.ts';
+export {
   computeCommitMetrics,
   computeRangeMetrics,
   computeWorkingTreeMetrics,
@@ -172,6 +192,8 @@ export {
   parseTrack,
 } from './analysis/branches.ts';
 export type { BranchBase, BranchesResult, BranchSummary, BranchSync } from './analysis/branches.ts';
+export { fetchBranches, pushBranch, syncBranch, isSafeBranch } from './analysis/branch-actions.ts';
+export type { BranchActionFailure, BranchActionName, BranchActionResult, BranchActionReason } from './analysis/branch-actions.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 export { computeQualityScorecard, smellsFromScorecard, SMELL_RULES } from './analysis/quality.ts';
 export type {
@@ -216,6 +238,38 @@ export {
   locateTarget,
 } from './workspace/services.ts';
 export type { RepoServiceFact } from './workspace/services.ts';
+export { extractSchema, buildSchema, findSqlFiles, normalizeType, constraintSignature } from './workspace/schema.ts';
+export type { SqlSource } from './workspace/schema.ts';
+export { extractDataUses, extractDataUsesFromSource } from './workspace/data-usage.ts';
+export type { RawDataUse } from './workspace/data-usage.ts';
+export { computeSchemaUsage, computeSchemaDrift } from './workspace/schema-usage.ts';
+export {
+  analyzeCompat,
+  analyzeWorkspaceCompat,
+  diffContracts,
+  diffSchemas,
+  schemaTypeWidens,
+  readRevisionFacts,
+  readWorkingFacts,
+} from './workspace/compat.ts';
+export type { CompatInput, RevisionFacts } from './workspace/compat.ts';
+export { materializeRevision, assertRef, RevisionError } from './workspace/revision.ts';
+export type { MaterializedRevision } from './workspace/revision.ts';
+export { analyzePreflight, buildPreflight, renderPreflightScript } from './workspace/preflight.ts';
+export type { PreflightInput } from './workspace/preflight.ts';
+export {
+  createPostgresDriver,
+  assertReadOnlyQuery,
+  databaseConfigured,
+  runPreflight,
+  introspectPostgres,
+  compareLiveSchema,
+  scrub as scrubProbeError,
+  ProbeError,
+} from './workspace/probe.ts';
+export type { DatabaseDriver, DatabaseSession, RunOptions } from './workspace/probe.ts';
+export { createWorkspaceRouter } from './api/routes/workspace.ts';
+export type { WorkspaceRouterOptions } from './api/routes/workspace.ts';
 export { analyzeWorkspace } from './workspace/analyze.ts';
 export type { AnalyzeWorkspaceOptions } from './workspace/analyze.ts';
 export { openWorkspaceCache, clearWorkspaceCache, workspaceCachePath, WORKSPACE_CACHE_VERSION } from './cache/workspace-cache.ts';

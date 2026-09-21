@@ -27,9 +27,10 @@ record is reported as `unavailable`, never invented.
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution; Member-map Narrate from the recorded members and data flow); follow-ups N1-N5 done (in-app narrator setup) |
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
-| 17 | Module quality and change impact | Q1-Q8 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run) |
+| 17 | Module quality and change impact | Q1-Q9 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run; the Change impact passport card) |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
-| 19 | Branches | B1 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath) |
+| 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions) |
+| 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -642,6 +643,17 @@ data flow (naming an unrecorded type or flow as such). The block is `host`ed on 
 configured identity, so a reply survives a find keystroke or a walkthrough step. The
 `member-map.feature` `@narrator` scenario asserts the inert path against the `member-repo`
 fixture.
+**A11 (done)** narration quality and the right-click entry. The Member-map evidence now names
+the file, its recorded imports and used-by, and the function metrics, and describes members
+declared straight in a file as module-level rather than as a "type" named after the file (which
+the model had read as an unrecorded type name). The instruction asks for three to five
+sentences on what the file appears to be for, what relies on it, and what a reviewer should
+know, allows a hedged reading of paths and names, and still bars invented behaviour
+(`NARRATOR_PROMPT_VERSION` is `narrator-2`, so cached replies are not reused). Replies render as
+prose, inline code, and lists built from text nodes (`narrativeBlocks`, `renderNarrativeReply`),
+never as HTML. Right-clicking a file or System unit offers **✦ Narrate**, which opens a
+Narrator window with the reply; the entry is inactive with the reason as its tooltip while the
+narrator is off or failing, and on a folder node, where there is nothing to narrate.
 
 ### Follow-ups: in-app narrator setup
 
@@ -1014,6 +1026,8 @@ coverage is the `mod declarations are declare edges` case in `test/unit/rust.tes
 
 **Q8 (done).** The pending-change risk summary and the tests to run. `CohesionChange` gains `testsToRun` (the test files whose forward closure reaches the changed file, from `computeTestReachByFile`), `untestedDependents` (direct dependents no test reaches), and `risk` — `linesTouched × touchedComplexity × definiteImpact × untestedShare`, each input kept — from `computeChangeRisk`. Unit coverage is `test/unit/change-passport.test.ts`. The per-module `scores` (`complexity`, `churn`, `hotspot`, `blastRadius`, `testReach`, `risk`) also ride the scorecard; the `@composites` scenario in `module-quality.feature` covers them.
 
+**Q9 (done).** The Change impact passport card. `src/analysis/impact-passport.ts` composes one file's card from already-recorded facts: a bounded 0-100 **risk** (a weighted product of the normalised max complexity, blast radius, signal count, and untested-dependent share, with every input kept and a `LOW`/`MODERATE`/`HIGH`/`CRITICAL` band), **max and average complexity** with their before → after moves and the unchanged function/class counts, **change coherence** (the largest connected component of the changed symbols over their count, from the recorded intra-file calls), the current-graph **blast radius** and **importers / imports**, the ranked **risk signals**, and the **most complex functions** with their moves. `functionFacts` derives a side's facts once, `buildFileImpactPassport` is pure, and `rollUpImpactPassports` unions blast radius, importers, and imports over the drawn graph for the change set or revision. `CohesionChange.impactPassport` carries the per-file card, `GET /analysis/review` carries the roll-up, and `GET /analysis/impact-passport?file=` serves the Module Passport's new **Impact** tab (compared against HEAD, so a dirty file shows its growth). The shared git content reader is `src/analysis/git-content.ts`. Unit coverage is `test/unit/impact-passport.test.ts`, the route case in `test/unit/server.test.ts`, and the `renderImpactPassport` cases in `test/unit/panels.test.ts`; the card is rendered by `ui/strabo-impact.js` / `ui/strabo-panels.js`.
+
 **Smells** are rules over those measures. Each shows the inputs that tripped it and is a
 signal, not a verdict: god module (size, members and importers high, cohesion low), hub
 dependency (high in-degree and out-degree), unstable dependency (depends on a more unstable
@@ -1141,9 +1155,112 @@ Where every branch stands against the trunk, and what merging one would do.
   `stale` after 90 days), with a base picker. Selecting a branch opens the review panel as
   a Branch review with the merge verdict, conflicting files, and what moved underneath,
   and annotates the map like any other review. Right-click delegation carries the verdict.
+- **B2 (done).** The branch actions: `POST /analysis/branches/fetch|push|sync`. **Fetch**
+  runs `git fetch --prune` on the remotes the listed branches track (else `origin`);
+  **Push** appears on a local branch ahead of its upstream (a branch with no upstream gets
+  **Publish**, which sets it) and never force-pushes; **Sync** runs on the checked-out
+  branch — fetch, fast-forward only when behind (refusing a diverged branch or a dirty tree
+  rather than merging), then push when ahead. The three are state-changing, so they are
+  accepted only from the page's own origin (`isSameOriginRequest`). `src/analysis/branch-actions.ts`
+  validates every branch/remote against a strict pattern before Git sees it, passes arguments
+  as a vector, disables credential prompts so an unauthenticated push fails rather than
+  hanging, bounds each action with a timeout, and classifies failures (`no-git`, `auth`,
+  `not-fast-forward`, `dirty`, `timeout`, …). The panel shows `Fetch`/`Sync` in the header
+  and `Push ↑N`/`Publish` per row, disables them while an action runs, and reloads the counts
+  from the server's message. Unit coverage is `test/unit/branch-actions.test.ts` (a real bare
+  remote) and the added cases in `test/unit/branches-panel.test.ts` and `test/unit/server.test.ts`.
 
 Unit coverage is `test/unit/branches.test.ts` and `test/unit/branches-panel.test.ts`; the
 browser scenario is `timeline.feature` `@branches`.
+
+## Phase 20 - Cross-repo and database compatibility
+
+An application is rarely one repository, and its behaviour is only half in code: the other
+half is the database and the data in it. Phase 11 compares contracts that repositories
+share. This phase adds the database as a workspace member, asks whether a change is safe
+for the systems that depend on it, and checks a migration against real data before it runs.
+
+The motivating failure: a new schema was rolled out on the belief that "the test data is a
+mess, that is normal", and production turned out to be just as messy, so the migration
+broke. Static analysis cannot see that; only a look at the data can.
+
+Principles carry over from Phase 11 and Phase 15:
+
+- Only what was recorded is reported. Dynamic SQL, a migration construct the parser does not
+  read, and a table reached only through a query builder are named as gaps, not guessed.
+- Anything that touches a live database is **opt-in and read-only**. The connection string
+  is never in a config file, never persisted, never logged, and never sent to the narrator.
+  Only aggregates leave the database, never rows.
+
+Slices:
+
+- **D1 - Schema snapshot (done).** `src/workspace/schema.ts` reads `.sql` migrations and schema
+  dumps lexically and replays them in order into one snapshot per repository: tables,
+  columns (type, nullability, default), primary/unique/foreign-key/check constraints, and
+  indexes, each with the file and line that declared it. Migration order is the natural sort
+  of the path (Flyway `V1__`, `V1.10__`, timestamped and numbered files), with dumps first
+  and Flyway repeatables last; `down`/undo files are skipped. A statement the parser cannot
+  interpret is listed as a gap. The snapshot is cached per git fingerprint with the other
+  workspace facts and is served by `GET /workspace/schema`.
+- **D2 - Code against schema (done).** ORM entities and string-literal SQL are matched with the
+  snapshot: a table or column code names that no migration creates is reported, with the
+  evidence line. `GET /workspace/schema/usage`.
+- **D3 - Compatibility diff (done).** Two revisions of the same repository (`base` and `head`,
+  default `HEAD` against the working tree) are extracted and compared. Contract and schema
+  changes are classified `breaking`, `conditional` (safe for one direction only, with the
+  direction named) or `safe`. `GET /workspace/compat?base=<ref>[&head=<ref>]`.
+- **D4 - Migration preflight (done).** Each risky operation in a schema diff (new NOT NULL, unique,
+  primary key, foreign key, check, narrowing type change, dropped column or table) becomes
+  a read-only aggregate query that counts the rows that would make it fail, plus the code
+  references to whatever is dropped. `GET /workspace/preflight?base=<ref>`. The queries can
+  be run by the operator against any environment.
+- **D5 - Live read-only probe (done).** With a database declared in the workspace config
+  (`databases: [{ name, dialect, urlEnv }]`, the URL read from that environment variable),
+  the preflight queries are executed inside a read-only transaction with a statement
+  timeout, and the live schema is introspected and diffed against the migrations, so
+  drift between the repository and the database is visible. The driver (`pg`) is an
+  optional dependency loaded on demand. `POST /workspace/preflight/run`.
+
+- **D6 - Workspace panel (done).** `ui/strabo-workspace.js` gains `schemaRows`,
+  `schemaGapRows`, `schemaDriftRows`, `usageFindingRows` and `usageCaption`; `renderWorkspace` draws
+  Database schema, Schema gaps, Table drift and Code against schema, and an older report with no schema
+  renders with each section saying so. A **Compatibility and migrations** section
+  (`renderWorkspaceTools`, enabled by `handlers.tools`) adds a base-revision field with **Compare**
+  (verdict badge, reason, the code that still uses a dropped element, other repositories that declare
+  the contract), **Preflight queries** (each check expands to its meaning and SQL; skipped operations
+  are listed with their reason) and an **SQL script** download. **Live database** lists the declared
+  databases and whether their variable is set, never its value. **Run preflight checks…** is a two-step
+  action: it first states what it will do (read-only counts, no rows, connection string not stored) and
+  only **Run** connects. **Read live schema** shows where the database and the migrations differ. A
+  result is drawn as passed only if it ran and found nothing; a check that could not run reads "could
+  not check", and one that has not run reads "not run". Status badges carry their word and a border
+  style, never hue alone. Helpers: `compatRows`, `preflightRows`, `resultCaption`, `databaseRows`,
+  `liveDriftRows`, `probeConsent`. Unit coverage: `test/unit/workspace-tools-panel.test.ts`. Not yet
+  covered by a browser acceptance scenario.
+
+Endpoints: `GET /workspace/schema`, `GET /workspace/schema/usage`, `GET /workspace/compat`,
+`GET /workspace/preflight[?format=sql]`, `GET /workspace/databases`, `POST /workspace/preflight/run`,
+`POST /workspace/live/schema`.
+
+Known limits, named rather than hidden:
+
+- The DDL reader is lexical. It reads `CREATE/ALTER/DROP TABLE`, `CREATE/DROP INDEX` and `RENAME` for
+  PostgreSQL, MySQL, SQLite and T-SQL forms; procedural bodies, views, enums and `EXCLUDE` constraints are not
+  recorded (an unreadable ALTER is listed as a gap). Object names are lower-cased, so a table created as
+  a quoted mixed-case name in PostgreSQL will not match the preflight's bare identifiers.
+- Compatibility does not know a contract's direction, so a required-ness change is `conditional` in both
+  directions, and Protobuf field numbers are not recorded, so a renumbered field is not detected.
+- Data uses in code are string-literal SQL and five ORM mappings. A query builder or an interpolated
+  table records nothing.
+- The preflight has no query for a conversion such as `text` to `uuid`; it lists it as skipped. A count is
+  only as exact as the engine's own rules where a query is marked approximate.
+- Only PostgreSQL can be probed live. The read-only guarantee rests on the read-only transaction, the
+  statement timeout, the single-SELECT guard, and the API accepting no SQL; it has been exercised against
+  a fake driver, not a live server, so run the first probe against a replica.
+
+Unit coverage: `test/unit/schema.test.ts`, `test/unit/schema-usage.test.ts`,
+`test/unit/compat.test.ts`, `test/unit/preflight.test.ts`, `test/unit/probe.test.ts`,
+`test/unit/workspace-routes.test.ts`, `test/unit/workspace-schema-panel.test.ts`.
 
 ## Phase 6 - Release readiness
 

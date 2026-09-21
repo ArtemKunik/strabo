@@ -231,6 +231,55 @@ the working tree, the first parent for a commit — and re-extracted for the rev
 file whose language has no extractor, is new, or was deleted names the missing side rather
 than showing a fabricated score.
 
+## Change impact passport
+
+Every changed file also carries a **Change impact passport** — the same card in the Review
+panel (rolled up over the change set or a branch revision) and, for any selected file, on
+the Module Passport's **Impact** tab (`GET /analysis/impact-passport?file=`). It reads:
+
+- **Risk** — a bounded 0-100 score with a `LOW`/`MODERATE`/`HIGH`/`CRITICAL` band, built
+  from normalised inputs that are kept on the card: the most complex function's decision
+  points, blast radius, recorded signal count, and the share of direct dependents no test
+  reaches. It is a heuristic, not a repository percentile.
+- **Max and average complexity** — the most complex and mean function decision points
+  (`C35`, `8.4`), each with its `grown +C3` / `shed −C2` move against the baseline, plus how
+  many functions and classes did not move.
+- **Change coherence** — a 0-100 concentration of the changed symbols: the largest connected
+  component of the changed functions over their count, using the recorded intra-file calls.
+  One changed symbol is trivially coherent (`100`).
+- **Blast radius** and **importers / imports** — the current graph's counts over `use` edges.
+- **Risk signals** — the recorded function signals, most severe first, with the value that
+  tripped each (e.g. *High complexity logic · maximum C35*).
+- **Most complex functions** — the reviewed side's worst functions by decision points, each
+  with its move from the baseline.
+
+The roll-up counts blast radius, importers, and imports as distinct-file unions over the
+drawn graph, takes the worst file's risk band, and pools the average complexity. A side the
+scan or Git cannot read is `null` and named in `note`, never a zero.
+
+## Branches
+
+The **Branches** panel (`N`) lists local and remote branches, newest first, each with its
+sync against its upstream (`N to push`, `M to pull`, `upstream gone`, `no upstream`), its
+divergence from a base you can pick (the remote's default branch by default), and its age.
+Counts come from the local object store and are as fresh as the last fetch.
+
+Branches is the one place Strabo writes to Git, and only through explicit buttons:
+
+- **Fetch** runs `git fetch --prune` on the remote(s) the listed branches track (else
+  `origin`), so the ahead/behind counts update.
+- **Push** appears on a local branch that is ahead of its upstream; a branch with no
+  upstream gets **Publish**, which pushes it and sets the upstream. It never force-pushes.
+- **Sync** runs on the checked-out branch: fetch, then fast-forward when behind (it refuses
+  a diverged branch or a dirty tree rather than merging), then push when ahead.
+
+The three actions are state-changing, so they are accepted only from the page's own origin
+(`isSameOriginRequest`). Every branch and remote name is validated against a strict pattern
+before it reaches Git, arguments are passed as a vector (never a shell), credential prompts
+are disabled so an unauthenticated push fails with a reason instead of hanging, and each
+action is time-bounded. A failure is classified (`no-git`, `auth`, `not-fast-forward`,
+`dirty`, `timeout`, …) and shown in the status bar.
+
 ## Workspace analysis
 
 `STRABO_CONFIG` can name a workspace: several local repositories analyzed together.
@@ -287,6 +336,67 @@ Each repository's graph comes from the shared graph cache, and its coordinate an
 are cached per git fingerprint, so an unchanged repository is never rescanned or
 re-extracted. A root that is not a git working tree is not cached under a key that cannot be
 checked.
+
+### Databases and compatibility
+
+An application is rarely one repository, and half of how it behaves is in the database. The
+workspace treats the database as a member and asks whether a change is safe for what depends
+on it.
+
+**Schema snapshot** (`GET /api/strabo/workspace/schema`). Each repository's `.sql` files are
+replayed in order into one schema: tables, columns with normalised types, nullability and
+defaults, primary/unique/foreign-key/check constraints, and indexes, each with the file and
+line that declared it. Order is the natural sort of the path (so `V2__` runs before `V10__`),
+schema dumps first and Flyway repeatables last; `down`/undo scripts are skipped. A statement
+the parser cannot apply is listed as a **gap**, not skipped silently. A table two repositories
+both declare is compared like a shared contract.
+
+**Code against schema** (`GET /workspace/schema/usage`). Tables and columns that code names,
+from string-literal SQL and from JPA, TypeORM, SQLAlchemy, Diesel and SeaORM mappings, are
+checked against every declared schema in the workspace. A finding is evidence, not a verdict: an
+unknown table may be created by an ORM auto-migration or live in a database the workspace does
+not include, and a bare `SELECT` literal is marked `weak`.
+
+**Compatibility** (`GET /workspace/compat?base=<ref>[&head=<ref>][&repository=]`). Two
+revisions of a repository (default `HEAD` against the working tree) are extracted and compared.
+Contract and schema changes are `breaking`, `conditional` (safe for one direction only, and the
+reason says which) or `safe`. Schema changes are judged by whether the application still running
+against the database keeps working: a NOT NULL column with no default, or a constraint old
+writes can violate, is breaking even though the migration itself succeeds. A change lists the
+code that still names a dropped column or writes without a new required one, and the other
+repositories that declare the same contract. A revision that cannot be read is reported as
+unavailable, never as "no changes".
+
+**Migration preflight** (`GET /workspace/preflight?base=<ref>[&format=sql]`). Static analysis
+cannot see the data, which is where a migration actually fails. Each risky operation (a new NOT
+NULL, unique, primary key, foreign key or check, a narrowing type change, a dropped column or
+table) becomes a read-only aggregate query that counts the rows that would trip it. `format=sql`
+renders them as a script an operator can run against any environment; an operation that cannot
+be expressed as a query is listed as skipped with its reason.
+
+**Live read-only probe.** Declare a database in the workspace config by the *name of the
+environment variable* that holds its connection string. A config with a URL in it is refused:
+
+```json
+{
+  "name": "acme",
+  "repositories": ["api", "db"],
+  "databases": [{ "name": "prod", "dialect": "postgres", "urlEnv": "STRABO_DB_PROD" }]
+}
+```
+
+`POST /workspace/preflight/run` `{ "database": "prod", "base": "HEAD" }` runs the generated
+checks and returns the counts. `POST /workspace/live/schema` `{ "database": "prod" }` reads the
+live catalog in the same shape as the migrations and reports where they differ, in both
+directions. The probe is narrow by construction: the connection string is read from the
+environment when a run starts and is never stored, logged or returned (errors are scrubbed of
+it); every statement runs in its own `READ ONLY` transaction with a statement timeout; the
+request takes a database name and a revision, never SQL, and a final guard refuses anything that
+is not a single plain `SELECT`; only counts and catalog metadata come back, never a table row.
+Both routes accept only the page's own origin. The PostgreSQL driver is the optional peer
+dependency `pg` (`npm install pg` next to Strabo); nothing is loaded until a probe runs.
+`GET /workspace/databases` lists the declared databases (whether the variable is set, never its
+value) and the recent runs.
 
 ## Delegate to an agent
 
@@ -400,11 +510,30 @@ entry points are **stars**), and hue is reserved
 for status — a changed or affected node carries the fixed status scale, and never directory
 identity — so two statuses that can appear together differ by border shape as well as colour.
 The canvas toolbar offers `Focus`, `Trace impact`,
-`Start path`, `Boundaries`, and `Clear`; hovering a node reports its blast radius without
+`Start path`, `Boundaries`, `Calls`, and `Clear`; hovering a node reports its blast radius without
 selecting it. The strip along the bottom counts tests, modules, and directories, and
 clicking an entry filters the map. The zoom controls on the canvas adjust the viewport, and
 the status bar reports the diagnostics and exclusion counts, the node kinds on screen, and
 the active renderer (WebGL2 or canvas).
+
+**Calls** (toolbar `C`, file mode) swaps the map from import coupling to the recorded
+function-call graph: a dashed edge means the source file calls a function the target file
+declares. The switch is a change of reading, not of reachability — a call edge always sits
+beside the import edge that made the call possible. It is deliberately partial and
+evidence-bound; only a syntactically-provable call becomes an edge:
+
+- a name bound by an import plus a bare call — `import { foo } from './a'; foo()`,
+  `from m import foo; foo()`, `use crate::m::foo; foo()`, `using static Type; foo()`, and the
+  default and aliased forms;
+- a namespace- or module-qualified call — `ns.foo()`, `mod.foo()`, `crate::mod::foo()`,
+  `util::foo()`, `Type.foo()`, `Type::foo()`, `Helper.foo()`;
+- in C++, a call to a function declared in a directly included header (`#include "widget.h"`).
+
+Everything else is left unclaimed rather than guessed: a value receiver (`obj.method()`,
+`helper.doWork()`), a dynamic call, a re-exported or non-imported name, a call whose target is
+ambiguous, and any instance method — resolving those needs type inference the scan does not
+do. SQL has no calls; its table references are already edges. The same-file call analysis in
+the Functions tab is unchanged.
 
 ### Floating panels
 

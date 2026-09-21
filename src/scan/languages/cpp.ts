@@ -33,9 +33,20 @@ export interface CppInclude {
   line: number;
 }
 
+/** A call site whose callee the syntax proves: `foo(...)` or `Type::foo(...)`. */
+export interface CppCall {
+  name: string;
+  /** The receiver type for a `Type::foo()` call; absent for a bare call. */
+  qualifier?: string;
+  line: number;
+}
+
 export interface CppFileFacts {
   file: string;
   includes: CppInclude[];
+  /** Names the file declares: functions, methods, and class/struct/union types. */
+  callables?: string[];
+  calls?: CppCall[];
 }
 
 export interface CppExtraction {
@@ -69,6 +80,8 @@ export async function extractCppFacts(file: string, content: string): Promise<Cp
     // Includes are collected from the whole tree, not just the top: a header guard or an
     // `#ifdef` block puts them inside a preprocessor node.
     collectIncludes(tree.rootNode, facts.includes);
+    facts.callables = collectCallables(tree.rootNode);
+    facts.calls = collectCalls(tree.rootNode);
 
     if (tree.rootNode.hasError) {
       diagnostics.push({
@@ -106,6 +119,93 @@ function collectIncludes(node: Node, includes: CppInclude[]): void {
   for (const child of node.namedChildren) {
     collectIncludes(child, includes);
   }
+}
+
+/** Collect declared names a call could target: functions, methods, and named types. */
+function collectCallables(root: Node): string[] {
+  const names = new Set<string>();
+  const visit = (node: Node): void => {
+    if (
+      node.type === 'class_specifier' ||
+      node.type === 'struct_specifier' ||
+      node.type === 'union_specifier'
+    ) {
+      const name = node.childForFieldName('name')?.text;
+      if (name) {
+        names.add(name);
+      }
+    } else if (node.type === 'function_declarator') {
+      const name = functionDeclaratorName(node.childForFieldName('declarator'));
+      if (name) {
+        names.add(name);
+      }
+    }
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return [...names];
+}
+
+/** The trailing identifier a (possibly wrapped) declarator names. */
+function functionDeclaratorName(node: Node | null | undefined): string | null {
+  if (!node) {
+    return null;
+  }
+  if (node.type === 'identifier' || node.type === 'field_identifier') {
+    return node.text;
+  }
+  if (node.type === 'qualified_identifier') {
+    return node.childForFieldName('name')?.text ?? null;
+  }
+  if (node.type === 'function_declarator') {
+    return functionDeclaratorName(node.childForFieldName('declarator'));
+  }
+  const nested = node.namedChildren.find(
+    (child) =>
+      child.type === 'function_declarator' ||
+      child.type === 'identifier' ||
+      child.type === 'field_identifier' ||
+      child.type === 'qualified_identifier' ||
+      child.type === 'parenthesized_declarator' ||
+      child.type === 'pointer_declarator',
+  );
+  return nested ? functionDeclaratorName(nested) : null;
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `foo(...)` is bare; `Type::foo(...)` names the receiver type. `this->foo()` is left out
+ * (same-file, and the member map carries it), and `obj.foo()` is not recorded because the
+ * receiver's type is unknown here.
+ */
+function collectCalls(root: Node): CppCall[] {
+  const calls: CppCall[] = [];
+  const visit = (node: Node): void => {
+    if (node.type === 'call_expression') {
+      const fn = node.childForFieldName('function');
+      if (fn) {
+        const line = node.startPosition.row + 1;
+        if (fn.type === 'identifier') {
+          calls.push({ name: fn.text, line });
+        } else if (fn.type === 'qualified_identifier') {
+          const name = fn.childForFieldName('name')?.text;
+          const scope = fn.childForFieldName('scope')?.text;
+          const receiver = scope?.split('::').pop() ?? scope;
+          if (name && receiver && looksLikeTypeName(receiver)) {
+            calls.push({ name, qualifier: receiver, line });
+          }
+        }
+      }
+    }
+    for (const child of node.namedChildren) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return calls;
 }
 
 /**
@@ -209,7 +309,62 @@ export function resolveCpp(facts: readonly CppFileFacts[]): CppResolution {
     }
   }
 
+  // A call can only target a declaration the file includes; the resolved include edges are
+  // exactly that set, so build it from the edges just drawn.
+  const includedBy = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    const set = includedBy.get(edge.source) ?? new Set<string>();
+    includedBy.set(edge.source, set);
+    set.add(edge.target);
+  }
+  appendCallEdges(facts, includedBy, edges);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to a directly included file that declares its callee.
+ *
+ * A C++ call names no module, so the include graph is the evidence: the target must be a file
+ * this one includes and must declare the called name (and, for `Type::foo()`, the type). When
+ * more than one included header declares it, the call is left unclaimed rather than guessed.
+ */
+function appendCallEdges(
+  facts: readonly CppFileFacts[],
+  includedBy: Map<string, Set<string>>,
+  edges: GraphEdge[],
+): void {
+  const callablesByFile = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    callablesByFile.set(fact.file, new Set(fact.callables ?? []));
+  }
+  const declares = (file: string, name: string): boolean =>
+    callablesByFile.get(file)?.has(name) ?? false;
+  const seen = new Set<string>();
+
+  for (const fact of facts) {
+    for (const call of fact.calls ?? []) {
+      const candidates = [...(includedBy.get(fact.file) ?? [])].filter(
+        (target) => declares(target, call.name) && (!call.qualifier || declares(target, call.qualifier)),
+      );
+      if (candidates.length !== 1) {
+        continue;
+      }
+      const target = candidates[0] as string;
+      const specifier = call.qualifier ? `${call.qualifier}::${call.name}` : call.name;
+      const key = `${fact.file}\u0000${target}\u0000${call.line}\u0000call`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: fact.file,
+        target,
+        kind: 'call',
+        role: 'use',
+        evidence: { line: call.line, specifier, resolution: 'exact' },
+      });
+    }
+  }
 }
 
 /** Apply `.` and `..` segments; null when the path climbs above the repository root. */

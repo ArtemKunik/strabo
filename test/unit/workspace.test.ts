@@ -309,6 +309,7 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
       paths: { '/users': { get: {} } },
     }),
   );
+  write(a, 'db/V1__init.sql', 'CREATE TABLE users (id int PRIMARY KEY, name text NOT NULL);');
   git(a, 'init', '-q');
   git(a, 'config', 'user.email', 'test@example.com');
   git(a, 'config', 'user.name', 'Tester');
@@ -391,6 +392,13 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
   assert.equal(serviceFlow.method, 'GET');
   assert.equal(serviceFlow.path, '/users');
 
+  // The schema a repository's migrations describe joins the report; a repository with none is absent.
+  assert.deepEqual(
+    first.schemas.map((entry) => [entry.repository, entry.origin, entry.tables.map((table) => table.name)]),
+    [[nameOf(a), 'migrations', ['users']]],
+  );
+  assert.equal(first.summary.tables, 1);
+
   assert.ok(fs.existsSync(cacheFile), 'the workspace cache should be written');
 
   // A second run reads the cached facts; adding a cached marker proves it was consulted.
@@ -403,6 +411,7 @@ test('analyzeWorkspace joins repositories and caches the facts', async () => {
     cache: openWorkspaceCache({ file: cacheFile }),
   });
   assert.equal(second.flows.length, 1);
+  assert.deepEqual(second.schemas, first.schemas, 'the cached schema is served unchanged');
 
   clearWorkspaceCache(cacheFile);
 });

@@ -16,6 +16,7 @@ import {
   collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
+  walkNodes,
 } from './symbols.ts';
 
 export const PYTHON_LANGUAGE: GrammarLanguage = 'python';
@@ -37,9 +38,41 @@ export interface PythonImport {
   line: number;
 }
 
+/**
+ * A local name an import binds, used to resolve a call's qualifier back to a module.
+ *
+ * `import mod` binds `mod` to the module; `from mod import f` binds `f` to a member of it.
+ * A relative import keeps its dot depth so the resolver can absolutise it per file.
+ */
+export interface PythonBinding {
+  local: string;
+  module: string;
+  relativeDepth: number;
+  /** The imported member for `from m import f`; absent for a plain `import m`. */
+  member?: string;
+  line: number;
+  specifier: string;
+}
+
+/** A call site whose callee the syntax proves: `foo(...)` or `qualifier.foo(...)`. */
+export interface PythonCall {
+  name: string;
+  qualifier?: string;
+  line: number;
+}
+
+/** A callable declared at module level: a function or a class a call can target. */
+export interface PythonCallable {
+  name: string;
+  line: number;
+}
+
 export interface PythonFileFacts {
   file: string;
   imports: PythonImport[];
+  bindings: PythonBinding[];
+  calls: PythonCall[];
+  callables: PythonCallable[];
 }
 
 export interface PythonExtraction {
@@ -59,7 +92,7 @@ export async function extractPythonFacts(
 ): Promise<PythonExtraction> {
   return withParser(PYTHON_LANGUAGE, (parser) => {
     const diagnostics: Diagnostic[] = [];
-    const facts: PythonFileFacts = { file, imports: [] };
+    const facts: PythonFileFacts = { file, imports: [], bindings: [], calls: [], callables: [] };
 
     const tree = parser.parse(content);
     if (!tree) {
@@ -76,7 +109,9 @@ export async function extractPythonFacts(
     // Imports are collected from the whole tree, not just the module body: Python allows a
     // deferred import inside a function or an `if TYPE_CHECKING:` block, and those are real
     // dependencies.
-    collectImports(tree.rootNode, facts.imports);
+    collectImports(tree.rootNode, facts.imports, facts.bindings);
+    collectCallables(tree.rootNode, facts.callables);
+    collectCalls(tree.rootNode, facts.calls);
 
     if (tree.rootNode.hasError) {
       diagnostics.push({
@@ -92,8 +127,9 @@ export async function extractPythonFacts(
   });
 }
 
-function collectImports(node: Node, imports: PythonImport[]): void {
+function collectImports(node: Node, imports: PythonImport[], bindings: PythonBinding[]): void {
   if (node.type === 'import_statement') {
+    const line = node.startPosition.row + 1;
     for (const child of node.namedChildren) {
       const module = importedModuleName(child);
       if (module) {
@@ -103,7 +139,16 @@ function collectImports(node: Node, imports: PythonImport[]): void {
           wildcard: false,
           relativeDepth: 0,
           specifier: module,
-          line: node.startPosition.row + 1,
+          line,
+        });
+        // `import a.b` binds the whole path name `a.b` locally; a later `a.b.c()` reads as a
+        // qualifier, but the common case is `import a.b as x` / `import a`.
+        bindings.push({
+          local: importedLocalName(child) ?? module.split('.').pop() ?? module,
+          module,
+          relativeDepth: 0,
+          line,
+          specifier: module,
         });
       }
     }
@@ -111,16 +156,20 @@ function collectImports(node: Node, imports: PythonImport[]): void {
   }
 
   if (node.type === 'import_from_statement') {
-    collectFromImport(node, imports);
+    collectFromImport(node, imports, bindings);
     return;
   }
 
   for (const child of node.namedChildren) {
-    collectImports(child, imports);
+    collectImports(child, imports, bindings);
   }
 }
 
-function collectFromImport(node: Node, imports: PythonImport[]): void {
+function collectFromImport(
+  node: Node,
+  imports: PythonImport[],
+  bindings: PythonBinding[],
+): void {
   const source = node.childForFieldName('module_name');
   if (!source) {
     return;
@@ -151,6 +200,17 @@ function collectFromImport(node: Node, imports: PythonImport[]): void {
     const name = importedModuleName(child);
     if (name) {
       names.push(name);
+      // `from m import f as g` binds `g` to member `f` of `m`; the alias may also name a
+      // submodule (`from pkg import sub as s`), which the resolver tries both ways.
+      const alias = child.type === 'aliased_import' ? child.childForFieldName('alias')?.text : undefined;
+      bindings.push({
+        local: alias ?? name,
+        module,
+        relativeDepth,
+        member: name,
+        line: child.startPosition.row + 1,
+        specifier: `${'.'.repeat(relativeDepth)}${module}`,
+      });
     }
   }
 
@@ -162,6 +222,14 @@ function collectFromImport(node: Node, imports: PythonImport[]): void {
     specifier: `${'.'.repeat(relativeDepth)}${module}`,
     line: node.startPosition.row + 1,
   });
+}
+
+/** The local name an `import a.b as x` binds, or null for the plain `import a.b` form. */
+function importedLocalName(node: Node): string | null {
+  if (node.type !== 'aliased_import') {
+    return null;
+  }
+  return node.childForFieldName('alias')?.text ?? null;
 }
 
 /** The module path of an `import` clause, unwrapping `x as y` to `x`. */
@@ -176,6 +244,75 @@ function importedModuleName(node: Node): string | null {
     return node.text;
   }
   return null;
+}
+
+/**
+ * Collect the module-level callables a file declares: functions and classes.
+ *
+ * Only module-level declarations are call targets for a cross-file call: nested `def`s are
+ * local, and a class method is reached through its class, which the call graph does not
+ * claim. A decorated definition is unwrapped to the `def`/`class` it decorates.
+ */
+function collectCallables(root: Node, callables: PythonCallable[]): void {
+  for (const child of root.namedChildren) {
+    const definition = child.type === 'decorated_definition' ? decoratedTarget(child) : child;
+    if (!definition) {
+      continue;
+    }
+    if (definition.type !== 'function_definition' && definition.type !== 'class_definition') {
+      continue;
+    }
+    const name = definition.childForFieldName('name')?.text;
+    if (name) {
+      callables.push({ name, line: definition.startPosition.row + 1 });
+    }
+  }
+}
+
+function decoratedTarget(node: Node): Node | null {
+  return (
+    node.childForFieldName('definition') ??
+    node.namedChildren.find(
+      (child) => child.type === 'function_definition' || child.type === 'class_definition',
+    ) ??
+    null
+  );
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `foo(...)` is bare; `qualifier.foo(...)` names a receiver. `self.foo()` / `cls.foo()` are
+ * left out — those are same-file and the member map already carries them. A call through a
+ * local variable (`obj.foo()`) is not recorded: the receiver's type is unknown.
+ */
+function collectCalls(root: Node, calls: PythonCall[]): void {
+  walkNodes(root, (node) => {
+    if (node.type !== 'call') {
+      return;
+    }
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return;
+    }
+    const line = node.startPosition.row + 1;
+    if (fn.type === 'identifier') {
+      calls.push({ name: fn.text, line });
+      return;
+    }
+    if (fn.type !== 'attribute') {
+      return;
+    }
+    const object = fn.childForFieldName('object');
+    const attribute = fn.childForFieldName('attribute');
+    if (!object || !attribute || object.type !== 'identifier') {
+      return;
+    }
+    if (object.text === 'self' || object.text === 'cls') {
+      return;
+    }
+    calls.push({ name: attribute.text, qualifier: object.text, line });
+  });
 }
 
 /**
@@ -270,7 +407,12 @@ export function resolvePython(facts: readonly PythonFileFacts[]): PythonResoluti
 
   for (const fileFacts of facts) {
     for (const reference of fileFacts.imports) {
-      const base = absoluteModule(reference, canonicalModule.get(fileFacts.file) ?? '', fileFacts.file);
+      const base = absoluteModule(
+        reference.module,
+        reference.relativeDepth,
+        canonicalModule.get(fileFacts.file) ?? '',
+        fileFacts.file,
+      );
       if (base === null) {
         // A relative import that climbs past the source root cannot name a file here.
         diagnostics.push({
@@ -322,7 +464,94 @@ export function resolvePython(facts: readonly PythonFileFacts[]): PythonResoluti
     }
   }
 
+  appendCallEdges(facts, canonicalModule, byModule, edges, seen);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to the file that declares its callee.
+ *
+ * `qualifier.name()` resolves `qualifier` through the file's import bindings — a bound module
+ * (`import m as qualifier`) or a bound member that is itself an imported class or submodule.
+ * A bare `name()` resolves a `from m import name` binding. Ambiguity is left unclaimed rather
+ * than guessed, so a call never becomes an edge against the wrong file.
+ */
+function appendCallEdges(
+  facts: readonly PythonFileFacts[],
+  canonicalModule: Map<string, string>,
+  byModule: Map<string, Set<string>>,
+  edges: GraphEdge[],
+  seen: Set<string>,
+): void {
+  const declaredByFile = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    declaredByFile.set(fact.file, new Set(fact.callables.map((callable) => callable.name)));
+  }
+  const callableIn = (file: string, name: string): boolean =>
+    declaredByFile.get(file)?.has(name) ?? false;
+  const fileForCall = (module: string): string | null => {
+    const claimants = byModule.get(module);
+    return claimants && claimants.size === 1 ? ([...claimants][0] ?? null) : null;
+  };
+  const pushCall = (source: string, target: string, line: number, specifier: string): void => {
+    if (source === target) {
+      return;
+    }
+    const key = `${source}\u0000${target}\u0000${line}\u0000call`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    edges.push({
+      source,
+      target,
+      kind: 'call',
+      role: 'use',
+      evidence: { line, specifier, resolution: 'module-tree' },
+    });
+  };
+
+  for (const fact of facts) {
+    const canonical = canonicalModule.get(fact.file) ?? '';
+    for (const call of fact.calls) {
+      if (call.qualifier !== undefined) {
+        for (const binding of fact.bindings) {
+          if (binding.local !== call.qualifier) {
+            continue;
+          }
+          const base = absoluteModule(binding.module, binding.relativeDepth, canonical, fact.file);
+          if (base === null) {
+            continue;
+          }
+          // A bound member may be a class (the module declares it) or a submodule (the
+          // member path is itself a module); both are worth trying, and either must declare
+          // the called name.
+          const candidates =
+            binding.member === undefined
+              ? [base]
+              : [base, base === '' ? binding.member : `${base}.${binding.member}`];
+          for (const candidate of candidates) {
+            const target = fileForCall(candidate);
+            if (target && callableIn(target, call.name)) {
+              pushCall(fact.file, target, call.line, `${call.qualifier}.${call.name}`);
+            }
+          }
+        }
+        continue;
+      }
+      // A bare call: only a `from m import name` binding says which file declares it.
+      for (const binding of fact.bindings) {
+        if (binding.local !== call.name || binding.member === undefined) {
+          continue;
+        }
+        const base = absoluteModule(binding.module, binding.relativeDepth, canonical, fact.file);
+        const target = base === null ? null : fileForCall(base);
+        if (target && callableIn(target, binding.member)) {
+          pushCall(fact.file, target, call.line, call.name);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -342,27 +571,28 @@ function memberSpecifier(reference: PythonImport, name: string): string {
  * the import climbs above the source root, which names nothing in this repository.
  */
 function absoluteModule(
-  reference: PythonImport,
+  module: string,
+  relativeDepth: number,
   canonical: string,
   file: string,
 ): string | null {
-  if (reference.relativeDepth === 0) {
-    return reference.module;
+  if (relativeDepth === 0) {
+    return module;
   }
   // A package's `__init__.py` *is* its package, so `.` resolves to itself rather than its parent.
   const ownPackage = isPackageInit(file)
     ? canonical
     : canonical.slice(0, Math.max(0, canonical.lastIndexOf('.')));
   const segments = ownPackage === '' ? [] : ownPackage.split('.');
-  const climb = reference.relativeDepth - 1;
+  const climb = relativeDepth - 1;
   if (climb > segments.length) {
     return null;
   }
   const base = segments.slice(0, segments.length - climb).join('.');
-  if (reference.module === '') {
+  if (module === '') {
     return base;
   }
-  return base === '' ? reference.module : `${base}.${reference.module}`;
+  return base === '' ? module : `${base}.${module}`;
 }
 
 function isPackageInit(file: string): boolean {

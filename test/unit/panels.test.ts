@@ -23,6 +23,7 @@ const {
   renderDiagnostics,
   renderFolderList,
   renderFunctions,
+  renderImpactPassport,
   renderLegend,
   renderNarrationPanel,
   renderNarrativeReply,
@@ -358,4 +359,112 @@ test('renderNarrationPanel shows loading, the reply, and a way to the settings w
 
   renderNarrationPanel(target, { label: 'a.js', phase: 'error', message: 'boom' });
   assert.match(target.textContent, /Narrator unavailable: boom/);
+});
+
+test('renderImpactPassport renders the file card with its cells, signals, and functions', () => {
+  const target = container();
+  renderImpactPassport(target, {
+    scope: 'file',
+    baseline: 'HEAD',
+    capped: false,
+    files: [
+      {
+        path: 'src/dispatch.rs',
+        status: 'modified',
+        risk: {
+          score: 100,
+          band: 'critical',
+          inputs: { maxComplexity: 35, blastRadius: 0, signals: 1, untestedShare: 0, directImporters: 0 },
+        },
+        complexity: {
+          maxBefore: 32,
+          maxAfter: 35,
+          averageBefore: 8.2,
+          averageAfter: 8.4,
+          sumBefore: 115,
+          sumAfter: 118,
+          functionCountBefore: 14,
+          functionCountAfter: 14,
+          functionsUnchanged: 13,
+          classesUnchanged: 0,
+        },
+        coherence: { score: 100, changedSymbols: 1, detail: '1 changed symbol(s); concentration heuristic' },
+        snapshot: { blastRadius: 0, directImporters: 0, directImports: 5 },
+        signals: [{ kind: 'high-complexity', label: 'High complexity logic', detail: 'maximum C35' }],
+        mostComplex: [{ name: 'try_dispatch', owner: '', complexity: 35, before: 32, delta: 3 }],
+        impact: null,
+        testsToRun: [],
+        untestedDependents: [],
+      },
+    ],
+    totals: null,
+  });
+
+  assert.match(target.textContent, /Change impact passport/);
+  assert.equal(target.querySelector('[data-role="impact-risk"] .impact-cell-value').textContent, 'CRITICAL 100/100');
+  assert.equal(target.querySelector('[data-role="impact-max-complexity"] .impact-cell-value').textContent, 'C35');
+  assert.match(target.querySelector('[data-role="impact-max-complexity"] .impact-cell-detail').textContent, /grown \+C3/);
+  assert.equal(target.querySelector('[data-role="impact-coherence"] .impact-cell-value').textContent, '100/100');
+  assert.equal(target.querySelector('[data-role="impact-imports"] .impact-cell-value').textContent, '0 / 5');
+  assert.match(target.querySelector('[data-role="impact-average-complexity"] .impact-cell-detail').textContent, /13 function\(s\) unchanged/);
+  assert.equal(target.querySelector('[data-role="impact-signals"] li').textContent, 'High complexity logicmaximum C35');
+  assert.equal(target.querySelector('[data-role="impact-most-complex"] li').textContent, 'try_dispatchC35 (+C3)');
+});
+
+test('renderImpactPassport rolls a change set up and lists each file', () => {
+  const target = container();
+  const file = {
+    path: 'a.ts',
+    status: 'modified',
+    risk: { score: 40, band: 'moderate', inputs: { maxComplexity: 10, blastRadius: 1, signals: 0, untestedShare: 0, directImporters: 1 } },
+    complexity: {
+      maxBefore: 5,
+      maxAfter: 10,
+      averageBefore: 3,
+      averageAfter: 5,
+      sumBefore: 5,
+      sumAfter: 10,
+      functionCountBefore: 1,
+      functionCountAfter: 2,
+      functionsUnchanged: 1,
+      classesUnchanged: 0,
+    },
+    coherence: { score: 100, changedSymbols: 1, detail: '1 changed symbol(s); concentration heuristic' },
+    snapshot: { blastRadius: 1, directImporters: 1, directImports: 0 },
+    signals: [],
+    mostComplex: [],
+    impact: null,
+    testsToRun: [],
+    untestedDependents: [],
+  };
+  renderImpactPassport(
+    target,
+    {
+      scope: 'change-set',
+      baseline: 'HEAD',
+      capped: false,
+      files: [file],
+      totals: {
+        files: 1,
+        risk: { score: 40, band: 'moderate' },
+        maxComplexity: 10,
+        averageComplexity: 5,
+        coherence: 100,
+        changedSymbols: 1,
+        blastRadius: 1,
+        directImporters: 1,
+        directImports: 0,
+        signals: [],
+        mostComplex: [],
+        functionsUnchanged: 1,
+        classesUnchanged: 0,
+      },
+    },
+    { onSelect: () => {} },
+  );
+
+  assert.match(target.textContent, /compared with HEAD/);
+  assert.equal(target.querySelector('[data-role="impact-totals"] [data-role="impact-risk"] .impact-cell-value').textContent, 'MODERATE 40/100');
+  assert.equal(target.querySelector('[data-role="impact-files"] button.link').dataset.path, 'a.ts');
+  assert.match(target.querySelector('[data-role="impact-files"] .impact-risk-band').textContent, /MODERATE 40/);
 });

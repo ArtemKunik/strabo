@@ -228,3 +228,54 @@ test('Kotlin edges are deterministic across scans', async () => {
   const second = await scanRepository(fixture);
   assert.deepEqual([...pairs(first.graph.edges)].sort(), [...pairs(second.graph.edges)].sort());
 });
+
+async function resolveSources(sources: Record<string, string>) {
+  const facts = [];
+  for (const [file, source] of Object.entries(sources)) {
+    facts.push((await extractKotlinFacts(file, source)).facts);
+  }
+  return resolveKotlin(facts);
+}
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a Kotlin type-qualified call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'app/Main.kt': [
+      'package com.acme.app',
+      'import com.acme.util.Helper',
+      'fun run() {',
+      '    Helper.doWork()',
+      '}',
+    ].join('\n'),
+    'util/Helper.kt': [
+      'package com.acme.util',
+      'object Helper {',
+      '    fun doWork() {}',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), ['app/Main.kt->util/Helper.kt']);
+});
+
+test('a Kotlin call on a value receiver is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'app/Main.kt': [
+      'package com.acme.app',
+      'fun run(helper: Helper) {',
+      '    helper.doWork()',
+      '}',
+    ].join('\n'),
+    'util/Helper.kt': [
+      'package com.acme.util',
+      'object Helper {',
+      '    fun doWork() {}',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), []);
+});

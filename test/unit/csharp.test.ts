@@ -28,7 +28,7 @@ test('extractCSharpFacts reads the namespace, using kinds, and nested types', as
     { kind: 'simple', target: 'System', line: 1 },
     { kind: 'simple', target: 'Acme.Util', line: 2 },
     { kind: 'static', target: 'Acme.Util.Helper', line: 3 },
-    { kind: 'alias', target: 'Acme.Util.Widget', line: 4 },
+    { kind: 'alias', alias: 'Alias', target: 'Acme.Util.Widget', line: 4 },
   ]);
   assert.deepEqual(facts.types, [
     { name: 'Outer', line: 6 },
@@ -111,4 +111,70 @@ test('C# unresolved internal usings are diagnostics; System is ignored', async (
 
   assert.ok(mainDiagnostics.some((item) => item.specifier === 'Acme.Util.Missing'));
   assert.ok(!mainDiagnostics.some((item) => item.specifier === 'System'));
+});
+
+async function resolveSources(sources: Record<string, string>) {
+  const facts = [];
+  for (const [file, source] of Object.entries(sources)) {
+    facts.push((await extractCSharpFacts(file, source)).facts);
+  }
+  return resolveCSharp(facts);
+}
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a C# namespace-imported type call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'App/Main.cs': [
+      'using Acme.Util;',
+      'namespace Acme.App {',
+      '  class Main { void Run() { Helper.DoWork(); } }',
+      '}',
+    ].join('\n'),
+    'Util/Helper.cs': [
+      'namespace Acme.Util {',
+      '  class Helper { public static void DoWork() {} }',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), ['App/Main.cs->Util/Helper.cs']);
+});
+
+test('a C# static using plus a bare call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'App/Main.cs': [
+      'using static Acme.Util.Helper;',
+      'namespace Acme.App {',
+      '  class Main { void Run() { DoWork(); } }',
+      '}',
+    ].join('\n'),
+    'Util/Helper.cs': [
+      'namespace Acme.Util {',
+      '  class Helper { public static void DoWork() {} }',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), ['App/Main.cs->Util/Helper.cs']);
+});
+
+test('a C# call to a name the target does not declare is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'App/Main.cs': [
+      'using Acme.Util;',
+      'namespace Acme.App {',
+      '  class Main { void Run() { Helper.Missing(); } }',
+      '}',
+    ].join('\n'),
+    'Util/Helper.cs': [
+      'namespace Acme.Util {',
+      '  class Helper { public static void DoWork() {} }',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), []);
 });

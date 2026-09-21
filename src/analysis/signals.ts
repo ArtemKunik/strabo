@@ -34,6 +34,18 @@ export const SIGNAL_THRESHOLDS = {
   manyParameters: 5,
 } as const;
 
+/** Human-readable label per signal kind, for a passport or panel. */
+export const FUNCTION_SIGNAL_LABELS: Record<FunctionSignalKind, string> = {
+  'nested-loops': 'Nested loops',
+  'linear-scan-in-loop': 'Linear scan in a loop',
+  'sort-in-loop': 'Sort in a loop',
+  'deep-nesting': 'Deep nesting',
+  'high-complexity': 'High complexity logic',
+  'long-function': 'Long function',
+  'many-parameters': 'Many parameters',
+  recursion: 'Recursion',
+};
+
 /**
  * Derive signals from a function's recorded facts.
  *

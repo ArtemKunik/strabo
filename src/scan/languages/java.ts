@@ -39,12 +39,23 @@ export interface JavaTypeReference {
   line: number;
 }
 
+/** A call site whose callee the syntax proves: `foo(...)` or `Type.foo(...)`. */
+export interface JavaCall {
+  name: string;
+  /** The receiver type name for a `Type.foo()` call; absent for a bare call. */
+  qualifier?: string;
+  line: number;
+}
+
 export interface JavaFileFacts {
   file: string;
   package: string;
   imports: JavaImport[];
   types: JavaTypeDeclaration[];
   typeReferences: JavaTypeReference[];
+  /** Method names the file declares, so a call can be proven against this file. */
+  methods: string[];
+  calls: JavaCall[];
 }
 
 export interface JavaExtraction {
@@ -65,7 +76,15 @@ const TYPE_DECLARATIONS = new Set([
 export async function extractJavaFacts(file: string, content: string): Promise<JavaExtraction> {
   return withParser(JAVA_LANGUAGE, (parser) => {
     const diagnostics: Diagnostic[] = [];
-    const empty: JavaFileFacts = { file, package: '', imports: [], types: [], typeReferences: [] };
+    const empty: JavaFileFacts = {
+      file,
+      package: '',
+      imports: [],
+      types: [],
+      typeReferences: [],
+      methods: [],
+      calls: [],
+    };
 
     const tree = parser.parse(content);
     if (!tree) {
@@ -79,7 +98,15 @@ export async function extractJavaFacts(file: string, content: string): Promise<J
       return { facts: empty, diagnostics };
     }
 
-    const facts: JavaFileFacts = { file, package: '', imports: [], types: [], typeReferences: [] };
+    const facts: JavaFileFacts = {
+      file,
+      package: '',
+      imports: [],
+      types: [],
+      typeReferences: [],
+      methods: [],
+      calls: [],
+    };
 
     for (const node of tree.rootNode.namedChildren) {
       switch (node.type) {
@@ -99,6 +126,8 @@ export async function extractJavaFacts(file: string, content: string): Promise<J
     const references: JavaTypeReference[] = [];
     collectTypeReferences(tree.rootNode, references);
     facts.typeReferences = dedupeReferences(references);
+    collectMethods(tree.rootNode, facts.methods);
+    collectCalls(tree.rootNode, facts.calls);
 
     if (tree.rootNode.hasError) {
       diagnostics.push({
@@ -199,6 +228,48 @@ function dedupeReferences(references: JavaTypeReference[]): JavaTypeReference[] 
     }
   }
   return [...byName.values()];
+}
+
+/** The last dotted segment of a qualified name (`com.a.B` -> `B`). */
+function simpleName(qualified: string): string {
+  return qualified.slice(qualified.lastIndexOf('.') + 1);
+}
+
+/** Collect every declared method name, so a call can be proven against this file. */
+function collectMethods(node: Node, out: string[]): void {
+  if (node.type === 'method_declaration') {
+    const name = node.childForFieldName('name')?.text;
+    if (name) {
+      out.push(name);
+    }
+    return;
+  }
+  for (const child of node.namedChildren) {
+    collectMethods(child, out);
+  }
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `foo(...)` is bare; `Type.foo(...)` names the receiver type. A `this.foo()` call is skipped
+ * (same-file, and the member map carries it), and `obj.foo()` is not recorded because the
+ * receiver's type is not known here.
+ */
+function collectCalls(node: Node, out: JavaCall[]): void {
+  if (node.type === 'method_invocation') {
+    const name = node.childForFieldName('name')?.text;
+    const object = node.childForFieldName('object');
+    if (name && !object) {
+      out.push({ name, line: node.startPosition.row + 1 });
+    } else if (name && object && object.type === 'identifier' && looksLikeTypeName(object.text)) {
+      out.push({ name, qualifier: object.text, line: node.startPosition.row + 1 });
+    }
+    return;
+  }
+  for (const child of node.namedChildren) {
+    collectCalls(child, out);
+  }
 }
 
 interface JavaIndex {
@@ -366,7 +437,72 @@ export function resolveJava(facts: JavaFileFacts[]): JavaResolution {
     }
   }
 
+  appendCallEdges(facts, index, edges);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to the file that declares its method.
+ *
+ * `Type.foo()` resolves `Type` through a non-static import (or a same-package type) and
+ * requires the target file to declare `foo`. A bare `foo()` resolves a `import static
+ * com.a.B.foo` binding. Ambiguous or unimported receivers are left unclaimed.
+ */
+function appendCallEdges(
+  facts: readonly JavaFileFacts[],
+  index: JavaIndex,
+  edges: GraphEdge[],
+): void {
+  const declaredMethods = new Map<string, Set<string>>();
+  for (const fact of facts) {
+    declaredMethods.set(fact.file, new Set(fact.methods ?? []));
+  }
+  const declares = (file: string, name: string): boolean =>
+    declaredMethods.get(file)?.has(name) ?? false;
+  const seen = new Set<string>();
+
+  for (const fact of facts) {
+    for (const call of fact.calls ?? []) {
+      let target: string | undefined;
+      if (call.qualifier) {
+        const imported = fact.imports.find(
+          (entry) => !entry.wildcard && !entry.static && simpleName(entry.name) === call.qualifier,
+        );
+        target = imported ? index.qualifiedTypes.get(imported.name) : undefined;
+        if (!target) {
+          const samePackage = index.simpleTypesByPackage.get(fact.package)?.get(call.qualifier);
+          target = samePackage && samePackage.size === 1 ? ([...samePackage][0] as string) : undefined;
+        }
+      } else {
+        for (const entry of fact.imports) {
+          if (!entry.static || entry.wildcard || simpleName(entry.name) !== call.name) {
+            continue;
+          }
+          const enclosing = entry.name.slice(0, entry.name.lastIndexOf('.'));
+          const candidate = index.qualifiedTypes.get(enclosing);
+          if (candidate && declares(candidate, call.name)) {
+            target = candidate;
+          }
+        }
+      }
+      if (!target || target === fact.file || !declares(target, call.name)) {
+        continue;
+      }
+      const specifier = call.qualifier ? `${call.qualifier}.${call.name}` : call.name;
+      const key = `${fact.file}\u0000${target}\u0000${call.line}\u0000call`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: fact.file,
+        target,
+        kind: 'call',
+        role: 'use',
+        evidence: { line: call.line, specifier, resolution: 'exact' },
+      });
+    }
+  }
 }
 
 function unresolved(file: string, reference: JavaImport, specifier: string): Diagnostic {

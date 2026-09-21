@@ -306,3 +306,34 @@ test('an unrelated header contributes nothing to the file that includes it', asy
   assert.equal(symbols.some((symbol) => symbol.name === 'sink_'), false);
   assert.equal(symbols.some((symbol) => symbol.name === 'Logger'), false);
 });
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a call to a function declared in an included header becomes a call edge', async () => {
+  const { edges } = await resolveSources({
+    'src/widget.cpp': '#include "widget.h"\nvoid run() { render(); }\n',
+    'src/widget.h': '#pragma once\nvoid render();\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/widget.cpp->src/widget.h']);
+});
+
+test('a qualified call resolves to the included header that declares the type', async () => {
+  const { edges } = await resolveSources({
+    'src/widget.cpp': '#include "widget.h"\nvoid run() { Widget::render(); }\n',
+    'src/widget.h': '#pragma once\nclass Widget { public: static void render(); };\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/widget.cpp->src/widget.h']);
+});
+
+test('a call to a name no included header declares is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'src/widget.cpp': '#include "widget.h"\nvoid run() { missing(); }\n',
+    'src/widget.h': '#pragma once\nvoid render();\n',
+  });
+
+  assert.deepEqual(callPairs(edges), []);
+});

@@ -166,7 +166,7 @@ export const MEMBER_NARRATION_INSTRUCTION =
 
 /** The file's base name without its extension, which the scan uses to name module-level members. */
 function fileStem(file) {
-  const base = String(file ?? '').split(/[\/]/).pop() ?? '';
+  const base = String(file ?? '').split(/[\\/]/).pop() ?? '';
   const dot = base.lastIndexOf('.');
   return dot > 0 ? base.slice(0, dot) : base;
 }
@@ -199,11 +199,12 @@ export function buildMemberNarratorEvidence(memberMap, context = {}) {
   if (file) {
     lines.push(`File: ${file}`);
   }
-  if (Array.isArray(context.imports)) {
-    lines.push(`Recorded imports (${context.imports.length}): ${recordedList(context.imports.slice(0, 12))}`);
-  }
-  if (Array.isArray(context.usedBy)) {
-    lines.push(`Recorded used-by (${context.usedBy.length}): ${recordedList(context.usedBy.slice(0, 12))}`);
+  // Two edges from one file (an import and a re-export) are one neighbour.
+  for (const [label, ids] of [['imports', context.imports], ['used-by', context.usedBy]]) {
+    if (Array.isArray(ids)) {
+      const distinct = [...new Set(ids)];
+      lines.push(`Recorded ${label} (${distinct.length}): ${recordedList(distinct.slice(0, 12))}`);
+    }
   }
   for (const type of types) {
     const isModule = Boolean(moduleName) && type.name === moduleName;

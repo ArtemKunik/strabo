@@ -234,6 +234,7 @@ function shortcutSheet() {
     { keys: "O", action: "Show the selected file\u2019s links to other units" },
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
+    { keys: "C", action: "Show recorded function calls instead of imports" },
     { keys: "T", action: "Timeline" },
     { keys: "N", action: "Branches" },
     { keys: "R", action: "Review working-tree changes" },
@@ -1650,6 +1651,10 @@ function stylesheet() {
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
     { selector: "edge.edge-hidden", style: { display: "none" } },
+    { selector: "edge.edge-kind-hidden", style: { display: "none" } },
+    // A call is a runtime relationship, distinct from a module-tree import; dashed so the
+    // reading survives even if both kinds are ever drawn together.
+    { selector: 'edge[kind = "call"]', style: { "line-style": "dashed" } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
     {
       selector: "edge",
@@ -2009,6 +2014,7 @@ var RESET_CLASSES = [
   "edge-selected",
   "dimmed",
   "edge-faded",
+  "edge-kind-hidden",
   "label-hidden",
   "filtered-out",
   "tier-hidden",
@@ -2137,6 +2143,15 @@ function ringCrossRepo(cy, ids) {
     }
   });
 }
+function applyEdgeKind(cy, mode) {
+  const wantCalls = mode === "calls";
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      const isCall = edge.data("kind") === "call";
+      edge.toggleClass("edge-kind-hidden", wantCalls ? !isCall : isCall);
+    }
+  });
+}
 function filterNodes2(cy, ids) {
   const keep = ids ? new Set(ids) : null;
   cy.batch(() => {
@@ -2211,6 +2226,7 @@ function createView(container) {
   let islandModel = null;
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
+  let edgeKind = "imports";
   function repaintIslands() {
     islands.paint(
       islandBounds(islandModel, {
@@ -2327,6 +2343,7 @@ function createView(container) {
       repaintIslands();
       cards.apply(model);
       edgeFocus.apply();
+      applyEdgeKind(cy, edgeKind);
       applyLabelBudget(cy, true);
       notifyGroup();
     },
@@ -2341,6 +2358,16 @@ function createView(container) {
      */
     focusFile(fileId) {
       edgeFocus.setFile(fileId);
+    },
+    /**
+     * Read import coupling or recorded function calls: `'imports'` or `'calls'`.
+     *
+     * A call edge parallels an import edge, so this swaps which relationship the map shows
+     * rather than adding reachability.
+     */
+    setEdgeKind(mode) {
+      edgeKind = mode === "calls" ? "calls" : "imports";
+      applyEdgeKind(cy, edgeKind);
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
@@ -3180,7 +3207,7 @@ function buildGroupNamingEvidence(model, id) {
 }
 var MEMBER_NARRATION_INSTRUCTION = 'In three to five sentences of plain prose, say what this file appears to be for, what relies on it, and anything a reviewer should know. Do not use lists, headings, or markdown, and do not repeat counts the reader can already see. The path, member names, and import relationships are recorded and may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
 function fileStem(file) {
-  const base = String(file ?? "").split(/[\/]/).pop() ?? "";
+  const base = String(file ?? "").split(/[\\/]/).pop() ?? "";
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(0, dot) : base;
 }
@@ -3198,11 +3225,11 @@ function buildMemberNarratorEvidence(memberMap, context = {}) {
   if (file) {
     lines.push(`File: ${file}`);
   }
-  if (Array.isArray(context.imports)) {
-    lines.push(`Recorded imports (${context.imports.length}): ${recordedList(context.imports.slice(0, 12))}`);
-  }
-  if (Array.isArray(context.usedBy)) {
-    lines.push(`Recorded used-by (${context.usedBy.length}): ${recordedList(context.usedBy.slice(0, 12))}`);
+  for (const [label, ids] of [["imports", context.imports], ["used-by", context.usedBy]]) {
+    if (Array.isArray(ids)) {
+      const distinct = [...new Set(ids)];
+      lines.push(`Recorded ${label} (${distinct.length}): ${recordedList(distinct.slice(0, 12))}`);
+    }
   }
   for (const type of types) {
     const isModule = Boolean(moduleName) && type.name === moduleName;
@@ -3332,7 +3359,63 @@ function workspaceSummary(report) {
   if (!summary) {
     return "Workspace not recorded.";
   }
-  return `${summary.repositories} repositories \xB7 ${summary.flows} cross-repo flows \xB7 ${summary.serviceFlows ?? 0} service flows \xB7 ${summary.contracts} contracts \xB7 ${summary.drifting} drifting`;
+  return `${summary.repositories} repositories \xB7 ${summary.flows} cross-repo flows \xB7 ${summary.serviceFlows ?? 0} service flows \xB7 ${summary.contracts} contracts \xB7 ${summary.drifting} drifting` + (summary.tables > 0 ? ` \xB7 ${summary.tables} tables` : "");
+}
+function schemaRows(report) {
+  const rows = [];
+  for (const schema of report?.schemas ?? []) {
+    for (const table of schema.tables ?? []) {
+      const keys = (table.constraints ?? []).filter((entry) => entry.kind === "primary-key");
+      const references = (table.constraints ?? []).filter((entry) => entry.kind === "foreign-key");
+      rows.push({
+        id: `${schema.repository}:${table.name}`,
+        label: `${table.name} \u2014 ${schema.repository}`,
+        columns: (table.columns ?? []).length,
+        detail: `${(table.columns ?? []).length} column${(table.columns ?? []).length === 1 ? "" : "s"}` + (keys.length > 0 ? ` \xB7 key (${keys[0].columns.join(", ")})` : " \xB7 no primary key") + (references.length > 0 ? ` \xB7 ${references.length} foreign key${references.length === 1 ? "" : "s"}` : "") + ` \xB7 ${table.declared?.file ?? "unknown file"}:${table.declared?.line ?? "?"}`
+      });
+    }
+  }
+  return rows;
+}
+function schemaGapRows(report) {
+  return (report?.schemas ?? []).flatMap(
+    (schema) => (schema.gaps ?? []).map((gap) => ({
+      id: `${schema.repository}:${gap.file}:${gap.line}:${gap.statement}`,
+      label: `${gap.statement} \u2014 ${gap.file}:${gap.line}`,
+      reason: gap.reason
+    }))
+  );
+}
+function usageFindingRows(report) {
+  return (report?.usage?.findings ?? []).map((finding) => ({
+    id: `${finding.repository}:${finding.file}:${finding.line}:${finding.table}:${finding.column ?? ""}`,
+    label: finding.kind === "unknown-column" ? `${finding.table}.${finding.column} is not a column of a declared table` : `${finding.table} is not a declared table`,
+    detail: `${finding.repository} \xB7 ${finding.file}:${finding.line} \xB7 ${finding.evidence}` + (finding.confidence === "weak" ? " \xB7 weak evidence" : ""),
+    weak: finding.confidence === "weak"
+  }));
+}
+function schemaDriftRows(report) {
+  return (report?.usage?.drift ?? []).map((entry) => {
+    const deviations = entry.deviations ?? [];
+    return {
+      id: entry.table,
+      label: `${entry.table} \u2014 ${(entry.repositories ?? []).join(", ")}`,
+      clean: deviations.length === 0,
+      deviations: deviations.map((deviation) => `${deviation.column}: ${deviation.issue}`)
+    };
+  });
+}
+function usageCaption(report) {
+  const usage = report?.usage;
+  if (!usage) {
+    return "Code usage not recorded.";
+  }
+  if (!usage.checked) {
+    return "No SQL schema is declared, so there is nothing to check code against.";
+  }
+  const findings = (usage.findings ?? []).length;
+  const uses = (usage.uses ?? []).length;
+  return findings === 0 ? `${uses} table use${uses === 1 ? "" : "s"} recorded in code; each names a declared table and column.` : `${findings} of ${uses} recorded table uses name something no SQL file declares.`;
 }
 function repositoryRows(report) {
   return (report?.repositories ?? []).map((repository) => ({
@@ -3400,6 +3483,267 @@ function driftRows(report) {
       deviations: deviations.map((deviation) => `${deviation.name}: ${deviation.issue}`)
     };
   });
+}
+var COMPAT_LABEL = { breaking: "breaking", conditional: "conditional", safe: "safe" };
+function compatRows(response) {
+  return (response?.reports ?? []).map((report) => {
+    const summary = report.summary ?? { breaking: 0, conditional: 0, safe: 0 };
+    return {
+      repository: report.repository,
+      base: report.base,
+      head: report.head,
+      unavailable: report.unavailable ?? null,
+      caption: compatCaption(report),
+      rows: (report.changes ?? []).map((change) => {
+        const detail = [];
+        if (change.before !== void 0 || change.after !== void 0) {
+          detail.push(`${change.before ?? "\u2014"} \u2192 ${change.after ?? "\u2014"}`);
+        }
+        if (change.file) {
+          detail.push(`${change.file}${change.line ? `:${change.line}` : ""}`);
+        }
+        if (change.references?.length) {
+          detail.push(`still used at ${change.references.map((ref) => `${ref.file}:${ref.line}`).join(", ")}`);
+        }
+        if (change.consumers?.length) {
+          detail.push(`also declared by ${change.consumers.join(", ")}`);
+        }
+        return {
+          id: `${change.subject}:${change.id}:${change.name ?? ""}:${change.change}`,
+          compatibility: change.compatibility,
+          badge: COMPAT_LABEL[change.compatibility] ?? change.compatibility,
+          label: `${change.id}${change.name ? ` \xB7 ${change.name}` : ""} \u2014 ${change.change.replace("-", " ")}`,
+          reason: change.reason,
+          detail
+        };
+      }),
+      summary
+    };
+  });
+}
+function compatCaption(report) {
+  if (report?.unavailable) {
+    return `Not compared: ${report.unavailable}`;
+  }
+  const { breaking = 0, conditional = 0, safe = 0 } = report?.summary ?? {};
+  if (breaking + conditional + safe === 0) {
+    return `No contract or schema differences recorded between ${report?.base} and ${report?.head}.`;
+  }
+  return `${breaking} breaking \xB7 ${conditional} conditional \xB7 ${safe} safe (${report.base} \u2192 ${report.head})`;
+}
+function resultCaption(check) {
+  const result = check?.result;
+  if (!result) {
+    return "not run";
+  }
+  if (result.status === "error") {
+    return `could not check: ${result.error ?? "unknown error"}`;
+  }
+  const rows = result.violations ?? 0;
+  const noun = `${rows} row${rows === 1 ? "" : "s"}`;
+  if (check.severity === "data-loss") {
+    return rows === 0 ? "nothing stored there would be lost" : `${noun} would lose data`;
+  }
+  return rows === 0 ? "ok \u2014 no row would make it fail" : `${noun} would make it fail`;
+}
+function preflightRows(response) {
+  return (response?.reports ?? []).map((report) => ({
+    repository: report.repository,
+    dialect: report.dialect,
+    unavailable: report.unavailable ?? null,
+    caption: report.unavailable ? `Not compared: ${report.unavailable}` : (report.checks ?? []).length === 0 && (report.skipped ?? []).length === 0 ? `No migration operation between ${report.base} and ${report.head} needs a data check.` : `${(report.checks ?? []).length} data check${(report.checks ?? []).length === 1 ? "" : "s"} \xB7 ${report.dialect}`,
+    checks: (report.checks ?? []).map((check) => ({
+      id: check.id,
+      label: check.description,
+      severity: check.severity,
+      failsWhen: check.failsWhen,
+      sql: check.sql,
+      approximate: check.approximate === true,
+      status: check.result?.status ?? "not-run",
+      result: resultCaption(check),
+      references: (check.references ?? []).map((ref) => `${ref.file}:${ref.line}`)
+    })),
+    skipped: (report.skipped ?? []).map((entry) => ({
+      id: `${entry.table}:${entry.column ?? ""}:${entry.operation}`,
+      label: `${entry.table}${entry.column ? `.${entry.column}` : ""} \u2014 ${entry.operation}`,
+      reason: entry.reason
+    }))
+  }));
+}
+function databaseRows(response) {
+  return (response?.databases ?? []).map((database) => ({
+    name: database.name,
+    label: `${database.name} (${database.dialect})`,
+    configured: database.configured === true,
+    note: database.configured ? `connection string from ${database.urlEnv}` : `set ${database.urlEnv} to enable`
+  }));
+}
+function liveDriftRows(live) {
+  const at = (entry) => entry.column ? `${entry.table}.${entry.column}` : entry.table;
+  return (live?.drift ?? []).map((entry) => {
+    let text;
+    switch (entry.kind) {
+      case "table-not-in-live":
+        text = `declared by ${entry.repository}, missing in the database`;
+        break;
+      case "table-not-in-repository":
+        text = "in the database, declared by no repository";
+        break;
+      case "column-not-in-live":
+        text = `declared as ${entry.declared}, missing in the database`;
+        break;
+      case "column-not-in-repository":
+        text = `in the database (${entry.live}), not declared`;
+        break;
+      default:
+        text = `database ${entry.live}, migrations ${entry.declared} (${entry.kind})`;
+    }
+    return { id: `${entry.repository}:${at(entry)}:${entry.kind}`, label: at(entry), text };
+  });
+}
+function probeConsent(database, checkCount) {
+  return `This connects to ${database} with the connection string from its environment variable and runs ${checkCount} read-only count quer${checkCount === 1 ? "y" : "ies"}, each in its own read-only transaction with a timeout. No table row is read, and the connection string is not stored.`;
+}
+
+// ui/strabo-impact.js
+var BAND_LABELS = {
+  low: "LOW",
+  moderate: "MODERATE",
+  high: "HIGH",
+  critical: "CRITICAL"
+};
+function riskBandLabel(band) {
+  return BAND_LABELS[band] ?? String(band ?? "").toUpperCase();
+}
+function riskTone(band) {
+  if (band === "critical") return "critical";
+  if (band === "high") return "serious";
+  if (band === "moderate") return "warning";
+  return "good";
+}
+function complexityValue(value) {
+  return value === null || value === void 0 ? "\u2014" : `C${value}`;
+}
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+function moveText(before, after, format = (value) => String(value)) {
+  if ((before === null || before === void 0) && (after === null || after === void 0)) {
+    return { tone: "none", text: "not measured" };
+  }
+  if (before === null || before === void 0) {
+    return { tone: "grown", text: `new \xB7 ${format(after)}` };
+  }
+  if (after === null || after === void 0) {
+    return { tone: "shed", text: `removed \xB7 ${format(before)}` };
+  }
+  const delta = round2(after - before);
+  if (delta === 0) return { tone: "flat", text: "unchanged" };
+  if (delta > 0) return { tone: "grown", text: `grown +${format(delta)}` };
+  return { tone: "shed", text: `shed \u2212${format(-delta)}` };
+}
+function riskCell(risk) {
+  if (!risk) {
+    return { key: "risk", label: "Risk", value: "\u2014", detail: "not measurable", tone: "none" };
+  }
+  return {
+    key: "risk",
+    label: "Risk",
+    value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
+    detail: "current snapshot",
+    tone: riskTone(risk.band)
+  };
+}
+function filePassportCells(card) {
+  const complexity = card?.complexity ?? {};
+  const snapshot = card?.snapshot ?? {};
+  const cells = [riskCell(card?.risk)];
+  const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(complexity.maxAfter ?? complexity.maxBefore),
+    detail: maxMove.text,
+    tone: maxMove.tone
+  });
+  const coherence = card?.coherence;
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: coherence ? `${coherence.score}/100` : "\u2014",
+    detail: coherence ? coherence.detail : card?.status === "added" ? "new file" : "no changed symbols",
+    tone: coherence ? coherence.score >= 67 ? "flat" : "grown" : "none"
+  });
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(snapshot.blastRadius ?? 0),
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Importers / imports",
+    value: `${snapshot.directImporters ?? 0} / ${snapshot.directImports ?? 0}`,
+    detail: "current graph",
+    tone: "none"
+  });
+  const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: complexity.averageAfter === null || complexity.averageAfter === void 0 ? "\u2014" : String(complexity.averageAfter),
+    detail: `${averageMove.text} \xB7 ${complexity.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${complexity.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: averageMove.tone
+  });
+  return cells;
+}
+function totalsPassportCells(totals) {
+  const cells = [riskCell(totals?.risk)];
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(totals?.maxComplexity),
+    detail: `${totals?.files ?? 0} file(s)`,
+    tone: "none"
+  });
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: totals?.coherence === null || totals?.coherence === void 0 ? "\u2014" : `${totals.coherence}/100`,
+    detail: `${totals?.changedSymbols ?? 0} changed symbol(s)`,
+    tone: totals?.coherence === null || totals?.coherence === void 0 ? "none" : "flat"
+  });
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(totals?.blastRadius ?? 0),
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Importers / imports",
+    value: `${totals?.directImporters ?? 0} / ${totals?.directImports ?? 0}`,
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: totals?.averageComplexity === null || totals?.averageComplexity === void 0 ? "\u2014" : String(totals.averageComplexity),
+    detail: `${totals?.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${totals?.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: "none"
+  });
+  return cells;
+}
+function impactFunctionLabel(fn) {
+  return fn?.owner ? `${fn.owner}.${fn.name}` : String(fn?.name ?? "");
+}
+function passportHeading(scope) {
+  if (scope === "file") return "Change impact passport";
+  if (scope === "revision") return "Revision impact passport";
+  return "Change impact passport";
 }
 
 // ui/view.js
@@ -3764,11 +4108,21 @@ function renderInspector(container, model, id, handlers = {}) {
   functionsBody.className = "unavailable";
   functionsBody.textContent = "Loading functions\u2026";
   functions.append(functionsBody);
+  const impact = document.createElement("section");
+  impact.dataset.role = "impact";
+  const impactTitle = document.createElement("h3");
+  impactTitle.textContent = "Impact";
+  impact.append(impactTitle);
+  const impactBody = document.createElement("p");
+  impactBody.className = "unavailable";
+  impactBody.textContent = "Loading impact\u2026";
+  impact.append(impactBody);
   const tabDefs = [
     ["deps", `Dependencies (${passport.imports.length})`, depsSection],
     ["dependents", `Dependents (${passport.usedBy.length})`, dependentsSection],
     ["members", "Members", members],
-    ["functions", "Functions", functions]
+    ["functions", "Functions", functions],
+    ["impact", "Impact", impact]
   ];
   const base = `inspector-${inspectorSeq += 1}`;
   const tabButtons = [];
@@ -4578,6 +4932,60 @@ function renderWorkspace(container, report, handlers = {}) {
       item.append(detail);
     })
   );
+  const tables = schemaRows(report);
+  container.append(workspaceHeading("Database schema", tables.length));
+  container.append(
+    tables.length === 0 ? workspaceNote("No SQL schema recorded.") : workspaceList("workspace-schema", tables, (item, table) => {
+      item.textContent = table.label;
+      const detail = document.createElement("div");
+      detail.className = "workspace-detail";
+      detail.textContent = table.detail;
+      item.append(detail);
+    })
+  );
+  const gaps = schemaGapRows(report);
+  if (gaps.length > 0) {
+    container.append(workspaceHeading("Schema gaps", gaps.length));
+    container.append(
+      workspaceList("workspace-schema-gaps", gaps, (item, gap) => {
+        item.textContent = gap.label;
+        const detail = document.createElement("div");
+        detail.className = "workspace-detail";
+        detail.textContent = `not applied: ${gap.reason}`;
+        item.append(detail);
+      })
+    );
+  }
+  const schemaDrift = schemaDriftRows(report);
+  if (schemaDrift.length > 0) {
+    container.append(workspaceHeading("Table drift", schemaDrift.length));
+    container.append(
+      workspaceList("workspace-table-drift", schemaDrift, (item, entry) => {
+        item.textContent = entry.label;
+        const detail = document.createElement("div");
+        detail.className = "workspace-detail";
+        detail.textContent = entry.clean ? "clean \u2014 declarations match" : entry.deviations.join("; ");
+        item.append(detail);
+      })
+    );
+  }
+  const findings = usageFindingRows(report);
+  container.append(workspaceHeading("Code against schema", findings.length));
+  container.append(workspaceNote(usageCaption(report)));
+  if (findings.length > 0) {
+    container.append(
+      workspaceList("workspace-usage", findings, (item, finding) => {
+        item.textContent = finding.label;
+        const detail = document.createElement("div");
+        detail.className = "workspace-detail";
+        detail.textContent = finding.detail;
+        item.append(detail);
+      })
+    );
+  }
+  if (handlers.tools) {
+    renderWorkspaceTools(container, handlers.tools, handlers);
+  }
   if (handlers.onClose) {
     const close = document.createElement("button");
     close.type = "button";
@@ -4585,6 +4993,193 @@ function renderWorkspace(container, report, handlers = {}) {
     close.textContent = "Close";
     close.addEventListener("click", () => handlers.onClose());
     container.append(close);
+  }
+}
+function workspaceButton(label, action, onClick, disabled = false) {
+  const button2 = document.createElement("button");
+  button2.type = "button";
+  button2.textContent = label;
+  button2.dataset.action = action;
+  button2.disabled = disabled;
+  button2.addEventListener("click", () => onClick?.());
+  return button2;
+}
+function workspaceLine(className, text) {
+  const line = document.createElement("div");
+  line.className = className;
+  line.textContent = text;
+  return line;
+}
+function renderWorkspaceTools(container, tools, handlers = {}) {
+  const busy = Boolean(tools.busy);
+  const section2 = document.createElement("section");
+  section2.className = "workspace-tools";
+  container.append(section2);
+  const heading = document.createElement("h4");
+  heading.textContent = "Compatibility and migrations";
+  section2.append(heading);
+  const form = document.createElement("div");
+  form.className = "workspace-tools-form";
+  const label = document.createElement("label");
+  label.textContent = "Compare with ";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "workspace-base";
+  input.value = tools.base ?? "HEAD";
+  input.placeholder = "HEAD, a branch, a tag or a commit";
+  input.spellcheck = false;
+  input.addEventListener("input", () => handlers.onBase?.(input.value));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      handlers.onCompat?.();
+    }
+  });
+  label.append(input);
+  form.append(label);
+  form.append(workspaceButton("Compare", "compat", handlers.onCompat, busy));
+  form.append(workspaceButton("Preflight queries", "preflight", handlers.onPreflight, busy));
+  if (tools.scriptHref) {
+    const link = document.createElement("a");
+    link.href = tools.scriptHref;
+    link.textContent = "SQL script";
+    link.download = "strabo-preflight.sql";
+    link.className = "workspace-script-link";
+    form.append(link);
+  }
+  section2.append(form);
+  if (tools.busy) {
+    section2.append(workspaceNote(`Working: ${tools.busy}\u2026`));
+  }
+  if (tools.error) {
+    const error = workspaceNote(tools.error);
+    error.classList.add("workspace-error");
+    section2.append(error);
+  }
+  for (const group of compatRows(tools.compat)) {
+    section2.append(workspaceLine("workspace-group", group.repository));
+    section2.append(workspaceNote(group.caption));
+    if (group.rows.length > 0) {
+      section2.append(
+        workspaceList("workspace-compat", group.rows, (item, row) => {
+          const badge = document.createElement("span");
+          badge.className = `compat-badge compat-${row.compatibility}`;
+          badge.textContent = row.badge;
+          item.append(badge, ` ${row.label}`);
+          item.append(workspaceLine("workspace-detail", row.reason));
+          if (row.detail.length > 0) {
+            item.append(workspaceLine("workspace-detail", row.detail.join(" \xB7 ")));
+          }
+        })
+      );
+    }
+  }
+  const preflightGroups = preflightRows(tools.preflight);
+  for (const group of preflightGroups) {
+    section2.append(workspaceLine("workspace-group", `${group.repository} \xB7 preflight`));
+    section2.append(workspaceNote(group.caption));
+    if (group.checks.length > 0) {
+      section2.append(
+        workspaceList("workspace-preflight", group.checks, (item, check) => {
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          const badge = document.createElement("span");
+          badge.className = `compat-badge preflight-${check.status}`;
+          badge.textContent = check.severity === "data-loss" ? "data loss" : "blocks";
+          summary.append(badge, ` ${check.label} \u2014 ${check.result}`);
+          details.append(summary);
+          details.append(workspaceLine("workspace-detail", `A count above zero means: ${check.failsWhen}`));
+          if (check.approximate) {
+            details.append(workspaceLine("workspace-detail", "Approximate: the engine has the final say."));
+          }
+          if (check.references.length > 0) {
+            details.append(workspaceLine("workspace-detail", `Code that still uses it: ${check.references.join(", ")}`));
+          }
+          const sql = document.createElement("pre");
+          sql.className = "workspace-sql";
+          sql.textContent = check.sql;
+          details.append(sql);
+          item.append(details);
+        })
+      );
+    }
+    if (group.skipped.length > 0) {
+      section2.append(
+        workspaceList("workspace-preflight-skipped", group.skipped, (item, entry) => {
+          item.textContent = `not checked: ${entry.label}`;
+          item.append(workspaceLine("workspace-detail", entry.reason));
+        })
+      );
+    }
+  }
+  const databases = databaseRows(tools.databases);
+  const liveHeading = document.createElement("h4");
+  liveHeading.textContent = `Live database (${databases.length})`;
+  section2.append(liveHeading);
+  if (databases.length === 0) {
+    section2.append(
+      workspaceNote("No database is declared. Add databases to the workspace config, naming an environment variable, to probe one read-only.")
+    );
+  }
+  const checkCount = preflightGroups.reduce((total, group) => total + group.checks.length, 0);
+  for (const database of databases) {
+    const row = document.createElement("div");
+    row.className = "workspace-database";
+    row.append(workspaceLine("workspace-name", database.label));
+    row.append(workspaceLine("workspace-detail", database.note));
+    const actions = document.createElement("div");
+    actions.className = "workspace-tools-form";
+    actions.append(
+      workspaceButton(
+        "Run preflight checks\u2026",
+        "run-preflight",
+        () => handlers.onConfirmRun?.(database.name),
+        busy || !database.configured || checkCount === 0
+      ),
+      workspaceButton("Read live schema", "live-schema", () => handlers.onLive?.(database.name), busy || !database.configured)
+    );
+    row.append(actions);
+    if (database.configured && checkCount === 0) {
+      row.append(workspaceLine("workspace-detail", "Build the preflight queries first."));
+    }
+    if (tools.confirming === database.name) {
+      const consent = document.createElement("div");
+      consent.className = "workspace-consent";
+      consent.append(workspaceLine("workspace-detail", probeConsent(database.name, checkCount)));
+      const buttons = document.createElement("div");
+      buttons.className = "workspace-tools-form";
+      buttons.append(
+        workspaceButton("Run", "confirm-run", () => handlers.onRun?.(database.name), busy),
+        workspaceButton("Cancel", "cancel-run", () => handlers.onCancelRun?.())
+      );
+      consent.append(buttons);
+      row.append(consent);
+    }
+    section2.append(row);
+  }
+  if (tools.live) {
+    const drift = liveDriftRows(tools.live);
+    const tableCount = tools.live.tables;
+    section2.append(
+      workspaceLine(
+        "workspace-group",
+        `${tools.live.database} \xB7 live schema (${tableCount} table${tableCount === 1 ? "" : "s"}, read ${tools.live.capturedAt})`
+      )
+    );
+    section2.append(
+      drift.length === 0 ? workspaceNote("The live database and the migrations agree.") : workspaceList("workspace-live-drift", drift, (item, entry) => {
+        item.textContent = entry.label;
+        item.append(workspaceLine("workspace-detail", entry.text));
+      })
+    );
+  }
+  const runs = tools.databases?.runs ?? [];
+  if (runs.length > 0) {
+    section2.append(workspaceLine("workspace-group", "Recent probe runs"));
+    section2.append(
+      workspaceList("workspace-runs", runs, (item, run) => {
+        item.textContent = `${run.at} \xB7 ${run.database} \xB7 ${run.kind}` + (run.error ? ` \xB7 refused: ${run.error}` : run.kind === "preflight" ? ` \xB7 ${run.checks} checks, ${run.violations} with violations, ${run.errors} errors` : ` \xB7 ${run.checks} tables`);
+      })
+    );
   }
 }
 function passportSection(title, count) {
@@ -5228,6 +5823,17 @@ function branchTags(branch, now = Date.now()) {
   if (age !== null && age >= STALE_BRANCH_DAYS) tags.push({ text: "stale", tone: "worse" });
   return tags;
 }
+function branchActionButton(role, text, title, handler, busy) {
+  const button2 = document.createElement("button");
+  button2.type = "button";
+  button2.className = "branch-action";
+  button2.dataset.role = role;
+  button2.textContent = text;
+  button2.title = title;
+  button2.disabled = Boolean(busy);
+  button2.addEventListener("click", () => handler());
+  return button2;
+}
 function renderBranches(container, result, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -5281,6 +5887,27 @@ function renderBranches(container, result, handlers = {}) {
   summary.dataset.role = "branches-summary";
   summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
   container.append(summary);
+  const actions = document.createElement("div");
+  actions.className = "branch-actions";
+  actions.dataset.role = "branch-actions";
+  if (handlers.onFetch) {
+    actions.append(branchActionButton("branch-fetch", "Fetch", "Update the remote-tracking refs", handlers.onFetch, handlers.busy));
+  }
+  if (handlers.onSync && result.current) {
+    actions.append(
+      branchActionButton("branch-sync", `Sync ${result.current}`, `Fetch, fast-forward, then push ${result.current}`, handlers.onSync, handlers.busy)
+    );
+  }
+  if (actions.childElementCount > 0) {
+    if (handlers.busy) {
+      const running = document.createElement("span");
+      running.className = "evidence";
+      running.dataset.role = "branch-busy";
+      running.textContent = "Running\u2026";
+      actions.append(running);
+    }
+    container.append(actions);
+  }
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
@@ -5326,6 +5953,20 @@ function renderBranches(container, result, handlers = {}) {
         tagLine.append(chip);
       }
       item.append(tagLine);
+    }
+    const pushCount = branch.upstream?.ahead ?? 0;
+    const publish = branch.kind === "local" && !branch.isBase && (!branch.upstream || branch.upstream.gone);
+    if (handlers.onPush && branch.kind === "local" && !branch.isBase && (pushCount > 0 || publish)) {
+      const push = document.createElement("button");
+      push.type = "button";
+      push.className = "branch-action";
+      push.dataset.role = "branch-push";
+      push.dataset.branch = branch.name;
+      push.textContent = pushCount > 0 ? `Push \u2191${pushCount}` : "Publish";
+      push.title = pushCount > 0 ? `Push ${branch.name} to ${branch.upstream?.name ?? "its remote"}` : `Publish ${branch.name} to the remote`;
+      push.disabled = Boolean(handlers.busy);
+      push.addEventListener("click", () => handlers.onPush(branch));
+      item.append(push);
     }
     list.append(item);
   }
@@ -5423,6 +6064,26 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     container.append(note2);
   }
 }
+function renderReviewLoading(container, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Review";
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close review");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  const note2 = document.createElement("p");
+  note2.className = "evidence";
+  note2.dataset.role = "review-loading";
+  note2.textContent = "Reviewing changes\u2026";
+  container.append(note2);
+}
 function renderReview(container, result, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -5501,6 +6162,12 @@ function renderReview(container, result, handlers = {}) {
   }
   renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
+  if (result.impactPassport) {
+    const impactSection = document.createElement("div");
+    impactSection.className = "impact-passport-section";
+    container.append(impactSection);
+    renderImpactPassport(impactSection, result.impactPassport, handlers);
+  }
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
   const impactHeading = document.createElement("h4");
   impactHeading.textContent = `Potentially affected (${affected.length})`;
@@ -5674,6 +6341,130 @@ function renderChangePassport(container, passport) {
     note2.textContent = "Only the first files in the change set were measured.";
     container.append(note2);
   }
+}
+function renderImpactPassport(container, set, handlers = {}) {
+  container.replaceChildren();
+  if (!set || !Array.isArray(set.files) || set.files.length === 0) {
+    container.append(unavailableNote("No impact passport was recorded."));
+    return;
+  }
+  const heading = document.createElement("h4");
+  heading.textContent = passportHeading(set.scope);
+  container.append(heading);
+  const caption = document.createElement("p");
+  caption.className = "unavailable";
+  caption.textContent = set.baseline ? `Current graph; compared with ${set.baseline}.` : "Current graph; no baseline revision was available.";
+  container.append(caption);
+  if (set.scope === "file") {
+    container.append(impactCard(set.files[0], false));
+    return;
+  }
+  container.append(impactCard(set.totals, true));
+  const list = document.createElement("ul");
+  list.className = "impact-files";
+  list.dataset.role = "impact-files";
+  for (const file of set.files) {
+    list.append(impactFileRow(file, handlers));
+  }
+  container.append(list);
+  if (set.capped) {
+    container.append(unavailableNote("Only the first files in the change set were measured."));
+  }
+}
+function impactCard(card, totals) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "impact-card";
+  wrapper.dataset.role = totals ? "impact-totals" : "impact-file-card";
+  const grid = document.createElement("div");
+  grid.className = "impact-grid";
+  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
+  for (const cell of cells) {
+    const item = document.createElement("div");
+    item.className = "impact-cell";
+    item.dataset.role = `impact-${cell.key}`;
+    const label = document.createElement("div");
+    label.className = "impact-cell-label";
+    label.textContent = cell.label;
+    const value = document.createElement("div");
+    value.className = `impact-cell-value ${cell.tone ?? "none"}`;
+    value.textContent = cell.value;
+    const detail = document.createElement("div");
+    detail.className = "impact-cell-detail";
+    detail.textContent = cell.detail;
+    item.append(label, value, detail);
+    grid.append(item);
+  }
+  wrapper.append(grid);
+  wrapper.append(
+    impactList(
+      "Risk signals",
+      (card?.signals ?? []).map((signal) => ({ text: signal.label, detail: signal.detail })),
+      "impact-signals"
+    )
+  );
+  wrapper.append(
+    impactList(
+      "Most complex functions",
+      (card?.mostComplex ?? []).map((fn) => ({
+        text: impactFunctionLabel(fn),
+        detail: `C${fn.complexity}${fn.delta ? ` (${fn.delta > 0 ? "+" : "\u2212"}C${Math.abs(fn.delta)})` : ""}`
+      })),
+      "impact-most-complex"
+    )
+  );
+  return wrapper;
+}
+function impactList(title, entries, role) {
+  const section2 = document.createElement("div");
+  section2.className = "impact-list";
+  const heading = document.createElement("h5");
+  heading.textContent = title;
+  section2.append(heading);
+  if (entries.length === 0) {
+    section2.append(unavailableNote("None recorded."));
+    section2.dataset.role = role;
+    return section2;
+  }
+  const list = document.createElement("ul");
+  list.dataset.role = role;
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = entry.text;
+    item.append(text);
+    if (entry.detail) {
+      const detail = document.createElement("span");
+      detail.className = "evidence";
+      detail.textContent = entry.detail;
+      item.append(detail);
+    }
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
+}
+function impactFileRow(file, handlers) {
+  const item = document.createElement("li");
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "link";
+  link.dataset.path = file.path;
+  link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
+  if (handlers.onSelect) {
+    link.addEventListener("click", () => handlers.onSelect(file.path));
+  } else {
+    link.disabled = true;
+  }
+  item.append(link);
+  const risk = document.createElement("span");
+  risk.className = `impact-risk-band ${file.risk ? riskTone(file.risk.band) : "none"}`;
+  risk.textContent = file.risk ? `${riskBandLabel(file.risk.band)} ${file.risk.score}` : "\u2014";
+  item.append(risk);
+  const cx = document.createElement("span");
+  cx.className = "evidence";
+  cx.textContent = `${complexityValue(file.complexity?.maxAfter)} \xB7 coherence ${file.coherence ? `${file.coherence.score}/100` : "\u2014"}`;
+  item.append(cx);
+  return item;
 }
 var MEMBER_ORDER_OPTIONS = [
   ["source", "Source order"],
@@ -7273,6 +8064,8 @@ var store = createStore({
     prefix: "",
     filter: "",
     overlay: "none",
+    /** The edge lens: 'imports' for module coupling, 'calls' for recorded function calls. */
+    edgeKind: "imports",
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: "off",
     pathMode: false,
@@ -7331,6 +8124,9 @@ function readViewPrefs(repository) {
     if (typeof parsed.filter === "string" && parsed.filter !== "") {
       prefs.filter = parsed.filter.slice(0, 200);
     }
+    if (parsed.edgeKind === "calls" || parsed.edgeKind === "imports") {
+      prefs.edgeKind = parsed.edgeKind;
+    }
     return prefs;
   } catch {
     return null;
@@ -7340,7 +8136,12 @@ function writeViewPrefs() {
   try {
     window.localStorage.setItem(
       viewPrefsKey(state.repository),
-      JSON.stringify({ mode: state.mode, overlay: state.overlay, filter: state.filter })
+      JSON.stringify({
+        mode: state.mode,
+        overlay: state.overlay,
+        filter: state.filter,
+        edgeKind: state.edgeKind
+      })
     );
   } catch {
   }
@@ -7374,6 +8175,9 @@ function applyViewPrefs() {
       state.mode = "file";
       elements.detail.value = "file";
     }
+  }
+  if (prefs.edgeKind === "calls" && state.mode === "file") {
+    state.edgeKind = "calls";
   }
 }
 var view = createView(document.getElementById("graph"));
@@ -7421,6 +8225,7 @@ var elements = {
   tbUnits: document.getElementById("tb-units"),
   tbPath: document.getElementById("tb-path"),
   tbBoundaries: document.getElementById("tb-boundaries"),
+  tbCalls: document.getElementById("tb-calls"),
   tbTimeline: document.getElementById("tb-timeline"),
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
@@ -7454,6 +8259,7 @@ var memberTimer = null;
 var selectedCommitHash = null;
 var selectedBranchName = null;
 var branchBase = null;
+var branchesBusy = false;
 var browsedFolder = null;
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
@@ -7538,6 +8344,7 @@ async function scan({ refresh = false } = {}) {
     view.focusFile(null);
     applyFilterToView();
     applyTierLens();
+    applyEdgeKindLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -7556,6 +8363,8 @@ async function scan({ refresh = false } = {}) {
     updateOutsideButton();
     applyModeChrome();
     updateUnitsButton();
+    updateEdgeKindButton();
+    updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -7704,6 +8513,7 @@ function selectNode(id) {
   view.clearEdge();
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
+  updateFocusButton();
   view.highlight(neighbourhood(current, id));
   const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
   if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith("#support")) {
@@ -7738,30 +8548,44 @@ function selectNode(id) {
 async function loadMembers(id) {
   const membersSection = elements.inspector.querySelector('[data-role="members"]');
   const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
-  if (!membersSection && !functionsSection) {
+  const impactSection = elements.inspector.querySelector('[data-role="impact"]');
+  if (!membersSection && !functionsSection && !impactSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
   if (state.repository) {
     params.set("repository", state.repository);
   }
+  const impactParams = new URLSearchParams(params);
   try {
     if (narratorStatus === null) {
       narratorStatus = await fetchNarratorStatus();
     }
-    const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
-    const result = response.ok ? await response.json() : { available: false, detail: "Symbols are unavailable for this file." };
+    const [symbolsResponse, impactResponse] = await Promise.all([
+      fetch(`${API_PATH}/symbols?${params.toString()}`),
+      fetch(`${API_PATH}/analysis/impact-passport?${impactParams.toString()}`)
+    ]);
+    const result = symbolsResponse.ok ? await symbolsResponse.json() : { available: false, detail: "Symbols are unavailable for this file." };
+    const impact = impactResponse.ok ? await impactResponse.json() : null;
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
       if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
+      if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
     }
   } catch {
     if (selected === id) {
       const fallback = { available: false, detail: "Symbols could not be loaded." };
       if (membersSection) renderMembers(membersSection, fallback);
       if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
+      if (impactSection) renderImpactPassport(impactSection, null);
     }
   }
+}
+function impactPassportSet(card) {
+  if (!card || card.path === void 0) {
+    return null;
+  }
+  return { scope: "file", baseline: card.status === "added" ? null : "HEAD", files: [card], totals: null, capped: false };
 }
 function functionsHandlers(result) {
   return {
@@ -7886,6 +8710,7 @@ function clearSelection() {
   closeRisk();
   elements.inspector.hidden = true;
   view.clearGroupSelection();
+  updateFocusButton();
   refreshDock();
 }
 async function openMemberMap(id) {
@@ -8132,6 +8957,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "u" && state.mode === "system" && state.systemUnit) closeUnit();
   else if (key === "p") elements.tbPath.click();
   else if (key === "b") elements.tbBoundaries.click();
+  else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
   else if (key === "v") elements.tbRisk.click();
@@ -8183,6 +9009,7 @@ async function loadBranches() {
   if (result?.available && result.base) branchBase = result.base.name;
   renderBranches(elements.branchesPanel, result, {
     selected: selectedBranchName,
+    busy: branchesBusy,
     onSelect: (branch) => {
       selectBranch(branch.name).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
@@ -8194,10 +9021,44 @@ async function loadBranches() {
         elements.status.textContent = `Error: ${error.message}`;
       });
     },
+    onFetch: () => runBranchAction("fetch", {}),
+    onSync: () => runBranchAction("sync", { branch: result?.current }),
+    onPush: (branch) => runBranchAction("push", { branch: branch.name }),
     onClose: () => {
       elements.branchesPanel.hidden = true;
     }
   });
+}
+async function runBranchAction(action, payload) {
+  if (branchesBusy) return;
+  if (action === "sync" && !payload.branch) {
+    elements.status.textContent = "Sync needs a checked-out branch.";
+    return;
+  }
+  branchesBusy = true;
+  await loadBranches().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+  try {
+    const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
+    const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+    }
+    elements.status.textContent = body.available === false ? `${action} failed: ${body.detail}` : body.message;
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  } finally {
+    branchesBusy = false;
+    await loadBranches().catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  }
 }
 async function selectBranch(name) {
   selectedBranchName = name;
@@ -8214,7 +9075,19 @@ async function selectCommit(commit) {
 async function showReview(query, commit = null, branchName = null) {
   const separator = query ? "&" : "?";
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : "";
-  const data = await request(`/analysis/review${query}${repository}`);
+  const ticket = ++reviewTicket;
+  elements.reviewPanel.hidden = false;
+  renderReviewLoading(elements.reviewPanel, { onClose: closeReview });
+  let data;
+  try {
+    data = await request(`/analysis/review${query}${repository}`);
+  } catch (error) {
+    if (ticket === reviewTicket) {
+      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview });
+    }
+    throw error;
+  }
+  if (ticket !== reviewTicket) return;
   currentReview = data;
   if (data.available === false) {
     elements.reviewPanel.hidden = false;
@@ -8231,10 +9104,12 @@ async function showReview(query, commit = null, branchName = null) {
   const label = branchName ?? (commit ? commit.shortHash : "working tree");
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
 }
+var reviewTicket = 0;
 function closeReview() {
+  reviewTicket += 1;
   currentReview = null;
   elements.reviewPanel.hidden = true;
-  renderReview(elements.reviewPanel, null, {});
+  elements.reviewPanel.replaceChildren();
 }
 async function toggleReview() {
   if (!elements.reviewPanel.hidden) {
@@ -8399,10 +9274,12 @@ async function openSettings() {
 async function showWorkspace() {
   elements.workspacePanel.hidden = false;
   try {
-    const report = await request("/workspace");
-    renderWorkspace(elements.workspacePanel, report, { onClose: closeWorkspace });
-    view.crossRepo(crossRepoNodeIds(report, (current?.nodes ?? []).map((node) => node.id)));
+    workspaceReport = await request("/workspace");
+    workspaceTools.databases = await request("/workspace/databases").catch(() => null);
+    renderWorkspaceView();
+    view.crossRepo(crossRepoNodeIds(workspaceReport, (current?.nodes ?? []).map((node) => node.id)));
   } catch (error) {
+    workspaceReport = null;
     renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
     const note2 = document.createElement("p");
     note2.className = "unavailable";
@@ -8410,6 +9287,79 @@ async function showWorkspace() {
     elements.workspacePanel.append(note2);
   }
   refreshDock();
+}
+var workspaceReport = null;
+var workspaceTools = {
+  base: "HEAD",
+  busy: "",
+  error: "",
+  compat: null,
+  preflight: null,
+  databases: null,
+  live: null,
+  confirming: null,
+  scriptHref: ""
+};
+function renderWorkspaceView() {
+  workspaceTools.scriptHref = `${API_PATH}/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}&format=sql`;
+  renderWorkspace(elements.workspacePanel, workspaceReport, {
+    onClose: closeWorkspace,
+    tools: workspaceTools,
+    onBase: (value) => {
+      workspaceTools.base = value;
+    },
+    onCompat: () => runWorkspaceTool("comparing revisions", async () => {
+      workspaceTools.compat = await request(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
+    }),
+    onPreflight: () => runWorkspaceTool("building preflight queries", async () => {
+      workspaceTools.preflight = await request(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
+    }),
+    onConfirmRun: (name) => {
+      workspaceTools.confirming = name;
+      renderWorkspaceView();
+    },
+    onCancelRun: () => {
+      workspaceTools.confirming = null;
+      renderWorkspaceView();
+    },
+    onRun: (name) => runWorkspaceTool("running read-only checks", async () => {
+      workspaceTools.confirming = null;
+      workspaceTools.preflight = await postWorkspace("/workspace/preflight/run", {
+        database: name,
+        base: workspaceTools.base || "HEAD"
+      });
+      workspaceTools.databases = await request("/workspace/databases").catch(() => workspaceTools.databases);
+    }),
+    onLive: (name) => runWorkspaceTool("reading the live schema", async () => {
+      workspaceTools.live = await postWorkspace("/workspace/live/schema", { database: name });
+      workspaceTools.databases = await request("/workspace/databases").catch(() => workspaceTools.databases);
+    })
+  });
+}
+async function runWorkspaceTool(label, action) {
+  workspaceTools.busy = label;
+  workspaceTools.error = "";
+  renderWorkspaceView();
+  try {
+    await action();
+  } catch (error) {
+    workspaceTools.error = error.message;
+  } finally {
+    workspaceTools.busy = "";
+    renderWorkspaceView();
+  }
+}
+async function postWorkspace(path, body) {
+  const response = await fetch(`${API_PATH}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+  }
+  return payload;
 }
 function closeWorkspace() {
   elements.workspacePanel.hidden = true;
@@ -8687,6 +9637,26 @@ function updateSystemNote(model) {
     elements.systemNote.textContent = "1 build unit: showing its layers";
   }
 }
+function applyEdgeKindLens() {
+  view.setEdgeKind(state.mode === "file" ? state.edgeKind : "imports");
+}
+function toggleEdgeKind() {
+  if (state.mode !== "file") {
+    return;
+  }
+  state.edgeKind = state.edgeKind === "calls" ? "imports" : "calls";
+  updateEdgeKindButton();
+  applyEdgeKindLens();
+  schedulePrefsSave();
+}
+function updateEdgeKindButton() {
+  if (!elements.tbCalls) {
+    return;
+  }
+  const showCalls = state.mode === "file" && state.edgeKind === "calls";
+  elements.tbCalls.classList.toggle("active", showCalls);
+  elements.tbCalls.setAttribute("aria-pressed", String(showCalls));
+}
 function updateOutsideButton() {
   if (!elements.tbOutside) {
     return;
@@ -8701,6 +9671,12 @@ function updateUnitsButton() {
     return;
   }
   elements.tbUnits.hidden = !(state.mode === "system" && Boolean(state.systemUnit));
+}
+function updateFocusButton() {
+  if (!elements.tbFocus) {
+    return;
+  }
+  elements.tbFocus.disabled = !selected;
 }
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
@@ -8938,6 +9914,9 @@ elements.tbBoundaries.addEventListener("click", () => {
   state.prefix = "";
   scan();
 });
+if (elements.tbCalls) {
+  elements.tbCalls.addEventListener("click", toggleEdgeKind);
+}
 elements.tbBranches.addEventListener("click", () => {
   toggleBranches().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;

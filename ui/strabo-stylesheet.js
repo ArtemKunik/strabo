@@ -88,6 +88,10 @@ export function stylesheet() {
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-hidden', style: { display: 'none' } },
+    { selector: 'edge.edge-kind-hidden', style: { display: 'none' } },
+    // A call is a runtime relationship, distinct from a module-tree import; dashed so the
+    // reading survives even if both kinds are ever drawn together.
+    { selector: 'edge[kind = "call"]', style: { 'line-style': 'dashed' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
     {
       selector: 'edge',

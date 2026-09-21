@@ -262,7 +262,9 @@ Then('the toolbar offers a way back to the unit map', async function () {
   await this.page.waitForFunction(
     () => {
       const button = document.getElementById('tb-units');
-      return Boolean(button && !button.hidden);
+      // `hidden` must also win the cascade: `.tb-icon` sets `display: inline-flex`, which used
+      // to leave the control on screen in file mode, where it is a no-op.
+      return Boolean(button && !button.hidden && getComputedStyle(button).display !== 'none');
     },
     undefined,
     { timeout: 15_000 },
@@ -274,10 +276,18 @@ When('I press the back-to-units shortcut', async function () {
   await this.page.waitForFunction(() => window.straboTest?.state.systemUnit == null, undefined, {
     timeout: 15_000,
   });
-  // The control is only for an open unit, so it goes away with it.
-  await this.page.waitForFunction(() => Boolean(document.getElementById('tb-units')?.hidden), undefined, {
-    timeout: 15_000,
-  });
+  // The control is only for an open unit, so it goes away with it — and it must leave the
+  // layout, not just flip the `hidden` property.
+  await this.page.waitForFunction(
+    () => {
+      const button = document.getElementById('tb-units');
+      return Boolean(button?.hidden && getComputedStyle(button).display === 'none');
+    },
+    undefined,
+    {
+      timeout: 15_000,
+    },
+  );
 });
 
 When('I show outside links', async function () {

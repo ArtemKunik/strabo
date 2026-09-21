@@ -59,6 +59,24 @@ export function ringCrossRepo(cy, ids) {
   });
 }
 
+/**
+ * Show one kind of edge at a time: import coupling or recorded function calls.
+ *
+ * `mode` is `'imports'` (hide call edges) or `'calls'` (hide every other kind). A call edge
+ * always parallels an import edge, so switching is a change of reading, not of reachability.
+ * The class is separate from the edge-focus `edge-hidden`, so the two compose: a focused
+ * file's in-unit wiring is still filtered by whichever kind is being read.
+ */
+export function applyEdgeKind(cy, mode) {
+  const wantCalls = mode === 'calls';
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      const isCall = edge.data('kind') === 'call';
+      edge.toggleClass('edge-kind-hidden', wantCalls ? !isCall : isCall);
+    }
+  });
+}
+
 /** Hide nodes that do not match; returns the id set that stayed visible (null for all). */
 export function filterNodes(cy, ids) {
   const keep = ids ? new Set(ids) : null;

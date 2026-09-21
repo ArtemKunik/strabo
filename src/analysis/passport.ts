@@ -174,7 +174,9 @@ export function computeRepositoryPassport(
     repository,
     size: {
       files: nodes.length,
-      edges: graph.edges.length,
+      // Call edges are a separate lens that parallels the import graph; the headline count
+      // stays module coupling, matching what the map draws by default.
+      edges: graph.edges.filter((edge) => edge.kind !== 'call').length,
       directories: new Set(nodes.map((node) => node.directory)).size,
       tests: nodes.filter((node) => node.kind === 'test').length,
       diagnostics: graph.diagnostics.length,

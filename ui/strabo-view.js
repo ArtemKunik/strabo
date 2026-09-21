@@ -14,6 +14,7 @@ import { applyGraphDiff } from './strabo-graph-sync.js';
 import { createEdgeFocus } from './strabo-edge-focus.js';
 import { createEdgeHighlight } from './strabo-edge-highlight.js';
 import {
+  applyEdgeKind,
   applyTier,
   applyTierDirections,
   dimOutside,
@@ -45,6 +46,9 @@ export function createView(container) {
   let islandVisible = null;
   // The element set from the last render, so a re-render can update only what changed.
   let renderedElements = { nodes: [], edges: [] };
+  // The edge kind being read ('imports' | 'calls'); reapplied after every render because an
+  // incremental diff clears the classes the lens put on the edges.
+  let edgeKind = 'imports';
 
   function repaintIslands() {
     islands.paint(
@@ -186,6 +190,7 @@ export function createView(container) {
       repaintIslands();
       cards.apply(model);
       edgeFocus.apply();
+      applyEdgeKind(cy, edgeKind);
       applyLabelBudget(cy, true);
       // Removal doesn't fire unselect events, so the old node ids would otherwise linger
       // in whatever last read the group — tell listeners the slate is clean.
@@ -202,6 +207,16 @@ export function createView(container) {
      */
     focusFile(fileId) {
       edgeFocus.setFile(fileId);
+    },
+    /**
+     * Read import coupling or recorded function calls: `'imports'` or `'calls'`.
+     *
+     * A call edge parallels an import edge, so this swaps which relationship the map shows
+     * rather than adding reachability.
+     */
+    setEdgeKind(mode) {
+      edgeKind = mode === 'calls' ? 'calls' : 'imports';
+      applyEdgeKind(cy, edgeKind);
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {

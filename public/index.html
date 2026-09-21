@@ -137,7 +137,7 @@
           >
             <span aria-hidden="true">←</span>
           </button>
-          <button id="tb-focus" type="button" class="tb-icon" title="Center selection (F)" aria-label="Center selection">
+          <button id="tb-focus" type="button" class="tb-icon" disabled title="Center selection (F)" aria-label="Center selection">
             <span aria-hidden="true">◎</span>
           </button>
           <button id="tb-impact" type="button" class="tb-icon" title="Show change impact (I)" aria-label="Show change impact">
@@ -159,6 +159,16 @@
           </button>
           <button id="tb-boundaries" type="button" class="tb-icon" title="Toggle directories / files (B)" aria-label="Toggle boundaries">
             <span aria-hidden="true">▦</span>
+          </button>
+          <button
+            id="tb-calls"
+            type="button"
+            class="tb-icon"
+            aria-pressed="false"
+            title="Show recorded function calls only (C)"
+            aria-label="Show function calls only"
+          >
+            <span aria-hidden="true">ƒ</span>
           </button>
           <button id="tb-clear" type="button" class="tb-icon" title="Clear selection (Esc)" aria-label="Clear selection">
             <span aria-hidden="true">✕</span>

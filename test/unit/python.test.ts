@@ -312,3 +312,47 @@ test('scanning the Python fixture draws the recorded imports and nothing else', 
   assert.equal(unresolved.length, 1);
   assert.equal(unresolved[0]?.specifier, 'app.missing');
 });
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a from-import plus a bare call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'src/app/__init__.py': '',
+    'src/app/a.py': 'def helper():\n    return 1\n',
+    'src/app/b.py': 'from app.a import helper\n\n\ndef run():\n    helper()\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/app/b.py->src/app/a.py']);
+});
+
+test('a module import plus a qualified call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'src/app/__init__.py': '',
+    'src/app/a.py': 'def helper():\n    return 1\n',
+    'src/app/b.py': 'import app.a as a\n\n\ndef run():\n    a.helper()\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/app/b.py->src/app/a.py']);
+});
+
+test('a call through an unbound receiver is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'src/app/__init__.py': '',
+    'src/app/a.py': 'def helper():\n    return 1\n',
+    'src/app/b.py': 'def run(obj):\n    obj.helper()\n',
+  });
+
+  assert.deepEqual(callPairs(edges), []);
+});
+
+test('a call to a name the target does not declare is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'src/app/__init__.py': '',
+    'src/app/a.py': 'def other():\n    return 1\n',
+    'src/app/b.py': 'from app.a import missing\n\n\ndef run():\n    missing()\n',
+  });
+
+  assert.deepEqual(callPairs(edges), []);
+});

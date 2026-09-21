@@ -193,6 +193,77 @@ test('SQL files are resolved, not reported as unsupported', async () => {
   assert.ok(!report.graph.diagnostics.some((item) => item.file.endsWith('schema.sql')));
 });
 
+async function resolveJavaSources(sources: Record<string, string>) {
+  const facts = [];
+  for (const [file, content] of Object.entries(sources)) {
+    facts.push((await extractJavaFacts(file, content)).facts);
+  }
+  return resolveJava(facts);
+}
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a Java type-qualified call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveJavaSources({
+    'app/Main.java': [
+      'package com.acme.app;',
+      'import com.acme.util.Helper;',
+      'public class Main {',
+      '  void run() { Helper.doWork(); }',
+      '}',
+    ].join('\n'),
+    'util/Helper.java': [
+      'package com.acme.util;',
+      'public class Helper {',
+      '  public static void doWork() {}',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), ['app/Main.java->util/Helper.java']);
+});
+
+test('a Java static import plus a bare call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveJavaSources({
+    'app/Main.java': [
+      'package com.acme.app;',
+      'import static com.acme.util.Helper.doWork;',
+      'public class Main {',
+      '  void run() { doWork(); }',
+      '}',
+    ].join('\n'),
+    'util/Helper.java': [
+      'package com.acme.util;',
+      'public class Helper {',
+      '  public static void doWork() {}',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), ['app/Main.java->util/Helper.java']);
+});
+
+test('a Java call on a value receiver is not claimed', async () => {
+  const { edges } = await resolveJavaSources({
+    'app/Main.java': [
+      'package com.acme.app;',
+      'public class Main {',
+      '  void run(Helper helper) { helper.doWork(); }',
+      '}',
+    ].join('\n'),
+    'util/Helper.java': [
+      'package com.acme.util;',
+      'public class Helper {',
+      '  public static void doWork() {}',
+      '}',
+    ].join('\n'),
+  });
+
+  assert.deepEqual(callPairs(edges), []);
+});
+
 test('Java edges are deterministic across scans', async () => {
   const first = await scanRepository(fixture);
   const second = await scanRepository(fixture);

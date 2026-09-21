@@ -60,6 +60,46 @@ test('extractRustFacts records items, mods, and re-exports', async () => {
   assert.equal(reexport?.boundName, 'Request');
 });
 
+test('extractRustFacts records a #[path] override on a mod item', async () => {
+  const source = [
+    '#[cfg(test)]',
+    '#[path = "discovery_tests.rs"]',
+    'mod tests;',
+  ].join('\n');
+  const { facts } = await extractRustFacts('src/news_service/discovery.rs', source);
+
+  assert.deepEqual(facts.mods, [
+    { name: 'tests', external: true, line: 3, path: 'discovery_tests.rs' },
+  ]);
+});
+
+test('a #[path] override resolves beside the declaring file, not the module directory', () => {
+  const { edges, diagnostics } = resolveRust([
+    {
+      file: 'src/news_service/discovery.rs',
+      crateRoot: 'src',
+      modulePath: 'news_service/discovery',
+      mods: [{ name: 'tests', external: true, line: 3, path: 'discovery_tests.rs' }],
+      uses: [],
+      items: [],
+    },
+    {
+      file: 'src/news_service/discovery_tests.rs',
+      crateRoot: 'src',
+      modulePath: 'news_service/discovery_tests',
+      mods: [],
+      uses: [],
+      items: [],
+    },
+  ]);
+
+  assert.deepEqual(
+    edges.map((edge) => `${edge.source}->${edge.target}`),
+    ['src/news_service/discovery.rs->src/news_service/discovery_tests.rs'],
+  );
+  assert.deepEqual(diagnostics, []);
+});
+
 test('extractRustFacts records inline crate-relative paths', async () => {
   const source = [
     'fn main() {',
@@ -85,6 +125,8 @@ test('resolveRust links mod declarations, module paths, and re-exported items', 
   assert.ok(resolved.has('src/main.rs->src/api/request.rs'));
   assert.ok(resolved.has('src/main.rs->src/api/response.rs'));
   assert.ok(resolved.has('src/api/request.rs->src/api/response.rs'));
+  assert.ok(resolved.has('src/api/mod.rs->src/api/discovery.rs'));
+  assert.ok(resolved.has('src/api/discovery.rs->src/api/discovery_tests.rs'));
 });
 
 test('resolveRust resolves a re-exported item to its declaring file', () => {
@@ -143,6 +185,54 @@ test('mod declarations are declare edges and are not counted as dependencies', a
   // The explicit opt-in still sees every drawn edge.
   const all = buildAdjacency(report.graph, { includeDeclare: true });
   assert.ok((all.forward.get('src/main.rs') ?? []).includes('src/api/mod.rs'));
+});
+
+async function resolveSources(sources: Record<string, string>) {
+  const facts = [];
+  for (const [file, content] of Object.entries(sources)) {
+    facts.push((await extractRustFacts(file, content)).facts);
+  }
+  return resolveRust(facts);
+}
+
+function callPairs(edges: Array<{ source: string; target: string; kind: string }>): string[] {
+  return edges.filter((edge) => edge.kind === 'call').map((edge) => `${edge.source}->${edge.target}`);
+}
+
+test('a use-bound bare call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'src/main.rs': 'mod util;\nuse crate::util::helper;\nfn main() { helper(); }\n',
+    'src/util.rs': 'pub fn helper() {}\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/main.rs->src/util.rs']);
+});
+
+test('a module-qualified call becomes a cross-file call edge', async () => {
+  const { edges } = await resolveSources({
+    'src/main.rs': 'mod util;\nfn main() { util::helper(); }\n',
+    'src/util.rs': 'pub fn helper() {}\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/main.rs->src/util.rs']);
+});
+
+test('a glob import resolves a call only when one module declares the name', async () => {
+  const { edges } = await resolveSources({
+    'src/main.rs': 'mod util;\nuse crate::util::*;\nfn main() { helper(); }\n',
+    'src/util.rs': 'pub fn helper() {}\n',
+  });
+
+  assert.deepEqual(callPairs(edges), ['src/main.rs->src/util.rs']);
+});
+
+test('a call to a name no imported module declares is not claimed', async () => {
+  const { edges } = await resolveSources({
+    'src/main.rs': 'mod util;\nuse crate::util::other;\nfn main() { helper(); }\n',
+    'src/util.rs': 'pub fn other() {}\n',
+  });
+
+  assert.deepEqual(callPairs(edges), []);
 });
 
 test('Rust edges are deterministic across scans', async () => {

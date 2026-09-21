@@ -15,6 +15,7 @@ import {
   collectFunctionCalls,
   collectMemberAccesses,
   sortSymbols,
+  walkNodes,
 } from './symbols.ts';
 
 export const RUST_LANGUAGE: GrammarLanguage = 'rust';
@@ -24,6 +25,8 @@ export interface RustMod {
   /** `mod foo;` refers to another file; `mod foo { .. }` is inline and creates no edge. */
   external: boolean;
   line: number;
+  /** Value of an adjacent `#[path = "..."]`, which overrides the default file location. */
+  path?: string;
 }
 
 export interface RustUse {
@@ -46,6 +49,14 @@ export interface RustPathReference {
   line: number;
 }
 
+/** A call site whose callee the syntax proves: `foo(...)` or `path::foo(...)`. */
+export interface RustCall {
+  name: string;
+  /** The path before `::` for a scoped call (`crate::util`, `util`, `Type`); absent when bare. */
+  qualifier?: string;
+  line: number;
+}
+
 export interface RustFileFacts {
   file: string;
   /** Directory of the crate root (ends at the last `src` segment), '' when none. */
@@ -58,6 +69,8 @@ export interface RustFileFacts {
   items: RustItem[];
   /** Inline crate-relative paths referenced in the file body. */
   paths: RustPathReference[];
+  /** Calls to a free function or an associated item proved by the call syntax. */
+  calls?: RustCall[];
 }
 
 export interface RustExtraction {
@@ -66,6 +79,8 @@ export interface RustExtraction {
 }
 
 const MOD_PATTERN = /^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*(;|\{)/;
+
+const PATH_ATTRIBUTE_PATTERN = /^#\[\s*path\s*=\s*"([^"]+)"\s*\]$/;
 
 const ITEM_TYPES = new Set([
   'struct_item',
@@ -110,10 +125,12 @@ export async function extractRustFacts(file: string, content: string): Promise<R
       if (node.type === 'mod_item') {
         const match = MOD_PATTERN.exec(node.text);
         if (match) {
+          const path = pathAttribute(node);
           facts.mods.push({
             name: match[1] as string,
             external: match[2] === ';',
             line: node.startPosition.row + 1,
+            ...(path ? { path } : {}),
           });
         }
       } else if (node.type === 'use_declaration') {
@@ -146,9 +163,28 @@ export async function extractRustFacts(file: string, content: string): Promise<R
     }
 
     facts.paths = collectInlinePaths(tree.rootNode);
+    facts.calls = collectCalls(tree.rootNode);
 
     return { facts, diagnostics };
   });
+}
+
+/**
+ * The `#[path = "..."]` value declared on a `mod` item, if any.
+ *
+ * Attributes are siblings of the item they decorate, not children, so they are read by
+ * walking back over the adjacent `attribute_item` nodes.
+ */
+function pathAttribute(mod: Node): string | undefined {
+  let sibling = mod.previousNamedSibling;
+  while (sibling && sibling.type === 'attribute_item') {
+    const match = PATH_ATTRIBUTE_PATTERN.exec(sibling.text);
+    if (match) {
+      return match[1] as string;
+    }
+    sibling = sibling.previousNamedSibling;
+  }
+  return undefined;
 }
 
 /**
@@ -252,6 +288,40 @@ function collectInlinePaths(root: Node): RustPathReference[] {
 
   visit(root);
   return dedupePaths(references);
+}
+
+/**
+ * Collect the call sites whose callee the syntax proves.
+ *
+ * `foo(...)` is bare; `path::foo(...)` names a qualifier. `self.foo` is left out (same-file and
+ * the member map carries it), and a call on a value (`obj.foo()`) is not recorded because the
+ * receiver's type is unknown.
+ */
+function collectCalls(root: Node): RustCall[] {
+  const calls: RustCall[] = [];
+  walkNodes(root, (node) => {
+    if (node.type !== 'call_expression') {
+      return;
+    }
+    const fn = node.childForFieldName('function');
+    if (!fn) {
+      return;
+    }
+    const line = node.startPosition.row + 1;
+    if (fn.type === 'identifier') {
+      calls.push({ name: fn.text, line });
+      return;
+    }
+    if (fn.type !== 'scoped_identifier') {
+      return;
+    }
+    const path = fn.childForFieldName('path')?.text;
+    const name = fn.childForFieldName('name')?.text;
+    if (path && name) {
+      calls.push({ name, qualifier: path, line });
+    }
+  });
+  return calls;
 }
 
 /** Flatten a nested `scoped_identifier` into ordered segments (`crate`, `util`, `Helper`). */
@@ -373,7 +443,7 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
       if (!module.external) {
         continue;
       }
-      const target = resolveModFile(module.name, fileFacts, context);
+      const target = resolveModFile(module, fileFacts, context);
       if (target) {
         // `mod x;` only declares the module tree; it is not a dependency on x's contents.
         push(fileFacts.file, target, 'namespace', module.line, `mod ${module.name}`, 'exact', 'declare');
@@ -427,7 +497,83 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
     }
   }
 
+  appendCallEdges(facts, context, push);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a provable call to the file that declares its callee.
+ *
+ * A bare `foo()` resolves through an explicit `use ...::foo` binding, or through a
+ * `use ...::*` glob when exactly one imported module declares `foo`. A `path::foo()` resolves
+ * `path` as a crate-relative path (`crate::util::foo`) or as a `use`-bound module or type. The
+ * target must declare the called name; anything ambiguous or unresolved is left unclaimed.
+ */
+function appendCallEdges(
+  facts: readonly RustFileFacts[],
+  context: RustContext,
+  push: (
+    source: string,
+    target: string,
+    kind: GraphEdge['kind'],
+    line: number,
+    specifier: string,
+    resolution: 'exact' | 'module-tree',
+    role?: GraphEdge['role'],
+  ) => void,
+): void {
+  const declares = (file: string, name: string): boolean => {
+    const { crateRoot, modulePath } = moduleCoordinates(file);
+    return context.items.get(moduleKey(crateRoot, modulePath))?.has(name) ?? false;
+  };
+
+  for (const fileFacts of facts) {
+    for (const call of fileFacts.calls ?? []) {
+      let target: string | null = null;
+      if (call.qualifier !== undefined) {
+        const segments = call.qualifier.split('::');
+        if (isCrateRelative(segments)) {
+          target = resolveSymbolPath([...segments, call.name], fileFacts, context, new Set());
+        } else {
+          const binding = fileFacts.uses.find((use) => use.boundName === call.qualifier);
+          if (binding) {
+            target = resolveSymbolPath(binding.segments, fileFacts, context, new Set());
+          }
+          // `util::helper()` names a child module without a `use`; resolve it from this module.
+          target ??= resolveSymbolPath(['self', ...segments, call.name], fileFacts, context, new Set());
+        }
+      } else {
+        const explicit = fileFacts.uses.filter((use) => !use.glob && use.boundName === call.name);
+        const globs = fileFacts.uses.filter((use) => use.glob);
+        const candidates = new Set<string>();
+        for (const binding of explicit) {
+          const resolved = resolveSymbolPath(binding.segments, fileFacts, context, new Set());
+          if (resolved) {
+            candidates.add(resolved);
+          }
+        }
+        for (const binding of globs) {
+          const resolved = resolveSymbolPath(binding.segments, fileFacts, context, new Set());
+          if (resolved && declares(resolved, call.name)) {
+            candidates.add(resolved);
+          }
+        }
+        // Only a unique claimant is a provable target; two globs that both declare the name
+        // leave it unclaimed rather than picking one.
+        target = candidates.size === 1 ? ([...candidates][0] ?? null) : null;
+      }
+      if (target && declares(target, call.name)) {
+        push(
+          fileFacts.file,
+          target,
+          'call',
+          call.line,
+          call.qualifier ? `${call.qualifier}::${call.name}` : call.name,
+          'module-tree',
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -436,12 +582,22 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
  * Rust searches the declaring module's directory first (`src/foo.rs` -> `src/foo/bar.rs`).
  * Cargo bin targets (`[[bin]] path = "src/bin_name.rs"`) are their own crate roots, so
  * `mod name;` there refers to a sibling file; that layout is tried as a fallback.
+ *
+ * A `#[path = "..."]` on the declaration replaces both rules: the value is resolved against
+ * the directory of the declaring file, not the module directory. `#[path = "discovery_tests.rs"]`
+ * in `src/news_service/discovery.rs` names `src/news_service/discovery_tests.rs`, whereas the
+ * default `mod tests;` would look for `src/news_service/discovery/tests.rs`.
  */
 function resolveModFile(
-  name: string,
+  module: RustMod,
   fileFacts: RustFileFacts,
   context: RustContext,
 ): string | null {
+  if (module.path) {
+    return resolvePathOverride(module.path, fileFacts, context);
+  }
+
+  const name = module.name;
   const primary = joinModule(fileFacts.modulePath, name);
   const primaryTarget = context.modules.get(moduleKey(fileFacts.crateRoot, primary));
   if (primaryTarget) {
@@ -455,6 +611,25 @@ function resolveModFile(
       : fileDirectory;
   const sibling = relativeDirectory ? `${relativeDirectory}/${name}` : name;
   return context.modules.get(moduleKey(fileFacts.crateRoot, sibling)) ?? null;
+}
+
+/**
+ * Resolve a `#[path = "..."]` value to a file.
+ *
+ * The override replaces the default layout rule rather than adding to it: an authored path
+ * that names no repository file is reported, not re-guessed at the module directory.
+ */
+function resolvePathOverride(
+  path: string,
+  fileFacts: RustFileFacts,
+  context: RustContext,
+): string | null {
+  const target = normalisePath(`${directoryOf(fileFacts.file)}/${path}`);
+  if (!target) {
+    return null;
+  }
+  const { crateRoot, modulePath } = moduleCoordinates(target);
+  return context.modules.get(moduleKey(crateRoot, modulePath)) ?? null;
 }
 
 function buildContext(facts: RustFileFacts[]): RustContext {
@@ -600,6 +775,30 @@ function moduleKey(crateRoot: string, modulePath: string): string {
 
 function joinModule(modulePath: string, name: string): string {
   return modulePath ? `${modulePath}/${name}` : name;
+}
+
+function directoryOf(file: string): string {
+  const index = file.lastIndexOf('/');
+  return index === -1 ? '' : file.slice(0, index);
+}
+
+/** Apply `.` and `..` segments; null when the path climbs above the repository root. */
+function normalisePath(path: string): string | null {
+  const out: string[] = [];
+  for (const segment of path.split('/')) {
+    if (segment === '' || segment === '.') {
+      continue;
+    }
+    if (segment === '..') {
+      if (out.length === 0) {
+        return null;
+      }
+      out.pop();
+      continue;
+    }
+    out.push(segment);
+  }
+  return out.join('/');
 }
 
 /**

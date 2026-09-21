@@ -110,6 +110,51 @@ test('the symbol and file-health endpoints serve SQL members and mark cohesion u
   assert.match(cohesion?.detail ?? '', /not measured: sql members have no methods/);
 });
 
+test('the impact-passport endpoint serves one file card and rejects a missing file', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const query = `repository=${encodeURIComponent(path.join(fixtures, 'block-repo'))}&file=src/util.ts`;
+
+  const missing = await fetch(`${base}/api/strabo/analysis/impact-passport`);
+  assert.equal(missing.status, 400);
+
+  const card = (await (await fetch(`${base}/api/strabo/analysis/impact-passport?${query}`)).json()) as {
+    path: string;
+    risk: { score: number; band: string } | null;
+    snapshot: { blastRadius: number; directImporters: number; directImports: number };
+    complexity: { maxAfter: number | null };
+    mostComplex: Array<{ name: string }>;
+    signals: unknown[];
+  };
+  assert.equal(card.path, 'src/util.ts');
+  assert.ok(card.snapshot, 'the current-graph snapshot is always present');
+  assert.ok(card.risk, 'a bounded risk reading is always present');
+  assert.ok(Array.isArray(card.mostComplex));
+  assert.ok(Array.isArray(card.signals));
+});
+
+test('the branch action routes refuse a cross-origin request and require a branch', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const repository = `?repository=${encodeURIComponent(path.join(fixtures, 'block-repo'))}`;
+
+  const crossOrigin = await fetch(`${base}/api/strabo/analysis/branches/fetch${repository}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(crossOrigin.status, 403);
+
+  const missingBranch = await fetch(`${base}/api/strabo/analysis/branches/push${repository}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(missingBranch.status, 400);
+});
+
 test('the symbol endpoint serves the function inventory with body metrics', async () => {
   const host = express();
   host.use('/api/strabo', createStraboRouter(config));

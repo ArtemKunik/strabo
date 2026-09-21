@@ -540,7 +540,12 @@ export function buildTierReport(
   repositoryName: string,
   graph: {
     nodes: Array<{ id: string }>;
-    edges?: Array<{ source: string; target: string; evidence?: { line: number; specifier: string } }>;
+    edges?: Array<{
+      source: string;
+      target: string;
+      kind?: string;
+      evidence?: { line: number; specifier: string };
+    }>;
   },
 ): TierReport {
   const all = graph.nodes.map((node) => node.id).sort();
@@ -628,6 +633,10 @@ export function buildTierReport(
   const tierOfFile = new Map(files.map((entry) => [entry.file, entry.tier]));
   const directions: TierDirection[] = [];
   for (const edge of graph.edges ?? []) {
+    // A call edge parallels an import edge, so counting it would double a wrong-way pair.
+    if (edge.kind === 'call') {
+      continue;
+    }
     const sourceTier = tierOfFile.get(edge.source);
     const targetTier = tierOfFile.get(edge.target);
     if (!sourceTier || !targetTier) {

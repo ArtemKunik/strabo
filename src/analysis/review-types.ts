@@ -116,6 +116,137 @@ export interface ChangeRisk {
   };
 }
 
+/**
+ * How risky the current state of one file is, bounded to 0-100.
+ *
+ * A product of normalised inputs, each named so the number can be checked. The band is a
+ * coarse reading of the score, not a second measure.
+ */
+export type RiskBand = 'low' | 'moderate' | 'high' | 'critical';
+
+export interface ImpactRisk {
+  /** 0-100, rounded. A bounded heuristic, not a repository percentile. */
+  score: number;
+  band: RiskBand;
+  /** The raw values the score normalised, kept so the reading is inspectable. */
+  inputs: {
+    /** Most complex function's decision points in the reviewed state. */
+    maxComplexity: number;
+    /** Blast radius over use edges in the current graph. */
+    blastRadius: number;
+    /** Recorded function signals in the reviewed state. */
+    signals: number;
+    /** Share of direct dependents no test reaches, 0-1. */
+    untestedShare: number;
+    directImporters: number;
+  };
+}
+
+/** Complexity of one file on each side of a change, and what did not move. */
+export interface ComplexitySummary {
+  maxBefore: number | null;
+  maxAfter: number | null;
+  /** Mean decision points per measured function. */
+  averageBefore: number | null;
+  averageAfter: number | null;
+  sumBefore: number | null;
+  sumAfter: number | null;
+  functionCountBefore: number | null;
+  functionCountAfter: number | null;
+  /** Functions present on both sides whose decision points did not move. */
+  functionsUnchanged: number | null;
+  /** Declared types present on both sides with the same member count. */
+  classesUnchanged: number | null;
+}
+
+/** How concentrated the changed symbols are within the file. */
+export interface CoherenceSummary {
+  /** 0-100: the largest connected component of changed symbols over their count. */
+  score: number;
+  changedSymbols: number;
+  detail: string;
+}
+
+/** One cost signal, named and with the value that tripped it. */
+export interface ImpactSignal {
+  kind: string;
+  label: string;
+  detail: string;
+}
+
+/** A function ranked into a passport's most-complex list. */
+export interface ImpactFunction {
+  name: string;
+  owner: string;
+  /** Decision points in the reviewed state. */
+  complexity: number;
+  /** Decision points before the change; null when not measured or not a change. */
+  before: number | null;
+  /** complexity − before; null when before is null. */
+  delta: number | null;
+}
+
+/** The current-graph counts a passport reports. */
+export interface ImpactSnapshot {
+  /** Transitive dependents over use edges. */
+  blastRadius: number;
+  directImporters: number;
+  directImports: number;
+}
+
+/**
+ * The Change impact passport for one file: the current state plus, when a baseline exists,
+ * the deltas the change produced. Every field is read from the scan or Git; a value a side
+ * cannot provide is null and named in `note`, never a fabricated zero.
+ */
+export interface FileImpactPassport {
+  path: string;
+  previousPath?: string;
+  status: ReviewStatus;
+  /** Current-state risk, or null when the file has no measurable state. */
+  risk: ImpactRisk | null;
+  complexity: ComplexitySummary;
+  /** Concentration of the changed symbols; null when the file is not a change. */
+  coherence: CoherenceSummary | null;
+  snapshot: ImpactSnapshot;
+  signals: ImpactSignal[];
+  mostComplex: ImpactFunction[];
+  /** Tiered impact when the file was reviewed against a baseline; null otherwise. */
+  impact: TieredImpact | null;
+  testsToRun: string[];
+  untestedDependents: string[];
+  note?: string;
+}
+
+/** The passport rolled up over every file in a change set or revision. */
+export interface ImpactTotals {
+  files: number;
+  risk: { score: number; band: RiskBand } | null;
+  maxComplexity: number | null;
+  averageComplexity: number | null;
+  /** Mean of the files' coherence scores, or null when none is a change. */
+  coherence: number | null;
+  /** Summed changed-symbol count across the files. */
+  changedSymbols: number;
+  /** Distinct files reachable from any changed file over use edges. */
+  blastRadius: number;
+  directImporters: number;
+  directImports: number;
+  signals: ImpactSignal[];
+  mostComplex: ImpactFunction[];
+  functionsUnchanged: number;
+  classesUnchanged: number;
+}
+
+/** A passport at one of three scopes: one file, a change set, or a whole revision. */
+export interface ImpactPassportSet {
+  scope: 'file' | 'change-set' | 'revision';
+  baseline: string | null;
+  files: FileImpactPassport[];
+  totals: ImpactTotals;
+  capped: boolean;
+}
+
 /** Cohesion of one changed file on each side of the review, from recorded member wiring. */
 export interface CohesionChange {
   path: string;
@@ -140,6 +271,11 @@ export interface CohesionChange {
   untestedDependents: string[];
   /** The pending-change risk, or null when nothing measurable was touched. */
   risk: ChangeRisk | null;
+  /**
+   * The Change impact passport for this file: the current-state snapshot plus the deltas
+   * this change produced. Always present, even when no baseline could be read.
+   */
+  impactPassport: FileImpactPassport;
 }
 
 /** Cohesion before and after a change, from the member wiring the symbol extractor records. */

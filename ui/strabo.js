@@ -20,6 +20,7 @@ import {
   renderEdgeEvidence,
   renderFolderList,
   renderFunctions,
+  renderImpactPassport,
   renderInspector,
   renderLegend,
   renderBranches,
@@ -29,6 +30,7 @@ import {
   renderOverlayPanel,
   renderRepositoryPassport,
   renderReview,
+  renderReviewLoading,
   renderRisk,
   renderShortcuts,
   renderTestsStrip,
@@ -77,6 +79,8 @@ const store = createStore({
     prefix: '',
     filter: '',
     overlay: 'none',
+    /** The edge lens: 'imports' for module coupling, 'calls' for recorded function calls. */
+    edgeKind: 'imports',
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: 'off',
     pathMode: false,
@@ -145,6 +149,9 @@ function readViewPrefs(repository) {
     if (typeof parsed.filter === 'string' && parsed.filter !== '') {
       prefs.filter = parsed.filter.slice(0, 200);
     }
+    if (parsed.edgeKind === 'calls' || parsed.edgeKind === 'imports') {
+      prefs.edgeKind = parsed.edgeKind;
+    }
     return prefs;
   } catch {
     return null;
@@ -155,7 +162,12 @@ function writeViewPrefs() {
   try {
     window.localStorage.setItem(
       viewPrefsKey(state.repository),
-      JSON.stringify({ mode: state.mode, overlay: state.overlay, filter: state.filter }),
+      JSON.stringify({
+        mode: state.mode,
+        overlay: state.overlay,
+        filter: state.filter,
+        edgeKind: state.edgeKind,
+      }),
     );
   } catch {
     // Storage unavailable (private mode, quota): the app simply doesn't persist.
@@ -194,6 +206,10 @@ function applyViewPrefs() {
       state.mode = 'file';
       elements.detail.value = 'file';
     }
+  }
+  // The calls lens only reads edges in file mode.
+  if (prefs.edgeKind === 'calls' && state.mode === 'file') {
+    state.edgeKind = 'calls';
   }
 }
 
@@ -251,6 +267,7 @@ const elements = {
   tbUnits: document.getElementById('tb-units'),
   tbPath: document.getElementById('tb-path'),
   tbBoundaries: document.getElementById('tb-boundaries'),
+  tbCalls: document.getElementById('tb-calls'),
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
@@ -287,6 +304,8 @@ let selectedCommitHash = null;
 let selectedBranchName = null;
 /** The base the Branches panel compares with; null lets the server pick the trunk. */
 let branchBase = null;
+/** True while a branch fetch/push/sync is in flight, so the panel disables its actions. */
+let branchesBusy = false;
 
 let browsedFolder = null;
 
@@ -393,6 +412,7 @@ async function scan({ refresh = false } = {}) {
     view.focusFile(null);
     applyFilterToView();
     applyTierLens();
+    applyEdgeKindLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -411,6 +431,8 @@ async function scan({ refresh = false } = {}) {
     updateOutsideButton();
     applyModeChrome();
     updateUnitsButton();
+    updateEdgeKindButton();
+    updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -590,6 +612,7 @@ function selectNode(id) {
   view.clearEdge();
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
+  updateFocusButton();
   view.highlight(neighbourhood(current, id));
   const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
   if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith('#support')) {
@@ -632,36 +655,52 @@ function selectNode(id) {
   refreshDock();
 }
 
-/** Fetch members and functions for the selected file; symbols are extracted on demand. */
+/** Fetch members, functions, and the impact passport for the selected file; all on demand. */
 async function loadMembers(id) {
   const membersSection = elements.inspector.querySelector('[data-role="members"]');
   const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
-  if (!membersSection && !functionsSection) {
+  const impactSection = elements.inspector.querySelector('[data-role="impact"]');
+  if (!membersSection && !functionsSection && !impactSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
   if (state.repository) {
     params.set('repository', state.repository);
   }
+  const impactParams = new URLSearchParams(params);
   try {
     if (narratorStatus === null) {
       narratorStatus = await fetchNarratorStatus();
     }
-    const response = await fetch(`${API_PATH}/symbols?${params.toString()}`);
-    const result = response.ok
-      ? await response.json()
+    const [symbolsResponse, impactResponse] = await Promise.all([
+      fetch(`${API_PATH}/symbols?${params.toString()}`),
+      fetch(`${API_PATH}/analysis/impact-passport?${impactParams.toString()}`),
+    ]);
+    const result = symbolsResponse.ok
+      ? await symbolsResponse.json()
       : { available: false, detail: 'Symbols are unavailable for this file.' };
+    const impact = impactResponse.ok ? await impactResponse.json() : null;
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
       if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
+      if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
     }
   } catch {
     if (selected === id) {
       const fallback = { available: false, detail: 'Symbols could not be loaded.' };
       if (membersSection) renderMembers(membersSection, fallback);
       if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
+      if (impactSection) renderImpactPassport(impactSection, null);
     }
   }
+}
+
+/** Wrap a single file's passport in the set shape the shared card renderer reads. */
+function impactPassportSet(card) {
+  if (!card || card.path === undefined) {
+    return null;
+  }
+  return { scope: 'file', baseline: card.status === 'added' ? null : 'HEAD', files: [card], totals: null, capped: false };
 }
 
 /** Handlers that let the Functions tab ask the opt-in narrator about the recorded evidence. */
@@ -829,6 +868,7 @@ function clearSelection() {
   closeRisk();
   elements.inspector.hidden = true;
   view.clearGroupSelection();
+  updateFocusButton();
   refreshDock();
 }
 
@@ -1118,6 +1158,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'u' && state.mode === 'system' && state.systemUnit) closeUnit();
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
+  else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
   else if (key === 'v') elements.tbRisk.click();
@@ -1181,6 +1222,7 @@ async function loadBranches() {
   if (result?.available && result.base) branchBase = result.base.name;
   renderBranches(elements.branchesPanel, result, {
     selected: selectedBranchName,
+    busy: branchesBusy,
     onSelect: (branch) => {
       selectBranch(branch.name).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
@@ -1192,10 +1234,53 @@ async function loadBranches() {
         elements.status.textContent = `Error: ${error.message}`;
       });
     },
+    onFetch: () => runBranchAction('fetch', {}),
+    onSync: () => runBranchAction('sync', { branch: result?.current }),
+    onPush: (branch) => runBranchAction('push', { branch: branch.name }),
     onClose: () => {
       elements.branchesPanel.hidden = true;
     },
   });
+}
+
+/**
+ * Run one branch action (fetch, push, or fast-forward sync) and reload the listing.
+ *
+ * The server is the authority: it validates the ref, never force-pushes, and reports a
+ * classified reason. The panel simply shows the message and refreshes its counts.
+ */
+async function runBranchAction(action, payload) {
+  if (branchesBusy) return;
+  if (action === 'sync' && !payload.branch) {
+    elements.status.textContent = 'Sync needs a checked-out branch.';
+    return;
+  }
+  branchesBusy = true;
+  await loadBranches().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+  try {
+    const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+    const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+    }
+    elements.status.textContent = body.available === false
+      ? `${action} failed: ${body.detail}`
+      : body.message;
+  } catch (error) {
+    elements.status.textContent = `Error: ${error.message}`;
+  } finally {
+    branchesBusy = false;
+    await loadBranches().catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  }
 }
 
 /** Review a branch against the panel's base and annotate the map with its impact. */
@@ -1224,7 +1309,20 @@ async function selectCommit(commit) {
 async function showReview(query, commit = null, branchName = null) {
   const separator = query ? '&' : '?';
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
-  const data = await request(`/analysis/review${query}${repository}`);
+  const ticket = ++reviewTicket;
+  elements.reviewPanel.hidden = false;
+  renderReviewLoading(elements.reviewPanel, { onClose: closeReview });
+  let data;
+  try {
+    data = await request(`/analysis/review${query}${repository}`);
+  } catch (error) {
+    if (ticket === reviewTicket) {
+      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview });
+    }
+    throw error;
+  }
+  // The panel was closed, or another review started, while this one was computing.
+  if (ticket !== reviewTicket) return;
 
   currentReview = data;
   if (data.available === false) {
@@ -1244,10 +1342,14 @@ async function showReview(query, commit = null, branchName = null) {
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
 }
 
+/** Bumped by every review request and by closing, so a late response can tell it is stale. */
+let reviewTicket = 0;
+
 function closeReview() {
+  reviewTicket += 1;
   currentReview = null;
   elements.reviewPanel.hidden = true;
-  renderReview(elements.reviewPanel, null, {});
+  elements.reviewPanel.replaceChildren();
 }
 
 /** Review pending working-tree changes: staged, unstaged, and untracked. */
@@ -1450,11 +1552,13 @@ async function openSettings() {
 async function showWorkspace() {
   elements.workspacePanel.hidden = false;
   try {
-    const report = await request('/workspace');
-    renderWorkspace(elements.workspacePanel, report, { onClose: closeWorkspace });
+    workspaceReport = await request('/workspace');
+    workspaceTools.databases = await request('/workspace/databases').catch(() => null);
+    renderWorkspaceView();
     // Ring the files on this map that the report records on one side of a cross-repo flow.
-    view.crossRepo(crossRepoNodeIds(report, (current?.nodes ?? []).map((node) => node.id)));
+    view.crossRepo(crossRepoNodeIds(workspaceReport, (current?.nodes ?? []).map((node) => node.id)));
   } catch (error) {
+    workspaceReport = null;
     renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
     const note = document.createElement('p');
     note.className = 'unavailable';
@@ -1462,6 +1566,86 @@ async function showWorkspace() {
     elements.workspacePanel.append(note);
   }
   refreshDock();
+}
+
+/** The report and the compatibility tools' state; the tools re-render after each action. */
+let workspaceReport = null;
+const workspaceTools = {
+  base: 'HEAD',
+  busy: '',
+  error: '',
+  compat: null,
+  preflight: null,
+  databases: null,
+  live: null,
+  confirming: null,
+  scriptHref: '',
+};
+
+function renderWorkspaceView() {
+  workspaceTools.scriptHref = `${API_PATH}/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}&format=sql`;
+  renderWorkspace(elements.workspacePanel, workspaceReport, {
+    onClose: closeWorkspace,
+    tools: workspaceTools,
+    onBase: (value) => {
+      // Typing must not rebuild the panel, or the field would lose focus.
+      workspaceTools.base = value;
+    },
+    onCompat: () => runWorkspaceTool('comparing revisions', async () => {
+      workspaceTools.compat = await request(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
+    }),
+    onPreflight: () => runWorkspaceTool('building preflight queries', async () => {
+      workspaceTools.preflight = await request(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
+    }),
+    onConfirmRun: (name) => {
+      workspaceTools.confirming = name;
+      renderWorkspaceView();
+    },
+    onCancelRun: () => {
+      workspaceTools.confirming = null;
+      renderWorkspaceView();
+    },
+    onRun: (name) => runWorkspaceTool('running read-only checks', async () => {
+      workspaceTools.confirming = null;
+      workspaceTools.preflight = await postWorkspace('/workspace/preflight/run', {
+        database: name,
+        base: workspaceTools.base || 'HEAD',
+      });
+      workspaceTools.databases = await request('/workspace/databases').catch(() => workspaceTools.databases);
+    }),
+    onLive: (name) => runWorkspaceTool('reading the live schema', async () => {
+      workspaceTools.live = await postWorkspace('/workspace/live/schema', { database: name });
+      workspaceTools.databases = await request('/workspace/databases').catch(() => workspaceTools.databases);
+    }),
+  });
+}
+
+/** Run one tool action with a busy caption, keep any error in the panel, and redraw. */
+async function runWorkspaceTool(label, action) {
+  workspaceTools.busy = label;
+  workspaceTools.error = '';
+  renderWorkspaceView();
+  try {
+    await action();
+  } catch (error) {
+    workspaceTools.error = error.message;
+  } finally {
+    workspaceTools.busy = '';
+    renderWorkspaceView();
+  }
+}
+
+async function postWorkspace(path, body) {
+  const response = await fetch(`${API_PATH}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+  }
+  return payload;
 }
 
 function closeWorkspace() {
@@ -1806,6 +1990,40 @@ function updateSystemNote(model) {
   }
 }
 
+/**
+ * Swap the map between import coupling and the recorded function-call graph.
+ *
+ * Outside file mode there are no call edges, so the lens is forced back to imports rather
+ * than emptying the map; the remembered choice resumes when file mode returns.
+ */
+function applyEdgeKindLens() {
+  view.setEdgeKind(state.mode === 'file' ? state.edgeKind : 'imports');
+}
+
+/**
+ * Toggle the calls lens. It applies without a rescan: call edges are already in the model,
+ * so this only changes which kind the map draws.
+ */
+function toggleEdgeKind() {
+  if (state.mode !== 'file') {
+    return;
+  }
+  state.edgeKind = state.edgeKind === 'calls' ? 'imports' : 'calls';
+  updateEdgeKindButton();
+  applyEdgeKindLens();
+  schedulePrefsSave();
+}
+
+/** The calls button only appears in file mode; its pressed state follows the lens. */
+function updateEdgeKindButton() {
+  if (!elements.tbCalls) {
+    return;
+  }
+  const showCalls = state.mode === 'file' && state.edgeKind === 'calls';
+  elements.tbCalls.classList.toggle('active', showCalls);
+  elements.tbCalls.setAttribute('aria-pressed', String(showCalls));
+}
+
 /** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
 function updateOutsideButton() {
   if (!elements.tbOutside) {
@@ -1828,6 +2046,17 @@ function updateUnitsButton() {
     return;
   }
   elements.tbUnits.hidden = !(state.mode === 'system' && Boolean(state.systemUnit));
+}
+
+/**
+ * Centre-selection only has a target once a node is selected. Left enabled with nothing
+ * selected it reads as a control that does nothing, so it follows the selection instead.
+ */
+function updateFocusButton() {
+  if (!elements.tbFocus) {
+    return;
+  }
+  elements.tbFocus.disabled = !selected;
 }
 
 /**
@@ -2099,6 +2328,9 @@ elements.tbBoundaries.addEventListener('click', () => {
   state.prefix = '';
   scan();
 });
+if (elements.tbCalls) {
+  elements.tbCalls.addEventListener('click', toggleEdgeKind);
+}
 elements.tbBranches.addEventListener('click', () => {
   toggleBranches().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
