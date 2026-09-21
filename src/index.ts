@@ -64,6 +64,21 @@ export {
 export { buildPositions } from './analysis/layout.ts';
 export { blockRegion, topLevelDirectory } from './analysis/directory.ts';
 export { buildBlockViewModel } from './analysis/blocks.ts';
+export {
+  detectUnits,
+  assignUnits,
+  classifyPeriphery,
+  classifyPeripheryAll,
+} from './analysis/units.ts';
+export type { SystemUnit, SystemUnitEcosystem, Periphery } from './analysis/units.ts';
+export { buildSystemReport } from './analysis/system.ts';
+export type {
+  SystemReport,
+  SystemNode,
+  SystemEdge,
+  SystemLayer,
+  SystemCommunity,
+} from './analysis/system.ts';
 export { analyzeModuleDepth } from './analysis/depth.ts';
 export { computeImpact, getChangedFiles, impactFromPaths } from './analysis/impact.ts';
 export type { ImpactResult, ChangedFile } from './analysis/impact.ts';

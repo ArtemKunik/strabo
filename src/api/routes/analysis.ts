@@ -8,6 +8,7 @@ import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
+import { buildSystemReport } from '../../analysis/system.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
@@ -104,6 +105,20 @@ export function createAnalysisRouter(config: StraboConfig): Router {
           limit,
         ),
       );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The System view: build units, the import edges between them, layers inside each unit,
+   * and the support shelf. Every group names the evidence that formed it.
+   */
+  router.get('/analysis/system', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json(buildSystemReport(repository.root, repository.name, cached.report.graph));
     } catch (error) {
       sendError(response, error);
     }

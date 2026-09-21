@@ -26,7 +26,8 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution) |
-| 16 | Logical grouping (System view) | Planned (L1-L8) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L1, L3-L6 backend: `units.ts`, `system.ts`, layers, communities, `GET /analysis/system`; L2, L7, L8, L9-L13 and the System/tier UI remain) |
+| 17 | Module quality and change impact | Planned (Q1-Q8) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -221,8 +222,12 @@ scanner's rules. The facts are cached per fingerprint (`WORKSPACE_CACHE_VERSION`
 `strabo-workspace-3`). Unit coverage is `test/unit/dto.test.ts` and the `analyzeWorkspace`
 case in `test/unit/workspace.test.ts`.
 
-Next: C++ `struct` and Java POJO DTOs, and Kotlin body properties beyond the primary
-constructor.
+**A14 (done)** the remaining DTO shapes. `src/workspace/dto.ts` now reads C++ `struct`s with
+named fields (tagged `struct` only; a `typedef struct { … } Name` has no stable id and is
+skipped), Java POJOs (a class read as a DTO only when it declares instance fields and its
+methods are accessors, constructors, or object protocol — or it carries a Lombok annotation
+that generates the accessors), and Kotlin body properties beyond the primary constructor.
+Unit coverage is the added cases in `test/unit/dto.test.ts`.
 
 ## Phase 12 - Frontend foundation
 
@@ -455,8 +460,13 @@ defect in the running app, not a preference.
   only — block mode already aggregates a directory into a node, so every top-level block
   would land in one island spanning the map.
 
-  Known limit: two deep fixture paths can trim to the same tail (`…om/acme/app`). Revealing
-  the full path needs hover, which needs pointer events on the layer; not done.
+  Two deep fixture paths can trim to the same tail (`…om/acme/app`). Hovering such a plate
+  now reveals the full recorded directory: `islandHit`/`islandTooltipText`
+  (`ui/strabo-islands.js`) pick the smallest plate whose drawn label was trimmed, and the
+  layer shows the full path and member count as a caption. The caption is hit-tested from
+  the painted boxes rather than from pointer events on the plates, so the layer stays
+  `pointer-events: none` and a click on "an island" still clears the selection through the
+  canvas. Unit coverage is in `test/unit/islands.test.ts`.
 
   Spec: `test/acceptance/features/map-legibility.feature` (`@islands`),
   `test/unit/islands.test.ts`.
@@ -561,7 +571,7 @@ evidence (`buildNarratorEvidence`) and the captions (`narratorStatusLabel`,
 says so instead of failing. A browser scenario (`module-passport.feature` `@narrator`) asserts
 the inert path; it needs no endpoint, so it also proves nothing is contacted when unset.
 
-## Phase 16 - Logical grouping (System view)
+## Phase 16 - Logical grouping (System view) and tier lens
 
 Directory islands show where files sit on disk, not how the system is built. On a
 polyglot monorepo (an Android app, several Rust services, a tool with a web UI, scripts)
@@ -626,6 +636,158 @@ order are flagged. **L6** communities per layer with seeded stability, and L2/L3
 **L8** narrator naming of groups, opt-in, under the existing attribution. Acceptance:
 `test/acceptance/features/system-view.feature`, with a polyglot fixture (Gradle app, two
 Cargo crates with an HTTP call between them, a scripts folder).
+
+**Landed so far (L1, L3-L6 backend).** `src/analysis/units.ts` detects units from
+`package.json`, `Cargo.toml`, `pom.xml`, `go.mod`, `pyproject.toml`, `build.gradle(.kts)`,
+and `*.csproj`, names each by the manifest (a workspace-only manifest names no crate and is
+skipped), nests a unit under its nearest enclosing unit root, and gives every file to its
+longest enclosing unit; a file outside every unit falls into the root unit. It also classifies
+support files (tests, scripts, generated, fixtures) with the rule that tripped.
+`src/analysis/system.ts` rolls the graph up into units, aggregates the import edges between
+them with sample specifiers, assigns layers inside each unit (a per-ecosystem path-token
+table names them, recorded import depth orders them, and tokenless files land by depth),
+and detects communities inside a layer with a deterministic greedy-modularity pass and its
+internal-edge ratio. `GET /analysis/system` serves the report. Unit coverage is
+`test/unit/system.test.ts`. Still to do: L2 chain compression / unit-anchored labels, L7
+`strabo.groups.yml`, L8 narrator group naming, the System mode UI at L0, and the tier lens.
+
+### Tier lens
+
+Units answer "what is deployed"; **tiers** cut across units and answer "what role does
+this code play". Three backend crates and an Android app each still split into API,
+domain, and data code. Tiers: **Frontend**, **API surface**, **Domain/service**, **Data**,
+**Integration** (outbound HTTP, queues, SDK clients), **Infra/config**, **Build/tooling**,
+and **Tests**.
+
+Each file gets one primary tier from its strongest evidence, and shows that evidence:
+
+1. *Framework imports*: `axum` / `actix` / `express` / Spring Web routers → API; `sqlx` /
+   `diesel` / `Room` / JPA / Prisma → Data; `react` / `androidx.compose` / SwiftUI →
+   Frontend; `reqwest` / `retrofit` / `fetch` / message-queue clients → Integration.
+2. *Annotations and macros*: `#[get("/…")]`, `@RestController`, `@Entity`, `@Dao`,
+   `@Composable`.
+3. *Recorded endpoints*: a file that declares a route or implements an OpenAPI operation
+   is API (reusing Phase 11 service flows).
+4. *File kinds*: `.sql`, `migrations/`, `.proto`, OpenAPI documents, `Dockerfile`, k8s /
+   Helm / Terraform, CI workflows.
+5. *Path tokens* (`handlers`, `routes`, `ui/screen`, `repository`, `db`) as a fallback only,
+   labelled as the weakest evidence.
+
+A file with strong evidence for two tiers is flagged **mixed** (e.g. a handler that runs
+SQL directly) rather than forced into one tier. A file with no evidence is `unclassified`,
+never guessed. `strabo.groups.yml` can declare tiers by glob, and a declared tier overrides
+the derived one and says so. The rule tables are per ecosystem and live beside the
+language registry, so adding a framework is data, not code.
+
+Units get a **role** from the same evidence: *app* (has a Frontend tier or a mobile/desktop
+entry), *service* (has an API tier and a server entry), *library* (only imported), *tool*
+(a CLI entry or under `tools/` / `scripts/`). L0 boxes are drawn and captioned by role.
+
+Views:
+
+- **Tier × unit matrix**: rows are tiers in dependency order (Frontend on top, Data at the
+  bottom, Infra/Build to the side), columns are units. Each cell shows file count,
+  complexity, and hotspot count, and edges run between cells. An empty cell is
+  information too (a service with no Data tier, an app with no tests).
+- **Tier colour and filter** on the file map: colour by tier instead of top-level directory,
+  or show one tier only. It stays within the Phase 13 colour budget (eight tier hues max,
+  with `unclassified` neutral).
+- **Direction check**: a downward edge is expected. An **upward** edge (Data → API,
+  Domain → Frontend) and a **skip-layer** edge (Frontend → Data, API → Data with no Domain
+  in between, where the unit has a Domain tier) are flagged with the import line.
+- **Per-tier stats**: share of files, complexity, churn, test reach, and hotspot share per
+  tier, e.g. *Data: 12% of files, 40% of hotspots, 20% test reach*.
+
+**End-to-end trace** across tiers: screen → outbound HTTP call → endpoint → handler →
+repository → table. Frontend and integration calls already match endpoints through service
+flows. Table names come from migrations (`CREATE TABLE`, `ALTER TABLE`), from ORM entity
+declarations (`@Entity`, `#[derive(FromRow)]`, `@Table`), and from string-literal SQL
+(`FROM` / `INTO` / `UPDATE` / `JOIN <name>`), each labelled with its evidence. Dynamic SQL
+or a table reached only through a query builder is `unavailable`. That answers "which
+screens touch the `skills` table?" and gives Phase 17 a schema-change impact from a
+migration all the way up to the UI.
+
+Tier-lens slices: **L9** tier classification (`src/analysis/tiers.ts`) with per-ecosystem
+rule tables, `mixed` / `unclassified`, declared overrides, and unit roles. **L10**
+`GET /analysis/tiers` plus the tier colour mode and tier filter on the file map. **L11** the
+tier × unit matrix with per-cell and per-tier stats. **L12** the direction check (upward and
+skip-layer edges) as an overlay and in the unit swim lanes. **L13** table extraction and the
+end-to-end trace (screen → endpoint → handler → repository → table). Acceptance:
+`test/acceptance/features/tier-lens.feature`, with a fixture of a React client, an Axum
+service with a handler that queries SQL directly (flagged `mixed` and skip-layer), a
+migration, and a CI workflow.
+
+## Phase 17 - Module quality and change impact
+
+The Module Passport shows four graph counts. The measures needed to judge a module
+already exist but are scattered (`file-health.ts`, `signals.ts` / `hotspots.ts`,
+`depth.ts`, `cycles.ts`, `coverage.ts`, `ownership.ts`, `change-passport.ts`,
+`review.ts`). This phase brings them together per module, ranks each one against the
+repository, derives smells from them, and turns pending changes into a tiered impact.
+Every number links to its evidence, and anything the scan cannot prove stays `unavailable`.
+
+**Edge accuracy first.** A Rust `mod x;` in the crate root only declares the module tree,
+yet it is recorded as an import, so the root appears to depend on every module and blast
+radius is inflated (a file with 2 importers reporting a blast radius of 39). Edges get a
+kind: `use` (a real dependency) or `declare` (Rust `mod`, Python `__init__` re-exports, TS
+barrel `index.ts`). Blast radius and impact follow `use` edges only. `declare` edges are
+still shown but not counted.
+
+**Measures**, each shown as a repository percentile plus its raw value:
+
+- *Complexity*: LOC, function count, sum and max decision points, max nesting, and the
+  share of functions that trip a Phase 14 signal.
+- *Shape*: cohesion (LCOM proxy), member count, interface width, deep / shallow /
+  pass-through (`depth.ts`), and instability `I = out / (in + out)`.
+- *Centrality*: direct importers, blast radius (use edges), transitive dependencies, and
+  cycle membership.
+- *Evolution*: churn (commits in 90 days), author count and ownership fragmentation, and
+  **co-change partners with no import path** (hidden coupling), from `git log`.
+- *Protection*: tests that reach the module, and the share of its dependents that are tested.
+
+**Smells** are rules over those measures. Each shows the inputs that tripped it and is a
+signal, not a verdict: god module (size, members and importers high, cohesion low), hub
+dependency (high in-degree and out-degree), unstable dependency (depends on a more unstable
+module, per Martin's stable-dependencies principle), shotgun surgery (usually changes with
+≥ N files it does not import), hidden coupling (≥ 50% co-change with no import path),
+cyclic (in a strongly connected component, with the smallest edge to cut), tier leak
+(`mixed` tier, or an upward or skip-layer edge from the Phase 16 tier lens), dead (no
+use-importers, not an entry point, not a test), and pass-through. Feature envy needs
+cross-file identifier resolution, so it stays `unavailable`.
+
+**Composite scores**: *hotspot* = complexity percentile × churn percentile (after
+Tornhill), and *risk* = hotspot × blast-radius percentile × (1 − test reach). Both come
+with their inputs and are drawn on a complexity-vs-churn quadrant with the repository as
+faint dots.
+
+**Pending change.** When the file is dirty or staged, the passport shows:
+
+1. *Functions touched*: diff hunks mapped onto recorded function spans, with before → after
+   decision points, nesting, and signals introduced or resolved. This extends the change
+   passport, which today compares only cohesion.
+2. *Public surface*: exported or `pub` symbols added, removed, or with changed signatures.
+3. *Tiered impact*: **definite** (importers whose recorded specifier names a changed symbol,
+   e.g. `crate::store_skills::InMemorySkillStore`), **possible** (other direct importers),
+   and **reachable** (the transitive set over use edges), instead of one flat blast radius.
+4. *Structural deltas*: import edges added or removed, a new cycle, a fan-out change, and a
+   layer violation once Phase 16 lands.
+   A change to a migration or entity reports its **schema impact**: the tables touched,
+   and through the Phase 16 table trace, the repositories, endpoints, and screens above them.
+5. *Tests*: the tests that reach the change (the ones to run) and the affected dependents
+   no test reaches.
+6. *Change risk*: lines touched × complexity of touched functions × definite-impact size ×
+   untested share, shown with its inputs.
+
+Slices: **Q1** edge kinds (`use` / `declare`) in the resolvers, and blast radius and impact
+over use edges only. **Q2** a percentile scorecard in the passport built from the existing
+measures. **Q3** hunk → function mapping and per-function metric and signal deltas in the
+change passport. **Q4** public-surface diff per extractor language and the definite /
+possible / reachable impact tiers. **Q5** churn, author and co-change history from
+`git log` (bounded window, cached by fingerprint). **Q6** hotspot and risk scores and the
+quadrant. **Q7** smell rules with their tripping inputs, plus a repository-wide smells
+overlay. **Q8** the pending-change risk summary and the tests to run. Acceptance:
+`test/acceptance/features/module-quality.feature`, with a Rust fixture that proves `mod`
+declarations no longer inflate blast radius.
 
 ## Phase 6 - Release readiness
 
