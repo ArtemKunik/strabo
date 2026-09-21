@@ -972,6 +972,8 @@ function renderSettingsView() {
     },
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
+    onToggleWidening: (value) =>
+      saveServerSettings({ allowCeilingWidening: value }, 'Ceiling widening updated.'),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
   });
 }

@@ -454,9 +454,9 @@ export interface StraboConfig {
   /**
    * Permit `PUT /settings` to widen `scanCeiling` beyond its startup value.
    *
-   * The environment variable only ever narrows the read boundary; without this opt-in
-   * the running process cannot grow its own boundary through the settings route. Off by
-   * default, so an operator must deliberately enable runtime widening.
+   * Seeded from `STRABO_ALLOW_CEILING_WIDENING`, but the operator can toggle it at runtime
+   * and the app persists the choice, so the environment is only the initial default. Off by
+   * default, so a fresh process cannot grow its own read boundary without an explicit opt-in.
    */
   allowCeilingWidening?: boolean;
   integrations?: StraboIntegrations;

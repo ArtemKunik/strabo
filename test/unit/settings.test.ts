@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
-import { createStraboRouter } from '../../src/index.ts';
+import { createSettingsStore, createStraboRouter } from '../../src/index.ts';
 import type { StraboConfig } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -43,10 +43,20 @@ function makeConfig(): StraboConfig {
   };
 }
 
-async function mount(config: StraboConfig): Promise<string> {
+/** A fresh settings file per mount, so tests never read a real state directory. */
+function freshSettingsFile(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-settings-'));
+  tempDirs.push(dir);
+  return path.join(dir, 'strabo-settings.json');
+}
+
+async function mount(config: StraboConfig, settingsFile = freshSettingsFile()): Promise<string> {
   const host = express();
   host.use(express.json());
-  host.use('/api/strabo', createStraboRouter(config));
+  host.use(
+    '/api/strabo',
+    createStraboRouter(config, undefined, createSettingsStore({ file: settingsFile })),
+  );
   return listen(host);
 }
 
@@ -186,4 +196,83 @@ test('PUT /settings toggles the online risk lookup and rejects a non-boolean', a
     body: JSON.stringify({ riskOnline: 'yes' }),
   });
   assert.equal(bad.status, 400);
+});
+
+test('PUT /settings enables widening at runtime without an environment opt-in', async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
+  tempDirs.push(outside);
+  const base = await mount(makeConfig());
+
+  // Refused before the opt-in, exactly as when the environment gate is absent.
+  const denied = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: outside }),
+  });
+  assert.equal(denied.status, 400);
+
+  const enabled = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowCeilingWidening: true }),
+  });
+  assert.equal(enabled.status, 200);
+
+  const widened = await fetch(`${base}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: outside }),
+  });
+  assert.equal(widened.status, 200);
+  assert.equal(((await widened.json()) as { scanCeiling: string }).scanCeiling, path.resolve(outside));
+});
+
+test('persisted settings are re-applied when the server starts again', async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-ceiling-'));
+  tempDirs.push(outside);
+  const settingsFile = freshSettingsFile();
+
+  const first = await mount(makeConfig(), settingsFile);
+  await fetch(`${first}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ allowCeilingWidening: true }),
+  });
+  await fetch(`${first}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: outside, riskOnline: true }),
+  });
+
+  // A fresh config from the same environment, sharing only the persisted file.
+  const config = makeConfig();
+  const second = await mount(config, settingsFile);
+  const settings = (await (await fetch(`${second}/api/strabo/settings`)).json()) as {
+    scanCeiling: string;
+    riskOnline: boolean;
+    allowCeilingWidening: boolean;
+  };
+  assert.equal(settings.scanCeiling, path.resolve(outside));
+  assert.equal(settings.riskOnline, true);
+  assert.equal(settings.allowCeilingWidening, true);
+  assert.equal(config.scanCeiling, path.resolve(outside));
+});
+
+test('resetting the ceiling clears the persisted override', async () => {
+  const settingsFile = freshSettingsFile();
+  const first = await mount(makeConfig(), settingsFile);
+  await fetch(`${first}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: path.join(fixtures, 'block-repo') }),
+  });
+  await fetch(`${first}/api/strabo/settings`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ scanCeiling: null }),
+  });
+
+  const second = await mount(makeConfig(), settingsFile);
+  const settings = (await (await fetch(`${second}/api/strabo/settings`)).json()) as { scanCeiling: string };
+  assert.equal(settings.scanCeiling, fixtures);
 });

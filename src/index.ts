@@ -101,7 +101,7 @@ export type {
   PassportEntryPoint,
   PassportCycle,
 } from './analysis/passport.ts';
-export { createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
+export { applyPersistedSettings, createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
 export type { StraboSettings } from './api/routes/settings.ts';
 
 export { readWorkspaceConfig, resolveWorkspaceRepositories } from './workspace/config.ts';
@@ -187,6 +187,12 @@ export {
   REPOSITORY_STORE_VERSION,
 } from './state/repository-store.ts';
 export type { KnownRepository, RepositoryStore } from './state/repository-store.ts';
+export {
+  createSettingsStore,
+  settingsStorePath,
+  SETTINGS_STORE_VERSION,
+} from './state/settings-store.ts';
+export type { PersistedSettings, SettingsStore } from './state/settings-store.ts';
 export { getVulnerabilities } from './integrations/vulnerability.ts';
 export { getLineage } from './integrations/lineage-pack.ts';
 

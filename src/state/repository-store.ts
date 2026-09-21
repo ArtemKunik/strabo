@@ -42,7 +42,7 @@ interface StoreFile {
  * State lives outside the scanned repository for the same reason the cache does: writing
  * it inside would dirty the working tree and make the scan fingerprint self-invalidating.
  */
-function stateRoot(): string {
+export function stateRoot(): string {
   const configured = process.env.STRABO_STATE_DIR?.trim() || process.env.STRABO_CACHE_DIR?.trim();
   return configured ? path.resolve(configured) : path.join(os.tmpdir(), 'strabo-cache');
 }

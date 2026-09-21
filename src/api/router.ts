@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { browseDirectories } from '../boundary/browse.ts';
 import { loadCatalogue } from '../integrations/catalogue.ts';
 import { createRepositoryStore, type RepositoryStore } from '../state/repository-store.ts';
+import { createSettingsStore, type SettingsStore } from '../state/settings-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
 import { createDelegateRouter } from './routes/delegate.ts';
 import { createGraphRouter } from './routes/graph.ts';
@@ -24,7 +25,11 @@ import { sendError } from './http.ts';
  * A host may inject its own repository store so known repositories are shared rather
  * than re-read from disk on every mount.
  */
-export function createStraboRouter(config: StraboConfig, store?: RepositoryStore): Router {
+export function createStraboRouter(
+  config: StraboConfig,
+  store?: RepositoryStore,
+  settingsStore?: SettingsStore,
+): Router {
   const router = Router();
   const repositoryStore = store ?? createRepositoryStore();
 
@@ -61,7 +66,7 @@ export function createStraboRouter(config: StraboConfig, store?: RepositoryStore
   router.use(createNarratorRouter(config));
   router.use(createSymbolsRouter(config));
   router.use(createRepositoriesRouter(config, repositoryStore));
-  router.use(createSettingsRouter(config));
+  router.use(createSettingsRouter(config, settingsStore));
   router.use(createVulnerabilityRouter(config));
   router.use(createLineageRouter(config));
   router.use(createWorkspaceRouter(config));

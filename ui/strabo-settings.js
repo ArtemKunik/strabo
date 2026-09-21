@@ -2,10 +2,9 @@
  * The Settings panel: client preferences and the runtime server settings.
  *
  * Client preferences (theme, default detail, labels, reduce motion) live in localStorage
- * and take effect immediately. Server settings (the scan ceiling and the online risk
- * switch) are read from `/settings` and written back with `PUT /settings`; they are
- * process-local, so the panel says a restart restores the environment values rather than
- * implying persistence.
+ * and take effect immediately. Server settings (the scan ceiling, the widening opt-in, and
+ * the online risk switch) are read from `/settings` and written back with `PUT /settings`;
+ * the server persists them, so they survive a restart.
  *
  * `applyAppearance` is the only place that touches the document: it resolves the theme
  * (including `system`) to `dark`/`light`, sets `data-theme`, and sets `data-reduce-motion`
@@ -169,9 +168,10 @@ function note(text) {
  * Render the settings form into `container`.
  *
  * `handlers.onPref(key, value)` is called for every client preference change;
- * `onSaveCeiling(valueOrNull)` and `onToggleRisk(boolean)` return promises and may reject
- * with an `Error` whose message is shown inline. The controller re-renders afterwards,
- * so this function does not keep its own copy of the server values.
+ * `onSaveCeiling(valueOrNull)`, `onToggleWidening(boolean)`, and `onToggleRisk(boolean)`
+ * return promises and may reject with an `Error` whose message is shown inline. The
+ * controller re-renders afterwards, so this function does not keep its own copy of the
+ * server values.
  */
 export function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
@@ -220,12 +220,13 @@ export function renderSettings(container, handlers = {}) {
     ceilingRow.append(ceilingInput, saveButton, resetButton);
     remote.append(field('Scan ceiling', ceilingRow));
 
-    const remoteNote = note(
-      server.allowCeilingWidening
-        ? 'Applies immediately and may widen the read boundary (STRABO_ALLOW_CEILING_WIDENING is on). Reset after a restart.'
-        : 'Applies immediately; narrowing is allowed, widening beyond the startup boundary is refused unless STRABO_ALLOW_CEILING_WIDENING is set. Reset after a restart.',
+    remote.append(
+      note(
+        server.allowCeilingWidening
+          ? 'Saved on the server: the read boundary may be narrowed or widened, and the change survives a restart.'
+          : 'Saved on the server: narrowing applies immediately and survives a restart. Widening past the current boundary needs "Allow widening".',
+      ),
     );
-    remote.append(remoteNote);
 
     const statusLine = document.createElement('p');
     statusLine.className = 'setting-status';
@@ -257,6 +258,19 @@ export function renderSettings(container, handlers = {}) {
         });
     });
 
+    remote.append(
+      field(
+        'Allow widening',
+        checkboxInput(server.allowCeilingWidening, (value) => {
+          Promise.resolve(handlers.onToggleWidening?.(value)).catch((error) =>
+            report(error.message ?? 'Could not change ceiling widening.', true),
+          );
+        }),
+      ),
+    );
+    remote.append(
+      note('Permits the scan ceiling to grow beyond the boundary the server started with.'),
+    );
     remote.append(
       field(
         'Online risk lookup',
