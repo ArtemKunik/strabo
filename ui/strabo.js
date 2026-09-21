@@ -10,7 +10,7 @@
  * catalogue, layout, evidence, and drill-down states without host globals.
  */
 
-import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex } from './strabo-core.js';
+import { API_PATH, buildAgentPrompt, buildGraphQuery, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, tierOfFile } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -70,6 +70,8 @@ const store = createStore({
     prefix: '',
     filter: '',
     overlay: 'none',
+    /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
+    tier: 'off',
     pathMode: false,
     pathFrom: null,
     renderedGeneration: 0,
@@ -202,6 +204,7 @@ const elements = {
   filterClear: document.getElementById('filter-clear'),
   filterCount: document.getElementById('filter-count'),
   overlay: document.getElementById('overlay'),
+  tier: document.getElementById('tier'),
   overlayPanel: document.getElementById('overlay-panel'),
   edgePanel: document.getElementById('edge-panel'),
   reviewPanel: document.getElementById('review-panel'),
@@ -338,6 +341,7 @@ async function scan({ refresh = false } = {}) {
     store.set('ui', { node: null });
     view.render(model);
     applyFilterToView();
+    applyTierLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -447,6 +451,40 @@ function applyFilterToView() {
   if (current) {
     renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
   }
+}
+
+/**
+ * The tier lens: colour the file map by tier, and optionally keep one tier.
+ *
+ * The report is fetched once per render and cached, so switching the filter does not re-read
+ * the repository. Tiers are per file, so block and system modes clear the lens rather than
+ * colour an aggregate.
+ */
+let tierReportCache = { generation: -1, report: null };
+
+async function applyTierLens() {
+  if (state.tier === 'off' || !current || current.system || current.prefixLength !== undefined) {
+    view.applyTier(null);
+    return;
+  }
+  const generation = state.renderedGeneration;
+  if (tierReportCache.generation !== generation || !tierReportCache.report) {
+    try {
+      const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+      const response = await fetch(`${API_PATH}/analysis/tiers${query}`);
+      tierReportCache = {
+        generation,
+        report: response.ok ? await response.json() : null,
+      };
+    } catch {
+      tierReportCache = { generation, report: null };
+    }
+  }
+  if (!current || state.tier === 'off' || state.renderedGeneration !== generation) {
+    view.applyTier(null);
+    return;
+  }
+  view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
 }
 
 function selectNode(id) {
@@ -1385,6 +1423,20 @@ elements.detail.addEventListener('change', () => {
   writeViewPrefs();
   scan();
 });
+if (elements.tier) {
+  elements.tier.addEventListener('change', () => {
+    state.tier = elements.tier.value;
+    // The tier lens is per file; the aggregate modes switch to file detail to show it.
+    if (state.tier !== 'off' && state.mode !== 'file') {
+      state.mode = 'file';
+      elements.detail.value = 'file';
+      writeViewPrefs();
+      scan();
+      return;
+    }
+    applyTierLens();
+  });
+}
 elements.refresh.addEventListener('click', () => scan({ refresh: true }));
 elements.overlay.addEventListener('change', () => {
   state.overlay = elements.overlay.value;

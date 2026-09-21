@@ -43,6 +43,12 @@ import {
   reviewOverlay,
   shortcutSheet,
   summarizeDiagnostics,
+  tierClass,
+  tierColorVar,
+  tierFilterIds,
+  tierOfFile,
+  tierSummaryLabel,
+  tierSummaryRows,
   topLevelDirectory,
 } from '../../ui/strabo-core.js';
 import {
@@ -387,6 +393,37 @@ test('buildGroupNamingEvidence reports only recorded unit facts', () => {
   assert.match(evidence, /Support files folded into its shelf: 2/);
   assert.match(evidence, /Recorded imports: ledger-core/);
   assert.match(GROUP_NAMING_INSTRUCTION, /do not create, merge, or split/i);
+});
+
+test('the tier helpers map a report to classes, colours, and a filter set', () => {
+  const report = {
+    files: [
+      { file: 'src/handlers/a.ts', tier: 'api' },
+      { file: 'src/data/b.ts', tier: 'data' },
+      { file: 'src/thing.ts', tier: 'unclassified' },
+    ],
+    summary: { frontend: 0, api: 1, domain: 0, data: 1, integration: 0, infra: 0, build: 0, tests: 0, unclassified: 1, total: 3, mixed: 0 },
+  };
+
+  assert.equal(tierClass('api'), 'tier-api');
+  assert.equal(tierClass('nonsense'), 'tier-unclassified');
+  assert.equal(tierColorVar('data'), 'var(--tier-data)');
+  assert.equal(tierColorVar('unclassified'), 'var(--series-other)');
+
+  const map = tierOfFile(report);
+  assert.equal(map.get('src/handlers/a.ts'), 'api');
+  assert.equal(tierFilterIds(map, 'all').size, 3);
+  assert.deepEqual([...tierFilterIds(map, 'data')], ['src/data/b.ts']);
+
+  assert.deepEqual(
+    tierSummaryRows(report).map((row) => [row.tier, row.count, row.color]),
+    [
+      ['api', 1, 'var(--tier-api)'],
+      ['data', 1, 'var(--tier-data)'],
+      ['unclassified', 1, 'var(--series-other)'],
+    ],
+  );
+  assert.equal(tierSummaryLabel(report), '3 file(s) classified · 1 unclassified');
 });
 
 test('mapCounts lists units in system mode', () => {

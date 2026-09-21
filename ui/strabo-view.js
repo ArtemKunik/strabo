@@ -9,6 +9,7 @@
 import {
   LABEL_INSET,
   SHAPES,
+  TIER_ORDER,
   buildElements,
   diffGraph,
   fitLabel,
@@ -27,12 +28,14 @@ const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached'
  */
 const RESET_CLASSES = [
   ...OVERLAY_CLASSES,
+  ...TIER_ORDER.map((tier) => `tier-${tier}`),
   'hover',
   'edge-selected',
   'dimmed',
   'edge-faded',
   'label-hidden',
   'filtered-out',
+  'tier-hidden',
 ];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
@@ -307,6 +310,33 @@ export function createView(container) {
       islandVisible = keep;
       repaintIslands();
       applyLabelBudget(cy, true);
+    },
+    /**
+     * Colour nodes by tier and optionally hide every other tier.
+     *
+     * `tierByFile` is a file → tier map, or null to clear the lens. A tier of `all` colours
+     * without filtering. `tier-hidden` is separate from the text filter's `filtered-out`, so
+     * the two filters compose instead of clearing each other.
+     */
+    applyTier(tierByFile, filterTier = 'all') {
+      const enabled = tierByFile instanceof Map;
+      cy.batch(() => {
+        for (const node of cy.nodes()) {
+          for (const tier of TIER_ORDER) {
+            node.removeClass(`tier-${tier}`);
+          }
+          if (!enabled) {
+            node.removeClass('tier-hidden');
+            continue;
+          }
+          const tier = tierByFile.get(node.id());
+          if (tier) {
+            node.addClass(`tier-${tier}`);
+          }
+          const keep = filterTier === 'all' || tier === filterTier;
+          node.toggleClass('tier-hidden', !keep);
+        }
+      });
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
@@ -797,6 +827,10 @@ function graphTheme() {
     affected: cssVar('--graph-affected'),
     cycle: cssVar('--graph-cycle'),
     unreached: cssVar('--graph-unreached'),
+    tier: Object.fromEntries(
+      TIER_ORDER.filter((tier) => tier !== 'unclassified').map((tier) => [tier, cssVar(`--tier-${tier}`)]),
+    ),
+    tierUnclassified: cssVar('--series-other'),
   };
 }
 
@@ -805,6 +839,12 @@ function stylesheet() {
   const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
     selector: `node.kind-${kind}`,
     style: { shape },
+  }));
+  const tierRules = TIER_ORDER.map((tier) => ({
+    selector: `node.tier-${tier}`,
+    style: {
+      'background-color': tier === 'unclassified' ? theme.tierUnclassified : theme.tier[tier],
+    },
   }));
 
   return [
@@ -836,6 +876,8 @@ function stylesheet() {
       },
     },
     ...kindRules,
+    // The tier lens colours the fill; the neutral node fill is the default when it is off.
+    ...tierRules,
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
     { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -854,6 +896,7 @@ function stylesheet() {
     { selector: 'node.ov-cross-repo', style: { 'border-width': 4, 'border-style': 'dotted', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
+    { selector: 'node.tier-hidden', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
     {
       selector: 'edge',
