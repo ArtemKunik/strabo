@@ -46,3 +46,39 @@ export function computeCoverage(graph: Graph): TestReachResult {
     unreachedWithDependents,
   };
 }
+
+/**
+ * Map each file to the test files whose forward closure reaches it: the tests to run.
+ *
+ * The same reachability as `computeCoverage`, kept per test so a change can name the tests
+ * that cover it rather than a boolean. A test file maps to itself, so changing a test lists it.
+ */
+export function computeTestReachByFile(graph: Graph): Map<string, string[]> {
+  const { forward } = buildAdjacency(graph);
+  const testFiles = graph.nodes.filter((node) => node.kind === 'test').map((node) => node.id);
+  const byFile = new Map<string, string[]>();
+
+  for (const testFile of testFiles) {
+    const seen = new Set<string>([testFile]);
+    const stack = [testFile];
+    while (stack.length > 0) {
+      const next = stack.pop() as string;
+      const list = byFile.get(next) ?? [];
+      if (!list.includes(testFile)) {
+        list.push(testFile);
+      }
+      byFile.set(next, list);
+      for (const dependency of forward.get(next) ?? []) {
+        if (!seen.has(dependency)) {
+          seen.add(dependency);
+          stack.push(dependency);
+        }
+      }
+    }
+  }
+
+  for (const list of byFile.values()) {
+    list.sort();
+  }
+  return byFile;
+}

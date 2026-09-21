@@ -200,14 +200,15 @@ function readingLegend(model) {
 }
 function shortcutSheet() {
   return [
-    { keys: "F", action: "Focus the selection" },
-    { keys: "I", action: "Trace change impact" },
-    { keys: "P", action: "Start a path between two nodes" },
+    { keys: "F", action: "Center the selection" },
+    { keys: "I", action: "Show change impact" },
+    { keys: "O", action: "Show the selected file\u2019s links to other units" },
+    { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
     { keys: "T", action: "Timeline" },
     { keys: "R", action: "Review working-tree changes" },
     { keys: "V", action: "Dependency risk" },
-    { keys: "G", action: "Delegate a selected group" },
+    { keys: "G", action: "Delegate the selected files" },
     { keys: "\u2318K / ctrl-K", action: "Filter paths" },
     { keys: "Esc", action: "Clear the selection or close a panel" },
     { keys: "?", action: "Show this sheet" },
@@ -817,6 +818,8 @@ function overlayFor(kind, data) {
       return moduleDepthOverlay(data);
     case "ownership":
       return ownershipOverlay(data);
+    case "smells":
+      return smellsOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
@@ -853,6 +856,19 @@ function ownershipOverlay(contexts) {
     items: list.slice(0, 200).map(
       (entry) => `${entry.file} \xB7 ${entry.distinctAuthors} author(s) \xB7 ${entry.commits} commit(s) \xB7 ${entry.transitiveDependents} dependent(s)`
     )
+  };
+}
+function smellsOverlay(report) {
+  const files = Array.isArray(report?.files) ? report.files : [];
+  const classes = /* @__PURE__ */ new Map();
+  for (const entry of files) {
+    classes.set(entry.file, "ov-smell");
+  }
+  const counts = Object.entries(report?.summary ?? {}).filter(([, count]) => Number(count) > 0).map(([rule, count]) => `${count} ${rule}`).join(" \xB7 ");
+  return {
+    classes,
+    summary: `${files.length} file(s) with a smell${counts ? ` \xB7 ${counts}` : ""}`,
+    items: files.slice(0, 200).map((entry) => `${entry.file} \xB7 ${(entry.smells ?? []).map((smell) => smell.rule).join(", ")}`)
   };
 }
 function hotspotsOverlay(report) {
@@ -948,6 +964,60 @@ function architectureOverlay(report) {
       (axis) => axis.value === null ? `${axis.label}: unavailable (${axis.detail})` : `${axis.label}: ${axis.value}/100 (${axis.detail})`
     )
   };
+}
+function metricDelta(before, after, { moreIsWorse = true } = {}) {
+  if (before === null || before === void 0 || after === null || after === void 0) {
+    return { tone: "none", delta: null, text: "\u2014" };
+  }
+  const delta = after - before;
+  if (delta === 0) {
+    return { tone: "flat", delta, text: "\xB10" };
+  }
+  const rising = delta > 0;
+  return {
+    tone: rising === moreIsWorse ? "worse" : "better",
+    delta,
+    text: rising ? `+${delta}` : `\u2212${-delta}`
+  };
+}
+function changeMetricSummary(totals) {
+  if (!totals) {
+    return "Change metrics unavailable.";
+  }
+  const parts = [];
+  if (totals.measured > 0) {
+    const { before, after, added, removed } = totals.complexity;
+    parts.push(`complexity +${added} \u2212${removed} (${before} \u2192 ${after})`);
+    if (totals.functions.before !== totals.functions.after) {
+      parts.push(`functions ${totals.functions.before} \u2192 ${totals.functions.after}`);
+    }
+    const signals = metricDelta(totals.signals.before, totals.signals.after);
+    if (signals.delta) {
+      parts.push(`signals ${signals.text}`);
+    }
+  } else {
+    parts.push("complexity not measured");
+  }
+  parts.push(`coupling +${totals.coupling.added} \u2212${totals.coupling.removed} import(s)`);
+  return parts.join(" \xB7 ");
+}
+function commitMetricBadge(totals) {
+  if (!totals) {
+    return null;
+  }
+  const complexity = totals.measured > 0 ? metricDelta(totals.complexity.before, totals.complexity.after) : null;
+  const couplingNet = totals.coupling.added - totals.coupling.removed;
+  const coupling = metricDelta(0, couplingNet);
+  const complexityText = complexity ? `cx ${complexity.text}` : "cx \u2014";
+  return {
+    text: `${complexityText} \xB7 cpl ${coupling.text}`,
+    title: `${changeMetricSummary(totals)} \xB7 ${totals.files} file(s)`,
+    tone: complexity?.tone === "worse" || coupling.tone === "worse" ? "worse" : complexity?.tone === "better" ? "better" : "flat"
+  };
+}
+function orderMetricFiles(files) {
+  const weight = (file) => (file.complexityChange ? file.complexityChange.added + file.complexityChange.removed : 0) + (file.importsAdded?.length ?? 0) + (file.importsRemoved?.length ?? 0) + Math.abs(file.fanInDelta ?? 0);
+  return [...files ?? []].sort((a, b) => weight(b) - weight(a) || a.path.localeCompare(b.path));
 }
 
 // ui/strabo-member-map.js
@@ -1258,7 +1328,7 @@ function buildAgentPrompt({ agent, repository, target }) {
 }
 
 // ui/strabo-view.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
   ...TIER_ORDER.map((tier) => `tier-${tier}`),
@@ -1949,6 +2019,8 @@ function stylesheet() {
     // reserved status scale and differs by shape (double vs dashed), never hue alone.
     { selector: "node.tier-upward", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
+    // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
+    { selector: "node.ov-smell", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -2305,10 +2377,12 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     };
     const placeInRail = () => {
       const railWidth = win.offsetWidth || width;
+      const height = win.offsetHeight || fallbackHeight;
       const top = firstFreeRailTop();
-      const available = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+      const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
+      const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
       win.style.maxHeight = `${available}px`;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, top);
+      place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
     };
     const position = saved.position ?? config.position ?? {};
     if (config.center) {
@@ -2336,6 +2410,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
     updateCollapseChrome();
     let lastHidden = null;
+    const raise = () => {
+      topZ += 1;
+      win.style.zIndex = String(topZ);
+    };
     const sync2 = () => {
       const hidden = element.hidden === true;
       win.hidden = hidden;
@@ -2351,6 +2429,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         renderDock();
         if (!hidden) {
           if (!hasPosition) placeInRail();
+          raise();
           flashChip(config.key);
         }
       }
@@ -2362,10 +2441,6 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       subtree: true,
       characterData: true
     });
-    const raise = () => {
-      topZ += 1;
-      win.style.zIndex = String(topZ);
-    };
     const controller = {
       key: config.key,
       window: win,
@@ -4566,6 +4641,15 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     meta.className = "evidence";
     meta.textContent = `${commit.author} \xB7 ${commit.date.slice(0, 10)}`;
     item.append(meta);
+    const badge = commitMetricBadge(options.metrics?.get(commit.hash) ?? null);
+    if (badge) {
+      const metric = document.createElement("span");
+      metric.className = `metric-delta ${badge.tone}`;
+      metric.dataset.role = "commit-metrics";
+      metric.textContent = badge.text;
+      metric.title = badge.title;
+      item.append(metric);
+    }
     list.append(item);
   }
   container.append(list);
@@ -4643,6 +4727,7 @@ function renderReview(container, result, handlers = {}) {
     }
     container.append(list);
   }
+  renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
   const impactHeading = document.createElement("h4");
@@ -4682,6 +4767,97 @@ function renderReview(container, result, handlers = {}) {
     outside.textContent = `${result.impact.outsideGraph.length} changed path(s) are outside the scanned graph.`;
     container.append(outside);
   }
+}
+function renderChangeMetrics(container, metrics, handlers = {}) {
+  if (!metrics || metrics.available === false) {
+    return;
+  }
+  const heading = document.createElement("h4");
+  heading.textContent = "Change metrics";
+  container.append(heading);
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "change-metrics-summary";
+  summary.textContent = changeMetricSummary(metrics.totals);
+  container.append(summary);
+  const files = orderMetricFiles(metrics.files);
+  if (files.length === 0) {
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "change-metrics";
+  table.dataset.role = "change-metrics";
+  const head = document.createElement("tr");
+  for (const [label, title] of [
+    ["File", ""],
+    ["Cx", "Complexity: net change in summed function decision points"],
+    ["Out", "Fan-out: resolved in-repository imports, before \u2192 after"],
+    ["In", "Fan-in change from importers inside this change set"],
+    ["Lines", "Line count, net"]
+  ]) {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    if (title) cell.title = title;
+    head.append(cell);
+  }
+  table.append(head);
+  for (const file of files) {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "link";
+    link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
+    if (handlers.onSelect && file.status !== "deleted") {
+      link.addEventListener("click", () => handlers.onSelect(file.path));
+    } else {
+      link.disabled = true;
+    }
+    name.append(link);
+    if (file.note) name.title = file.note;
+    row.append(name);
+    const churn = file.complexityChange;
+    const complexity = churn ? metricDelta(0, churn.added - churn.removed) : metricDelta(null, null);
+    row.append(
+      metricCell(
+        complexity,
+        churn ? [
+          `${file.before?.complexity ?? "\u2014"} \u2192 ${file.after?.complexity ?? "\u2014"} (+${churn.added} \u2212${churn.removed})`,
+          ...file.functions.slice(0, 8).map((fn) => `${fn.owner ? `${fn.owner}.` : ""}${fn.name}: ${fn.before ?? "new"} \u2192 ${fn.after ?? "removed"}`)
+        ].join("\n") : file.note ?? "not measured"
+      )
+    );
+    row.append(
+      metricCell(
+        file.fanOut ? metricDelta(file.fanOut.before, file.fanOut.after) : metricDelta(null, null),
+        file.fanOut ? [
+          `${file.fanOut.before} \u2192 ${file.fanOut.after}`,
+          ...file.importsAdded.map((target) => `+ ${target}`),
+          ...file.importsRemoved.map((target) => `\u2212 ${target}`)
+        ].join("\n") : file.note ?? "imports not resolved"
+      )
+    );
+    row.append(metricCell(metricDelta(0, file.fanInDelta ?? 0), "Importers gained or lost within this change set"));
+    const lines = metricDelta(file.before?.lines ?? 0, file.after?.lines ?? 0);
+    row.append(metricCell({ ...lines, tone: lines.delta ? "flat" : lines.tone }, `${file.before?.lines ?? 0} \u2192 ${file.after?.lines ?? 0}`));
+    table.append(row);
+  }
+  container.append(table);
+  if (metrics.capped) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.textContent = "Only the first files in the change set were measured.";
+    container.append(note2);
+  }
+}
+function metricCell(delta, title) {
+  const cell = document.createElement("td");
+  const value = document.createElement("span");
+  value.className = `metric-delta ${delta.tone}`;
+  value.textContent = delta.text;
+  cell.append(value);
+  if (title) cell.title = title;
+  return cell;
 }
 var REVIEW_GROUP_LABELS = {
   commit: "Changed",
@@ -7101,16 +7277,25 @@ async function toggleTimeline() {
   elements.timelinePanel.hidden = false;
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
   const result = await request(`/analysis/timeline${query}`);
-  renderTimeline(elements.timelinePanel, result, (commit) => {
+  const draw = (metrics) => renderTimeline(elements.timelinePanel, result, (commit) => {
     selectCommit(commit).catch((error) => {
       elements.status.textContent = `Error: ${error.message}`;
     });
   }, {
     selectedHash: selectedCommitHash,
+    metrics,
     onClose: () => {
       elements.timelinePanel.hidden = true;
     }
   });
+  draw(null);
+  if (result?.available === false) {
+    return;
+  }
+  const history = await request(`/analysis/change-metrics/history${query}`).catch(() => null);
+  if (history?.available && !elements.timelinePanel.hidden) {
+    draw(new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])));
+  }
 }
 async function selectCommit(commit) {
   selectedCommitHash = commit.hash;
@@ -7205,7 +7390,12 @@ function renderSettingsView() {
     },
     onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
-    onNarratorChange: (patch2) => saveServerSettings({ narrator: patch2 }, "Narrator updated.").then(() => refreshNarratorStatus()),
+    onNarratorChange: async (patch2) => {
+      await saveServerSettings({ narrator: patch2 }, "Narrator updated.");
+      await refreshNarratorSettings();
+      renderSettingsView();
+      await refreshNarratorStatus();
+    },
     onFetchModels: async ({ endpoint, model }) => {
       const params = new URLSearchParams();
       if (endpoint) params.set("endpoint", endpoint);
@@ -7422,7 +7612,8 @@ var OVERLAY_TITLES = {
   architecture: "Architecture health",
   hotspots: "Function hotspots",
   "module-depth": "Module depth",
-  ownership: "Ownership"
+  ownership: "Ownership",
+  smells: "Smells"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -7431,9 +7622,10 @@ var OVERLAY_ENDPOINTS = {
   architecture: "/analysis/architecture-health",
   hotspots: "/analysis/functions",
   "module-depth": "/analysis/module-depth",
-  ownership: "/analysis/ownership"
+  ownership: "/analysis/ownership",
+  smells: "/analysis/smells"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells"];
 async function applyOverlay(generation) {
   const kind = state.overlay;
   if (kind === "none") {

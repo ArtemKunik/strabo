@@ -100,6 +100,22 @@ export interface TieredImpact {
   reachable: string[];
 }
 
+/** The pending-change risk and the inputs it multiplies, so the number can be checked. */
+export interface ChangeRisk {
+  /** linesTouched × touchedComplexity × definiteImpact × untestedShare. */
+  score: number;
+  inputs: {
+    /** Lines in the touched functions on the reviewed side. */
+    linesTouched: number;
+    /** Sum of decision points in the touched functions. */
+    touchedComplexity: number;
+    /** Size of the definite-impact set. */
+    definiteImpact: number;
+    /** Share of the change and its definite dependents that no test reaches. */
+    untestedShare: number;
+  };
+}
+
 /** Cohesion of one changed file on each side of the review, from recorded member wiring. */
 export interface CohesionChange {
   path: string;
@@ -118,6 +134,12 @@ export interface CohesionChange {
   publicSurface: PublicSurfaceChange[];
   /** Tiered impact: definite (specifier names a changed symbol), possible (other direct importers), reachable (transitive). */
   impact: TieredImpact | null;
+  /** Test files whose forward closure reaches this file: the tests to run. */
+  testsToRun: string[];
+  /** Direct dependents that no test reaches. */
+  untestedDependents: string[];
+  /** The pending-change risk, or null when nothing measurable was touched. */
+  risk: ChangeRisk | null;
 }
 
 /** Cohesion before and after a change, from the member wiring the symbol extractor records. */

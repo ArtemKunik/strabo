@@ -22,6 +22,18 @@ Feature: Module quality scorecard
     Then every percentile is between 0 and 100
     And the percentile values match the raw measure values
 
+  @composites
+  Scenario: The scorecard carries composite hotspot and risk scores
+    When I request the quality scorecard
+    Then each module reports composite scores in 0-100
+    And each module reports a hotspot and a risk
+
+  @smells
+  Scenario: The smells endpoint reports rules with their inputs
+    When I request the repository smells
+    Then the smells report lists files with a rule summary
+    And each smell names a rule and its inputs
+
 @change-passport
 Scenario: The change passport includes per-function metric and signal deltas
      Given the Strabo server is running against a Kotlin fixture repository

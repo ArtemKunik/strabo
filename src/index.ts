@@ -130,6 +130,22 @@ export {
 export type { ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
 export { computeChangePassport } from './analysis/change-passport.ts';
 export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
+export {
+  computeCommitMetrics,
+  computeWorkingTreeMetrics,
+  computeMetricsHistory,
+  clearChangeMetricsCache,
+  readBlobs,
+} from './analysis/change-metrics.ts';
+export type {
+  ChangeMetrics,
+  ChangeMetricsResult,
+  FileMeasures,
+  FileMetricDelta,
+  FunctionDelta,
+  MetricTotals,
+  MetricsHistoryEntry,
+} from './analysis/change-metrics.ts';
 export { computeCoverage } from './analysis/coverage.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';
@@ -145,7 +161,7 @@ export { rankHotspots } from './analysis/hotspots.ts';
 export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';
 export { getTimeline, parseTimeline } from './analysis/timeline.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
-export { computeQualityScorecard } from './analysis/quality.ts';
+export { computeQualityScorecard, smellsFromScorecard, SMELL_RULES } from './analysis/quality.ts';
 export type {
   QualityScorecard,
   QualityPercentile,
@@ -156,6 +172,10 @@ export type {
   EvolutionMeasures,
   ProtectionMeasures,
   PercentileMeasure,
+  CompositeScores,
+  Smell,
+  SmellRule,
+  SmellsReport,
 } from './analysis/quality.ts';
 export { computeRepositoryPassport } from './analysis/passport.ts';
 export type {

@@ -1745,6 +1745,57 @@ button.primary {
   font-style: italic;
 }
 
+.metric-delta {
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+.metric-delta.worse {
+  color: var(--status-critical);
+}
+
+.metric-delta.better {
+  color: var(--status-good);
+}
+
+.metric-delta.none {
+  font-style: italic;
+}
+
+table.change-metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+table.change-metrics th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--ink-3);
+  padding: 2px 4px;
+}
+
+table.change-metrics th:first-child,
+table.change-metrics td:first-child {
+  text-align: left;
+}
+
+table.change-metrics td {
+  text-align: right;
+  padding: 1px 4px;
+  vertical-align: top;
+}
+
+table.change-metrics td:first-child .link {
+  font-family: var(--font-mono);
+  word-break: break-all;
+  text-align: left;
+}
+
 .risk-panel {
   border-left: 3px solid var(--status-critical);
   background: var(--bg-0);

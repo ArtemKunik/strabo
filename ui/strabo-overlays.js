@@ -135,6 +135,8 @@ export function overlayFor(kind, data) {
       return moduleDepthOverlay(data);
     case 'ownership':
       return ownershipOverlay(data);
+    case 'smells':
+      return smellsOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
@@ -190,6 +192,31 @@ export function ownershipOverlay(contexts) {
         (entry) =>
           `${entry.file} · ${entry.distinctAuthors} author(s) · ${entry.commits} commit(s) · ${entry.transitiveDependents} dependent(s)`,
       ),
+  };
+}
+
+/**
+ * Map the repository smells report onto the files that carry a smell.
+ *
+ * A smell is a signal, not a verdict: the panel names the rules and the inputs that tripped
+ * them, so the overlay points at evidence rather than standing as a judgement.
+ */
+export function smellsOverlay(report) {
+  const files = Array.isArray(report?.files) ? report.files : [];
+  const classes = new Map();
+  for (const entry of files) {
+    classes.set(entry.file, 'ov-smell');
+  }
+  const counts = Object.entries(report?.summary ?? {})
+    .filter(([, count]) => Number(count) > 0)
+    .map(([rule, count]) => `${count} ${rule}`)
+    .join(' · ');
+  return {
+    classes,
+    summary: `${files.length} file(s) with a smell${counts ? ` · ${counts}` : ''}`,
+    items: files
+      .slice(0, 200)
+      .map((entry) => `${entry.file} · ${(entry.smells ?? []).map((smell) => smell.rule).join(', ')}`),
   };
 }
 
@@ -301,4 +328,79 @@ function architectureOverlay(report) {
         : `${axis.label}: ${axis.value}/100 (${axis.detail})`,
     ),
   };
+}
+
+/**
+ * A signed delta with its reading. For complexity and coupling more is worse, so a rise is
+ * `worse` and a fall `better`; an unmeasured side stays `none` rather than reading as zero.
+ */
+export function metricDelta(before, after, { moreIsWorse = true } = {}) {
+  if (before === null || before === undefined || after === null || after === undefined) {
+    return { tone: 'none', delta: null, text: '—' };
+  }
+  const delta = after - before;
+  if (delta === 0) {
+    return { tone: 'flat', delta, text: '±0' };
+  }
+  const rising = delta > 0;
+  return {
+    tone: rising === moreIsWorse ? 'worse' : 'better',
+    delta,
+    text: rising ? `+${delta}` : `−${-delta}`,
+  };
+}
+
+/**
+ * The one-line quantitative summary of a change set: complexity gained and shed across
+ * functions, the net move, function and signal counts, and import edges added or removed.
+ */
+export function changeMetricSummary(totals) {
+  if (!totals) {
+    return 'Change metrics unavailable.';
+  }
+  const parts = [];
+  if (totals.measured > 0) {
+    const { before, after, added, removed } = totals.complexity;
+    parts.push(`complexity +${added} −${removed} (${before} → ${after})`);
+    if (totals.functions.before !== totals.functions.after) {
+      parts.push(`functions ${totals.functions.before} → ${totals.functions.after}`);
+    }
+    const signals = metricDelta(totals.signals.before, totals.signals.after);
+    if (signals.delta) {
+      parts.push(`signals ${signals.text}`);
+    }
+  } else {
+    parts.push('complexity not measured');
+  }
+  parts.push(`coupling +${totals.coupling.added} −${totals.coupling.removed} import(s)`);
+  return parts.join(' · ');
+}
+
+/** The compact per-commit badge the timeline shows: net complexity and net coupling. */
+export function commitMetricBadge(totals) {
+  if (!totals) {
+    return null;
+  }
+  const complexity = totals.measured > 0 ? metricDelta(totals.complexity.before, totals.complexity.after) : null;
+  const couplingNet = totals.coupling.added - totals.coupling.removed;
+  const coupling = metricDelta(0, couplingNet);
+  const complexityText = complexity ? `cx ${complexity.text}` : 'cx —';
+  return {
+    text: `${complexityText} · cpl ${coupling.text}`,
+    title: `${changeMetricSummary(totals)} · ${totals.files} file(s)`,
+    tone: complexity?.tone === 'worse' || coupling.tone === 'worse' ? 'worse' : complexity?.tone === 'better' ? 'better' : 'flat',
+  };
+}
+
+/**
+ * Order changed files by how much they moved: complexity churn first, then import edges,
+ * then fan-in, so the files that shifted structure most lead the list.
+ */
+export function orderMetricFiles(files) {
+  const weight = (file) =>
+    (file.complexityChange ? file.complexityChange.added + file.complexityChange.removed : 0) +
+    (file.importsAdded?.length ?? 0) +
+    (file.importsRemoved?.length ?? 0) +
+    Math.abs(file.fanInDelta ?? 0);
+  return [...(files ?? [])].sort((a, b) => weight(b) - weight(a) || a.path.localeCompare(b.path));
 }

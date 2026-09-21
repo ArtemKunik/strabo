@@ -8,7 +8,9 @@
 import {
   SHAPES,
   breadcrumb,
+  changeMetricSummary,
   cohesionDelta,
+  commitMetricBadge,
   constellationLayout,
   clusterSeriesClass,
   createVirtualList,
@@ -23,6 +25,8 @@ import {
   memberClusters,
   memberMapSteps,
   methodCard,
+  metricDelta,
+  orderMetricFiles,
   orderAdvisories,
   orderMembers,
   passportFor,
@@ -1849,6 +1853,15 @@ export function renderTimeline(container, result, onSelect, options = {}) {
     meta.className = 'evidence';
     meta.textContent = `${commit.author} · ${commit.date.slice(0, 10)}`;
     item.append(meta);
+    const badge = commitMetricBadge(options.metrics?.get(commit.hash) ?? null);
+    if (badge) {
+      const metric = document.createElement('span');
+      metric.className = `metric-delta ${badge.tone}`;
+      metric.dataset.role = 'commit-metrics';
+      metric.textContent = badge.text;
+      metric.title = badge.title;
+      item.append(metric);
+    }
     list.append(item);
   }
   container.append(list);
@@ -1951,6 +1964,7 @@ export function renderReview(container, result, handlers = {}) {
     container.append(list);
   }
 
+  renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
 
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
@@ -1992,6 +2006,117 @@ export function renderReview(container, result, handlers = {}) {
     outside.textContent = `${result.impact.outsideGraph.length} changed path(s) are outside the scanned graph.`;
     container.append(outside);
   }
+}
+
+/**
+ * Change metrics: complexity and coupling before and after, per change set and per file.
+ * Complexity is the summed decision points of each file's functions; coupling is the file's
+ * resolved imports. A side that was not measured shows a dash, not a zero.
+ */
+function renderChangeMetrics(container, metrics, handlers = {}) {
+  if (!metrics || metrics.available === false) {
+    return;
+  }
+
+  const heading = document.createElement('h4');
+  heading.textContent = 'Change metrics';
+  container.append(heading);
+
+  const summary = document.createElement('p');
+  summary.className = 'overlay-summary';
+  summary.dataset.role = 'change-metrics-summary';
+  summary.textContent = changeMetricSummary(metrics.totals);
+  container.append(summary);
+
+  const files = orderMetricFiles(metrics.files);
+  if (files.length === 0) {
+    return;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'change-metrics';
+  table.dataset.role = 'change-metrics';
+  const head = document.createElement('tr');
+  for (const [label, title] of [
+    ['File', ''],
+    ['Cx', 'Complexity: net change in summed function decision points'],
+    ['Out', 'Fan-out: resolved in-repository imports, before → after'],
+    ['In', 'Fan-in change from importers inside this change set'],
+    ['Lines', 'Line count, net'],
+  ]) {
+    const cell = document.createElement('th');
+    cell.textContent = label;
+    if (title) cell.title = title;
+    head.append(cell);
+  }
+  table.append(head);
+
+  for (const file of files) {
+    const row = document.createElement('tr');
+    const name = document.createElement('td');
+    const link = document.createElement('button');
+    link.type = 'button';
+    link.className = 'link';
+    link.textContent = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+    if (handlers.onSelect && file.status !== 'deleted') {
+      link.addEventListener('click', () => handlers.onSelect(file.path));
+    } else {
+      link.disabled = true;
+    }
+    name.append(link);
+    if (file.note) name.title = file.note;
+    row.append(name);
+
+    const churn = file.complexityChange;
+    const complexity = churn ? metricDelta(0, churn.added - churn.removed) : metricDelta(null, null);
+    row.append(
+      metricCell(
+        complexity,
+        churn
+          ? [
+              `${file.before?.complexity ?? '—'} → ${file.after?.complexity ?? '—'} (+${churn.added} −${churn.removed})`,
+              ...file.functions
+                .slice(0, 8)
+                .map((fn) => `${fn.owner ? `${fn.owner}.` : ''}${fn.name}: ${fn.before ?? 'new'} → ${fn.after ?? 'removed'}`),
+            ].join('\n')
+          : (file.note ?? 'not measured'),
+      ),
+    );
+    row.append(
+      metricCell(
+        file.fanOut ? metricDelta(file.fanOut.before, file.fanOut.after) : metricDelta(null, null),
+        file.fanOut
+          ? [
+              `${file.fanOut.before} → ${file.fanOut.after}`,
+              ...file.importsAdded.map((target) => `+ ${target}`),
+              ...file.importsRemoved.map((target) => `− ${target}`),
+            ].join('\n')
+          : (file.note ?? 'imports not resolved'),
+      ),
+    );
+    row.append(metricCell(metricDelta(0, file.fanInDelta ?? 0), 'Importers gained or lost within this change set'));
+    const lines = metricDelta(file.before?.lines ?? 0, file.after?.lines ?? 0);
+    row.append(metricCell({ ...lines, tone: lines.delta ? 'flat' : lines.tone }, `${file.before?.lines ?? 0} → ${file.after?.lines ?? 0}`));
+    table.append(row);
+  }
+  container.append(table);
+
+  if (metrics.capped) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = 'Only the first files in the change set were measured.';
+    container.append(note);
+  }
+}
+
+function metricCell(delta, title) {
+  const cell = document.createElement('td');
+  const value = document.createElement('span');
+  value.className = `metric-delta ${delta.tone}`;
+  value.textContent = delta.text;
+  cell.append(value);
+  if (title) cell.title = title;
+  return cell;
 }
 
 const REVIEW_GROUP_LABELS = {

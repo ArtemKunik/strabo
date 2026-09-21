@@ -4,19 +4,20 @@ import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
 import { buildAdjacency } from './analysis.ts';
+import { computeCoverage, computeTestReachByFile } from './coverage.ts';
 import { assertReadable } from '../boundary/repository-root.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
 import { computeMemberCohesion } from './file-health.ts';
 import { buildFunctions } from './functions.ts';
 import type { FunctionEntry } from './functions.ts';
 import { isSafeRevision } from './impact.ts';
-import type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
+import type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
 
 const run = promisify(execFile);
 const MAX_FILES = 40;
 const MAX_BYTES = 4 * 1024 * 1024;
 
-export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './review-types.ts';
+export type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './review-types.ts';
 
 export async function computeChangePassport(
   root: string,
@@ -28,8 +29,11 @@ export async function computeChangePassport(
   const measured = files.slice(0, MAX_FILES);
   const changes: CohesionChange[] = [];
   const { backward } = buildAdjacency(graph);
+  const coverage = computeCoverage(graph);
+  const reached = new Set([...coverage.reached, ...coverage.testFiles]);
+  const testsByFile = computeTestReachByFile(graph);
   for (const file of measured) {
-    changes.push(await cohesionChange(root, file, safeBaseline, graph, backward));
+    changes.push(await cohesionChange(root, file, safeBaseline, graph, backward, testsByFile, reached));
   }
   return { files: changes, baseline: safeBaseline, capped: files.length > measured.length };
 }
@@ -40,6 +44,8 @@ async function cohesionChange(
   baseline: string | null,
   graph: Graph,
   backward: Map<string, string[]>,
+  testsByFile: Map<string, string[]>,
+  reached: Set<string>,
 ): Promise<CohesionChange> {
   const base: Pick<CohesionChange, 'path' | 'status' | 'previousPath'> = {
     path: file.path,
@@ -47,12 +53,19 @@ async function cohesionChange(
     ...(file.previousPath ? { previousPath: file.previousPath } : {}),
   };
 
+  // Which tests to run, and which dependents no test reaches, are answered for every file,
+  // even one whose language has no extractor.
+  const testsToRun = testsByFile.get(file.path) ?? [];
+  const untestedDependents = (backward.get(file.path) ?? [])
+    .filter((dependent) => !reached.has(dependent))
+    .sort();
+
   const extractor = symbolExtractorFor(file.path);
   if (!extractor) {
-    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], impact: null };
+    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null };
   }
   if (extractor.tracksAccess === false) {
-    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], impact: null };
+    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null };
   }
 
   const sourcePath = file.previousPath ?? file.path;
@@ -64,6 +77,7 @@ async function cohesionChange(
   const functions = await computeFunctionChanges(extractor, root, file, baseline, beforeContent, afterContent);
   const publicSurface = await computePublicSurfaceDiff(extractor, root, file, baseline, beforeContent, afterContent);
   const impact = computeTieredImpact(file.path, file, graph, backward, functions);
+  const risk = computeChangeRisk(file.path, functions, impact, reached);
 
   return {
     ...base,
@@ -73,6 +87,47 @@ async function cohesionChange(
     functions,
     publicSurface,
     impact,
+    testsToRun,
+    untestedDependents,
+    risk,
+  };
+}
+
+/**
+ * linesTouched × touchedComplexity × definiteImpact × untestedShare, with each input kept.
+ *
+ * A product, not a percentile: the passport is about one pending change, so there is no
+ * repository to rank against. Null when nothing measurable was touched.
+ */
+function computeChangeRisk(
+  filePath: string,
+  functions: readonly FunctionChange[],
+  impact: TieredImpact | null,
+  reached: ReadonlySet<string>,
+): ChangeRisk | null {
+  const definiteImpact = impact?.definite.length ?? 0;
+  if (functions.length === 0 && definiteImpact === 0) {
+    return null;
+  }
+  let linesTouched = 0;
+  let touchedComplexity = 0;
+  for (const fn of functions) {
+    linesTouched += fn.linesAfter ?? fn.linesBefore ?? 0;
+    touchedComplexity += fn.decisionPointsAfter ?? fn.decisionPointsBefore ?? 0;
+  }
+  const candidates = [filePath, ...(impact?.definite ?? [])];
+  const reachedCount = candidates.filter((candidate) => reached.has(candidate)).length;
+  const untestedShare = candidates.length === 0 ? 1 : (candidates.length - reachedCount) / candidates.length;
+  const score = linesTouched * touchedComplexity * definiteImpact * untestedShare;
+
+  return {
+    score: Math.round(score * 1000) / 1000,
+    inputs: {
+      linesTouched,
+      touchedComplexity,
+      definiteImpact,
+      untestedShare: Number(untestedShare.toFixed(3)),
+    },
   };
 }
 

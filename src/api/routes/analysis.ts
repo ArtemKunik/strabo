@@ -3,6 +3,11 @@ import fs from 'node:fs';
 
 import { computeCoverage } from '../../analysis/coverage.ts';
 import { computeChangePassport } from '../../analysis/change-passport.ts';
+import {
+  computeCommitMetrics,
+  computeMetricsHistory,
+  computeWorkingTreeMetrics,
+} from '../../analysis/change-metrics.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
@@ -16,7 +21,7 @@ import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
-import { computeQualityScorecard } from '../../analysis/quality.ts';
+import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
@@ -272,7 +277,47 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       // the first parent for a commit (which `^` names for a merge and fails on the root).
       const baseline = base ? `${base}^` : 'HEAD';
       const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph);
-      response.json({ ...review, cohesion });
+      const metrics = base
+        ? await computeCommitMetrics(repository.root, base)
+        : await computeWorkingTreeMetrics(repository.root, review.files);
+      response.json({ ...review, cohesion, metrics });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Quantitative change impact: complexity, function, signal, line, and coupling deltas per
+   * changed file and for the whole change set. `base` measures that commit against its
+   * first parent (cached by commit hash); omitting it measures the working tree against HEAD.
+   */
+  router.get('/analysis/change-metrics', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      if (base) {
+        response.json(await computeCommitMetrics(repository.root, base));
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      const review = await reviewWorkingTree(repository.root, cached.report.graph);
+      response.json(review.available ? await computeWorkingTreeMetrics(repository.root, review.files) : review);
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** Change metric totals for each recent commit, newest first: the retrospective view. */
+  router.get('/analysis/change-metrics/history', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const limit = parsePositiveInt(request.query.limit, 200) ?? 30;
+      const timeline = await getTimeline(repository.root, limit);
+      if (!timeline.available) {
+        response.json(timeline);
+        return;
+      }
+      response.json({ available: true, commits: await computeMetricsHistory(repository.root, timeline.commits) });
     } catch (error) {
       sendError(response, error);
     }
@@ -291,6 +336,24 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         repository.name,
       );
       response.json(scorecard);
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Repository-wide smells: the scorecard's per-module rules, each with its tripping inputs.
+   */
+  router.get('/analysis/smells', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const scorecard = await computeQualityScorecard(
+        cached.report.graph,
+        repository.root,
+        repository.name,
+      );
+      response.json(smellsFromScorecard(scorecard));
     } catch (error) {
       sendError(response, error);
     }

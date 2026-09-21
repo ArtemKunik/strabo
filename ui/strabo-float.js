@@ -223,13 +223,18 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
 
     const placeInRail = () => {
       const railWidth = win.offsetWidth || width;
+      const height = win.offsetHeight || fallbackHeight;
       const top = firstFreeRailTop();
+      // When the rail is full and the next slot would fall past the bottom edge, reuse the
+      // top slot instead: the window just opened is raised, so it is usable on top rather
+      // than opening off-screen with its controls unreachable.
+      const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
       // Keep the window on screen: a tall panel opened below another (e.g. Settings below
-      // the Legend) would otherwise run past the bottom edge, leaving its controls
-      // unreachable. The body scrolls within whatever height is left.
-      const available = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+      // the Legend) would otherwise run past the bottom edge. The body scrolls within
+      // whatever height is left.
+      const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
       win.style.maxHeight = `${available}px`;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, top);
+      place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
     };
 
     const position = saved.position ?? config.position ?? {};
@@ -268,6 +273,11 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
 
     let lastHidden = null;
 
+    const raise = () => {
+      topZ += 1;
+      win.style.zIndex = String(topZ);
+    };
+
     const sync = () => {
       const hidden = element.hidden === true;
       win.hidden = hidden;
@@ -284,8 +294,10 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         if (!hidden) {
           // A panel can also be revealed by setting `element.hidden = false` directly (the
           // Repository passport opens that way on a first visit). It still earns its rail
-          // slot here, instead of sitting at the CSS default in the corner over the toolbar.
+          // slot and the top of the stack here, instead of sitting at the CSS default in the
+          // corner over the toolbar with the previous panel on top of it.
           if (!hasPosition) placeInRail();
+          raise();
           flashChip(config.key);
         }
       }
@@ -298,11 +310,6 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       subtree: true,
       characterData: true,
     });
-
-    const raise = () => {
-      topZ += 1;
-      win.style.zIndex = String(topZ);
-    };
 
     const controller = {
       key: config.key,

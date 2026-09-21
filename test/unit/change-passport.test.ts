@@ -194,6 +194,37 @@ test('computeChangePassport includes public-surface diff for Python files', asyn
    assert.equal(newPublic.change, 'added');
  });
 
+test('computeChangePassport lists the tests to run, untested dependents, and the risk', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/lib.ts'), 'export function exported(): number {\n  return 1;\n}\n');
+  fs.writeFileSync(path.join(root, 'src/lib.test.ts'), "import { exported } from './lib';\nexport const t = exported();\n");
+  fs.writeFileSync(path.join(root, 'src/other.ts'), "import { exported } from './lib';\nexport const o = exported();\n");
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(
+    path.join(root, 'src/lib.ts'),
+    'export function exported(): number {\n  if (Math.random() > 0.5) {\n    return 2;\n  }\n  return 1;\n}\n',
+  );
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) {
+    return;
+  }
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const change = passport.files.find((entry) => entry.path === 'src/lib.ts');
+  assert.ok(change);
+  assert.ok(change.testsToRun.includes('src/lib.test.ts'), 'the importing test is listed');
+  assert.ok(change.untestedDependents.includes('src/other.ts'), 'other.ts is not reached by a test');
+  assert.ok(change.risk, 'a touched function carries a pending-change risk');
+  assert.ok((change.risk?.inputs.linesTouched ?? 0) > 0);
+  assert.equal(typeof change.risk?.score, 'number');
+});
+
 test('computeChangePassport includes tiered impact for importers', async () => {
    const root = tempDir();
    fs.mkdirSync(path.join(root, 'src'), { recursive: true });

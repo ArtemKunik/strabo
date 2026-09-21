@@ -154,14 +154,15 @@ export function readingLegend(model) {
 /** The shortcut sheet shown on `?`: gestures, not encodings. */
 export function shortcutSheet() {
   return [
-    { keys: 'F', action: 'Focus the selection' },
-    { keys: 'I', action: 'Trace change impact' },
-    { keys: 'P', action: 'Start a path between two nodes' },
+    { keys: 'F', action: 'Center the selection' },
+    { keys: 'I', action: 'Show change impact' },
+    { keys: 'O', action: 'Show the selected file’s links to other units' },
+    { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
     { keys: 'T', action: 'Timeline' },
     { keys: 'R', action: 'Review working-tree changes' },
     { keys: 'V', action: 'Dependency risk' },
-    { keys: 'G', action: 'Delegate a selected group' },
+    { keys: 'G', action: 'Delegate the selected files' },
     { keys: '⌘K / ctrl-K', action: 'Filter paths' },
     { keys: 'Esc', action: 'Clear the selection or close a panel' },
     { keys: '?', action: 'Show this sheet' },

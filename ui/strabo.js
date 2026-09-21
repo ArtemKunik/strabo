@@ -1014,16 +1014,28 @@ async function toggleTimeline() {
   elements.timelinePanel.hidden = false;
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
   const result = await request(`/analysis/timeline${query}`);
-  renderTimeline(elements.timelinePanel, result, (commit) => {
-    selectCommit(commit).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
+  const draw = (metrics) =>
+    renderTimeline(elements.timelinePanel, result, (commit) => {
+      selectCommit(commit).catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    }, {
+      selectedHash: selectedCommitHash,
+      metrics,
+      onClose: () => {
+        elements.timelinePanel.hidden = true;
+      },
     });
-  }, {
-    selectedHash: selectedCommitHash,
-    onClose: () => {
-      elements.timelinePanel.hidden = true;
-    },
-  });
+  draw(null);
+  if (result?.available === false) {
+    return;
+  }
+  // Per-commit change metrics arrive after the list: uncached commits are measured on the
+  // server, so the timeline is usable first and the badges fill in when they are ready.
+  const history = await request(`/analysis/change-metrics/history${query}`).catch(() => null);
+  if (history?.available && !elements.timelinePanel.hidden) {
+    draw(new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])));
+  }
 }
 
 /** Compare a revision with the working tree and annotate the map with the impact. */
@@ -1150,8 +1162,14 @@ function renderSettingsView() {
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
-    onNarratorChange: (patch) =>
-      saveServerSettings({ narrator: patch }, 'Narrator updated.').then(() => refreshNarratorStatus()),
+    onNarratorChange: async (patch) => {
+      await saveServerSettings({ narrator: patch }, 'Narrator updated.');
+      // The server can change more than the patch asked for: a new endpoint host clears the
+      // stored key. Re-read `/settings` so the panel shows the key source it now has.
+      await refreshNarratorSettings();
+      renderSettingsView();
+      await refreshNarratorStatus();
+    },
     onFetchModels: async ({ endpoint, model }) => {
       const params = new URLSearchParams();
       if (endpoint) params.set('endpoint', endpoint);
@@ -1413,6 +1431,7 @@ const OVERLAY_TITLES = {
   hotspots: 'Function hotspots',
   'module-depth': 'Module depth',
   ownership: 'Ownership',
+  smells: 'Smells',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -1423,10 +1442,11 @@ const OVERLAY_ENDPOINTS = {
   hotspots: '/analysis/functions',
   'module-depth': '/analysis/module-depth',
   ownership: '/analysis/ownership',
+  smells: '/analysis/smells',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership'];
+const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells'];
 
 /**
  * Load the selected review analysis and annotate the graph. Overlays annotate only what

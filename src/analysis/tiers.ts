@@ -54,6 +54,11 @@ const TIER_RANK: Partial<Record<Tier, number>> = {
   data: 1,
 };
 
+/** The dependency rank of a tier, or null when it sits outside the layer order. */
+export function tierRank(tier: Tier): number | null {
+  return TIER_RANK[tier] ?? null;
+}
+
 const STRENGTH_RANK: Record<TierStrength, number> = {
   framework: 4,
   annotation: 3,
