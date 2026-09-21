@@ -2765,6 +2765,43 @@ table.change-metrics td:first-child .link {
   border-top: 1px solid var(--line);
 }
 
+/* ------------------------------------------------------- Prompt review dialog */
+.prompt-dialog {
+  width: min(720px, 92vw);
+}
+
+.prompt-dialog .dialog-path {
+  border-bottom: none;
+}
+
+.prompt-dialog-target {
+  padding-bottom: 0;
+}
+
+.prompt-dialog-text {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 32px);
+  height: 46vh;
+  min-height: 220px;
+  margin: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--bg-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* ---------------------------------------------------------------- Member map */
 .member-open {
   padding: 4px 8px;

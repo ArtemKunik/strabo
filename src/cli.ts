@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 
 import { runCheckCommand } from './cli/check.ts';
 import { runExportCommand } from './cli/export.ts';
+import { runReportCommand } from './cli/report.ts';
 import { configFromEnv, readEnv } from './config.ts';
 import { startMcpServer } from './mcp/server.ts';
 import { createStraboServer } from './server.ts';
@@ -13,6 +14,7 @@ Usage:
   strabo serve [path]                 same, with an explicit subcommand
   strabo export [path] --format=<fmt> write a portable graph (json, dot, mermaid, svg)
   strabo check [path] [rules]         run headless checks for CI
+  strabo report [path] --base <ref>   report a change against a base revision
   strabo mcp                          serve the recorded analysis over MCP (stdio)
 
 Export options:
@@ -21,11 +23,17 @@ Export options:
   --view=file|block|system        view to render for svg (default file)
   --include-declare               draw declare edges (dashed), off by default
 
+Report options:
+  --base=<ref>                    the revision to compare HEAD against (required)
+  --format=md|json                markdown for a PR description, or the same document (default md)
+  --fail-on <rules>               fail only for these rules (cycle, tier, …)
+
 Check rules (only the ones named can fail the build):
   --fail-on-cycles
   --fail-on-layer-violations
   --fail-on-new-smells
   --fail-on-health-regression[=pct]
+  --fail-on cycle,tier            comma-separated aliases for the same rules
   --baseline=<file>               baseline to compare against
   --write-baseline                record the current findings as the baseline
   --format=json                   machine-readable result
@@ -41,6 +49,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return runExportCommand(rest);
     case 'check':
       return runCheckCommand(rest);
+    case 'report':
+      return runReportCommand(rest);
     case 'mcp':
       return runMcp(rest);
     case 'serve':

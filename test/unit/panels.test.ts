@@ -35,6 +35,10 @@ const {
   renderShortcuts,
   renderSource,
   renderWorkspace,
+  structuralCycleLabel,
+  structuralDiffGroups,
+  structuralEdgeLabel,
+  structuralTierEdgeLabel,
 } = await import('../../ui/strabo-panels.js');
 const { createVirtualList } = await import('../../ui/strabo-virtual.js');
 
@@ -397,6 +401,110 @@ test('renderReview offers the change-set narrator only when a handler is supplie
   const button = ready.querySelector('#narrate-change');
   assert.equal(button.textContent, 'Narrate change');
   assert.equal(button.disabled, false);
+});
+
+test('structuralDiffGroups labels each structural event from the same document the report prints', () => {
+  const structural = {
+    available: true,
+    base: 'HEAD~1',
+    baseRevision: 'abc',
+    headRevision: 'def',
+    diff: {
+      edgesAdded: [{ source: 'src/a.ts', target: 'src/b.ts', kind: 'import' }],
+      edgesRemoved: [],
+      cyclesIntroduced: [{ id: 'src/a.ts', members: ['src/a.ts', 'src/b.ts'] }],
+      cyclesResolved: [],
+      tierEdgesAdded: [{ unit: '.', source: 'src/data/x.ts', target: 'src/api/y.ts', kind: 'upward' }],
+      entryPointsAdded: ['src/cli.ts'],
+      newlyUnreached: ['src/lib.ts'],
+      counts: {},
+    },
+  };
+
+  assert.equal(structuralEdgeLabel({ source: 'a', target: 'b', kind: 'import' }), 'a → b (import)');
+  assert.equal(structuralCycleLabel({ members: ['a', 'b'] }), 'a → b');
+  assert.equal(structuralTierEdgeLabel({ unit: '.', source: 'x', target: 'y', kind: 'upward' }), 'x → y (upward, .)');
+
+  const groups = structuralDiffGroups(structural);
+  assert.deepEqual(
+    groups.map((group) => group.key),
+    ['edges-added', 'cycles-introduced', 'tier-edges-added', 'entry-points-added', 'newly-unreached'],
+  );
+  assert.equal(groups[0].items[0], 'src/a.ts → src/b.ts (import)');
+  assert.equal(groups[1].items[0], 'src/a.ts → src/b.ts');
+  assert.equal(groups[2].items[0], 'src/data/x.ts → src/api/y.ts (upward, .)');
+  assert.deepEqual(structuralDiffGroups({ available: false, reason: 'unknown-revision' }), []);
+});
+
+test('structuralDiffGroups is empty when nothing structural changed', () => {
+  const empty = {
+    available: true,
+    diff: {
+      edgesAdded: [],
+      edgesRemoved: [],
+      cyclesIntroduced: [],
+      cyclesResolved: [],
+      tierEdgesAdded: [],
+      entryPointsAdded: [],
+      newlyUnreached: [],
+    },
+  };
+  assert.deepEqual(structuralDiffGroups(empty), []);
+});
+
+test('renderReview renders the Structure section from the structural document', () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'commit',
+      commit: { shortHash: 'abc1234', author: 'a', date: '2026-01-01T00:00:00Z', subject: 'Change' },
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+      structural: {
+        available: true,
+        base: 'HEAD~1',
+        baseRevision: 'abc',
+        headRevision: 'def',
+        diff: {
+          edgesAdded: [],
+          edgesRemoved: [],
+          cyclesIntroduced: [{ id: 'src/a.ts', members: ['src/a.ts', 'src/b.ts'] }],
+          cyclesResolved: [],
+          tierEdgesAdded: [],
+          entryPointsAdded: [],
+          newlyUnreached: [],
+        },
+      },
+    },
+    {},
+  );
+  assert.equal(
+    target.querySelector('[data-role="review-structure-cycles-introduced"] li').textContent,
+    'src/a.ts → src/b.ts',
+  );
+});
+
+test('renderReview names an unavailable structure instead of an empty diff', () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'commit',
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+      structural: { available: false, reason: 'unknown-revision', detail: 'Unknown revision "x".' },
+    },
+    {},
+  );
+  assert.match(
+    target.querySelector('[data-role="review-structure-unavailable"]').textContent,
+    /Unknown revision/,
+  );
 });
 
 test('renderReview sends the change set to the narrator and renders the reply', async () => {

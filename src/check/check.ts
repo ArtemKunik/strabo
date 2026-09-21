@@ -17,6 +17,42 @@ export const CHECK_RULES: readonly CheckRule[] = [
   'health-regression',
 ];
 
+/**
+ * Names a `--fail-on` list may use, mapped onto the check rules. The short names are what a
+ * CI author writes (`--fail-on cycle,tier`); the long names are accepted so a caller can
+ * spell the rule out.
+ */
+export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
+  cycle: 'cycles',
+  cycles: 'cycles',
+  tier: 'layer-violations',
+  layer: 'layer-violations',
+  'layer-violations': 'layer-violations',
+  smell: 'new-smells',
+  smells: 'new-smells',
+  'new-smells': 'new-smells',
+  health: 'health-regression',
+  'health-regression': 'health-regression',
+};
+
+/**
+ * Resolve `--fail-on` values (each a comma-separated list) into check rules, in the stable
+ * `CHECK_RULES` order. An unknown token is ignored rather than failing the build: only the
+ * rules actually named can fail it.
+ */
+export function parseFailOnRules(values: readonly string[]): CheckRule[] {
+  const named = new Set<CheckRule>();
+  for (const value of values) {
+    for (const token of value.split(',')) {
+      const rule = FAIL_ON_ALIASES[token.trim().toLowerCase()];
+      if (rule) {
+        named.add(rule);
+      }
+    }
+  }
+  return CHECK_RULES.filter((rule) => named.has(rule));
+}
+
 export interface CheckFinding {
   rule: CheckRule;
   key: string;

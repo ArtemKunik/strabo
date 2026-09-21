@@ -13,7 +13,7 @@
 import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
-import { closeContextMenu, copyText, launchAgent, showContextMenu, showToast } from './strabo-delegate.js';
+import { closeContextMenu, copyText, launchAgent, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
 import { createFreshnessBadge } from './strabo-freshness.js';
 import {
@@ -1506,6 +1506,17 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
     elements.reviewPanel.hidden = false;
     renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
     return;
+  }
+
+  // A commit review compares two revisions, so the Structure section can name the
+  // structural events. The document is the one `strabo report` prints.
+  if (commit) {
+    try {
+      data.structural = await request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+    } catch (error) {
+      data.structural = { available: false, reason: 'git-error', detail: error.message };
+    }
+    if (ticket !== reviewTicket) return;
   }
 
   // The review's narrator affordance needs the status before it renders.
@@ -3131,16 +3142,20 @@ function resolveDomDelegateTarget(node) {
   return null;
 }
 
-/** Open the agent's interactive TUI on the delegated item, with the task prefilled. */
+/** Open the agent's interactive TUI on the delegated item, after the prompt is reviewed. */
 async function delegateToAgent(agent, target) {
   const repository = current?.repository ?? null;
   const prompt = buildAgentPrompt({ agent, repository, target });
   const title = (target.label ?? target.id ?? 'repository view').slice(0, 80);
+  const reviewed = await showPromptReview({ agent, title, prompt });
+  if (reviewed === null) {
+    return;
+  }
   try {
     await launchAgent(agent, {
       repository: state.repository ?? repository?.root,
       target: { kind: target.kind, id: target.id, label: target.label },
-      prompt,
+      prompt: reviewed,
       title,
     });
     showToast(`Opened ${agent} on ${title} — edit the prefilled task, then send.`);
@@ -3148,7 +3163,7 @@ async function delegateToAgent(agent, target) {
     showToast(`Could not open a terminal (${error.message}).`, {
       label: 'Copy prompt',
       onClick: async () => {
-        await copyText(prompt);
+        await copyText(reviewed);
         showToast('Prompt copied — paste it into your agent.');
       },
     });

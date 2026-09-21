@@ -2765,6 +2765,43 @@ table.change-metrics td:first-child .link {
   border-top: 1px solid var(--line);
 }
 
+/* ------------------------------------------------------- Prompt review dialog */
+.prompt-dialog {
+  width: min(720px, 92vw);
+}
+
+.prompt-dialog .dialog-path {
+  border-bottom: none;
+}
+
+.prompt-dialog-target {
+  padding-bottom: 0;
+}
+
+.prompt-dialog-text {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 32px);
+  height: 46vh;
+  min-height: 220px;
+  margin: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--bg-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* ---------------------------------------------------------------- Member map */
 .member-open {
   padding: 4px 8px;
@@ -3898,4 +3935,74 @@ table.change-metrics td:first-child .link {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   pointer-events: none;
+}
+
+/* The reading route: a step-through control, then each unit's summary above its files. */
+.route-panel {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.route-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.route-counter {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.route-summary,
+.route-truncated {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+
+.route-unit {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.route-unit h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.route-unit-why {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.route-step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  word-break: break-all;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+}
+
+.route-step.is-current {
+  background: var(--veiled-surface);
+  outline: 1px solid var(--line);
+}
+
+.route-unreached {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.route-unreached-file {
+  padding: 2px 0;
+  word-break: break-all;
 }

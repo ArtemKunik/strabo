@@ -2753,6 +2753,84 @@ export function renderReviewLoading(container, handlers = {}) {
 }
 
 /**
+ * The Structure section's rows: the structural diff between the reviewed base and HEAD,
+ * grouped for reading. Pure, so the browser and the headless report agree on the events.
+ */
+export function structuralDiffGroups(structural) {
+  if (!structural || structural.available === false) {
+    return [];
+  }
+  const diff = structural.diff ?? {};
+  return [
+    { key: 'edges-added', label: 'Dependency edges added', items: (diff.edgesAdded ?? []).map(structuralEdgeLabel) },
+    { key: 'edges-removed', label: 'Dependency edges removed', items: (diff.edgesRemoved ?? []).map(structuralEdgeLabel) },
+    { key: 'cycles-introduced', label: 'Cycles introduced', items: (diff.cyclesIntroduced ?? []).map(structuralCycleLabel) },
+    { key: 'cycles-resolved', label: 'Cycles resolved', items: (diff.cyclesResolved ?? []).map(structuralCycleLabel) },
+    { key: 'tier-edges-added', label: 'Wrong-way tier edges added', items: (diff.tierEdgesAdded ?? []).map(structuralTierEdgeLabel) },
+    { key: 'entry-points-added', label: 'Entry points added', items: [...(diff.entryPointsAdded ?? [])] },
+    { key: 'newly-unreached', label: 'Newly unreached', items: [...(diff.newlyUnreached ?? [])] },
+  ].filter((group) => group.items.length > 0);
+}
+
+/** One dependency edge as a single line. */
+export function structuralEdgeLabel(edge) {
+  return `${edge.source} → ${edge.target} (${edge.kind})`;
+}
+
+/** One cycle as its members in order. */
+export function structuralCycleLabel(cycle) {
+  return (cycle.members ?? []).join(' → ');
+}
+
+/** One wrong-way tier edge with its unit. */
+export function structuralTierEdgeLabel(edge) {
+  return `${edge.source} → ${edge.target} (${edge.kind}, ${edge.unit})`;
+}
+
+/**
+ * The Structure section of the Review panel: what the change did to the architecture,
+ * from the same document `strabo report` prints. An unreadable base says so rather than
+ * rendering an empty diff as if nothing had changed.
+ */
+function renderStructuralDiff(container, structural) {
+  const heading = document.createElement('h4');
+  heading.textContent = 'Structure';
+  container.append(heading);
+  if (!structural || structural.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'review-structure-unavailable';
+    note.textContent = structural?.detail
+      ? `Structure unavailable: ${structural.detail}`
+      : 'Structure unavailable: no base revision to compare.';
+    container.append(note);
+    return;
+  }
+  const groups = structuralDiffGroups(structural);
+  if (groups.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'review-structure-empty';
+    note.textContent = 'No structural change between the base and HEAD.';
+    container.append(note);
+    return;
+  }
+  for (const group of groups) {
+    const title = document.createElement('h5');
+    title.textContent = `${group.label} (${group.items.length})`;
+    container.append(title);
+    const list = document.createElement('ul');
+    list.dataset.role = `review-structure-${group.key}`;
+    for (const item of group.items) {
+      const entry = document.createElement('li');
+      entry.textContent = item;
+      list.append(entry);
+    }
+    container.append(list);
+  }
+}
+
+/**
  * Render a Git review: what changed, by how much, and what the change can reach.
  *
  * A commit review names its revision; a working-tree review groups staged, unstaged, and
@@ -2881,6 +2959,10 @@ export function renderReview(container, result, handlers = {}) {
       list.append(item);
     }
     container.append(list);
+  }
+
+  if (result.structural !== undefined) {
+    renderStructuralDiff(container, result.structural);
   }
 
   renderChangeMetrics(container, result.metrics, handlers);

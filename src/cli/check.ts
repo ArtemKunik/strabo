@@ -1,6 +1,12 @@
 import path from 'node:path';
 
-import { buildBaseline, runCheck, type CheckOptions, type CheckRule } from '../check/check.ts';
+import {
+  buildBaseline,
+  parseFailOnRules,
+  runCheck,
+  type CheckOptions,
+  type CheckRule,
+} from '../check/check.ts';
 import { defaultBaselinePath, readBaseline, writeBaseline } from '../check/baseline.ts';
 import { readEnv } from '../config.ts';
 
@@ -26,6 +32,11 @@ export async function runCheckCommand(
   }
   if (hasFlag(argv, 'fail-on-health-regression')) {
     rules.push('health-regression');
+  }
+  for (const rule of parseFailOnRules(collectFailOnValues(argv))) {
+    if (!rules.includes(rule)) {
+      rules.push(rule);
+    }
   }
 
   const options: CheckOptions = {
@@ -84,6 +95,30 @@ function renderHuman(result: Awaited<ReturnType<typeof runCheck>>, baselinePath:
   }
   lines.push(`health ${result.healthScore ?? 'unavailable'}`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Every `--fail-on <rules>` / `--fail-on=<rules>` value, in order. The comma-separated
+ * lists are resolved by `parseFailOnRules`; this only gathers them.
+ */
+export function collectFailOnValues(argv: readonly string[]): string[] {
+  const values: string[] = [];
+  const prefix = '--fail-on=';
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg.startsWith(prefix)) {
+      const value = arg.slice(prefix.length).trim();
+      if (value) {
+        values.push(value);
+      }
+    } else if (arg === '--fail-on') {
+      const value = (argv[index + 1] ?? '').trim();
+      if (value && !value.startsWith('-')) {
+        values.push(value);
+      }
+    }
+  }
+  return values;
 }
 
 function flagValue(argv: readonly string[], name: string): string | undefined {

@@ -170,6 +170,21 @@ export type {
   MetricsHistoryEntry,
 } from './analysis/change-metrics.ts';
 export { computeCoverage } from './analysis/coverage.ts';
+export {
+  diffGraphs,
+  structuralContext,
+  computeStructuralDiff,
+  clearStructuralDiffCache,
+} from './analysis/structural-diff.ts';
+export type {
+  StructuralContext,
+  StructuralDiff,
+  StructuralDiffResult,
+  StructuralEdge,
+  StructuralCycle,
+  StructuralTierEdge,
+  StructuralUnavailableReason,
+} from './analysis/structural-diff.ts';
 export { computeCycles } from './analysis/cycles.ts';
 export { computeArchitectureHealth } from './analysis/health.ts';
 export { computeFileHealth, computeMemberCohesion } from './analysis/file-health.ts';
@@ -396,7 +411,7 @@ export type { SiteExportOptions, SitePage } from './export/site.ts';
 export { computeFreshness, revisionFromFingerprint } from './status.ts';
 export type { Freshness } from './status.ts';
 
-export { runCheck, buildBaseline, collectFindings, CHECK_RULES } from './check/check.ts';
+export { runCheck, buildBaseline, collectFindings, CHECK_RULES, FAIL_ON_ALIASES, parseFailOnRules } from './check/check.ts';
 export type { CheckFinding, CheckOptions, CheckResult, CheckRule, CheckWarning } from './check/check.ts';
 export {
   readBaseline,
@@ -416,6 +431,8 @@ export { runExportCommand } from './cli/export.ts';
 export type { ExportIo } from './cli/export.ts';
 export { runCheckCommand } from './cli/check.ts';
 export type { CheckIo } from './cli/check.ts';
+export { runReportCommand, renderMarkdown } from './cli/report.ts';
+export type { ReportDocument, ReportChange, ReportHotspot, ReportIo } from './cli/report.ts';
 
 export { createStraboServer } from './server.ts';
 

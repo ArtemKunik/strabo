@@ -31,8 +31,10 @@ import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/qua
 import { buildCoChangeEdges } from '../../analysis/co-change.ts';
 import { collectHistory } from '../../analysis/history.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
+import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { revisionFromFingerprint } from '../../status.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import type { StraboConfig } from '../../types.ts';
@@ -65,6 +67,32 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(computeCoverage(cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The structural diff between HEAD and `base`: dependency edges, cycles, wrong-way tier
+   * edges, entry points, and test reach that appeared or disappeared. The base graph is
+   * scanned from a temporary worktree; an unreadable base is returned `unavailable`.
+   */
+  router.get('/analysis/structural-diff', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      if (!base) {
+        response.status(400).json({ error: 'base query parameter is required.' });
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      response.json(
+        await computeStructuralDiff(repository.root, base, {
+          headGraph: cached.report.graph,
+          headRevision: revisionFromFingerprint(cached.fingerprint),
+          repository: repository.name,
+        }),
+      );
     } catch (error) {
       sendError(response, error);
     }

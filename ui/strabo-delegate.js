@@ -11,6 +11,10 @@ import { API_PATH } from './strabo-core.js';
 
 let menuElement = null;
 let toastStack = null;
+let promptDialog = null;
+let promptDialogResolve = null;
+
+const AGENT_LABELS = { opencode: 'OpenCode', claude: 'Claude' };
 
 function ensureMenu() {
   if (!menuElement) {
@@ -180,6 +184,105 @@ export async function copyText(text) {
   area.select();
   document.execCommand('copy');
   area.remove();
+}
+
+/** Resolve the open review dialog, if any, with `value` and forget it. */
+function settlePromptReview(value) {
+  const resolve = promptDialogResolve;
+  promptDialogResolve = null;
+  resolve?.(value);
+}
+
+/** Build the review dialog once, wiring its static chrome to the current session's fields. */
+function ensurePromptDialog() {
+  if (promptDialog) {
+    return promptDialog;
+  }
+  const dialog = document.createElement('dialog');
+  dialog.id = 'prompt-dialog';
+  dialog.className = 'dialog prompt-dialog';
+  dialog.setAttribute('aria-label', 'Review the task before sending it to an agent');
+
+  const header = document.createElement('header');
+  header.className = 'dialog-header';
+  const heading = document.createElement('strong');
+  heading.className = 'prompt-dialog-title';
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'dialog-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  close.addEventListener('click', () => dialog.close());
+  header.append(heading, close);
+
+  const target = document.createElement('p');
+  target.className = 'dialog-path prompt-dialog-target';
+
+  const text = document.createElement('textarea');
+  text.className = 'prompt-dialog-text';
+  text.spellcheck = false;
+  text.setAttribute('aria-label', 'Task prompt');
+
+  const footer = document.createElement('footer');
+  footer.className = 'dialog-footer';
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.textContent = 'Copy';
+  copy.addEventListener('click', async () => {
+    await copyText(text.value);
+    copy.textContent = 'Copied';
+    setTimeout(() => {
+      copy.textContent = 'Copy';
+    }, 1500);
+  });
+  const actions = document.createElement('span');
+  actions.className = 'dialog-footer-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => dialog.close());
+  const send = document.createElement('button');
+  send.type = 'button';
+  send.className = 'primary prompt-dialog-send';
+  send.addEventListener('click', () => {
+    const reviewed = text.value;
+    settlePromptReview(reviewed);
+    dialog.close();
+  });
+  actions.append(cancel, send);
+  footer.append(copy, actions);
+
+  dialog.append(header, target, text, footer);
+  dialog.addEventListener('close', () => settlePromptReview(null));
+  document.body.append(dialog);
+  promptDialog = dialog;
+  return dialog;
+}
+
+/**
+ * Show the built prompt in a modal so the operator can read and edit it before it
+ * is handed to an agent. Resolves with the reviewed prompt when confirmed, or null
+ * when dismissed (Cancel, Escape, or the backdrop is not used here). `agent` names
+ * the confirm button so it is obvious which tool will open.
+ */
+export function showPromptReview({ agent, title, prompt }) {
+  const dialog = ensurePromptDialog();
+  settlePromptReview(null);
+  const agentName = AGENT_LABELS[agent] ?? agent;
+  dialog.querySelector('.prompt-dialog-title').textContent = `Review task for ${agentName}`;
+  dialog.querySelector('.prompt-dialog-target').textContent = title;
+  const text = dialog.querySelector('.prompt-dialog-text');
+  text.value = prompt;
+  dialog.querySelector('.prompt-dialog-send').textContent = `Open ${agentName}`;
+  const pending = new Promise((resolve) => {
+    promptDialogResolve = resolve;
+  });
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  text.focus();
+  text.setSelectionRange(text.value.length, text.value.length);
+  return pending;
 }
 
 /**

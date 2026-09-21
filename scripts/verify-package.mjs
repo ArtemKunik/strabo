@@ -120,6 +120,29 @@ console.log('consumer verification passed');
   console.log('Running the shipped package in the consumer...');
   const output = execSync('node verify.mjs', { cwd: consumer }).toString().trim();
   check(output.includes('consumer verification passed'), 'installed package scans, resolves Java, and serves');
+
+  // A fixture repository whose second commit adds a cycle, so `strabo report` has two
+  // revisions to diff structurally. The base graph is scanned from a temporary worktree.
+  const fixture = path.join(consumer, 'fixture');
+  fs.mkdirSync(path.join(fixture, 'src'), { recursive: true });
+  const gitIn = (args) => execSync(`git ${args}`, { cwd: fixture, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+  gitIn('init -q');
+  gitIn('config user.email test@example.com');
+  gitIn('config user.name Tester');
+  gitIn('config core.autocrlf false');
+  fs.writeFileSync(path.join(fixture, 'src', 'a.ts'), "import './b.ts';\nexport const a = 1;\n");
+  fs.writeFileSync(path.join(fixture, 'src', 'b.ts'), 'export const b = 1;\n');
+  gitIn('add .');
+  gitIn('commit -q -m base');
+  const baseHash = gitIn('rev-parse HEAD').trim();
+  fs.writeFileSync(path.join(fixture, 'src', 'b.ts'), "import './a.ts';\nexport const b = 1;\n");
+  gitIn('add .');
+  gitIn('commit -q -m cycle');
+
+  const straboBin = path.join(consumer, 'node_modules', 'strabo', 'bin', 'strabo.js');
+  const report = execSync(`node "${straboBin}" report . --base ${baseHash} --format md`, { cwd: fixture }).toString();
+  check(/Cycles introduced/.test(report), 'report names the introduced cycle');
+  check(report.includes('src/a.ts') && report.includes('src/b.ts'), 'report names the cycle members');
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
   console.error(error);

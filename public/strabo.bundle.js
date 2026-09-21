@@ -185,6 +185,22 @@ function passportFor(model, id) {
     usedBy
   };
 }
+function coChangePartnersFor(report, file, limit = 20) {
+  const edges = (report?.edges ?? []).filter(
+    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
+  );
+  return edges.sort(
+    (a, b) => (b.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
+      b.source === file ? b.target : b.source
+    )
+  ).slice(0, limit).map((edge) => ({
+    file: edge.source === file ? edge.target : edge.source,
+    hidden: edge.hidden === true,
+    ratio: edge.ratio,
+    commitsShared: edge.commitsShared ?? edge.commits.length,
+    commits: edge.commits
+  }));
+}
 function mapCounts(model) {
   const isBlock = model.prefixLength !== void 0 || model.system === true;
   const byKey = /* @__PURE__ */ new Map();
@@ -235,6 +251,7 @@ function shortcutSheet() {
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
     { keys: "C", action: "Show recorded function calls instead of imports" },
+    { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
     { keys: "S", action: "View the selected file\u2019s source" },
     { keys: "T", action: "Timeline" },
     { keys: "N", action: "Branches" },
@@ -396,10 +413,47 @@ function buildElements(model) {
       evidenceSpecifier: edge.evidence?.specifier,
       // In a System drill-down, `unit` edges are hidden until their file is selected;
       // `outside` edges are the L17 links and stay visible.
-      scope: edge.scope
+      scope: edge.scope,
+      // A co-change edge is drawn only in the off-by-default coupling lens, as a dashed
+      // relationship; the true value keeps the lens able to hide it without dropping it.
+      coChange: edge.coChange === true
     }
   }));
   return { nodes, edges };
+}
+function buildCoChangeElements(model, report, startIndex = 0) {
+  const ids = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = [];
+  (report?.edges ?? []).forEach((edge, offset) => {
+    if (!ids.has(edge.source) || !ids.has(edge.target)) {
+      return;
+    }
+    if (!Array.isArray(edge.commits) || edge.commits.length === 0) {
+      return;
+    }
+    edges.push({
+      group: "edges",
+      data: {
+        id: `coh${startIndex + offset}`,
+        source: edge.source,
+        target: edge.target,
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        kind: "co-change",
+        weight: edge.commitsShared ?? edge.commits.length,
+        edgeWidth: edgeStrokeWidth(edge.commitsShared ?? edge.commits.length),
+        evidenceLine: null,
+        evidenceSpecifier: `${edge.commitsShared} shared commit(s)`,
+        scope: void 0,
+        coChange: true,
+        hidden: edge.hidden === true,
+        ratio: edge.ratio,
+        commitsShared: edge.commitsShared,
+        commits: edge.commits
+      }
+    });
+  });
+  return edges;
 }
 function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
@@ -1933,6 +1987,10 @@ function stylesheet() {
     { selector: "node.tier-hidden", style: { display: "none" } },
     { selector: "edge.edge-hidden", style: { display: "none" } },
     { selector: "edge.edge-kind-hidden", style: { display: "none" } },
+    // A co-change edge is a changed-together relationship, not a dependency: dashed so the
+    // reading survives next to an import, and hidden until the off-by-default lens is on.
+    { selector: 'edge[kind = "co-change"]', style: { "line-style": "dashed", opacity: 0.85 } },
+    { selector: "edge.edge-cochange-hidden", style: { display: "none" } },
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { "line-style": "dashed" } },
@@ -2296,6 +2354,7 @@ var RESET_CLASSES = [
   "dimmed",
   "edge-faded",
   "edge-kind-hidden",
+  "edge-cochange-hidden",
   "label-hidden",
   "filtered-out",
   "tier-hidden",
@@ -2433,6 +2492,17 @@ function applyEdgeKind(cy, mode) {
     }
   });
 }
+function applyCoChange(cy, on) {
+  const visible = on === true;
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      if (edge.data("coChange") !== true) {
+        continue;
+      }
+      edge.toggleClass("edge-cochange-hidden", !visible);
+    }
+  });
+}
 function filterNodes2(cy, ids) {
   const keep = ids ? new Set(ids) : null;
   cy.batch(() => {
@@ -2518,11 +2588,19 @@ function createView(container) {
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
   let edgeKind = "imports";
+  let coChangeReport2 = null;
+  let coChangeOn = false;
   function renderModel() {
     if (!baseModel) {
       return;
     }
     islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
+    if (coChangeOn && coChangeReport2) {
+      islandModel = {
+        ...islandModel,
+        edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport2)]
+      };
+    }
     lastModel = islandModel;
     directoryMembers = membersByDirectory(islandModel);
     renderedElements = applyGraphDiff(cy, islandModel, renderedElements);
@@ -2531,6 +2609,7 @@ function createView(container) {
     cards.apply(islandModel);
     edgeFocus.apply();
     applyEdgeKind(cy, edgeKind);
+    applyCoChange(cy, coChangeOn);
     applyLabelBudget(cy, true);
     notifyGroup();
   }
@@ -2755,6 +2834,18 @@ function createView(container) {
       edgeKind = mode === "calls" ? "calls" : "imports";
       applyEdgeKind(cy, edgeKind);
     },
+    /**
+     * Draw the co-change coupling edges from an `/analysis/co-change` report.
+     *
+     * The report is merged into the model as dashed edges and the lens is applied; pass
+     * `null` or `{ on: false }` to hide them. This is a re-render, not a rescan: the report
+     * is fetched separately so the default map never pays for a history pass.
+     */
+    setCoChange(report, on = true) {
+      coChangeReport2 = report;
+      coChangeOn = on === true && report !== null;
+      renderModel();
+    },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
       overlayNodes(cy, classesByNode);
@@ -2902,6 +2993,9 @@ function writeIslandLayout(repository, offsets, storage = globalThis.localStorag
 // ui/strabo-delegate.js
 var menuElement = null;
 var toastStack = null;
+var promptDialog = null;
+var promptDialogResolve = null;
+var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
 function ensureMenu() {
   if (!menuElement) {
     menuElement = document.createElement("div");
@@ -3047,6 +3141,89 @@ async function copyText(text) {
   area.select();
   document.execCommand("copy");
   area.remove();
+}
+function settlePromptReview(value) {
+  const resolve = promptDialogResolve;
+  promptDialogResolve = null;
+  resolve?.(value);
+}
+function ensurePromptDialog() {
+  if (promptDialog) {
+    return promptDialog;
+  }
+  const dialog = document.createElement("dialog");
+  dialog.id = "prompt-dialog";
+  dialog.className = "dialog prompt-dialog";
+  dialog.setAttribute("aria-label", "Review the task before sending it to an agent");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading2 = document.createElement("strong");
+  heading2.className = "prompt-dialog-title";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => dialog.close());
+  header.append(heading2, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Task prompt");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", async () => {
+    await copyText(text.value);
+    copy.textContent = "Copied";
+    setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1500);
+  });
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog.close());
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "primary prompt-dialog-send";
+  send.addEventListener("click", () => {
+    const reviewed = text.value;
+    settlePromptReview(reviewed);
+    dialog.close();
+  });
+  actions.append(cancel, send);
+  footer.append(copy, actions);
+  dialog.append(header, target, text, footer);
+  dialog.addEventListener("close", () => settlePromptReview(null));
+  document.body.append(dialog);
+  promptDialog = dialog;
+  return dialog;
+}
+function showPromptReview({ agent, title, prompt }) {
+  const dialog = ensurePromptDialog();
+  settlePromptReview(null);
+  const agentName = AGENT_LABELS[agent] ?? agent;
+  dialog.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
+  dialog.querySelector(".prompt-dialog-target").textContent = title;
+  const text = dialog.querySelector(".prompt-dialog-text");
+  text.value = prompt;
+  dialog.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
+  const pending = new Promise((resolve) => {
+    promptDialogResolve = resolve;
+  });
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  text.focus();
+  text.setSelectionRange(text.value.length, text.value.length);
+  return pending;
 }
 async function launchAgent(agent, { repository, target, prompt, title }) {
   const response = await fetch(`${API_PATH}/delegate`, {
@@ -3247,9 +3424,9 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
       const hidden = element2.hidden === true;
       win.hidden = hidden;
       if (!hidden && config.titleFrom) {
-        const heading = config.titleFrom(element2);
-        if (heading) {
-          title.textContent = heading;
+        const heading2 = config.titleFrom(element2);
+        if (heading2) {
+          title.textContent = heading2;
         }
       }
       win.setAttribute("aria-label", title.textContent);
@@ -4628,6 +4805,16 @@ function renderInspector(container, model, id, handlers = {}) {
     memberMap.addEventListener("click", () => handlers.onOpenMemberMap(id));
     actions.append(memberMap);
   }
+  if (handlers.onOpenRoute) {
+    const route = document.createElement("button");
+    route.type = "button";
+    route.className = "route-open";
+    route.id = "open-route";
+    route.textContent = "Read next";
+    route.title = "Step through the repository reading route from its entry points";
+    route.addEventListener("click", () => handlers.onOpenRoute(id));
+    actions.append(route);
+  }
   const copy = document.createElement("button");
   copy.type = "button";
   copy.className = "icon-button";
@@ -4758,16 +4945,26 @@ function renderInspector(container, model, id, handlers = {}) {
   }
   selectTab(0);
   container.append(tabs, panels);
+  const changesWith = document.createElement("section");
+  changesWith.dataset.role = "changes-with";
+  const changesWithTitle = document.createElement("h3");
+  changesWithTitle.textContent = "Changes with";
+  changesWith.append(changesWithTitle);
+  const changesWithBody = document.createElement("p");
+  changesWithBody.className = "unavailable";
+  changesWithBody.textContent = "Loading co-change\u2026";
+  changesWith.append(changesWithBody);
+  container.append(changesWith);
   const trace = document.createElement("p");
   trace.className = "trace";
   trace.dataset.role = "trace";
   trace.textContent = "Use a row button to trace a directed path.";
   container.append(trace);
 }
-function listSection(heading, from, entries, handlers) {
+function listSection(heading2, from, entries, handlers) {
   const section2 = document.createElement("section");
   const title = document.createElement("h3");
-  title.textContent = `${heading} (${entries.length})`;
+  title.textContent = `${heading2} (${entries.length})`;
   section2.append(title);
   const list = document.createElement("ul");
   for (const entry of entries.slice(0, 100)) {
@@ -4805,6 +5002,65 @@ function appendFact(list, term, value) {
   dd.textContent = value;
   list.append(dt, dd);
 }
+function renderChangesWith(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Changes with";
+  container.append(title);
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Co-change is unavailable: no Git history was read.";
+    container.append(note3);
+    return;
+  }
+  const partners = result.partners ?? [];
+  if (partners.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No recorded commits changed this file together with another in the window.";
+    container.append(note3);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "passport-list";
+  list.dataset.role = "changes-with-list";
+  for (const partner of partners) {
+    const item = document.createElement("li");
+    item.dataset.delegateNode = partner.file;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "link";
+    open.textContent = partner.file;
+    open.addEventListener("click", () => handlers.onSelect?.(partner.file));
+    item.append(open);
+    const badge = document.createElement("span");
+    badge.className = "evidence";
+    badge.hidden = !partner.hidden;
+    badge.textContent = "hidden coupling";
+    item.append(badge);
+    const summary = document.createElement("span");
+    summary.className = "evidence";
+    summary.textContent = `${partner.commitsShared} shared commit(s) \xB7 ratio ${partner.ratio}`;
+    item.append(summary);
+    const commits = document.createElement("ul");
+    commits.className = "cochange-commits";
+    for (const commit of partner.commits.slice(0, 5)) {
+      const line = document.createElement("li");
+      line.textContent = `${commit.hash.slice(0, 8)} \xB7 ${commit.date} \xB7 ${commit.subject}`;
+      commits.append(line);
+    }
+    if (partner.commits.length > 5) {
+      const more = document.createElement("li");
+      more.className = "unavailable";
+      more.textContent = `+${partner.commits.length - 5} more commit(s)`;
+      commits.append(more);
+    }
+    item.append(commits);
+    list.append(item);
+  }
+  container.append(list);
+}
 function renderMembers(container, result) {
   container.replaceChildren();
   const symbols = result?.symbols ?? [];
@@ -4812,17 +5068,17 @@ function renderMembers(container, result) {
   title.textContent = `Members (${symbols.length})`;
   container.append(title);
   if (!result || result.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = result?.detail ?? "Not recorded by the scan.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Not recorded by the scan.";
+    container.append(note3);
     return;
   }
   if (symbols.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "No members declared.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No members declared.";
+    container.append(note3);
     return;
   }
   const memberMap = result.memberMap;
@@ -4851,24 +5107,24 @@ function renderFunctions(container, result, handlers = {}) {
   title.textContent = `Functions (${report?.functions?.length ?? 0})`;
   container.append(title);
   if (!result || result.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = result?.detail ?? "Functions are not recorded for this file.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Functions are not recorded for this file.";
+    container.append(note3);
     return;
   }
   if (!report || report.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = report?.detail ?? "Functions are not recorded for this file.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = report?.detail ?? "Functions are not recorded for this file.";
+    container.append(note3);
     return;
   }
   if (report.functions.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "No functions declared.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No functions declared.";
+    container.append(note3);
     return;
   }
   const summary = document.createElement("p");
@@ -5343,8 +5599,8 @@ function renderNarrativeReply(target, reply) {
   target.replaceChildren(...nodes, attribution);
 }
 function renderNarrationPanel(container, state2, handlers = {}) {
-  const heading = document.createElement("h3");
-  heading.textContent = `Narrator \xB7 ${state2.label}`;
+  const heading2 = document.createElement("h3");
+  heading2.textContent = `Narrator \xB7 ${state2.label}`;
   const reply = document.createElement("div");
   reply.className = "narrator-reply";
   reply.dataset.role = "narrative";
@@ -5355,7 +5611,7 @@ function renderNarrationPanel(container, state2, handlers = {}) {
   } else {
     renderNarrativeReply(reply, state2.reply);
   }
-  const nodes = [heading, reply];
+  const nodes = [heading2, reply];
   if (state2.phase === "done" && state2.reply?.available !== true && handlers.onOpenNarratorSettings) {
     const setup = document.createElement("button");
     setup.type = "button";
@@ -5372,10 +5628,10 @@ function appendNarratorBlock(container, handlers, { id, label }) {
   }
   const block = document.createElement("div");
   block.className = "narrator-block";
-  const note2 = document.createElement("p");
-  note2.className = "narrator-note";
-  note2.textContent = narratorStatusLabel(handlers.narratorStatus);
-  block.append(note2);
+  const note3 = document.createElement("p");
+  note3.className = "narrator-note";
+  note3.textContent = narratorStatusLabel(handlers.narratorStatus);
+  block.append(note3);
   if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
     const setup = document.createElement("button");
     setup.type = "button";
@@ -5415,15 +5671,15 @@ function appendNarratorBlock(container, handlers, { id, label }) {
   container.append(block);
 }
 function workspaceHeading(text, count) {
-  const heading = document.createElement("h4");
-  heading.textContent = `${text} (${count})`;
-  return heading;
+  const heading2 = document.createElement("h4");
+  heading2.textContent = `${text} (${count})`;
+  return heading2;
 }
 function workspaceNote(text) {
-  const note2 = document.createElement("p");
-  note2.className = "unavailable";
-  note2.textContent = text;
-  return note2;
+  const note3 = document.createElement("p");
+  note3.className = "unavailable";
+  note3.textContent = text;
+  return note3;
 }
 function workspaceList(className, rows, fill) {
   const list = document.createElement("ul");
@@ -5604,9 +5860,9 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   const section2 = document.createElement("section");
   section2.className = "workspace-tools";
   container.append(section2);
-  const heading = document.createElement("h4");
-  heading.textContent = "Compatibility and migrations";
-  section2.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Compatibility and migrations";
+  section2.append(heading2);
   const form = document.createElement("div");
   form.className = "workspace-tools-form";
   const label = document.createElement("label");
@@ -5772,16 +6028,16 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   }
 }
 function passportSection(title, count) {
-  const heading = document.createElement("h4");
-  heading.className = "passport-section-heading";
-  heading.textContent = `${title} (${count})`;
-  return heading;
+  const heading2 = document.createElement("h4");
+  heading2.className = "passport-section-heading";
+  heading2.textContent = `${title} (${count})`;
+  return heading2;
 }
 function passportNote(text) {
-  const note2 = document.createElement("p");
-  note2.className = "unavailable";
-  note2.textContent = text;
-  return note2;
+  const note3 = document.createElement("p");
+  note3.className = "unavailable";
+  note3.textContent = text;
+  return note3;
 }
 function passportFileList(entries, handlers, label) {
   const list = document.createElement("ul");
@@ -5884,6 +6140,15 @@ function renderRepositoryPassport(container, report, handlers = {}) {
       () => ""
     )
   );
+  if (handlers.onOpenRoute) {
+    const route = document.createElement("button");
+    route.type = "button";
+    route.id = "open-route";
+    route.textContent = "Read next";
+    route.title = "Step through the outward route from the declared entry points";
+    route.addEventListener("click", () => handlers.onOpenRoute());
+    container.append(route);
+  }
   if (handlers.onClose) {
     const close = document.createElement("button");
     close.type = "button";
@@ -5901,9 +6166,9 @@ function renderMemberType(type) {
   title.textContent = type.name;
   section2.append(title);
   if (type.fields.length > 0) {
-    const heading = document.createElement("h5");
-    heading.textContent = `Fields (${type.fields.length})`;
-    section2.append(heading);
+    const heading2 = document.createElement("h5");
+    heading2.textContent = `Fields (${type.fields.length})`;
+    section2.append(heading2);
     const list = document.createElement("ul");
     list.className = "member-fields";
     for (const field2 of type.fields) {
@@ -5917,9 +6182,9 @@ function renderMemberType(type) {
     section2.append(list);
   }
   if (type.methods.length > 0) {
-    const heading = document.createElement("h5");
-    heading.textContent = `Methods (${type.methods.length})`;
-    section2.append(heading);
+    const heading2 = document.createElement("h5");
+    heading2.textContent = `Methods (${type.methods.length})`;
+    section2.append(heading2);
     const list = document.createElement("ul");
     list.className = "member-methods";
     for (const method of type.methods) {
@@ -5937,10 +6202,10 @@ function renderMemberType(type) {
     section2.append(list);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "No members declared.";
-    section2.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No members declared.";
+    section2.append(note3);
   }
   return section2;
 }
@@ -5963,20 +6228,20 @@ function renderDataFlow(dataFlow) {
   title.textContent = "Data flow";
   section2.append(title);
   if (!dataFlow || dataFlow.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "flow-unavailable";
-    note2.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
-    section2.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "flow-unavailable";
+    note3.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
+    section2.append(note3);
     return section2;
   }
   for (const [key, label] of DATA_FLOW_PANELS) {
     const panel = document.createElement("div");
     panel.className = "flow-panel";
     panel.dataset.flow = key;
-    const heading = document.createElement("h5");
-    heading.textContent = label;
-    panel.append(heading);
+    const heading2 = document.createElement("h5");
+    heading2.textContent = label;
+    panel.append(heading2);
     const list = document.createElement("ul");
     const items = dataFlow[key] ?? [];
     if (items.length === 0) {
@@ -6178,14 +6443,14 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
   container.replaceChildren();
   const kind = options.kind ?? "impact";
   container.className = `overlay-panel overlay-kind-${kind}`;
-  const heading = document.createElement("h3");
+  const heading2 = document.createElement("h3");
   const dot = document.createElement("span");
   dot.className = "overlay-dot";
   dot.setAttribute("aria-hidden", "true");
-  heading.append(dot);
-  heading.append(document.createTextNode(`${title} \xB7 ${overlay.summary}`));
-  heading.className = "overlay-summary";
-  container.append(heading);
+  heading2.append(dot);
+  heading2.append(document.createTextNode(`${title} \xB7 ${overlay.summary}`));
+  heading2.className = "overlay-summary";
+  container.append(heading2);
   if (options.onClose) {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
@@ -6193,7 +6458,7 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     dismiss.setAttribute("aria-label", "Dismiss overlay panel");
     dismiss.textContent = "\xD7";
     dismiss.addEventListener("click", () => options.onClose());
-    heading.append(dismiss);
+    heading2.append(dismiss);
   }
   if (overlay.meta && (overlay.meta.testFiles !== void 0 || overlay.meta.unreached !== void 0)) {
     const counts = document.createElement("p");
@@ -6206,10 +6471,10 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     container.append(counts);
   }
   if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
-    const note2 = document.createElement("p");
-    note2.className = "overlay-empty";
-    note2.textContent = overlay.emptyNote;
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "overlay-empty";
+    note3.textContent = overlay.emptyNote;
+    container.append(note3);
     return;
   }
   if (overlay.items.length > 0) {
@@ -6278,10 +6543,10 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.hidden = false;
   container.replaceChildren();
   container.dataset.delegateEdge = evidence.id;
-  const heading = document.createElement("h3");
-  heading.className = "overlay-summary";
-  heading.textContent = `Edge \xB7 ${evidence.kind}`;
-  container.append(heading);
+  const heading2 = document.createElement("h3");
+  heading2.className = "overlay-summary";
+  heading2.textContent = `Edge \xB7 ${evidence.kind}`;
+  container.append(heading2);
   const route = document.createElement("p");
   route.className = "edge-route";
   route.append(edgeEndpoint(evidence.source, handlers.onSelect));
@@ -6344,17 +6609,17 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
+    container.append(note3);
     return;
   }
   if (result.commits.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "No commits recorded.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No commits recorded.";
+    container.append(note3);
     return;
   }
   const list = document.createElement("ul");
@@ -6446,11 +6711,11 @@ function renderBranches(container, result, handlers = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "branches-unavailable";
-    note2.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "branches-unavailable";
+    note3.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
+    container.append(note3);
     return;
   }
   const baseLine = document.createElement("p");
@@ -6611,10 +6876,10 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
   }
   container.append(merge);
-  const fileList = (role, heading, entries, describe) => {
+  const fileList = (role, heading2, entries, describe) => {
     if (entries.length === 0) return;
     const title = document.createElement("h4");
-    title.textContent = `${heading} (${entries.length})`;
+    title.textContent = `${heading2} (${entries.length})`;
     container.append(title);
     const list = document.createElement("ul");
     list.dataset.role = role;
@@ -6654,11 +6919,11 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     (entry) => `changed on the base \xB7 imported by ${entry.via}${entry.distance > 1 ? ` (distance ${entry.distance})` : ""}`
   );
   if (!branch.checkedOut) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "review-branch-graph";
-    note2.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-branch-graph";
+    note3.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
+    container.append(note3);
   }
 }
 function renderReviewLoading(container, handlers = {}) {
@@ -6678,11 +6943,11 @@ function renderReviewLoading(container, handlers = {}) {
     dismiss.addEventListener("click", () => handlers.onClose());
     title.append(dismiss);
   }
-  const note2 = document.createElement("p");
-  note2.className = "evidence";
-  note2.dataset.role = "review-loading";
-  note2.textContent = "Reviewing changes\u2026";
-  container.append(note2);
+  const note3 = document.createElement("p");
+  note3.className = "evidence";
+  note3.dataset.role = "review-loading";
+  note3.textContent = "Reviewing changes\u2026";
+  container.append(note3);
 }
 function renderReview(container, result, handlers = {}) {
   container.replaceChildren();
@@ -6702,11 +6967,11 @@ function renderReview(container, result, handlers = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "review-unavailable";
-    note2.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-unavailable";
+    note3.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
+    container.append(note3);
     return;
   }
   if (result.commit) {
@@ -6732,15 +6997,15 @@ function renderReview(container, result, handlers = {}) {
     renderBranchDivergence(container, result.branch, handlers);
   }
   if ((result.files ?? []).length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
+    container.append(note3);
   }
   for (const [group, files] of reviewGroups(result.files)) {
-    const heading = document.createElement("h4");
-    heading.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
-    container.append(heading);
+    const heading2 = document.createElement("h4");
+    heading2.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
+    container.append(heading2);
     const list = document.createElement("ul");
     list.dataset.role = `review-group-${group}`;
     for (const file of files) {
@@ -6792,11 +7057,11 @@ function renderReview(container, result, handlers = {}) {
   impactHeading.textContent = `Potentially affected (${affected.length})`;
   container.append(impactHeading);
   if (affected.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "review-impact-empty";
-    note2.textContent = "Nothing depends on the changed files.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-impact-empty";
+    note3.textContent = "Nothing depends on the changed files.";
+    container.append(note3);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "review-impact";
@@ -6830,9 +7095,9 @@ function renderChangeMetrics(container, metrics, handlers = {}) {
   if (!metrics || metrics.available === false) {
     return;
   }
-  const heading = document.createElement("h4");
-  heading.textContent = "Change metrics";
-  container.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Change metrics";
+  container.append(heading2);
   const summary = document.createElement("p");
   summary.className = "overlay-summary";
   summary.dataset.role = "change-metrics-summary";
@@ -6902,10 +7167,10 @@ function renderChangeMetrics(container, metrics, handlers = {}) {
   }
   container.append(table);
   if (metrics.capped) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "Only the first files in the change set were measured.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "Only the first files in the change set were measured.";
+    container.append(note3);
   }
 }
 function metricCell(delta, title) {
@@ -6928,9 +7193,9 @@ function renderChangePassport(container, passport) {
   if (!passport || !Array.isArray(passport.files) || passport.files.length === 0) {
     return;
   }
-  const heading = document.createElement("h4");
-  heading.textContent = "Change passport";
-  container.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Change passport";
+  container.append(heading2);
   const caption = document.createElement("p");
   caption.className = "unavailable";
   caption.textContent = passport.baseline ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.` : "Cohesion from recorded member wiring; no baseline revision was available.";
@@ -6955,10 +7220,10 @@ function renderChangePassport(container, passport) {
   }
   container.append(list);
   if (passport.capped) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = "Only the first files in the change set were measured.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "Only the first files in the change set were measured.";
+    container.append(note3);
   }
 }
 function renderImpactPassport(container, set, handlers = {}) {
@@ -6967,9 +7232,9 @@ function renderImpactPassport(container, set, handlers = {}) {
     container.append(unavailableNote("No impact passport was recorded."));
     return;
   }
-  const heading = document.createElement("h4");
-  heading.textContent = passportHeading(set.scope);
-  container.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = passportHeading(set.scope);
+  container.append(heading2);
   const caption = document.createElement("p");
   caption.className = "unavailable";
   caption.textContent = set.baseline ? `Current graph; compared with ${set.baseline}.` : "Current graph; no baseline revision was available.";
@@ -7036,9 +7301,9 @@ function impactCard(card, totals) {
 function impactList(title, entries, role) {
   const section2 = document.createElement("div");
   section2.className = "impact-list";
-  const heading = document.createElement("h5");
-  heading.textContent = title;
-  section2.append(heading);
+  const heading2 = document.createElement("h5");
+  heading2.textContent = title;
+  section2.append(heading2);
   if (entries.length === 0) {
     section2.append(unavailableNote("None recorded."));
     section2.dataset.role = role;
@@ -7096,10 +7361,10 @@ var ZOOM_LEVELS = [
   ["detail", "Detail"]
 ];
 function unavailableNote(text) {
-  const note2 = document.createElement("p");
-  note2.className = "unavailable";
-  note2.textContent = text;
-  return note2;
+  const note3 = document.createElement("p");
+  note3.className = "unavailable";
+  note3.textContent = text;
+  return note3;
 }
 function renderRisk(container, report, handlers = {}) {
   container.replaceChildren();
@@ -7116,11 +7381,11 @@ function renderRisk(container, report, handlers = {}) {
     title.append(dismiss);
   }
   if (!report || report.available === false) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "risk-unavailable";
-    note2.textContent = "Risk report unavailable.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-unavailable";
+    note3.textContent = "Risk report unavailable.";
+    container.append(note3);
     return;
   }
   const summary = document.createElement("p");
@@ -7141,15 +7406,15 @@ function renderRisk(container, report, handlers = {}) {
     container.append(undeclared);
   }
   const advisories = orderAdvisories(report.advisories);
-  const heading = document.createElement("h4");
-  heading.textContent = `Advisories (${advisories.length})`;
-  container.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = `Advisories (${advisories.length})`;
+  container.append(heading2);
   if (advisories.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "risk-advisories-empty";
-    note2.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-advisories-empty";
+    note3.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
+    container.append(note3);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-advisories";
@@ -7228,11 +7493,11 @@ function renderRisk(container, report, handlers = {}) {
   licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
   container.append(licenseHeading);
   if (flagged.length === 0) {
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.dataset.role = "risk-licenses-empty";
-    note2.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
-    container.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-licenses-empty";
+    note3.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
+    container.append(note3);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-licenses";
@@ -7491,14 +7756,14 @@ function memberButton(id, text, handler, className = "") {
 function buildTypeSection(type, view2, clusters, handlers) {
   const section2 = document.createElement("section");
   section2.className = "member-type";
-  const heading = document.createElement("h3");
-  heading.className = "member-type-name";
-  heading.textContent = type.name;
+  const heading2 = document.createElement("h3");
+  heading2.className = "member-type-name";
+  heading2.textContent = type.name;
   const count = document.createElement("span");
   count.className = "member-count";
   count.textContent = `${type.fields.length + type.methods.length} members`;
-  heading.append(count);
-  section2.append(heading);
+  heading2.append(count);
+  section2.append(heading2);
   const legend = document.createElement("div");
   legend.className = "member-clusters";
   legend.dataset.role = "clusters";
@@ -7848,9 +8113,9 @@ function buildDataFlow(memberMap, consumerIds) {
   section2.append(title);
   const flow = memberMap?.dataFlow;
   if (!flow || flow.available === false) {
-    const note2 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
-    note2.dataset.role = "flow-unavailable";
-    section2.append(note2);
+    const note3 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
+    note3.dataset.role = "flow-unavailable";
+    section2.append(note3);
     return section2;
   }
   const diagram = buildFlowDiagram(memberMap);
@@ -8059,11 +8324,11 @@ function sourceModeButton(label, mode, handler) {
   return button2;
 }
 function sourceNote(text, className, role) {
-  const note2 = document.createElement("p");
-  note2.className = className;
-  if (role) note2.dataset.role = role;
-  note2.textContent = text;
-  return note2;
+  const note3 = document.createElement("p");
+  note3.className = className;
+  if (role) note3.dataset.role = role;
+  note3.textContent = text;
+  return note3;
 }
 function sourceLine(kind, gutters, text, mark) {
   const row = document.createElement("div");
@@ -8156,10 +8421,10 @@ function renderTierPanel(container, report, filter = "all") {
   const title = document.createElement("h3");
   title.textContent = "Tier lens";
   container.append(title);
-  const note2 = document.createElement("p");
-  note2.className = "overlay-note";
-  note2.textContent = tierSummaryLabel(report);
-  container.append(note2);
+  const note3 = document.createElement("p");
+  note3.className = "overlay-note";
+  note3.textContent = tierSummaryLabel(report);
+  container.append(note3);
   const rows = tierMatrixRows(report);
   if (rows.length === 0) {
     const empty = document.createElement("p");
@@ -8214,9 +8479,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const calls = tierCallSites(report);
   if (calls.length > 0) {
-    const heading = document.createElement("h4");
-    heading.textContent = "Calls";
-    container.append(heading);
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Calls";
+    container.append(heading2);
     for (const call of calls.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-call";
@@ -8227,9 +8492,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const endpoints = tierEndpointSites(report);
   if (endpoints.length > 0) {
-    const heading = document.createElement("h4");
-    heading.textContent = "Endpoints";
-    container.append(heading);
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Endpoints";
+    container.append(heading2);
     for (const endpoint of endpoints.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-endpoint";
@@ -8240,9 +8505,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
   if (joined.length > 0) {
-    const heading = document.createElement("h4");
-    heading.textContent = "Trace";
-    container.append(heading);
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Trace";
+    container.append(heading2);
     for (const entry of joined.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-trace";
@@ -8253,9 +8518,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const tables = tierTables(report);
   if (tables.length > 0) {
-    const heading = document.createElement("h4");
-    heading.textContent = "Tables";
-    container.append(heading);
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Tables";
+    container.append(heading2);
     for (const entry of tables.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-table";
@@ -8271,6 +8536,185 @@ function renderTierPanel(container, report, filter = "all") {
         container.append(caption);
       }
     }
+  }
+}
+
+// ui/strabo-route.js
+var ROUTE_PROGRESS_PREFIX = "strabo.route.progress.";
+function routeProgressKey(repository) {
+  return `${ROUTE_PROGRESS_PREFIX}${repository ?? "default"}`;
+}
+function routeSteps(route) {
+  const steps = [];
+  for (const unit of route?.units ?? []) {
+    for (const step of unit.files ?? []) {
+      steps.push({ ...step, unitName: unit.summary?.name ?? step.unit });
+    }
+  }
+  return steps;
+}
+function routeIndexOf(route, file) {
+  if (!file) {
+    return -1;
+  }
+  return routeSteps(route).findIndex((step) => step.file === file);
+}
+function clampRouteIndex(index, length) {
+  if (!Number.isFinite(index) || length <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(Math.trunc(index), 0), length - 1);
+}
+function routeStepLabel(step) {
+  if (!step) {
+    return "No file is on the route.";
+  }
+  const reached = step.from ? `reached from ${step.from}` : "entry point";
+  return `${step.file} \xB7 depth ${step.depth} \xB7 ${reached} \xB7 ${step.fanIn} importer(s) \xB7 ${step.tier}`;
+}
+function readRouteProgress(storage, repository) {
+  try {
+    const raw = storage?.getItem(routeProgressKey(repository));
+    if (raw === null || raw === void 0) {
+      return null;
+    }
+    const index = Number.parseInt(raw, 10);
+    return Number.isFinite(index) ? index : null;
+  } catch {
+    return null;
+  }
+}
+function writeRouteProgress(storage, repository, index) {
+  try {
+    storage?.setItem(routeProgressKey(repository), String(index));
+  } catch {
+  }
+}
+function heading(level, text) {
+  const node = document.createElement(level);
+  node.textContent = text;
+  return node;
+}
+function note(text, className = "overlay-note") {
+  const node = document.createElement("p");
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
+  container.replaceChildren();
+  container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
+  if (!route) {
+    container.append(note("No reading route was recorded for this repository.", "unavailable"));
+    return;
+  }
+  const steps = routeSteps(route);
+  const index = clampRouteIndex(state2.index ?? 0, steps.length);
+  if (route.truncated) {
+    container.append(note(route.truncated, "route-truncated"));
+  }
+  const controls = document.createElement("div");
+  controls.className = "route-controls";
+  controls.dataset.role = "route-controls";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "route-back";
+  back.textContent = "Previous";
+  back.disabled = index <= 0;
+  back.addEventListener("click", () => handlers.onStep?.(index - 1));
+  const counter = document.createElement("span");
+  counter.className = "route-counter";
+  counter.dataset.role = "route-counter";
+  counter.textContent = steps.length > 0 ? `Step ${index + 1} of ${steps.length}` : "No file is on the route.";
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "route-next";
+  next.textContent = "Next";
+  next.disabled = steps.length === 0 || index >= steps.length - 1;
+  next.addEventListener("click", () => handlers.onStep?.(index + 1));
+  const focus2 = document.createElement("button");
+  focus2.type = "button";
+  focus2.className = "route-focus";
+  focus2.dataset.role = "route-focus";
+  focus2.textContent = "Focus on map";
+  focus2.disabled = steps.length === 0;
+  focus2.addEventListener("click", () => {
+    const step = steps[index];
+    if (step) {
+      handlers.onFocus?.(step.file);
+    }
+  });
+  controls.append(back, counter, next, focus2);
+  if (handlers.onNarrateTour) {
+    const tour = document.createElement("button");
+    tour.type = "button";
+    tour.className = "route-narrate";
+    tour.dataset.role = "route-narrate";
+    tour.textContent = "Narrate tour";
+    tour.title = "Ask the opt-in narrator for a guided tour of this route";
+    tour.disabled = state2.narratorConfigured === false;
+    tour.addEventListener("click", () => handlers.onNarrateTour());
+    controls.append(tour);
+  }
+  container.append(controls);
+  const current2 = steps[index];
+  const currentCard = document.createElement("p");
+  currentCard.className = "route-current";
+  currentCard.dataset.role = "route-current";
+  currentCard.textContent = routeStepLabel(current2);
+  if (current2) {
+    currentCard.dataset.file = current2.file;
+  }
+  container.append(currentCard);
+  const summary = route.summary ?? {};
+  container.append(
+    note(
+      `${summary.entryPoints ?? 0} entry point(s) \xB7 ${summary.routed ?? 0} routed \xB7 ${summary.unreached ?? 0} no entry point reaches \xB7 ${summary.units ?? 0} unit(s)`,
+      "route-summary"
+    )
+  );
+  for (const unit of route.units ?? []) {
+    const section2 = document.createElement("section");
+    section2.className = "route-unit";
+    section2.dataset.role = "route-unit";
+    section2.dataset.unit = unit.summary?.id ?? "";
+    const unitName = unit.summary?.name ?? unit.summary?.id ?? "unit";
+    section2.append(
+      heading("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
+    );
+    if (unit.summary?.roleEvidence) {
+      section2.append(note(unit.summary.roleEvidence, "route-unit-why"));
+    }
+    for (const step of unit.files ?? []) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "route-step";
+      row.dataset.role = "route-step";
+      row.dataset.file = step.file;
+      if (step.file === current2?.file) {
+        row.classList.add("is-current");
+      }
+      row.textContent = routeStepLabel(step);
+      row.addEventListener("click", () => handlers.onStep?.(routeIndexOf(route, step.file)));
+      section2.append(row);
+    }
+    if ((unit.unreached ?? []).length > 0) {
+      const unreached = document.createElement("details");
+      unreached.className = "route-unreached";
+      unreached.dataset.role = "route-unreached";
+      const count = document.createElement("summary");
+      count.textContent = `${unit.unreached.length} file(s) no entry point reaches`;
+      unreached.append(count);
+      for (const entry of unit.unreached) {
+        const row = document.createElement("div");
+        row.className = "route-unreached-file";
+        row.dataset.file = entry.file;
+        row.textContent = `${entry.file} \xB7 ${entry.fanIn} importer(s) \xB7 ${entry.tier}`;
+        unreached.append(row);
+      }
+      section2.append(unreached);
+    }
+    container.append(section2);
   }
 }
 
@@ -8388,12 +8832,12 @@ function checkboxInput(checked, onChange) {
 function section(title) {
   const group = document.createElement("section");
   group.className = "setting-section";
-  const heading = document.createElement("h4");
-  heading.textContent = title;
-  group.append(heading);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = title;
+  group.append(heading2);
   return group;
 }
-function note(text) {
+function note2(text) {
   const paragraph = document.createElement("p");
   paragraph.className = "setting-note";
   paragraph.textContent = text;
@@ -8419,7 +8863,7 @@ function narratorSection(handlers = {}) {
   const view2 = handlers.narrator;
   const state2 = handlers.narratorState ?? {};
   if (!view2) {
-    group.append(note("Loading narrator settings\u2026"));
+    group.append(note2("Loading narrator settings\u2026"));
     return group;
   }
   const locked = view2.locked ?? {};
@@ -8482,7 +8926,7 @@ function narratorSection(handlers = {}) {
   modelRow.append(modelInput, fetchButton);
   group.append(field("Model", modelRow), modelList);
   if (state2.modelsNote) {
-    group.append(note(state2.modelsNote));
+    group.append(note2(state2.modelsNote));
   }
   if (locked.model) {
     group.append(lockedNote(locked.model, "The model"));
@@ -8503,7 +8947,7 @@ function narratorSection(handlers = {}) {
   keySelect.id = "narrator-key-source";
   keySelect.disabled = Boolean(locked.apiKeyEnv);
   group.append(field("API key source", keySelect));
-  group.append(note(narratorKeyLabel(view2.key)));
+  group.append(note2(narratorKeyLabel(view2.key)));
   if (keyMode === "env") {
     const envInput = textInput(view2.apiKeyEnv ?? "STRABO_NARRATOR_API_KEY", {
       placeholder: "STRABO_NARRATOR_API_KEY",
@@ -8516,7 +8960,7 @@ function narratorSection(handlers = {}) {
     envRow.className = "setting-row";
     envRow.append(envInput, saveEnv);
     group.append(field("Variable name", envRow));
-    group.append(note("The panel only shows whether the variable is set, never its value."));
+    group.append(note2("The panel only shows whether the variable is set, never its value."));
   } else if (keyMode === "stored") {
     const keyInput = document.createElement("input");
     keyInput.type = "password";
@@ -8543,12 +8987,12 @@ function narratorSection(handlers = {}) {
     keyRow.append(keyInput, storeButton, clearButton);
     group.append(field("Stored key", keyRow));
     group.append(
-      note(
+      note2(
         "Stored in the state directory with owner-only permissions, bound to this host. It is never shown again, logged, or sent anywhere but the endpoint."
       )
     );
   } else {
-    group.append(note("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
+    group.append(note2("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
   }
   keySelect.addEventListener("change", () => {
     const next = keySelect.value;
@@ -8562,7 +9006,7 @@ function narratorSection(handlers = {}) {
   sendSourceToggle.disabled = Boolean(locked.sendSource);
   group.append(field("Send source", sendSourceToggle));
   group.append(
-    note("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
+    note2("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
   );
   if (locked.sendSource) {
     group.append(lockedNote(locked.sendSource, "The Send source toggle"));
@@ -8594,7 +9038,7 @@ function narratorSection(handlers = {}) {
   });
   testButton.id = "narrator-test";
   group.append(field("Connection", testButton));
-  group.append(note(narratorTestLabel(state2.test)));
+  group.append(note2(narratorTestLabel(state2.test)));
   const saveButton = button(
     "Save endpoint and model",
     () => handlers.onNarratorChange?.({
@@ -8605,7 +9049,7 @@ function narratorSection(handlers = {}) {
   saveButton.id = "narrator-save";
   group.append(saveButton);
   group.append(
-    note("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
+    note2("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
   );
   return group;
 }
@@ -8621,20 +9065,20 @@ function renderingSection() {
   group.append(field("GPU rendering (WebGL2)", toggle));
   if (!available) {
     group.append(
-      note("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
+      note2("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
     );
     return group;
   }
   if (armed && webglRefused()) {
     group.append(
-      note(
+      note2(
         "WebGL failed to start in this tab and the map fell back to the 2D canvas. Open a new tab to try again."
       )
     );
     return group;
   }
   group.append(
-    note(
+    note2(
       "Draws the map on the GPU. Changing this reloads the page. Diagnostics reports the renderer actually in use."
     )
   );
@@ -8643,9 +9087,9 @@ function renderingSection() {
 function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
   container.replaceChildren();
-  const heading = document.createElement("h3");
-  heading.textContent = "Settings";
-  container.append(heading);
+  const heading2 = document.createElement("h3");
+  heading2.textContent = "Settings";
+  container.append(heading2);
   const local = section("Appearance");
   local.append(
     field(
@@ -8666,13 +9110,13 @@ function renderSettings(container, handlers = {}) {
       )
     ),
     field("Show node labels", checkboxInput(prefs.labels, (value) => handlers.onPref?.("labels", value))),
-    note("Preferences are stored in this browser.")
+    note2("Preferences are stored in this browser.")
   );
   container.append(local);
   container.append(renderingSection());
   const remote = section("Server");
   if (!server) {
-    remote.append(note("Loading server settings\u2026"));
+    remote.append(note2("Loading server settings\u2026"));
   } else {
     remote.append(field("Start root", textInput(server.workspaceRoot, { readOnly: true })));
     const ceilingInput = textInput(server.scanCeiling);
@@ -8688,7 +9132,7 @@ function renderSettings(container, handlers = {}) {
     ceilingRow.append(ceilingInput, saveButton, resetButton);
     remote.append(field("Scan ceiling", ceilingRow));
     remote.append(
-      note(
+      note2(
         server.allowCeilingWidening ? "Widening is enabled for this process (startup flag), so the ceiling may also be raised above the start boundary." : "Widening is off for this process: the ceiling can only be narrowed. Restart with STRABO_ALLOW_CEILING_WIDENING=1 (or --allow-ceiling-widening) to permit raising it."
       )
     );
@@ -8714,7 +9158,7 @@ function renderSettings(container, handlers = {}) {
       });
     });
     remote.append(
-      note(
+      note2(
         "Whether widening is permitted is a startup-only setting, shown here read-only. It is never accepted from the browser, so this panel cannot widen what the server may read."
       )
     );
@@ -8729,10 +9173,10 @@ function renderSettings(container, handlers = {}) {
       )
     );
     if (server.riskDeniedLicenses && server.riskDeniedLicenses.length > 0) {
-      remote.append(note(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
+      remote.append(note2(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
     }
     remote.append(
-      note("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
+      note2("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
     );
   }
   container.append(remote);
@@ -8840,6 +9284,8 @@ var store = createStore({
     overlay: "none",
     /** The edge lens: 'imports' for module coupling, 'calls' for recorded function calls. */
     edgeKind: "imports",
+    /** The co-change coupling lens: off by default, since it needs a git history pass. */
+    coChange: false,
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: "off",
     pathMode: false,
@@ -8901,6 +9347,9 @@ function readViewPrefs(repository) {
     if (parsed.edgeKind === "calls" || parsed.edgeKind === "imports") {
       prefs.edgeKind = parsed.edgeKind;
     }
+    if (parsed.coChange === true) {
+      prefs.coChange = true;
+    }
     return prefs;
   } catch {
     return null;
@@ -8914,7 +9363,8 @@ function writeViewPrefs() {
         mode: state.mode,
         overlay: state.overlay,
         filter: state.filter,
-        edgeKind: state.edgeKind
+        edgeKind: state.edgeKind,
+        coChange: state.coChange
       })
     );
   } catch {
@@ -8953,6 +9403,9 @@ function applyViewPrefs() {
   }
   if (prefs.edgeKind === "calls" && state.mode === "file") {
     state.edgeKind = "calls";
+  }
+  if (prefs.coChange) {
+    state.coChange = true;
   }
 }
 var view = createView(document.getElementById("graph"));
@@ -9005,6 +9458,7 @@ var elements = {
   tbPath: document.getElementById("tb-path"),
   tbBoundaries: document.getElementById("tb-boundaries"),
   tbCalls: document.getElementById("tb-calls"),
+  tbCoChange: document.getElementById("tb-cochange"),
   tbTimeline: document.getElementById("tb-timeline"),
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
@@ -9032,6 +9486,7 @@ var elements = {
   settingsPanel: document.getElementById("settings-panel"),
   workspacePanel: document.getElementById("workspace-panel"),
   passportPanel: document.getElementById("passport-panel"),
+  routePanel: document.getElementById("route-panel"),
   sourcePanel: document.getElementById("source-panel")
 };
 var memberData = null;
@@ -9044,6 +9499,8 @@ var reviewHistory = [];
 var currentReviewRequest = null;
 var passportHistory = [];
 var passportGoingBack = false;
+var currentRoute = null;
+var routeIndex = 0;
 var browsedFolder = null;
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
@@ -9134,6 +9591,7 @@ async function scan({ refresh = false } = {}) {
     applyFilterToView();
     applyTierLens();
     applyEdgeKindLens();
+    applyCoChangeLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -9153,6 +9611,7 @@ async function scan({ refresh = false } = {}) {
     applyModeChrome();
     updateUnitsButton();
     updateEdgeKindButton();
+    updateCoChangeButton();
     updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
@@ -9321,6 +9780,8 @@ function selectNode(id) {
     onBack: passportBack,
     backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
     ...isFileNode(id) ? { onViewSource: (target) => viewSource(target) } : {},
+    // The reading route is repository-wide; a Module Passport opens it at its own file.
+    ...isFileNode(id) ? { onOpenRoute: (target) => showRoute(target) } : {},
     onOpenMemberMap: (target) => {
       openMemberMap(target).then(() => {
         floatingWindows.find((controller) => controller.key === "inspector")?.close();
@@ -9346,7 +9807,8 @@ async function loadMembers(id) {
   const membersSection = elements.inspector.querySelector('[data-role="members"]');
   const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
   const impactSection = elements.inspector.querySelector('[data-role="impact"]');
-  if (!membersSection && !functionsSection && !impactSection) {
+  const changesWithSection = elements.inspector.querySelector('[data-role="changes-with"]');
+  if (!membersSection && !functionsSection && !impactSection && !changesWithSection) {
     return;
   }
   const params = new URLSearchParams({ file: id });
@@ -9364,10 +9826,12 @@ async function loadMembers(id) {
     ]);
     const result = symbolsResponse.ok ? await symbolsResponse.json() : { available: false, detail: "Symbols are unavailable for this file." };
     const impact = impactResponse.ok ? await impactResponse.json() : null;
+    const changesWith = changesWithSection ? await loadChangesWith(id) : null;
     if (selected === id) {
       if (membersSection) renderMembers(membersSection, result);
       if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
       if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
+      if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
     }
   } catch {
     if (selected === id) {
@@ -9375,8 +9839,25 @@ async function loadMembers(id) {
       if (membersSection) renderMembers(membersSection, fallback);
       if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
       if (impactSection) renderImpactPassport(impactSection, null);
+      if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: "Co-change could not be loaded." });
     }
   }
+}
+async function loadChangesWith(id) {
+  const repository = state.repository ?? null;
+  if (!coChangeReport || coChangeRepository !== repository) {
+    try {
+      const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
+      coChangeReport = await request(`/analysis/co-change${query}`);
+      coChangeRepository = repository;
+    } catch (error) {
+      return { available: false, detail: error.message };
+    }
+  }
+  if (coChangeReport?.unavailable) {
+    return { available: false, detail: coChangeReport.detail };
+  }
+  return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
 }
 function impactPassportSet(card) {
   if (!card || card.path === void 0) {
@@ -9478,6 +9959,28 @@ async function narrateNode(id) {
     showPanel({ label, phase: "done", reply });
   } catch (error) {
     showPanel({ label, phase: "error", message: error.message });
+  }
+}
+async function narrateRouteTour() {
+  const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
+  const showPanel = (panelState) => {
+    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
+  };
+  showPanel({ label: "Guided tour", phase: "loading" });
+  floatingWindows.find((controller) => controller.key === "narration")?.open();
+  try {
+    const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(state.repository ? { repository: state.repository } : {})
+    });
+    const reply = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
+    }
+    showPanel({ label: "Guided tour", phase: "done", reply });
+  } catch (error) {
+    showPanel({ label: "Guided tour", phase: "error", message: error.message });
   }
 }
 async function postNarration(instruction, evidence) {
@@ -9780,6 +10283,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "p") elements.tbPath.click();
   else if (key === "b") elements.tbBoundaries.click();
   else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
+  else if (key === "h" && state.mode === "file") elements.tbCoChange?.click();
   else if (key === "s" && selected && isFileNode(selected)) viewSource(selected);
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
@@ -10135,10 +10639,10 @@ async function showWorkspace() {
   } catch (error) {
     workspaceReport = null;
     renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = error.message;
-    elements.workspacePanel.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = error.message;
+    elements.workspacePanel.append(note3);
   }
   refreshDock();
 }
@@ -10226,19 +10730,71 @@ async function showPassport() {
     const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
     renderRepositoryPassport(elements.passportPanel, report, {
       onSelect: (id) => selectNode(id),
+      onOpenRoute: () => showRoute(),
       onClose: closePassport
     });
   } catch (error) {
     renderRepositoryPassport(elements.passportPanel, null, { onClose: closePassport });
-    const note2 = document.createElement("p");
-    note2.className = "unavailable";
-    note2.textContent = error.message;
-    elements.passportPanel.append(note2);
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = error.message;
+    elements.passportPanel.append(note3);
   }
   refreshDock();
 }
 function closePassport() {
   elements.passportPanel.hidden = true;
+  refreshDock();
+}
+async function showRoute(preferredFile) {
+  elements.routePanel.hidden = false;
+  try {
+    const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
+    currentRoute = report;
+    const steps = routeSteps(report);
+    const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
+    routeIndex = preferred >= 0 ? clampRouteIndex(preferred, steps.length) : clampRouteIndex(readRouteProgress(window.localStorage, state.repository) ?? 0, steps.length);
+    renderRouteView();
+  } catch (error) {
+    currentRoute = null;
+    renderRoutePanel(elements.routePanel, null, {}, {});
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = error.message;
+    elements.routePanel.append(note3);
+  }
+  refreshDock();
+}
+function renderRouteView() {
+  renderRoutePanel(elements.routePanel, currentRoute, {
+    index: routeIndex,
+    ...narratorStatus?.configured === false ? { narratorConfigured: false } : {}
+  }, {
+    onStep: (index) => stepRoute(index),
+    onFocus: (file) => focusRouteFile(file),
+    onNarrateTour: () => narrateRouteTour()
+  });
+}
+function stepRoute(index) {
+  const steps = routeSteps(currentRoute);
+  routeIndex = clampRouteIndex(index, steps.length);
+  writeRouteProgress(window.localStorage, state.repository, routeIndex);
+  renderRouteView();
+  const step = steps[routeIndex];
+  if (step) {
+    focusRouteFile(step.file);
+  }
+}
+function focusRouteFile(file) {
+  const visible = (current?.nodes ?? []).some((node) => node.id === file);
+  if (!visible) {
+    elements.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
+    return;
+  }
+  selectNode(file);
+}
+function closeRoute() {
+  elements.routePanel.hidden = true;
   refreshDock();
 }
 var PASSPORT_SEEN_PREFIX = "strabo.passport.seen.";
@@ -10495,6 +11051,15 @@ function updateSystemNote(model) {
 function applyEdgeKindLens() {
   view.setEdgeKind(state.mode === "file" ? state.edgeKind : "imports");
 }
+function applyCoChangeLens() {
+  if (state.mode !== "file" || !state.coChange) {
+    view.setCoChange(null, false);
+    return;
+  }
+  if (coChangeReport) {
+    view.setCoChange(coChangeReport, true);
+  }
+}
 function toggleEdgeKind() {
   if (state.mode !== "file") {
     return;
@@ -10511,6 +11076,40 @@ function updateEdgeKindButton() {
   const showCalls = state.mode === "file" && state.edgeKind === "calls";
   elements.tbCalls.classList.toggle("active", showCalls);
   elements.tbCalls.setAttribute("aria-pressed", String(showCalls));
+}
+var coChangeReport = null;
+var coChangeRepository = null;
+async function toggleCoChange() {
+  state.coChange = !state.coChange;
+  updateCoChangeButton();
+  schedulePrefsSave();
+  if (!state.coChange) {
+    view.setCoChange(null, false);
+    return;
+  }
+  const repository = state.repository ?? null;
+  if (!coChangeReport || coChangeRepository !== repository) {
+    try {
+      const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
+      coChangeReport = await request(`/analysis/co-change${query}`);
+      coChangeRepository = repository;
+    } catch (error) {
+      state.coChange = false;
+      updateCoChangeButton();
+      elements.status.textContent = `Error: ${error.message}`;
+      return;
+    }
+  }
+  view.setCoChange(coChangeReport, true);
+}
+function updateCoChangeButton() {
+  if (!elements.tbCoChange) {
+    return;
+  }
+  const shown = state.mode === "file";
+  elements.tbCoChange.hidden = !shown;
+  elements.tbCoChange.classList.toggle("active", shown && state.coChange);
+  elements.tbCoChange.setAttribute("aria-pressed", String(shown && state.coChange));
 }
 function updateOutsideButton() {
   if (!elements.tbOutside) {
@@ -10864,6 +11463,13 @@ elements.tbBoundaries.addEventListener("click", () => {
 if (elements.tbCalls) {
   elements.tbCalls.addEventListener("click", toggleEdgeKind);
 }
+if (elements.tbCoChange) {
+  elements.tbCoChange.addEventListener("click", () => {
+    toggleCoChange().catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  });
+}
 elements.tbBranches.addEventListener("click", () => {
   toggleBranches().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
@@ -11075,12 +11681,12 @@ function memberDelegateTarget(card) {
   };
 }
 function overlayDelegateTarget(item) {
-  const heading = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
+  const heading2 = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
   return {
     kind: "view",
-    label: heading.trim().slice(0, 120),
+    label: heading2.trim().slice(0, 120),
     detail: item.dataset.delegateOverlayItem ?? item.textContent.trim(),
-    evidence: [`overlay: ${heading.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
+    evidence: [`overlay: ${heading2.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
   };
 }
 function viewDelegateTarget(detail) {
@@ -11148,11 +11754,15 @@ async function delegateToAgent(agent, target) {
   const repository = current?.repository ?? null;
   const prompt = buildAgentPrompt({ agent, repository, target });
   const title = (target.label ?? target.id ?? "repository view").slice(0, 80);
+  const reviewed = await showPromptReview({ agent, title, prompt });
+  if (reviewed === null) {
+    return;
+  }
   try {
     await launchAgent(agent, {
       repository: state.repository ?? repository?.root,
       target: { kind: target.kind, id: target.id, label: target.label },
-      prompt,
+      prompt: reviewed,
       title
     });
     showToast(`Opened ${agent} on ${title} \u2014 edit the prefilled task, then send.`);
@@ -11160,7 +11770,7 @@ async function delegateToAgent(agent, target) {
     showToast(`Could not open a terminal (${error.message}).`, {
       label: "Copy prompt",
       onClick: async () => {
-        await copyText(prompt);
+        await copyText(reviewed);
         showToast("Prompt copied \u2014 paste it into your agent.");
       }
     });
@@ -11512,6 +12122,18 @@ var floatingWindows = initFloatingWindows({
         });
       },
       onClose: () => closePassport()
+    },
+    {
+      key: "route",
+      element: elements.routePanel,
+      title: "Reading route",
+      dockLabel: "Route",
+      width: 440,
+      onOpen: () => {
+        showRoute().catch(() => {
+        });
+      },
+      onClose: () => closeRoute()
     }
   ]
 });
@@ -11555,7 +12177,8 @@ if (window.STRABO_TEST) {
     setIslandLayout: (offsets) => view.setIslandOffsets(offsets),
     resetIslandLayout: resetMapLayout,
     workspace: () => showWorkspace(),
-    passport: () => showPassport()
+    passport: () => showPassport(),
+    route: (file) => showRoute(file)
   };
 }
 fetchNarratorStatus().then((status) => {
