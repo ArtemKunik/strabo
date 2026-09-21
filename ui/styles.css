@@ -1080,10 +1080,60 @@ button.primary {
   padding-top: 6px;
 }
 
+.outside-links {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outside-toggle {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-1);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.outside-toggle.active {
+  border-color: var(--accent, var(--ink-1));
+  color: var(--accent, var(--ink-1));
+}
+
+.outside-badge {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
 .narrator-note {
   color: var(--ink-3);
   font-size: 11px;
   margin: 0 0 6px;
+}
+
+.narrator-setup {
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, var(--ink-1));
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.narrator-setup:hover {
+  border-color: var(--accent, var(--ink-1));
+}
+
+.narrator-button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .narrator-reply {
@@ -2969,6 +3019,16 @@ button.primary {
 
 .setting-note {
   margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.setting-locked {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--ink-3);
   font-size: var(--text-xs);
 }

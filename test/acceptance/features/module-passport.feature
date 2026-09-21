@@ -43,4 +43,26 @@ Feature: Module Passport
   Scenario: The narrator is offered but stays inert without configuration
     When I switch to file detail
     And I select the "main.ts" node
-    Then the inspector offers the narrator and reports it is not configured
+    Then the inspector offers the narrator and reports it is off
+
+  @narrator
+  Scenario: The narrator is set up from Settings against a loopback stub
+    Given a loopback narrator stub is running
+    When I open the Settings window
+    And I set the narrator endpoint to the stub and model "stub-model"
+    And I save the narrator settings
+    And I switch to file detail
+    And I select the "main.ts" node
+    And I narrate the "main.ts" file
+    Then the narrative reports the stub reply
+
+  @narrator
+  Scenario: Changing the endpoint host clears the stored key
+    Given a loopback narrator stub is running
+    When I open the Settings window
+    And I set the narrator endpoint to the stub and model "stub-model"
+    And I save the narrator settings
+    And I store a narrator key
+    Then the narrator panel reports the key is stored
+    When I change the narrator endpoint host
+    Then the narrator panel reports the key is missing

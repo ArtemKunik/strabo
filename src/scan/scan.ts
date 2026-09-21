@@ -83,6 +83,7 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
     directory: directoryOf(id),
     ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
+    lines: countLines(contentByFile.get(id) as string),
   }));
 
   const [jsScan, polyglot] = await Promise.all([
@@ -114,6 +115,18 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
   };
+}
+
+/** Lines as an editor numbers them: a trailing newline does not start another line. */
+export function countLines(content: string): number {
+  if (content.length === 0) {
+    return 0;
+  }
+  let count = 1;
+  for (let index = content.indexOf('\n'); index !== -1; index = content.indexOf('\n', index + 1)) {
+    count += 1;
+  }
+  return content.endsWith('\n') ? count - 1 : count;
 }
 
 /** Walk the root, skipping symbolic links, and record exclusion reasons. */

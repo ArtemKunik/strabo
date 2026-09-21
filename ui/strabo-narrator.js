@@ -9,14 +9,84 @@
 /** Attribution shown under any narrative, so it is never mistaken for recorded evidence. */
 export const NARRATOR_ATTRIBUTION = 'Model-generated narrative — not recorded evidence.';
 
-/** A short status caption for the narrator endpoint; the unconfigured case is named plainly. */
+/**
+ * A short status caption for the narrator endpoint.
+ *
+ * The unconfigured case is one line, "Narrator is off.", with the "Set up →" call to action
+ * rendered as a button beside it; the old two-line "not configured" / "unavailable" pair is
+ * gone, so the operator sees exactly one thing to do.
+ */
 export function narratorStatusLabel(status) {
   if (!status || status.configured !== true) {
-    return 'Narrator is not configured. Set an endpoint and model to enable it.';
+    return 'Narrator is off.';
   }
   const remaining = status.remaining ?? 0;
   const budget = status.requestBudget ?? 0;
   return `Narrator ready · ${status.model} · ${remaining}/${budget} requests left`;
+}
+
+/** True when the narrator is off and the affordance should offer "Set up →". */
+export function narratorNeedsSetup(status) {
+  return !status || status.configured !== true;
+}
+
+/**
+ * Why the Narrate / Name group buttons are disabled, or null when they are usable.
+ *
+ * The buttons are disabled with this reason as their tooltip rather than being clickable and
+ * failing. `detail` carries a configured-but-failing explanation when the server supplies one.
+ */
+export function narratorDisabledReason(status) {
+  if (narratorNeedsSetup(status)) {
+    return 'Narrator is off — set it up in Settings.';
+  }
+  if (status.detail && status.reason) {
+    return `Narrator unavailable: ${status.reason} — ${status.detail}`;
+  }
+  return null;
+}
+
+/** The plain-words result of a Test connection call, for the Settings panel. */
+export function narratorTestLabel(result) {
+  if (!result) {
+    return 'Test the connection to see the model reply and its latency.';
+  }
+  if (result.ok === true) {
+    const latency = typeof result.latencyMs === 'number' ? `${result.latencyMs} ms` : 'an unknown time';
+    return `Connected · ${result.model} replied in ${latency}.`;
+  }
+  const reason = result.reason ?? 'provider-error';
+  const detail = result.detail ? ` — ${result.detail}` : '';
+  return `Not connected: ${reason}${detail}`;
+}
+
+/** The models listed by the provider, or the reason none could be listed. */
+export function narratorModelsLabel(result) {
+  if (result?.error) {
+    return result.error;
+  }
+  const models = result?.models ?? [];
+  if (models.length === 0) {
+    return 'The provider listed no models; type the model id instead.';
+  }
+  return `${models.length} model${models.length === 1 ? '' : 's'} listed.`;
+}
+
+/** How the key source reads to the operator: never the key itself. */
+export function narratorKeyLabel(key) {
+  if (!key) {
+    return 'No key source.';
+  }
+  if (key.source === 'env') {
+    return `Key found in ${key.envVar} (value never shown).`;
+  }
+  if (key.source === 'stored') {
+    return `Key stored on this machine for ${key.host ?? 'this host'}.`;
+  }
+  if (key.host && key.envSet === false) {
+    return `No key set. Store one for ${key.host}, or name an environment variable.`;
+  }
+  return `Key missing: set ${key.envVar}, or store one on this machine.`;
 }
 
 /** The narrative text when available, or the reason and detail when it is not. */

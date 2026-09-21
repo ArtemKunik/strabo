@@ -12,6 +12,7 @@ import {
   assignUnits,
   buildDirectoryLabels,
   buildSystemReport,
+  buildSystemUnitViewModel,
   buildSystemViewModel,
   classifyPeriphery,
   createStraboRouter,
@@ -251,6 +252,7 @@ test('buildSystemViewModel rolls units into the graph model the map draws', () =
   );
 
   assert.equal(model.system, true);
+  assert.equal(model.systemUnit, undefined);
   const pkg = model.nodes.find((node) => node.id === 'pkg');
   assert.equal(pkg?.label, 'widgets');
   assert.equal(pkg?.files, 2);
@@ -260,6 +262,11 @@ test('buildSystemViewModel rolls units into the graph model the map draws', () =
     [],
   );
   assert.equal(model.positions.length, model.nodes.length);
+  // L14: L0 draws units only — every node is a unit or its support shelf, never a file.
+  assert.ok(
+    model.nodes.every((node) => node.id === 'pkg' || node.id.endsWith('#support') || !node.id.includes('/')),
+    `unexpected file node at L0: ${model.nodes.map((node) => node.id).join(', ')}`,
+  );
 });
 
 test('buildSystemViewModel folds support files into one shelf node', () => {
@@ -282,6 +289,200 @@ test('buildSystemViewModel folds support files into one shelf node', () => {
   const edge = model.edges.find((candidate) => candidate.target === 'pkg#support');
   assert.equal(edge?.source, 'pkg');
   assert.equal((edge as { role?: string })?.role, 'declare');
+});
+
+/** Two crates: api imports a file in core, which is the one cross-unit edge. */
+function twoCrateFixture(root: string): Graph {
+  write(root, 'crates/api/Cargo.toml', '[package]\nname = "ledger-api"\n');
+  write(root, 'crates/core/Cargo.toml', '[package]\nname = "ledger-core"\n');
+  return graphOf(
+    [
+      'crates/api/src/http/routes.rs',
+      'crates/api/src/service/ledger.rs',
+      'crates/core/src/lib.rs',
+    ],
+    [
+      ['crates/api/src/http/routes.rs', 'crates/api/src/service/ledger.rs'],
+      ['crates/api/src/service/ledger.rs', 'crates/core/src/lib.rs'],
+    ],
+  );
+}
+
+const unitDescriptor = (root: string) => ({
+  name: 'ledger',
+  root,
+  head: null,
+  dirty: false,
+  gitUrl: null,
+});
+const unitCache = {
+  status: 'memory' as const,
+  fingerprint: null,
+  artifactVersion: 'test',
+  generatedAt: 'now',
+};
+
+test('buildSystemUnitViewModel opens a unit with its files and collapses the rest', () => {
+  const root = tempDir();
+  const graph = twoCrateFixture(root);
+  const report = buildSystemReport(root, 'ledger', graph);
+  const model = buildSystemUnitViewModel(report, graph, 'crates/api', unitDescriptor(root), unitCache);
+
+  assert.ok(model);
+  assert.equal(model.systemUnit, 'crates/api');
+  assert.equal(model.systemUnitName, 'ledger-api');
+  // The open unit's files are drawn...
+  assert.ok(model.nodes.some((node) => node.id === 'crates/api/src/http/routes.rs'));
+  assert.ok(model.nodes.some((node) => node.id === 'crates/api/src/service/ledger.rs'));
+  // ...the other units are collapsed boxes...
+  const core = model.nodes.find((node) => node.id === 'crates/core');
+  assert.equal(core?.collapsed, true);
+  assert.equal(core?.label, 'ledger-core');
+  // ...and the layers travel with the model.
+  assert.deepEqual(
+    model.systemLayers?.map((layer) => layer.name),
+    ['service', 'http'],
+  );
+  // L16: in-unit edges stay inside the unit; nothing crosses its frame.
+  assert.ok(model.edges.every((edge) => edge.scope === 'unit'));
+  assert.ok(
+    model.edges.every(
+      (edge) =>
+        !edge.target.startsWith('crates/core') || edge.target === 'crates/core',
+    ),
+  );
+  assert.equal(model.outsideLinks?.length, 0);
+});
+
+test('buildSystemUnitViewModel carries each file line count from the scan', () => {
+  const root = tempDir();
+  const graph = twoCrateFixture(root);
+  const scanned = {
+    ...graph,
+    nodes: graph.nodes.map((node) =>
+      node.id === 'crates/api/src/http/routes.rs' ? { ...node, lines: 27 } : node,
+    ),
+  };
+  const report = buildSystemReport(root, 'ledger', scanned);
+  const model = buildSystemUnitViewModel(report, scanned, 'crates/api', unitDescriptor(root), unitCache);
+
+  assert.equal(model?.nodes.find((node) => node.id === 'crates/api/src/http/routes.rs')?.lines, 27);
+  assert.equal(
+    model?.nodes.find((node) => node.id === 'crates/api/src/service/ledger.rs')?.lines,
+    undefined,
+  );
+});
+
+test('buildSystemUnitViewModel draws cross-unit links only when asked (L17)', () => {
+  const root = tempDir();
+  const graph = twoCrateFixture(root);
+  const report = buildSystemReport(root, 'ledger', graph);
+  const descriptor = unitDescriptor(root);
+
+  const plain = buildSystemUnitViewModel(report, graph, 'crates/api', descriptor, unitCache, {
+    selectedFile: 'crates/api/src/service/ledger.rs',
+  });
+  assert.equal(plain?.outsideLinks?.length, 0);
+  assert.equal(plain?.edges.some((edge) => edge.scope === 'outside'), false);
+
+  const outside = buildSystemUnitViewModel(report, graph, 'crates/api', descriptor, unitCache, {
+    showOutside: true,
+    selectedFile: 'crates/api/src/service/ledger.rs',
+  });
+  assert.ok(outside);
+  assert.equal(outside.outsideLinks?.length, 1);
+  const link = outside.outsideLinks?.[0];
+  assert.equal(link?.targetUnit, 'crates/core');
+  assert.equal(link?.targetName, 'ledger-core');
+  assert.equal(link?.count, 1);
+  assert.deepEqual(link?.files.map((entry) => entry.file), ['crates/core/src/lib.rs']);
+  const crossing = outside.edges.filter((edge) => edge.scope === 'outside');
+  assert.deepEqual(
+    crossing.map((edge) => `${edge.source}->${edge.target}`),
+    ['crates/api/src/service/ledger.rs->crates/core'],
+  );
+
+  const expanded = buildSystemUnitViewModel(report, graph, 'crates/api', descriptor, unitCache, {
+    showOutside: true,
+    selectedFile: 'crates/api/src/service/ledger.rs',
+    expandedUnits: ['crates/core'],
+  });
+  assert.ok(expanded?.nodes.some((node) => node.id === 'crates/core/src/lib.rs'));
+  assert.ok(
+    expanded?.edges.some(
+      (edge) => edge.scope === 'outside' && edge.target === 'crates/core/src/lib.rs',
+    ),
+  );
+});
+
+test('buildSystemUnitViewModel splits blast radius into in-unit and outside counts', () => {
+  const root = tempDir();
+  write(root, 'crates/api/Cargo.toml', '[package]\nname = "ledger-api"\n');
+  write(root, 'crates/core/Cargo.toml', '[package]\nname = "ledger-core"\n');
+  const graph = graphOf(
+    [
+      'crates/api/src/http/routes.rs',
+      'crates/api/src/service/other.rs',
+      'crates/core/src/consumer.rs',
+    ],
+    [
+      ['crates/api/src/service/other.rs', 'crates/api/src/http/routes.rs'],
+      ['crates/core/src/consumer.rs', 'crates/api/src/http/routes.rs'],
+    ],
+  );
+  const report = buildSystemReport(root, 'ledger', graph);
+  const model = buildSystemUnitViewModel(report, graph, 'crates/api', unitDescriptor(root), unitCache);
+
+  const routes = model?.nodes.find((node) => node.id === 'crates/api/src/http/routes.rs');
+  // Imported by one file in the unit and one in core.
+  assert.equal(routes?.inUnitDependents, 1);
+  assert.equal(routes?.outsideDependents, 1);
+});
+
+test('buildSystemUnitViewModel returns null for an unknown unit', () => {
+  const root = tempDir();
+  const graph = twoCrateFixture(root);
+  const report = buildSystemReport(root, 'ledger', graph);
+  const model = buildSystemUnitViewModel(report, graph, 'crates/nope', unitDescriptor(root), unitCache);
+  assert.equal(model, null);
+});
+
+test('GET /graph?systemUnit= opens a unit and gates cross-unit edges behind outside=1', async () => {
+  const root = tempDir();
+  write(root, 'crates/api/Cargo.toml', '[package]\nname = "ledger-api"\n');
+  write(root, 'crates/core/Cargo.toml', '[package]\nname = "ledger-core"\n');
+  write(
+    root,
+    'crates/api/src/http/routes.rs',
+    "pub fn r() {}\n",
+  );
+  write(
+    root,
+    'crates/api/src/service/ledger.rs',
+    "use crate::core;\npub fn s() { core::run(); }\n",
+  );
+  write(root, 'crates/core/src/lib.rs', 'pub fn run() {}\n');
+
+  const host = express();
+  host.use(express.json());
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/graph?system=1&systemUnit=crates/api`);
+  assert.equal(response.status, 200);
+  const model = (await response.json()) as {
+    systemUnit?: string;
+    edges: Array<{ scope?: string }>;
+  };
+  assert.equal(model.systemUnit, 'crates/api');
+  assert.ok(model.edges.every((edge) => edge.scope === 'unit'));
 });
 
 test('GET /graph?system=1 serves the unit roll-up', async () => {

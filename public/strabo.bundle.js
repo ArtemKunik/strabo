@@ -130,12 +130,22 @@ function passportFor(model, id) {
   const edges = model.edges ?? [];
   const imports = edges.filter((edge) => edge.source === id).map((edge) => ({ id: edge.target, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
   const usedBy = edges.filter((edge) => edge.target === id).map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
-  const metrics = [
-    { label: "Direct importers", value: usedBy.length },
-    { label: "Blast radius", value: node.transitiveDependents ?? 0 },
+  const metrics = [{ label: "Direct importers", value: usedBy.length }];
+  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
+    metrics.push(
+      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
+      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
+    );
+  } else {
+    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0 });
+  }
+  metrics.push(
     { label: "Direct imports", value: imports.length },
     { label: "Depends on (all)", value: node.transitiveDependencies ?? 0 }
-  ];
+  );
+  if (typeof node.lines === "number") {
+    metrics.push({ label: "Lines", value: node.lines });
+  }
   if (typeof node.files === "number") {
     metrics.push({ label: "Files", value: node.files });
   }
@@ -163,18 +173,26 @@ function mapCounts(model) {
     } else {
       modules += 1;
     }
-    const key = isBlock ? String(node.id) : topLevelDirectory(node.id);
+    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
   const entries = [...byKey.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([key, count]) => ({
     label: key,
     count,
     // Block ids are whole directories; file ids filter by their directory prefix.
-    filter: key === "." ? "" : isBlock ? key : `${key}/`
+    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
   }));
   return { tests, modules, entries };
 }
 function readingLegend(model) {
+  if (model?.systemUnit) {
+    return [
+      "box = unit frame",
+      "lane = layer",
+      "edge = selected file import",
+      "badge = files in another unit"
+    ];
+  }
   if (model?.system) {
     return ["box = build unit", "size = files", "edge = import between units", "shelf = support files"];
   }
@@ -211,6 +229,18 @@ function buildGraphQuery(state2, options = {}) {
   }
   if (state2.mode === "system") {
     params.set("system", "1");
+    if (state2.systemUnit) {
+      params.set("systemUnit", state2.systemUnit);
+      if (state2.showOutside) {
+        params.set("outside", "1");
+        if (state2.unitFile) {
+          params.set("selected", state2.unitFile);
+        }
+        if (state2.expandedUnits?.length) {
+          params.set("expanded", state2.expandedUnits.join(","));
+        }
+      }
+    }
   } else if (state2.mode === "block") {
     params.set("blockDepth", String(state2.depth ?? 1));
     if (state2.prefix) {
@@ -251,7 +281,10 @@ function buildElements(model) {
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
       evidenceLine: edge.evidence?.line,
-      evidenceSpecifier: edge.evidence?.specifier
+      evidenceSpecifier: edge.evidence?.specifier,
+      // In a System drill-down, `unit` edges are hidden until their file is selected;
+      // `outside` edges are the L17 links and stay visible.
+      scope: edge.scope
     }
   }));
   return { nodes, edges };
@@ -348,6 +381,13 @@ function findPath(model, from, to, maxHops = 12) {
   return null;
 }
 function breadcrumb(state2) {
+  if (state2.mode === "system") {
+    const crumbs2 = [{ label: "System", prefix: "" }];
+    if (state2.systemUnit) {
+      crumbs2.push({ label: state2.systemUnitLabel ?? state2.systemUnit, prefix: state2.systemUnit });
+    }
+    return crumbs2;
+  }
   if (state2.mode !== "block") {
     return [];
   }
@@ -522,6 +562,26 @@ function fitLabel(label, widthPx) {
     return label;
   }
   return `\u2026${label.slice(-(budget - 1))}`;
+}
+
+// ui/strabo-tiers.js
+var TIER_ORDER = [
+  "frontend",
+  "api",
+  "domain",
+  "data",
+  "integration",
+  "infra",
+  "build",
+  "tests",
+  "unclassified"
+];
+function tierOfFile(report) {
+  const map = /* @__PURE__ */ new Map();
+  for (const entry of report?.files ?? []) {
+    map.set(entry.file, entry.tier);
+  }
+  return map;
 }
 
 // ui/strabo-links.js
@@ -1093,12 +1153,14 @@ function buildAgentPrompt({ agent, repository, target }) {
 var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
+  ...TIER_ORDER.map((tier) => `tier-${tier}`),
   "hover",
   "edge-selected",
   "dimmed",
   "edge-faded",
   "label-hidden",
-  "filtered-out"
+  "filtered-out",
+  "tier-hidden"
 ];
 var labelsVisible = true;
 var LABEL_DETAIL_ZOOM = 0.65;
@@ -1117,6 +1179,19 @@ function createView(container) {
   let islandModel = null;
   let islandVisible = null;
   let renderedElements = { nodes: [], edges: [] };
+  let focusedFile = null;
+  function applyEdgeFocus() {
+    cy.batch(() => {
+      cy.edges().forEach((edge) => {
+        if (edge.data("scope") !== "unit") {
+          edge.removeClass("edge-hidden");
+          return;
+        }
+        const incident = focusedFile !== null && (edge.data("source") === focusedFile || edge.data("target") === focusedFile);
+        edge.toggleClass("edge-hidden", !incident);
+      });
+    });
+  }
   function repaintIslands() {
     islands.paint(
       islandBounds(islandModel, {
@@ -1260,6 +1335,7 @@ function createView(container) {
       islandModel = model;
       islandVisible = null;
       repaintIslands();
+      applyEdgeFocus();
       applyLabelBudget(cy, true);
       notifyGroup();
     },
@@ -1277,6 +1353,16 @@ function createView(container) {
           });
         }
       });
+    },
+    /**
+     * Draw only one file's edges inside its unit in a System drill-down; null hides them.
+     *
+     * This is L16: before a file is chosen the unit's internal wiring is not drawn, and
+     * once one is chosen only its import edges to and from files in the same unit show.
+     */
+    focusFile(fileId) {
+      focusedFile = fileId ?? null;
+      applyEdgeFocus();
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
@@ -1315,6 +1401,33 @@ function createView(container) {
       islandVisible = keep;
       repaintIslands();
       applyLabelBudget(cy, true);
+    },
+    /**
+     * Colour nodes by tier and optionally hide every other tier.
+     *
+     * `tierByFile` is a file → tier map, or null to clear the lens. A tier of `all` colours
+     * without filtering. `tier-hidden` is separate from the text filter's `filtered-out`, so
+     * the two filters compose instead of clearing each other.
+     */
+    applyTier(tierByFile, filterTier = "all") {
+      const enabled = tierByFile instanceof Map;
+      cy.batch(() => {
+        for (const node of cy.nodes()) {
+          for (const tier2 of TIER_ORDER) {
+            node.removeClass(`tier-${tier2}`);
+          }
+          if (!enabled) {
+            node.removeClass("tier-hidden");
+            continue;
+          }
+          const tier = tierByFile.get(node.id());
+          if (tier) {
+            node.addClass(`tier-${tier}`);
+          }
+          const keep = filterTier === "all" || tier === filterTier;
+          node.toggleClass("tier-hidden", !keep);
+        }
+      });
     },
     /** Fit the viewport to a set of node ids, ignoring the rest. */
     fitNodes(ids) {
@@ -1617,7 +1730,11 @@ function graphTheme() {
     changed: cssVar("--graph-changed"),
     affected: cssVar("--graph-affected"),
     cycle: cssVar("--graph-cycle"),
-    unreached: cssVar("--graph-unreached")
+    unreached: cssVar("--graph-unreached"),
+    tier: Object.fromEntries(
+      TIER_ORDER.filter((tier) => tier !== "unclassified").map((tier) => [tier, cssVar(`--tier-${tier}`)])
+    ),
+    tierUnclassified: cssVar("--series-other")
   };
 }
 function stylesheet() {
@@ -1625,6 +1742,12 @@ function stylesheet() {
   const kindRules = Object.entries(SHAPES).map(([kind, shape]) => ({
     selector: `node.kind-${kind}`,
     style: { shape }
+  }));
+  const tierRules = TIER_ORDER.map((tier) => ({
+    selector: `node.tier-${tier}`,
+    style: {
+      "background-color": tier === "unclassified" ? theme.tierUnclassified : theme.tier[tier]
+    }
   }));
   return [
     {
@@ -1655,6 +1778,8 @@ function stylesheet() {
       }
     },
     ...kindRules,
+    // The tier lens colours the fill; the neutral node fill is the default when it is off.
+    ...tierRules,
     { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
     { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -1673,6 +1798,8 @@ function stylesheet() {
     { selector: "node.ov-cross-repo", style: { "border-width": 4, "border-style": "dotted", "border-color": theme.edgeAccent, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
+    { selector: "node.tier-hidden", style: { display: "none" } },
+    { selector: "edge.edge-hidden", style: { display: "none" } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
     {
       selector: "edge",
@@ -1766,28 +1893,28 @@ function showContextMenu({ x, y, title, items }) {
       menu.append(sep);
       continue;
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "agent-menu-item";
-    button.setAttribute("role", "menuitem");
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "agent-menu-item";
+    button2.setAttribute("role", "menuitem");
     const label = document.createElement("span");
     label.textContent = item.label;
-    button.append(label);
+    button2.append(label);
     if (item.hint) {
       const hint = document.createElement("span");
       hint.className = "agent-menu-hint";
       hint.textContent = item.hint;
-      button.append(hint);
+      button2.append(hint);
     }
     if (typeof item.action === "function") {
-      button.addEventListener("click", () => {
+      button2.addEventListener("click", () => {
         closeContextMenu();
         item.action();
       });
     } else {
-      button.disabled = true;
+      button2.disabled = true;
     }
-    menu.append(button);
+    menu.append(button2);
   }
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
@@ -1830,15 +1957,15 @@ function showToast(message, action = null, { timeout = 6e3 } = {}) {
   text.textContent = message;
   toast.append(text);
   if (action) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "toast-action";
-    button.textContent = action.label;
-    button.addEventListener("click", () => {
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "toast-action";
+    button2.textContent = action.label;
+    button2.addEventListener("click", () => {
       action.onClick?.();
       toast.remove();
     });
-    toast.append(button);
+    toast.append(button2);
   }
   const dismiss = document.createElement("button");
   dismiss.type = "button";
@@ -2023,7 +2150,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     };
     const placeInRail = () => {
       const railWidth = win.offsetWidth || width;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, firstFreeRailTop());
+      const top = firstFreeRailTop();
+      const available = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+      win.style.maxHeight = `${available}px`;
+      place(window.innerWidth - railWidth - RAIL_RIGHT, top);
     };
     const position = saved.position ?? config.position ?? {};
     if (config.center) {
@@ -2139,25 +2269,25 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         return snapshot;
       },
       dockButton() {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "dock-chip";
-        button.dataset.panel = config.key;
+        const button2 = document.createElement("button");
+        button2.type = "button";
+        button2.className = "dock-chip";
+        button2.dataset.panel = config.key;
         const open = !win.hidden;
         const canOpen = !config.canOpen || config.canOpen();
-        button.classList.toggle("active", open);
-        button.classList.toggle("collapsed", open && isCollapsed());
-        button.setAttribute("aria-pressed", String(open));
-        button.textContent = config.dockLabel ?? config.title ?? config.key;
+        button2.classList.toggle("active", open);
+        button2.classList.toggle("collapsed", open && isCollapsed());
+        button2.setAttribute("aria-pressed", String(open));
+        button2.textContent = config.dockLabel ?? config.title ?? config.key;
         if (!canOpen && !open) {
-          button.disabled = true;
+          button2.disabled = true;
           const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
-          button.title = reason;
+          button2.title = reason;
         } else {
-          button.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
+          button2.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
         }
-        button.addEventListener("click", () => controller.toggle());
-        return button;
+        button2.addEventListener("click", () => controller.toggle());
+        return button2;
       }
     };
     win.addEventListener("keydown", (event) => {
@@ -2360,11 +2490,60 @@ function functionSignals(entry) {
 var NARRATOR_ATTRIBUTION = "Model-generated narrative \u2014 not recorded evidence.";
 function narratorStatusLabel(status) {
   if (!status || status.configured !== true) {
-    return "Narrator is not configured. Set an endpoint and model to enable it.";
+    return "Narrator is off.";
   }
   const remaining = status.remaining ?? 0;
   const budget = status.requestBudget ?? 0;
   return `Narrator ready \xB7 ${status.model} \xB7 ${remaining}/${budget} requests left`;
+}
+function narratorNeedsSetup(status) {
+  return !status || status.configured !== true;
+}
+function narratorDisabledReason(status) {
+  if (narratorNeedsSetup(status)) {
+    return "Narrator is off \u2014 set it up in Settings.";
+  }
+  if (status.detail && status.reason) {
+    return `Narrator unavailable: ${status.reason} \u2014 ${status.detail}`;
+  }
+  return null;
+}
+function narratorTestLabel(result) {
+  if (!result) {
+    return "Test the connection to see the model reply and its latency.";
+  }
+  if (result.ok === true) {
+    const latency = typeof result.latencyMs === "number" ? `${result.latencyMs} ms` : "an unknown time";
+    return `Connected \xB7 ${result.model} replied in ${latency}.`;
+  }
+  const reason = result.reason ?? "provider-error";
+  const detail = result.detail ? ` \u2014 ${result.detail}` : "";
+  return `Not connected: ${reason}${detail}`;
+}
+function narratorModelsLabel(result) {
+  if (result?.error) {
+    return result.error;
+  }
+  const models = result?.models ?? [];
+  if (models.length === 0) {
+    return "The provider listed no models; type the model id instead.";
+  }
+  return `${models.length} model${models.length === 1 ? "" : "s"} listed.`;
+}
+function narratorKeyLabel(key) {
+  if (!key) {
+    return "No key source.";
+  }
+  if (key.source === "env") {
+    return `Key found in ${key.envVar} (value never shown).`;
+  }
+  if (key.source === "stored") {
+    return `Key stored on this machine for ${key.host ?? "this host"}.`;
+  }
+  if (key.host && key.envSet === false) {
+    return `No key set. Store one for ${key.host}, or name an environment variable.`;
+  }
+  return `Key missing: set ${key.envVar}, or store one on this machine.`;
 }
 function narratorReplyLabel(reply) {
   if (reply?.available === true) {
@@ -2827,6 +3006,10 @@ function renderInspector(container, model, id, handlers = {}) {
   }
   container.append(cards);
   if (model.system) {
+    if (model.systemUnit) {
+      appendOutsideLinks(container, model, id, node, handlers);
+      return;
+    }
     const narrator = document.createElement("div");
     narrator.className = "system-narrator";
     appendNarratorBlock(narrator, handlers, { id: "narrate-group", label: "Name group" });
@@ -2868,10 +3051,10 @@ function renderInspector(container, model, id, handlers = {}) {
   const tabButtons = [];
   const tabSections = [];
   const selectTab = (index, { focus: focus2 = false } = {}) => {
-    tabButtons.forEach((button, position) => {
+    tabButtons.forEach((button2, position) => {
       const selected2 = position === index;
-      button.setAttribute("aria-selected", selected2 ? "true" : "false");
-      button.tabIndex = selected2 ? 0 : -1;
+      button2.setAttribute("aria-selected", selected2 ? "true" : "false");
+      button2.tabIndex = selected2 ? 0 : -1;
     });
     tabSections.forEach((section2, position) => {
       section2.hidden = position !== index;
@@ -3181,8 +3364,8 @@ function wireFunctionRoving(tbody) {
       return;
     }
     event.preventDefault();
-    names().forEach((button, position) => {
-      button.tabIndex = position === next ? 0 : -1;
+    names().forEach((button2, position) => {
+      button2.tabIndex = position === next ? 0 : -1;
     });
     names()[next]?.focus();
   });
@@ -3193,18 +3376,18 @@ function functionTableHead(entries, sort, onSort) {
   for (const column of FUNCTION_COLUMNS) {
     const cell = document.createElement("th");
     cell.scope = "col";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "function-sort";
-    button.dataset.sort = column.key;
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "function-sort";
+    button2.dataset.sort = column.key;
     const active = sort.key === column.key;
-    button.setAttribute("aria-label", `Sort by ${column.label}`);
-    button.textContent = `${column.label}${active ? sort.dir === "desc" ? " \u25BC" : " \u25B2" : ""}`;
+    button2.setAttribute("aria-label", `Sort by ${column.label}`);
+    button2.textContent = `${column.label}${active ? sort.dir === "desc" ? " \u25BC" : " \u25B2" : ""}`;
     if (active) {
       cell.setAttribute("aria-sort", sort.dir === "desc" ? "descending" : "ascending");
     }
-    button.addEventListener("click", () => onSort(column.key));
-    cell.append(button);
+    button2.addEventListener("click", () => onSort(column.key));
+    cell.append(button2);
     row.append(cell);
   }
   thead.append(row);
@@ -3323,8 +3506,8 @@ function renderFunctionTable(report) {
       tbody.append(functionTableRow(entry, (name) => jumpToFunctionRow(table, name)));
     }
     wireFunctionRoving(tbody);
-    tbody.querySelectorAll(".function-name").forEach((button, position) => {
-      button.tabIndex = position === 0 ? 0 : -1;
+    tbody.querySelectorAll(".function-name").forEach((button2, position) => {
+      button2.tabIndex = position === 0 ? 0 : -1;
     });
     table.append(tbody);
   };
@@ -3423,6 +3606,42 @@ function renderFunctionTableVirtual(report) {
   }
   return wrapper;
 }
+function appendOutsideLinks(container, model, id, node, handlers) {
+  const isFile = Boolean(node?.systemUnit) && !id.endsWith("#support");
+  const block = document.createElement("div");
+  block.className = "outside-links";
+  if (isFile && handlers.onShowOutside) {
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.id = "show-outside-links";
+    button2.className = handlers.outsideShown ? "outside-toggle active" : "outside-toggle";
+    button2.setAttribute("aria-pressed", String(Boolean(handlers.outsideShown)));
+    button2.textContent = handlers.outsideShown ? "Hide outside links" : "Show outside links";
+    button2.title = "Draw this file\u2019s links to other units (O)";
+    button2.addEventListener("click", () => handlers.onShowOutside());
+    block.append(button2);
+  }
+  const links = (model.outsideLinks ?? []).filter((link) => link.file === id);
+  for (const link of links) {
+    const badge = document.createElement("div");
+    badge.className = "outside-badge";
+    badge.dataset.unit = link.targetUnit;
+    const label = document.createElement("span");
+    label.textContent = `${link.count} file${link.count === 1 ? "" : "s"} in ${link.targetName}`;
+    badge.append(label);
+    badge.append(document.createTextNode(" \xB7 "));
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "link";
+    expand.textContent = "expand";
+    expand.addEventListener("click", () => handlers.onExpandUnit?.(link.targetUnit));
+    badge.append(expand);
+    block.append(badge);
+  }
+  if (isFile || links.length > 0) {
+    container.append(block);
+  }
+}
 function appendNarratorBlock(container, handlers, { id, label }) {
   if (!handlers.onNarrate) {
     return;
@@ -3433,18 +3652,33 @@ function appendNarratorBlock(container, handlers, { id, label }) {
   note2.className = "narrator-note";
   note2.textContent = narratorStatusLabel(handlers.narratorStatus);
   block.append(note2);
-  const button = document.createElement("button");
-  button.type = "button";
-  button.id = id;
-  button.className = "narrator-button";
-  button.textContent = label;
-  block.append(button);
+  if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
+    const setup = document.createElement("button");
+    setup.type = "button";
+    setup.className = "narrator-setup";
+    setup.dataset.role = "narrator-setup";
+    setup.textContent = "Set up \u2192";
+    setup.title = "Open Settings at the Narrator section";
+    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
+    block.append(setup);
+  }
+  const button2 = document.createElement("button");
+  button2.type = "button";
+  button2.id = id;
+  button2.className = "narrator-button";
+  button2.textContent = label;
+  const disabledReason = narratorDisabledReason(handlers.narratorStatus);
+  if (disabledReason) {
+    button2.disabled = true;
+    button2.title = disabledReason;
+  }
+  block.append(button2);
   const reply = document.createElement("div");
   reply.className = "narrator-reply";
   reply.dataset.role = "narrative";
   block.append(reply);
-  button.addEventListener("click", async () => {
-    button.disabled = true;
+  button2.addEventListener("click", async () => {
+    button2.disabled = true;
     reply.replaceChildren("Asking the narrator\u2026");
     try {
       const narrated = await handlers.onNarrate();
@@ -3458,7 +3692,7 @@ function appendNarratorBlock(container, handlers, { id, label }) {
     } catch (error) {
       reply.replaceChildren(`Narrator unavailable: ${error.message}`);
     } finally {
-      button.disabled = false;
+      button2.disabled = false;
     }
   });
   container.append(block);
@@ -3649,11 +3883,11 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   container.append(
     entryPoints.length === 0 ? passportNote("No entry point declared by a manifest (package.json, Cargo.toml, pom.xml).") : passportFileList(entryPoints, handlers, (entry) => entry.reason)
   );
-  const layers = report.layers ?? [];
-  container.append(passportSection("Top-level directories", layers.length));
+  const directories = report.topDirectories ?? report.layers ?? [];
+  container.append(passportSection("Top-level directories", directories.length));
   container.append(
-    layers.length === 0 ? passportNote("No directories recorded.") : passportPlainList(
-      layers,
+    directories.length === 0 ? passportNote("No directories recorded.") : passportPlainList(
+      directories,
       (entry) => `${entry.directory} \xB7 ${entry.files} file(s) \xB7 ${entry.incoming} incoming`
     )
   );
@@ -3663,7 +3897,10 @@ function renderRepositoryPassport(container, report, handlers = {}) {
     topFiles.length === 0 ? passportNote("No files recorded.") : passportFileList(
       topFiles,
       handlers,
-      (entry) => `${entry.fanIn} importer(s) \xB7 blast radius ${entry.transitiveDependents} \xB7 ${entry.kind}`
+      (entry) => {
+        const base = `${entry.fanIn} importer(s) \xB7 blast radius ${entry.transitiveDependents} \xB7 ${entry.kind}`;
+        return entry.reExports > 0 ? `${base} \xB7 ${entry.reExports} re-export(s)` : base;
+      }
     )
   );
   const cycles = report.cycles ?? { total: 0, largest: [] };
@@ -3941,28 +4178,28 @@ function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
 function renderBreadcrumb(container, state2, onNavigate) {
   container.replaceChildren();
   for (const crumb of breadcrumb(state2)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "crumb";
-    button.textContent = crumb.label;
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "crumb";
+    button2.textContent = crumb.label;
     if (crumb.prefix === (state2.prefix ?? "")) {
-      button.disabled = true;
+      button2.disabled = true;
     }
-    button.addEventListener("click", () => onNavigate(crumb.prefix));
-    container.append(button);
+    button2.addEventListener("click", () => onNavigate(crumb.prefix));
+    container.append(button2);
   }
 }
 function renderFolderList(container, result, onNavigate) {
   container.replaceChildren();
   for (const directory of result.directories) {
     const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = directory.isRepository ? "folder folder-repository" : "folder";
-    button.dataset.path = directory.path;
-    button.textContent = directory.isRepository ? `${directory.name} \xB7 repository` : directory.name;
-    button.addEventListener("click", () => onNavigate(directory.path));
-    item.append(button);
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = directory.isRepository ? "folder folder-repository" : "folder";
+    button2.dataset.path = directory.path;
+    button2.textContent = directory.isRepository ? `${directory.name} \xB7 repository` : directory.name;
+    button2.addEventListener("click", () => onNavigate(directory.path));
+    item.append(button2);
     container.append(item);
   }
   if (result.directories.length === 0) {
@@ -4117,14 +4354,14 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   }
 }
 function edgeEndpoint(id, onSelect2) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "link";
-  button.textContent = id;
+  const button2 = document.createElement("button");
+  button2.type = "button";
+  button2.className = "link";
+  button2.textContent = id;
   if (onSelect2) {
-    button.addEventListener("click", () => onSelect2(id));
+    button2.addEventListener("click", () => onSelect2(id));
   }
-  return button;
+  return button2;
 }
 function renderTimeline(container, result, onSelect2, options = {}) {
   container.replaceChildren();
@@ -4160,13 +4397,13 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     if (options.selectedHash && commit.hash === options.selectedHash) {
       item.classList.add("selected-commit");
     }
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "commit";
-    button.dataset.hash = commit.hash;
-    button.textContent = `${commit.shortHash} \xB7 ${commit.subject}`;
-    button.addEventListener("click", () => onSelect2(commit));
-    item.append(button);
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "commit";
+    button2.dataset.hash = commit.hash;
+    button2.textContent = `${commit.shortHash} \xB7 ${commit.subject}`;
+    button2.addEventListener("click", () => onSelect2(commit));
+    item.append(button2);
     const meta = document.createElement("span");
     meta.className = "evidence";
     meta.textContent = `${commit.author} \xB7 ${commit.date.slice(0, 10)}`;
@@ -4224,18 +4461,18 @@ function renderReview(container, result, handlers = {}) {
     list.dataset.role = `review-group-${group}`;
     for (const file of files) {
       const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "link";
-      button.dataset.path = file.path;
-      button.textContent = file.path;
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "link";
+      button2.dataset.path = file.path;
+      button2.textContent = file.path;
       if (handlers.onSelect && file.inGraph) {
-        button.addEventListener("click", () => handlers.onSelect(file.path));
+        button2.addEventListener("click", () => handlers.onSelect(file.path));
       } else {
-        button.disabled = true;
-        button.title = "Not a node in the scanned graph";
+        button2.disabled = true;
+        button2.title = "Not a node in the scanned graph";
       }
-      item.append(button);
+      item.append(button2);
       const status = document.createElement("span");
       status.className = "review-status";
       status.textContent = file.status;
@@ -4264,14 +4501,14 @@ function renderReview(container, result, handlers = {}) {
     list.dataset.role = "review-impact";
     for (const entry of affected.slice(0, 100)) {
       const item = document.createElement("li");
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "link";
-      button.textContent = entry.id;
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "link";
+      button2.textContent = entry.id;
       if (handlers.onSelect) {
-        button.addEventListener("click", () => handlers.onSelect(entry.id));
+        button2.addEventListener("click", () => handlers.onSelect(entry.id));
       }
-      item.append(button);
+      item.append(button2);
       const distance = document.createElement("span");
       distance.className = "evidence";
       distance.textContent = `distance ${entry.distance}`;
@@ -4449,14 +4686,14 @@ function renderRisk(container, report, handlers = {}) {
         list2.dataset.role = "risk-impact";
         for (const entry of impacted.slice(0, 20)) {
           const entryItem = document.createElement("li");
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "link";
-          button.textContent = entry.id;
+          const button2 = document.createElement("button");
+          button2.type = "button";
+          button2.className = "link";
+          button2.textContent = entry.id;
           if (handlers.onSelect) {
-            button.addEventListener("click", () => handlers.onSelect(entry.id));
+            button2.addEventListener("click", () => handlers.onSelect(entry.id));
           }
-          entryItem.append(button);
+          entryItem.append(button2);
           const distance = document.createElement("span");
           distance.className = "evidence";
           distance.textContent = `distance ${entry.distance}`;
@@ -5339,6 +5576,216 @@ function note(text) {
   paragraph.textContent = text;
   return paragraph;
 }
+function button(text, onClick) {
+  const control = document.createElement("button");
+  control.type = "button";
+  control.textContent = text;
+  control.addEventListener("click", onClick);
+  return control;
+}
+function lockedNote(envVar, what) {
+  const element = document.createElement("span");
+  element.className = "setting-locked";
+  element.textContent = `set by ${envVar}`;
+  element.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
+  return element;
+}
+function narratorSection(handlers = {}) {
+  const group = section("Narrator");
+  group.id = "setting-narrator";
+  const view2 = handlers.narrator;
+  const state2 = handlers.narratorState ?? {};
+  if (!view2) {
+    group.append(note("Loading narrator settings\u2026"));
+    return group;
+  }
+  const locked = view2.locked ?? {};
+  const presets = handlers.presets ?? [];
+  const presetSelect = document.createElement("select");
+  const currentPresetId = state2.presetId ?? presets.find((preset) => preset.endpoint && preset.endpoint === view2.endpoint)?.id ?? "custom";
+  for (const preset of presets) {
+    const option = document.createElement("option");
+    option.value = preset.id;
+    option.textContent = preset.label;
+    presetSelect.append(option);
+  }
+  presetSelect.value = currentPresetId;
+  presetSelect.id = "narrator-preset";
+  presetSelect.disabled = Boolean(locked.endpoint || locked.model);
+  presetSelect.addEventListener("change", () => {
+    const preset = presets.find((candidate) => candidate.id === presetSelect.value);
+    handlers.onNarratorState?.({ presetId: presetSelect.value, models: preset?.models ?? [] });
+    if (!preset || preset.id === "custom") {
+      return;
+    }
+    const patch2 = {};
+    if (!locked.endpoint) patch2.endpoint = preset.endpoint;
+    if (!locked.model && preset.models.length > 0) patch2.model = preset.models[0];
+    handlers.onNarratorChange?.(patch2);
+  });
+  group.append(field("Provider preset", presetSelect));
+  const endpointInput = textInput(view2.endpoint ?? "", {
+    placeholder: "https://api.example.com/v1/chat/completions",
+    readOnly: Boolean(locked.endpoint)
+  });
+  endpointInput.id = "narrator-endpoint";
+  group.append(field("Endpoint", endpointInput));
+  if (locked.endpoint) {
+    group.append(lockedNote(locked.endpoint, "The endpoint"));
+  }
+  const modelInput = textInput(view2.model ?? "", {
+    placeholder: "model id",
+    readOnly: Boolean(locked.model)
+  });
+  modelInput.id = "narrator-model";
+  const modelList = document.createElement("datalist");
+  modelList.id = "narrator-model-options";
+  for (const model of state2.models ?? []) {
+    const option = document.createElement("option");
+    option.value = model;
+    modelList.append(option);
+  }
+  modelInput.setAttribute("list", modelList.id);
+  const fetchButton = button("Fetch models", () => {
+    fetchButton.disabled = true;
+    Promise.resolve(handlers.onFetchModels?.({ endpoint: endpointInput.value.trim(), model: modelInput.value.trim() })).then((result) => handlers.onNarratorState?.({ models: result?.models ?? [], modelsNote: narratorModelsLabel(result) })).catch((error) => handlers.onNarratorState?.({ modelsNote: error.message ?? "Could not list models." })).finally(() => {
+      fetchButton.disabled = false;
+    });
+  });
+  fetchButton.disabled = Boolean(locked.endpoint) || presets.length === 0;
+  fetchButton.id = "narrator-fetch-models";
+  const modelRow = document.createElement("div");
+  modelRow.className = "setting-row";
+  modelRow.append(modelInput, fetchButton);
+  group.append(field("Model", modelRow), modelList);
+  if (state2.modelsNote) {
+    group.append(note(state2.modelsNote));
+  }
+  if (locked.model) {
+    group.append(lockedNote(locked.model, "The model"));
+  }
+  const keyMode = state2.keyMode ?? (locked.apiKeyEnv ? "env" : view2.apiKeyEnv ? "env" : view2.key?.storedSet ? "stored" : "none");
+  const keySelect = document.createElement("select");
+  for (const [value, text] of [
+    ["none", "None (local endpoints)"],
+    ["env", "Environment variable"],
+    ["stored", "Stored on this machine"]
+  ]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    keySelect.append(option);
+  }
+  keySelect.value = keyMode;
+  keySelect.id = "narrator-key-source";
+  keySelect.disabled = Boolean(locked.apiKeyEnv);
+  group.append(field("API key source", keySelect));
+  group.append(note(narratorKeyLabel(view2.key)));
+  if (keyMode === "env") {
+    const envInput = textInput(view2.apiKeyEnv ?? "STRABO_NARRATOR_API_KEY", {
+      placeholder: "STRABO_NARRATOR_API_KEY",
+      readOnly: Boolean(locked.apiKeyEnv)
+    });
+    envInput.id = "narrator-key-env";
+    const saveEnv = button("Use variable", () => handlers.onNarratorChange?.({ apiKeyEnv: envInput.value.trim() }));
+    saveEnv.id = "narrator-key-env-save";
+    const envRow = document.createElement("div");
+    envRow.className = "setting-row";
+    envRow.append(envInput, saveEnv);
+    group.append(field("Variable name", envRow));
+    group.append(note("The panel only shows whether the variable is set, never its value."));
+  } else if (keyMode === "stored") {
+    const keyInput = document.createElement("input");
+    keyInput.type = "password";
+    keyInput.id = "narrator-key";
+    keyInput.placeholder = "paste the key (write-only)";
+    keyInput.autocomplete = "off";
+    const storeButton = button("Store key", () => {
+      if (!keyInput.value.trim()) {
+        return;
+      }
+      storeButton.disabled = true;
+      Promise.resolve(handlers.onStoreKey?.(keyInput.value.trim())).then(() => {
+        keyInput.value = "";
+      }).catch(() => {
+      }).finally(() => {
+        storeButton.disabled = false;
+      });
+    });
+    storeButton.id = "narrator-key-store";
+    const clearButton = button("Remove stored key", () => handlers.onClearKey?.());
+    clearButton.id = "narrator-key-clear";
+    const keyRow = document.createElement("div");
+    keyRow.className = "setting-row";
+    keyRow.append(keyInput, storeButton, clearButton);
+    group.append(field("Stored key", keyRow));
+    group.append(
+      note(
+        "Stored in the state directory with owner-only permissions, bound to this host. It is never shown again, logged, or sent anywhere but the endpoint."
+      )
+    );
+  } else {
+    group.append(note("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
+  }
+  keySelect.addEventListener("change", () => {
+    const next = keySelect.value;
+    handlers.onNarratorState?.({ keyMode: next });
+    if (next !== "stored") {
+      handlers.onClearKey?.();
+    }
+    handlers.onNarratorChange?.({ apiKeyEnv: next === "env" ? view2.apiKeyEnv ?? null : null });
+  });
+  const sendSourceToggle = checkboxInput(view2.sendSource, (value) => handlers.onNarratorChange?.({ sendSource: value }));
+  sendSourceToggle.disabled = Boolean(locked.sendSource);
+  group.append(field("Send source", sendSourceToggle));
+  group.append(
+    note("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
+  );
+  if (locked.sendSource) {
+    group.append(lockedNote(locked.sendSource, "The Send source toggle"));
+  }
+  const budgetInput = document.createElement("input");
+  budgetInput.type = "number";
+  budgetInput.min = "1";
+  budgetInput.id = "narrator-budget";
+  budgetInput.value = view2.requestBudget ?? "";
+  budgetInput.readOnly = Boolean(locked.budget);
+  const budgetSave = button(
+    "Save budget",
+    () => handlers.onNarratorChange?.({ requestBudget: Number.parseInt(budgetInput.value, 10) || null })
+  );
+  budgetSave.disabled = Boolean(locked.budget);
+  budgetSave.id = "narrator-budget-save";
+  const budgetRow = document.createElement("div");
+  budgetRow.className = "setting-row";
+  budgetRow.append(budgetInput, budgetSave);
+  group.append(field("Request budget per session", budgetRow));
+  if (locked.budget) {
+    group.append(lockedNote(locked.budget, "The request budget"));
+  }
+  const testButton = button("Test connection", () => {
+    testButton.disabled = true;
+    Promise.resolve(handlers.onTestConnection?.({ endpoint: endpointInput.value.trim(), model: modelInput.value.trim() })).then((result) => handlers.onNarratorState?.({ test: result })).catch((error) => handlers.onNarratorState?.({ test: { ok: false, reason: "provider-error", detail: error.message } })).finally(() => {
+      testButton.disabled = false;
+    });
+  });
+  testButton.id = "narrator-test";
+  group.append(field("Connection", testButton));
+  group.append(note(narratorTestLabel(state2.test)));
+  const saveButton = button(
+    "Save endpoint and model",
+    () => handlers.onNarratorChange?.({
+      ...locked.endpoint ? {} : { endpoint: endpointInput.value.trim() },
+      ...locked.model ? {} : { model: modelInput.value.trim() }
+    })
+  );
+  saveButton.id = "narrator-save";
+  group.append(saveButton);
+  group.append(
+    note("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
+  );
+  return group;
+}
 function renderingSection() {
   const group = section("Rendering");
   const available = probeWebGL2();
@@ -5419,7 +5866,7 @@ function renderSettings(container, handlers = {}) {
     remote.append(field("Scan ceiling", ceilingRow));
     remote.append(
       note(
-        server.allowCeilingWidening ? "Saved on the server: the read boundary may be narrowed or widened, and the change survives a restart." : 'Saved on the server: narrowing applies immediately and survives a restart. Widening past the current boundary needs "Allow widening".'
+        server.allowCeilingWidening ? "Widening is enabled for this process (startup flag), so the ceiling may also be raised above the start boundary." : "Widening is off for this process: the ceiling can only be narrowed. Restart with STRABO_ALLOW_CEILING_WIDENING=1 (or --allow-ceiling-widening) to permit raising it."
       )
     );
     const statusLine = document.createElement("p");
@@ -5444,17 +5891,9 @@ function renderSettings(container, handlers = {}) {
       });
     });
     remote.append(
-      field(
-        "Allow widening",
-        checkboxInput(server.allowCeilingWidening, (value) => {
-          Promise.resolve(handlers.onToggleWidening?.(value)).catch(
-            (error) => report(error.message ?? "Could not change ceiling widening.", true)
-          );
-        })
+      note(
+        "Whether widening is permitted is a startup-only setting, shown here read-only. It is never accepted from the browser, so this panel cannot widen what the server may read."
       )
-    );
-    remote.append(
-      note("Permits the scan ceiling to grow beyond the boundary the server started with.")
     );
     remote.append(
       field(
@@ -5474,6 +5913,19 @@ function renderSettings(container, handlers = {}) {
     );
   }
   container.append(remote);
+  container.append(
+    narratorSection({
+      narrator: server?.narrator ?? null,
+      presets: handlers.presets,
+      narratorState: handlers.narratorState,
+      onNarratorState: handlers.onNarratorState,
+      onNarratorChange: handlers.onNarratorChange,
+      onFetchModels: handlers.onFetchModels,
+      onTestConnection: handlers.onTestConnection,
+      onStoreKey: handlers.onStoreKey,
+      onClearKey: handlers.onClearKey
+    })
+  );
   if (status) {
     const line = document.createElement("p");
     line.className = `setting-status${statusError ? " is-error" : ""}`;
@@ -5563,9 +6015,21 @@ var store = createStore({
     prefix: "",
     filter: "",
     overlay: "none",
+    /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
+    tier: "off",
     pathMode: false,
     pathFrom: null,
-    renderedGeneration: 0
+    renderedGeneration: 0,
+    /** The open build unit in a System drill-down, or null at L0. */
+    systemUnit: null,
+    /** The open unit's declared name, for the breadcrumb. */
+    systemUnitLabel: null,
+    /** The file whose in-unit edges are drawn, or null. */
+    unitFile: null,
+    /** Whether the selected file's cross-unit links are drawn (L17). */
+    showOutside: false,
+    /** Target units whose count badge is expanded in place. */
+    expandedUnits: []
   },
   member: {
     order: "source",
@@ -5669,6 +6133,7 @@ var elements = {
   filterClear: document.getElementById("filter-clear"),
   filterCount: document.getElementById("filter-count"),
   overlay: document.getElementById("overlay"),
+  tier: document.getElementById("tier"),
   overlayPanel: document.getElementById("overlay-panel"),
   edgePanel: document.getElementById("edge-panel"),
   reviewPanel: document.getElementById("review-panel"),
@@ -5691,6 +6156,7 @@ var elements = {
   zoomFit: document.getElementById("zoom-fit"),
   tbFocus: document.getElementById("tb-focus"),
   tbImpact: document.getElementById("tb-impact"),
+  tbOutside: document.getElementById("tb-outside"),
   tbPath: document.getElementById("tb-path"),
   tbBoundaries: document.getElementById("tb-boundaries"),
   tbTimeline: document.getElementById("tb-timeline"),
@@ -5782,13 +6248,23 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     current = model;
+    const restoreFile = state.mode === "system" ? state.unitFile : null;
     selected = null;
     selectedEdgeId = null;
     selectedCommitHash = null;
     state.renderedGeneration = generation;
+    if (model.systemUnit) {
+      state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
+    } else if (state.mode === "system") {
+      state.systemUnit = null;
+      state.systemUnitLabel = null;
+      state.unitFile = null;
+    }
     store.set("ui", { node: null });
     view.render(model);
+    view.focusFile(null);
     applyFilterToView();
+    applyTierLens();
     renderLegend(elements.legend, model);
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
@@ -5797,9 +6273,14 @@ async function scan({ refresh = false } = {}) {
     });
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
+      if (state.mode === "system") {
+        if (!prefix) closeUnit();
+        return;
+      }
       state.prefix = prefix;
       scan();
     });
+    updateOutsideButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
@@ -5807,6 +6288,11 @@ async function scan({ refresh = false } = {}) {
     updateEmptyState();
     view.resize();
     fit(view.cy);
+    if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
+      if (generation === scanGeneration) {
+        selectNode(restoreFile);
+      }
+    }
     if (shouldShowHint()) {
       elements.graphHint.hidden = false;
     }
@@ -5884,6 +6370,31 @@ function applyFilterToView() {
     renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
   }
 }
+var tierReportCache = { generation: -1, report: null };
+async function applyTierLens() {
+  if (state.tier === "off" || !current || current.system || current.prefixLength !== void 0) {
+    view.applyTier(null);
+    return;
+  }
+  const generation = state.renderedGeneration;
+  if (tierReportCache.generation !== generation || !tierReportCache.report) {
+    try {
+      const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
+      const response = await fetch(`${API_PATH}/analysis/tiers${query}`);
+      tierReportCache = {
+        generation,
+        report: response.ok ? await response.json() : null
+      };
+    } catch {
+      tierReportCache = { generation, report: null };
+    }
+  }
+  if (!current || state.tier === "off" || state.renderedGeneration !== generation) {
+    view.applyTier(null);
+    return;
+  }
+  view.applyTier(tierOfFile(tierReportCache.report), state.tier === "all" ? "all" : state.tier);
+}
 function selectNode(id) {
   if (!current) {
     return;
@@ -5911,17 +6422,30 @@ function selectNode(id) {
   selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   view.highlight(neighbourhood(current, id));
+  const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith("#support")) {
+    state.unitFile = id;
+    view.focusFile(id);
+  }
   renderInspector(elements.inspector, current, id, {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
     onOpenMemberMap: (target) => {
-      openMemberMap(target).catch((error) => {
+      openMemberMap(target).then(() => {
+        floatingWindows.find((controller) => controller.key === "inspector")?.close();
+      }).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
       });
     },
     // A System-view unit may ask the opt-in narrator to name its group.
-    ...current?.system ? { narratorStatus, onNarrate: () => narrateGroup(id) } : {}
+    ...current?.system && !current?.systemUnit ? { narratorStatus, onNarrate: () => narrateGroup(id), onOpenNarratorSettings: openNarratorSettings } : {},
+    // Inside a unit, the selected file may show its cross-unit links (L17).
+    ...current?.systemUnit ? {
+      outsideShown: state.showOutside,
+      onShowOutside: () => toggleOutsideLinks(),
+      onExpandUnit: (unit) => toggleExpandedUnit(unit)
+    } : {}
   });
   if (!current?.system) {
     loadMembers(id);
@@ -5959,13 +6483,21 @@ async function loadMembers(id) {
 function functionsHandlers(result) {
   return {
     narratorStatus,
-    onNarrate: () => narrateFile(result)
+    onNarrate: () => narrateFile(result),
+    onOpenNarratorSettings: openNarratorSettings
   };
 }
 async function fetchNarratorStatus() {
   try {
     const response = await fetch(`${API_PATH}/narrator`);
-    return response.ok ? await response.json() : { configured: false, reason: "not-configured" };
+    if (!response.ok) {
+      return { configured: false, reason: "not-configured" };
+    }
+    const body = await response.json();
+    if (Array.isArray(body?.presets) && body.presets.length > 0) {
+      narratorPresets = body.presets;
+    }
+    return body;
   } catch {
     return { configured: false, reason: "not-configured" };
   }
@@ -6009,6 +6541,8 @@ function clearSelection() {
   state.pathFrom = null;
   state.pathMode = false;
   elements.tbPath.classList.remove("active");
+  state.unitFile = null;
+  view.focusFile(null);
   elements.hover.textContent = "";
   hideTooltip();
   view.highlight(null);
@@ -6046,9 +6580,9 @@ async function openMemberMap(id) {
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null
   };
-  elements.memberView.hidden = false;
   store.set("ui", { memberOpen: true, node: id });
   store.set("member", { stepIndex: 0, find: "" });
+  floatingWindows.find((controller) => controller.key === "member")?.open();
   refreshDock();
 }
 function memberStepCount() {
@@ -6163,6 +6697,8 @@ function syncUrl() {
     };
     set("repository", state.repository ?? "");
     set("mode", state.mode === "file" ? "file" : state.mode === "system" ? "system" : "");
+    set("unit", state.mode === "system" ? state.systemUnit ?? "" : "");
+    set("outside", state.mode === "system" && state.showOutside ? "1" : "");
     set("node", store.get().ui.node ?? "");
     set("panel", store.get().ui.memberOpen ? "member-map" : "");
     if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -6183,6 +6719,9 @@ function applyUrl() {
     state.mode = mode;
     elements.detail.value = mode;
   }
+  state.systemUnit = mode === "system" ? params.get("unit") : null;
+  state.systemUnitLabel = state.systemUnit;
+  state.showOutside = mode === "system" && params.get("outside") === "1";
   return params;
 }
 async function restoreUrlPanel() {
@@ -6223,8 +6762,20 @@ document.addEventListener("keydown", (event) => {
       applyFilterToView();
       return;
     }
+    if (state.mode === "system" && state.systemUnit && !inField) {
+      closeUnit();
+      return;
+    }
     if (!inField) clearSelection();
     return;
+  }
+  if (event.key === "Enter" && !inField && state.mode === "system" && selected) {
+    const node = current?.nodes.find((candidate) => candidate.id === selected);
+    if (node && !node.systemUnit) {
+      event.preventDefault();
+      openUnit(selected);
+      return;
+    }
   }
   if (event.key === "?" && !inField) {
     event.preventDefault();
@@ -6235,6 +6786,7 @@ document.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   if (key === "f" && selected) focus(view.cy, selected);
   else if (key === "i") elements.tbImpact.click();
+  else if (key === "o" && state.mode === "system" && state.systemUnit) elements.tbOutside.click();
   else if (key === "p") elements.tbPath.click();
   else if (key === "b") elements.tbBoundaries.click();
   else if (key === "t") elements.tbTimeline.click();
@@ -6331,11 +6883,19 @@ async function toggleRisk() {
 var serverSettings = null;
 var settingsStatus = "";
 var settingsStatusError = false;
+var narratorPresets = [];
+var narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
 function renderSettingsView() {
   if (!elements.settingsPanel) return;
   renderSettings(elements.settingsPanel, {
     prefs: clientPrefs,
     server: serverSettings,
+    presets: narratorPresets,
+    narratorState: narratorUiState,
+    onNarratorState: (patch2) => {
+      narratorUiState = { ...narratorUiState, ...patch2 };
+      renderSettingsView();
+    },
     status: settingsStatus || null,
     statusError: settingsStatusError,
     onPref: (key, value) => {
@@ -6345,9 +6905,56 @@ function renderSettingsView() {
       renderSettingsView();
     },
     onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
-    onToggleWidening: (value) => saveServerSettings({ allowCeilingWidening: value }, "Ceiling widening updated."),
-    onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated.")
+    onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
+    onNarratorChange: (patch2) => saveServerSettings({ narrator: patch2 }, "Narrator updated.").then(() => refreshNarratorStatus()),
+    onFetchModels: async ({ endpoint, model }) => {
+      const params = new URLSearchParams();
+      if (endpoint) params.set("endpoint", endpoint);
+      if (model) params.set("model", model);
+      const response = await fetch(`${API_PATH}/narrator/models?${params.toString()}`);
+      const body = await response.json().catch(() => ({}));
+      return response.ok ? body : { models: [], error: body.error ?? `Could not list models (${response.status}).` };
+    },
+    onTestConnection: async ({ endpoint, model }) => {
+      const response = await fetch(`${API_PATH}/narrator/test`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint, model })
+      });
+      return response.json().catch(() => ({ ok: false, reason: "provider-error", detail: "no response" }));
+    },
+    onStoreKey: async (key) => {
+      const response = await fetch(`${API_PATH}/narrator/key`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `Could not store the key (${response.status}).`);
+      }
+      settingsStatus = "Key stored for this host.";
+      settingsStatusError = false;
+      await refreshNarratorSettings();
+      renderSettingsView();
+      return body;
+    },
+    onClearKey: async () => {
+      await fetch(`${API_PATH}/narrator/key`, { method: "DELETE" }).catch(() => {
+      });
+      await refreshNarratorSettings();
+      renderSettingsView();
+    }
   });
+}
+async function refreshNarratorSettings() {
+  try {
+    serverSettings = await request("/settings");
+  } catch {
+  }
+}
+async function refreshNarratorStatus() {
+  narratorStatus = await fetchNarratorStatus();
 }
 async function saveServerSettings(patch2, successMessage) {
   try {
@@ -6381,6 +6988,9 @@ async function openSettings() {
   renderSettingsView();
   try {
     serverSettings = await request("/settings");
+    if (narratorPresets.length === 0) {
+      narratorStatus = await fetchNarratorStatus();
+    }
   } catch (error) {
     settingsStatus = error.message;
     settingsStatusError = true;
@@ -6606,8 +7216,69 @@ async function forgetRepository() {
     scan();
   }
 }
+function openUnit(id) {
+  if (state.mode !== "system") {
+    return;
+  }
+  const node = current?.nodes.find((candidate) => candidate.id === id);
+  state.systemUnit = id;
+  state.systemUnitLabel = node?.label ?? id;
+  state.unitFile = null;
+  state.showOutside = false;
+  state.expandedUnits = [];
+  scan();
+}
+function closeUnit() {
+  state.systemUnit = null;
+  state.systemUnitLabel = null;
+  state.unitFile = null;
+  state.showOutside = false;
+  state.expandedUnits = [];
+  scan();
+}
+function toggleOutsideLinks() {
+  if (state.mode !== "system" || !state.systemUnit) {
+    return;
+  }
+  if (!state.unitFile) {
+    elements.hover.textContent = "Select a file inside the unit before showing outside links.";
+    return;
+  }
+  state.showOutside = !state.showOutside;
+  state.expandedUnits = [];
+  updateOutsideButton();
+  scan();
+}
+function toggleExpandedUnit(id) {
+  const set = new Set(state.expandedUnits ?? []);
+  if (set.has(id)) {
+    set.delete(id);
+  } else {
+    set.add(id);
+  }
+  state.expandedUnits = [...set].sort();
+  scan();
+}
+function updateOutsideButton() {
+  if (!elements.tbOutside) {
+    return;
+  }
+  const shown = state.mode === "system" && Boolean(state.systemUnit);
+  elements.tbOutside.hidden = !shown;
+  elements.tbOutside.classList.toggle("active", state.showOutside);
+  elements.tbOutside.setAttribute("aria-pressed", String(state.showOutside));
+}
 function onDrill(id) {
   if (state.mode === "system") {
+    const node = current?.nodes.find((candidate) => candidate.id === id);
+    if (!node) {
+      return;
+    }
+    if (node.systemUnit) {
+      if (!id.endsWith("#support")) openFile(id);
+      return;
+    }
+    openUnit(id);
     return;
   }
   if (state.mode === "block") {
@@ -6656,9 +7327,29 @@ elements.forget.addEventListener("click", () => {
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
   state.prefix = "";
+  if (state.mode !== "system") {
+    state.systemUnit = null;
+    state.systemUnitLabel = null;
+    state.unitFile = null;
+    state.showOutside = false;
+    state.expandedUnits = [];
+  }
   writeViewPrefs();
   scan();
 });
+if (elements.tier) {
+  elements.tier.addEventListener("change", () => {
+    state.tier = elements.tier.value;
+    if (state.tier !== "off" && state.mode !== "file") {
+      state.mode = "file";
+      elements.detail.value = "file";
+      writeViewPrefs();
+      scan();
+      return;
+    }
+    applyTierLens();
+  });
+}
 elements.refresh.addEventListener("click", () => scan({ refresh: true }));
 elements.overlay.addEventListener("change", () => {
   state.overlay = elements.overlay.value;
@@ -6744,7 +7435,7 @@ function showTooltip(id, clientX, clientY) {
   kind.textContent = node.kind ?? "";
   row.append(kind);
   const blast = document.createElement("span");
-  blast.textContent = `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`;
+  blast.textContent = node.systemUnit && !id.endsWith("#support") ? `blast ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 id ${id}` : `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`;
   row.append(blast);
   elements.tooltip.append(row);
   elements.tooltip.hidden = false;
@@ -6762,7 +7453,8 @@ view.onHover((id, event) => {
     return;
   }
   const node = current?.nodes.find((candidate) => candidate.id === id);
-  elements.hover.textContent = `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
+  const insideUnit = node?.systemUnit && !id.endsWith("#support");
+  elements.hover.textContent = insideUnit ? `${id} \xB7 blast radius ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 ${node.kind ?? ""}` : `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
   if (event?.clientX !== void 0) showTooltip(id, event.clientX, event.clientY);
 });
 elements.tbFocus.addEventListener("click", () => {
@@ -6774,6 +7466,9 @@ elements.tbImpact.addEventListener("click", () => {
   elements.overlay.value = "impact";
   elements.overlay.dispatchEvent(new Event("change"));
 });
+if (elements.tbOutside) {
+  elements.tbOutside.addEventListener("click", () => toggleOutsideLinks());
+}
 elements.tbPath.addEventListener("click", () => {
   state.pathMode = !state.pathMode;
   state.pathFrom = null;
@@ -6861,6 +7556,20 @@ if (elements.tbOverflow) {
 function toggleShortcuts() {
   floatingWindows?.find?.((controller) => controller.key === "shortcuts")?.toggle();
 }
+function openNarratorSettings() {
+  floatingWindows?.find?.((controller) => controller.key === "settings")?.open?.();
+  const reveal = (attempt = 0) => {
+    const target = elements.settingsPanel?.querySelector("#setting-narrator");
+    if (target) {
+      target.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    if (attempt < 10) {
+      setTimeout(() => reveal(attempt + 1), 50);
+    }
+  };
+  setTimeout(() => reveal(), 50);
+}
 function nodeDelegateTarget(id) {
   const passport = current ? passportFor(current, id) : null;
   const node = current?.nodes.find((candidate) => candidate.id === id);
@@ -6943,14 +7652,14 @@ function reviewDelegateTarget(result) {
   }
   return { kind: "review", label, evidence };
 }
-function commitDelegateTarget(button) {
-  const meta = button.parentElement?.querySelector(".evidence")?.textContent ?? "";
+function commitDelegateTarget(button2) {
+  const meta = button2.parentElement?.querySelector(".evidence")?.textContent ?? "";
   return {
     kind: "commit",
-    id: button.dataset.hash ?? button.textContent,
-    label: button.textContent.trim().slice(0, 120),
-    detail: meta ? `${button.textContent.trim()} (${meta.trim()})` : button.textContent.trim(),
-    evidence: meta ? [`commit: ${button.textContent.trim()}`, `meta: ${meta.trim()}`] : []
+    id: button2.dataset.hash ?? button2.textContent,
+    label: button2.textContent.trim().slice(0, 120),
+    detail: meta ? `${button2.textContent.trim()} (${meta.trim()})` : button2.textContent.trim(),
+    evidence: meta ? [`commit: ${button2.textContent.trim()}`, `meta: ${meta.trim()}`] : []
   };
 }
 function memberDelegateTarget(card) {
@@ -7324,6 +8033,11 @@ if (window.STRABO_TEST) {
     state,
     select: selectNode,
     drill: onDrill,
+    openUnit,
+    closeUnit,
+    toggleOutsideLinks,
+    toggleExpandedUnit,
+    outsideShown: () => state.showOutside,
     selectEdge,
     model: () => current,
     renderedGeneration: () => state.renderedGeneration,

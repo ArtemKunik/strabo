@@ -213,23 +213,6 @@ Then('the inspector shows a functions summary with a sortable table', async func
   assert.match(detail, /calls: /);
 });
 
-Then('the inspector offers the narrator and reports it is not configured', async function () {
-  await this.openInspectorTab('functions');
-  await this.page.waitForSelector('#inspector .narrator-note', { timeout: 15_000 });
-  const note = (await this.page.textContent('#inspector .narrator-note')) ?? '';
-  assert.match(note, /not configured/i);
-
-  await this.page.click('#inspector #narrate-functions');
-  await this.page.waitForFunction(
-    () => {
-      const reply = document.querySelector('#inspector [data-role="narrative"]');
-      return reply != null && /not-configured|unavailable/i.test(reply.textContent ?? '');
-    },
-    undefined,
-    { timeout: 15_000 },
-  );
-});
-
 Then('the member map lists fields with declared types', async function () {
   await this.openInspectorTab('members');
   await this.page.waitForFunction(

@@ -34,6 +34,18 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-other: #8da0b5;
+  /* The tier lens: a second bounded categorical set (Phase 16 L10). Eight reserved hues
+     plus the neutral `--series-other` for unclassified. Each clears 3:1 on --bg-1 and the
+     light surfaces; no tier equals the accent or a status hue. Tiers never carry meaning by
+     hue alone — every chip ships its label. */
+  --tier-frontend: #b63596;
+  --tier-api: #3092a6;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #a68930;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
   /* Alpha is a scale, not a literal (R13): a wash for subtle fills, a hairline for
      borders, and a veil for the translucent surfaces above the canvas. */
   --wash: rgba(255, 255, 255, 0.05);
@@ -103,6 +115,15 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --series-other: #66748a;
+  /* Tier hues hold on the light surfaces at the same values as the dark theme. */
+  --tier-frontend: #b63596;
+  --tier-api: #3092a6;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #a68930;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
   --wash: rgba(20, 40, 70, 0.05);
   --hairline: rgba(20, 40, 70, 0.16);
   --veil: rgba(240, 243, 248, 0.7);
@@ -1059,10 +1080,60 @@ button.primary {
   padding-top: 6px;
 }
 
+.outside-links {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outside-toggle {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-1);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.outside-toggle.active {
+  border-color: var(--accent, var(--ink-1));
+  color: var(--accent, var(--ink-1));
+}
+
+.outside-badge {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
 .narrator-note {
   color: var(--ink-3);
   font-size: 11px;
   margin: 0 0 6px;
+}
+
+.narrator-setup {
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent, var(--ink-1));
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.narrator-setup:hover {
+  border-color: var(--accent, var(--ink-1));
+}
+
+.narrator-button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .narrator-reply {
@@ -2948,6 +3019,16 @@ button.primary {
 
 .setting-note {
   margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.setting-locked {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   color: var(--ink-3);
   font-size: var(--text-xs);
 }

@@ -29,7 +29,7 @@ export async function startServer() {
       STRABO_CACHE_DIR: cacheDir,
       STRABO_STATE_DIR: stateDir,
     },
-    stdio: 'ignore',
+      stdio: 'ignore',
   });
 
   await waitForHealth();

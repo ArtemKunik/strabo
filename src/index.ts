@@ -247,7 +247,7 @@ export type {
 } from './narrator/client.ts';
 export { collectPolyglotExternalImports, mavenCoordinateMatches } from './scan/external-polyglot.ts';
 
-export { buildViewModel, buildSystemViewModel } from './view/view-model.ts';
+export { buildViewModel, buildSystemViewModel, buildSystemUnitViewModel } from './view/view-model.ts';
 
 export {
   getCachedGraph,

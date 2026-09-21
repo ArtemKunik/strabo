@@ -36,10 +36,6 @@ const RESET_CLASSES = [
   'label-hidden',
   'filtered-out',
   'tier-hidden',
-  'tier-upward',
-  'tier-skip',
-  'edge-tier-upward',
-  'edge-tier-skip',
 ];
 
 /** When false, the settings panel asked for a label-free map. Set via `view.setLabelsVisible`. */
@@ -85,6 +81,24 @@ export function createView(container) {
   let islandVisible = null;
   // The element set from the last render, so a re-render can update only what changed.
   let renderedElements = { nodes: [], edges: [] };
+  // The file whose in-unit edges are drawn in a System drill-down; null hides them all.
+  let focusedFile = null;
+
+  /** Show only the focused file's in-unit edges; outside links stay visible. */
+  function applyEdgeFocus() {
+    cy.batch(() => {
+      cy.edges().forEach((edge) => {
+        if (edge.data('scope') !== 'unit') {
+          edge.removeClass('edge-hidden');
+          return;
+        }
+        const incident =
+          focusedFile !== null &&
+          (edge.data('source') === focusedFile || edge.data('target') === focusedFile);
+        edge.toggleClass('edge-hidden', !incident);
+      });
+    });
+  }
 
   function repaintIslands() {
     islands.paint(
@@ -255,6 +269,7 @@ export function createView(container) {
       islandModel = model;
       islandVisible = null;
       repaintIslands();
+      applyEdgeFocus();
       applyLabelBudget(cy, true);
       // Removal doesn't fire unselect events, so the old node ids would otherwise linger
       // in whatever last read the group — tell listeners the slate is clean.
@@ -276,6 +291,16 @@ export function createView(container) {
           });
         }
       });
+    },
+    /**
+     * Draw only one file's edges inside its unit in a System drill-down; null hides them.
+     *
+     * This is L16: before a file is chosen the unit's internal wiring is not drawn, and
+     * once one is chosen only its import edges to and from files in the same unit show.
+     */
+    focusFile(fileId) {
+      focusedFile = fileId ?? null;
+      applyEdgeFocus();
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
@@ -339,43 +364,6 @@ export function createView(container) {
           }
           const keep = filterTier === 'all' || tier === filterTier;
           node.toggleClass('tier-hidden', !keep);
-        }
-      });
-    },
-    /**
-     * Mark the files and edges in a wrong-way dependency. Pass null to clear.
-     *
-     * `byNode` maps a file to its classes and `edges` names the endpoints to mark. Upward
-     * and skip-layer use different classes, so the two differ by border/line shape, not hue.
-     */
-    applyTierDirections(directions) {
-      const nodes = directions?.byNode instanceof Map ? directions.byNode : null;
-      const edges = Array.isArray(directions?.edges) ? directions.edges : [];
-      cy.batch(() => {
-        for (const node of cy.nodes()) {
-          node.removeClass('tier-upward');
-          node.removeClass('tier-skip');
-        }
-        for (const edge of cy.edges()) {
-          edge.removeClass('edge-tier-upward');
-          edge.removeClass('edge-tier-skip');
-        }
-        if (!nodes) {
-          return;
-        }
-        for (const [id, classes] of nodes) {
-          const node = cy.getElementById(id);
-          if (node.nonempty()) {
-            for (const cls of classes) {
-              node.addClass(cls);
-            }
-          }
-        }
-        for (const direction of edges) {
-          const cls = direction.kind === 'upward' ? 'edge-tier-upward' : 'edge-tier-skip';
-          cy.edges()
-            .filter((edge) => edge.data('source') === direction.source && edge.data('target') === direction.target)
-            .addClass(cls);
         }
       });
     },
@@ -935,13 +923,10 @@ function stylesheet() {
     // Cross-repo is a relationship, not a status, so it rides on the accent hue: a heavy
     // dotted ring that reads as "part of a workspace flow" without entering the status set.
     { selector: 'node.ov-cross-repo', style: { 'border-width': 4, 'border-style': 'dotted', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
-    // The tier direction check: a wrong-way dependency is a signal, so it rides on the
-    // reserved status scale and differs by shape (double vs dashed), never hue alone.
-    { selector: 'node.tier-upward', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
-    { selector: 'node.tier-skip', style: { 'border-width': 3, 'border-style': 'dashed', 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
+    { selector: 'edge.edge-hidden', style: { display: 'none' } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
     {
       selector: 'edge',
@@ -963,8 +948,6 @@ function stylesheet() {
         'arrow-scale': 0.9,
       },
     },
-    { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
-    { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
     { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {

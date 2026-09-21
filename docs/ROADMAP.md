@@ -25,8 +25,8 @@ record is reported as `unavailable`, never invented.
     `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
-| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 planned (in-app narrator setup) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13 done: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17 and unit cards L18-L22 remain) |
+| 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 done (in-app narrator setup) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; system drill-down L14-L17, unit cards L18-L22, and the tier lens L9-L13 remain) |
 | 17 | Module quality and change impact | Q1-Q4 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact); Q5-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -638,7 +638,18 @@ the inert path; it needs no endpoint, so it also proves nothing is contacted whe
 
 ### Follow-ups: in-app narrator setup
 
-The narrator can be configured only through environment variables
+**N1-N5 (done).** The narrator is now set up from the UI: `GET /narrator` reports the
+effective settings, the environment lock on each field, the key source, and the provider
+presets; `src/state/settings-store.ts` persists the narrator fields under the environment;
+`src/narrator/key-store.ts` holds a write-only, host-bound key in the state directory with
+owner-only permissions; `src/api/routes/narrator.ts` adds `GET /narrator/models`,
+`POST /narrator/test`, `POST /narrator/key`, and `DELETE /narrator/key`; and the Settings →
+Narrator section, the single *Narrator is off · Set up →* call to action, and the disabled
+Narrate / Name group live in `ui/strabo-settings.js` and `ui/strabo-panels.js`. Anthropic
+needs no adapter: its OpenAI-compatible endpoint (`https://api.anthropic.com/v1/`) fits the
+existing `messages` body, so N5 resolved without a native Messages-API client.
+
+The narrator could previously be configured only through environment variables
 (`STRABO_NARRATOR_ENDPOINT`, `_MODEL`, `_KEY_ENV`, `_BUDGET`, `_SEND_SOURCE`, plus the
 key in yet another variable), and an unconfigured narrator shows two overlapping lines
 ("Narrator is not configured…" and "Narrator unavailable: not-configured") next to a
@@ -679,14 +690,15 @@ Narrate button that only fails. The operator should be able to set it up from th
   it fits, and otherwise gets a small adapter for the native Messages API. The same
   applies to any other preset whose API is not OpenAI-compatible.
 
-Slices: **N1** persisted narrator settings (endpoint, model, key source, send-source,
+Slices: **N1 (done)** persisted narrator settings (endpoint, model, key source, send-source,
 budget) merged under the environment, with locked-by-environment reporting in
-`GET /narrator`. **N2** the Settings → Narrator section with presets, Fetch models, and the
-write-only key field (env-var name or stored key), plus the host-change key reset and
-same-origin check. **N3** Test connection with plain-language errors. **N4** the single
-*Narrator is off · Set up →* call to action and disabled Narrate / Name group with their
-reason. **N5** the Anthropic preset (compatible endpoint or native adapter), decided
-against current provider docs. Acceptance: `module-passport.feature` `@narrator` gains
+`GET /narrator`. **N2 (done)** the Settings → Narrator section with presets, Fetch models, and
+the write-only key field (env-var name or stored key), plus the host-change key reset and
+same-origin check. **N3 (done)** Test connection with plain-language errors. **N4 (done)**
+the single *Narrator is off · Set up →* call to action and disabled Narrate / Name group with
+their reason. **N5 (done)** the Anthropic preset (OpenAI-compatible endpoint; no native
+adapter needed), decided against current provider docs. Acceptance: `module-passport.feature`
+`@narrator` gains
 "set up from Settings against a loopback stub" and "changing the host clears the key"
 scenarios, and still proves nothing is contacted while unset.
 
@@ -790,24 +802,18 @@ unit's recorded facts (`buildGroupNamingEvidence`) with an instruction that the 
 only name and describe, never create, merge, or split a group; the reply renders under the
 Phase 15 model-generated attribution. The `@polyglot` scenario runs against
 `test/fixtures/system-repo` (a Gradle app, two Cargo crates, a scripts folder), so the unit
-detection is exercised in the browser as well as in unit tests.
-**L9-L13 (done)** the tier lens: `src/analysis/tiers.ts` classifies every file into a role
-tier (frontend, api, domain, data, integration, infra, build, tests, unclassified) from
-framework imports, annotations, file kinds, and path tokens, strongest evidence first, keeping
-a `mixed` file and an `unclassified` one rather than forcing a choice, and honouring declared
-overrides in `strabo.groups.yml`; it rolls the files up per unit with the unit’s role, builds
-the tier × unit matrix with per-cell and per-tier stats, checks each in-unit import for an
-upward or skip-layer direction, extracts table names from SQL, ORM annotations, and
-string-literal SQL, and records outbound calls and the endpoints declared in the repository’s
-OpenAPI documents, joining a call to the endpoint it reaches here by method and path.
-`GET /analysis/tiers` serves it. On the map, the tier lens colours nodes by tier and filters
-to one tier (choosing a tier switches to Files mode). The panel (`ui/strabo-tier-panel.js`)
-draws the matrix, the per-tier shares, the direction check, and the trace — calls and endpoints
-above the table index — and `applyTierDirections` paints the direction check on the map: both
-ends of a wrong-way edge take a status ring and the edge thickens, with upward and skip-layer
-reading apart by shape, not hue alone. The middle of the full chain (which handler serves an
-endpoint) still comes from the Phase 11 service flows, and the table side only reaches as far
-as the files that name the table.
+detection is exercised in the browser as well as in unit tests. **L14-L17 (done)** the
+System drill-down: L0 draws units only (no file nodes, no islands, no directory strip), a
+unit opens on double-click or Enter into layer swim lanes and communities with the other
+units collapsed and a *System › unit* breadcrumb (Escape or the breadcrumb returns, and the
+deep link carries `mode=system&unit=`), selecting a file draws only its in-unit import edges
+with the rest of the unit dimmed, and **Show outside links** (inspector, toolbar, `o`) adds
+the selected file's cross-unit edges ending at the target unit's box with a count badge that
+expands in place; trace and blast radius split the in-unit and outside counts. Served by
+`buildSystemUnitViewModel` (`src/view/view-model.ts`) at `GET /graph?systemUnit=`, with
+coverage in `test/unit/system.test.ts`, `test/unit/browser-core.test.ts`, and the `@units-only`,
+`@open-unit`, `@unit-edges`, and `@outside` scenarios in `system-view.feature`. Still to do:
+the tier lens.
 
 ### System drill-down
 
@@ -848,6 +854,41 @@ links**: cross-unit edges to target-unit boxes with count badges, expand-in-plac
 contract edges, and split impact counts. Acceptance: `system-view.feature` gains scenarios
 for "no files at L0", "open a unit", "file edges stay inside the unit", and "outside links
 appear only after the action".
+
+### Unit cards and the single-unit case
+
+On a repository with one manifest (Strabo itself), System mode draws two identical empty
+squares, `strabo` and `strabo support`, both with a thick blue outline, and hovering the
+shelf reads *MODULE · blast 0 · id #support*. The cause is that `buildSystemViewModel`
+(`src/view/view-model.ts`) models each unit and each shelf as a `kind: 'module'` file
+node, so they inherit file styling, file sizing, and the file hover card.
+
+- **One unit skips the overview.** With a single unit, System mode opens that unit at L1
+  (layer lanes, then communities) with the note *1 build unit: showing its layers* and a
+  breadcrumb back to L0. L0 is shown only for two or more units.
+- **The shelf is part of its unit.** It is drawn as a muted, dashed footer strip inside
+  the unit card (*support: 74 tests · 6 scripts*) that expands on click. It is not a peer
+  node with its own edge.
+- **Units are cards with facts, not empty boxes.** Header: manifest name, role (Phase 16
+  tier lens) and ecosystem (`npm`, `cargo`, `gradle`). Stats: files, LOC, and language
+  mix. Layer bars with file counts, hotspot count, and test reach. The card is a DOM
+  overlay that tracks node positions (units number in the tens, so there is no
+  per-frame cost worth avoiding), or an HTML-label plugin if the overlay proves awkward.
+  It must render in both themes and within the Phase 13 colour budget.
+- **Unit and shelf hover cards use unit vocabulary.** Unit: *npm package `strabo` · 142
+  files · depends on N units · used by M units · why: package.json*. Shelf: *74 test
+  files, 6 scripts: folded support*. No blast radius on a shelf, and no internal `#` ids.
+- **Honest sizing and styling.** A unit node is a distinct kind (`unit`, `shelf`), not
+  `module`. Area is proportional to file count on a square-root scale with a minimum size,
+  and the blue outline is reserved for selection.
+
+Slices: **L18** distinct `unit` / `shelf` node kinds in the view model with their own
+styles, square-root file-count sizing, and selection-only outline. **L19** single-unit
+auto-open at L1 with the note and breadcrumb. **L20** unit and shelf hover cards in unit
+vocabulary. **L21** the shelf as a footer strip inside the unit card, expandable in place.
+**L22** unit cards with header, stats, layer bars, hotspots, and test reach. Acceptance:
+`system-view.feature` gains "a single-unit repository opens at its layers" (run on the
+Strabo repository itself) and "a unit hover shows unit facts, not blast radius".
 
 ### Tier lens
 
@@ -913,7 +954,7 @@ skip-layer edges) as an overlay and in the unit swim lanes. **L13** table extrac
 end-to-end trace (screen → endpoint → handler → repository → table). Acceptance:
 `test/acceptance/features/tier-lens.feature`, with a fixture of a React client, an Axum
 service with a handler that queries SQL directly (flagged `mixed` and skip-layer), a
-migration, and a CI workflow. All four slices have landed (see the landed note above).
+migration, and a CI workflow.
 
 ## Phase 17 - Module quality and change impact
 

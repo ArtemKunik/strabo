@@ -20,6 +20,8 @@ export interface GraphNode {
   language?: string;
   /** Why this node is an entry point, when a manifest declares it as one. */
   entryReason?: string;
+  /** Line count of the file as read during the scan; absent on aggregate nodes. */
+  lines?: number;
 }
 
 /** The kind of relationship an edge represents. */

@@ -63,8 +63,12 @@ import {
   GROUP_NAMING_INSTRUCTION,
   buildGroupNamingEvidence,
   buildNarratorEvidence,
+  narratorDisabledReason,
+  narratorKeyLabel,
+  narratorNeedsSetup,
   narratorReplyLabel,
   narratorStatusLabel,
+  narratorTestLabel,
 } from '../../ui/strabo-narrator.js';
 import {
   contractRows,
@@ -340,6 +344,102 @@ test('buildGraphQuery sends system=1 in system mode', () => {
   assert.ok(!query.includes('blockDepth'));
 });
 
+test('buildGraphQuery sends the open unit and outside links in a system drill-down', () => {
+  const query = buildGraphQuery({
+    repository: '/demo',
+    mode: 'system',
+    systemUnit: 'crates/api',
+    unitFile: 'crates/api/src/service/ledger.rs',
+    showOutside: true,
+    expandedUnits: ['crates/core'],
+  });
+  assert.ok(query.includes('systemUnit=crates%2Fapi'));
+  assert.ok(query.includes('outside=1'));
+  assert.ok(query.includes('selected=crates%2Fapi%2Fsrc%2Fservice%2Fledger.rs'));
+  assert.ok(query.includes('expanded=crates%2Fcore'));
+
+  // Nothing crosses the unit frame unless the action was taken.
+  const closed = buildGraphQuery({
+    repository: '/demo',
+    mode: 'system',
+    systemUnit: 'crates/api',
+    unitFile: 'crates/api/src/service/ledger.rs',
+    showOutside: false,
+  });
+  assert.ok(!closed.includes('outside=1'));
+  assert.ok(!closed.includes('selected='));
+});
+
+test('breadcrumb reads System › unit inside a drill-down', () => {
+  assert.deepEqual(breadcrumb({ mode: 'system', systemUnit: null }), [
+    { label: 'System', prefix: '' },
+  ]);
+  assert.deepEqual(
+    breadcrumb({ mode: 'system', systemUnit: 'crates/api', systemUnitLabel: 'ledger-api' }),
+    [
+      { label: 'System', prefix: '' },
+      { label: 'ledger-api', prefix: 'crates/api' },
+    ],
+  );
+});
+
+test('the reading legend names layers and the outside badge in a drill-down', () => {
+  assert.deepEqual(readingLegend({ system: true, systemUnit: 'crates/api' }), [
+    'box = unit frame',
+    'lane = layer',
+    'edge = selected file import',
+    'badge = files in another unit',
+  ]);
+});
+
+test('a drill-down file splits its blast radius into in-unit and outside counts', () => {
+  const model = {
+    system: true,
+    systemUnit: 'crates/api',
+    nodes: [
+      {
+        id: 'crates/api/src/service/ledger.rs',
+        kind: 'module',
+        systemUnit: 'crates/api',
+        inUnitDependents: 12,
+        outsideDependents: 27,
+        transitiveDependents: 39,
+      },
+    ],
+    edges: [],
+    positions: [],
+  };
+  const passport = passportFor(model, 'crates/api/src/service/ledger.rs');
+  assert.ok(
+    passport.metrics.some(
+      (metric) => metric.label === 'Blast radius in unit' && metric.value === 12,
+    ),
+  );
+  assert.ok(
+    passport.metrics.some(
+      (metric) => metric.label === 'Blast radius outside' && metric.value === 27,
+    ),
+  );
+});
+
+test('mapCounts lists the open unit layers instead of one chip per file', () => {
+  const counts = mapCounts({
+    system: true,
+    systemUnit: 'crates/api',
+    nodes: [
+      { id: 'crates/api/src/http/routes.rs', kind: 'module', systemLayer: 'http', systemUnit: 'crates/api' },
+      { id: 'crates/api/src/http/middleware.rs', kind: 'module', systemLayer: 'http', systemUnit: 'crates/api' },
+      { id: 'crates/api/src/service/ledger.rs', kind: 'module', systemLayer: 'service', systemUnit: 'crates/api' },
+      { id: 'crates/core', kind: 'module', collapsed: true },
+    ],
+  });
+  const labels = counts.entries.map((entry) => entry.label);
+  assert.ok(labels.includes('http'));
+  assert.ok(labels.includes('service'));
+  assert.ok(labels.includes('outside units'));
+  assert.equal(counts.entries.find((entry) => entry.label === 'http')?.count, 2);
+});
+
 test('the reading legend names units and files in system mode', () => {
   assert.deepEqual(readingLegend({ system: true }), [
     'box = build unit',
@@ -460,6 +560,19 @@ test('passportFor reports metrics, imports, and used-by from evidence', () => {
     ],
   );
   assert.deepEqual(passport.usedBy.map((entry) => entry.id).sort(), ['src/index.ts']);
+});
+
+test('passportFor shows the file line count when the scan recorded one', () => {
+  const withLines = {
+    ...model,
+    nodes: model.nodes.map((node) => (node.id === 'src/util.ts' ? { ...node, lines: 42 } : node)),
+  };
+  const lines = passportFor(withLines, 'src/util.ts').metrics.find((metric) => metric.label === 'Lines');
+  assert.equal(lines?.value, 42);
+  assert.equal(
+    passportFor(model, 'src/util.ts').metrics.some((metric) => metric.label === 'Lines'),
+    false,
+  );
 });
 
 test('buildElements labels a block node from the server directoryLabels', () => {
@@ -932,13 +1045,37 @@ test('functionSignals lists the recorded cost signals or says there are none', (
   );
 });
 
-test('narratorStatusLabel names the unconfigured state and reports the budget', () => {
-  assert.match(narratorStatusLabel(null), /not configured/);
-  assert.match(narratorStatusLabel({ configured: false, reason: 'not-configured' }), /not configured/);
+test('narratorStatusLabel names the off state once and reports the budget', () => {
+  assert.equal(narratorStatusLabel(null), 'Narrator is off.');
+  assert.equal(narratorStatusLabel({ configured: false, reason: 'not-configured' }), 'Narrator is off.');
   assert.equal(
     narratorStatusLabel({ configured: true, model: 'gpt-x', requestBudget: 20, remaining: 18 }),
     'Narrator ready · gpt-x · 18/20 requests left',
   );
+});
+
+test('narratorNeedsSetup and narratorDisabledReason collapse the old two lines', () => {
+  assert.equal(narratorNeedsSetup(null), true);
+  assert.equal(narratorNeedsSetup({ configured: false }), true);
+  assert.equal(narratorNeedsSetup({ configured: true, model: 'm' }), false);
+  assert.match(narratorDisabledReason({ configured: false }) ?? '', /off/i);
+  assert.equal(narratorDisabledReason({ configured: true, model: 'm' }), null);
+  assert.match(
+    narratorDisabledReason({ configured: true, model: 'm', reason: 'not-authenticated', detail: 'set X' }) ?? '',
+    /not-authenticated — set X/,
+  );
+});
+
+test('narratorTestLabel reports latency and model, or the problem in plain words', () => {
+  assert.match(narratorTestLabel({ ok: true, model: 'gpt-x', latencyMs: 42 }), /gpt-x replied in 42 ms/);
+  assert.match(narratorTestLabel({ ok: false, reason: 'provider-error', detail: '401: key rejected' }), /401: key rejected/);
+  assert.match(narratorTestLabel(null), /Test the connection/);
+});
+
+test('narratorKeyLabel reports set / found / missing, never a key value', () => {
+  assert.match(narratorKeyLabel({ source: 'env', envVar: 'STRABO_NARRATOR_API_KEY' }), /Key found in STRABO_NARRATOR_API_KEY/);
+  assert.match(narratorKeyLabel({ source: 'stored', host: 'api.example.com' }), /stored on this machine for api.example.com/);
+  assert.match(narratorKeyLabel({ source: 'none', envVar: 'STRABO_NARRATOR_API_KEY', host: 'api.example.com' }), /Key missing/);
 });
 
 test('narratorReplyLabel renders the narrative or the reason it is unavailable', () => {

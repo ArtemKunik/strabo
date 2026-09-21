@@ -197,7 +197,9 @@ test('createNarratorClient turns a provider failure into an unavailable reply', 
 async function withHost(config: StraboConfig, run: (base: string) => Promise<void>): Promise<void> {
   const app = express();
   app.use(express.json());
-  app.use('/api/strabo', createStraboRouter(config));
+  // An isolated, empty environment so status locks and key source never depend on the
+  // machine the tests run on.
+  app.use('/api/strabo', createStraboRouter(config, undefined, undefined, { env: {} }));
   const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', () => resolve()));
   const { port } = server.address() as AddressInfo;
@@ -211,7 +213,19 @@ async function withHost(config: StraboConfig, run: (base: string) => Promise<voi
 test('the narrator route reports status and refuses evidence-free requests', async () => {
   await withHost({ workspaceRoot: process.cwd() }, async (base) => {
     const status = await fetch(`${base}/api/strabo/narrator`);
-    assert.deepEqual(await status.json(), { configured: false, reason: 'not-configured' });
+    const body = (await status.json()) as Record<string, unknown>;
+    assert.equal(body.configured, false);
+    assert.equal(body.reason, 'not-configured');
+    assert.equal(body.apiKeyEnv, 'STRABO_NARRATOR_API_KEY');
+    assert.equal(body.sendSource, false);
+    assert.deepEqual(body.locked, {
+      endpoint: null,
+      model: null,
+      apiKeyEnv: null,
+      budget: null,
+      sendSource: null,
+    });
+    assert.ok(Array.isArray(body.presets));
 
     const runs = await fetch(`${base}/api/strabo/narrator/runs`);
     assert.deepEqual(await runs.json(), { runs: [] });

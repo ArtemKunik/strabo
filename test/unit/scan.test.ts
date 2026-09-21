@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { scanRepository } from '../../src/index.ts';
+import { countLines } from '../../src/scan/scan.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'sample-repo');
@@ -16,6 +17,20 @@ test('scanRepository emits one node per retained source file', async () => {
   assert.ok(ids.includes('src/util.ts'));
   assert.equal(report.graph.nodes.find((node) => node.id === 'src/feature.test.ts')?.kind, 'test');
   assert.equal(report.graph.nodes.find((node) => node.id === 'src/util.ts')?.kind, 'module');
+});
+
+test('scanRepository records each file line count on its node', async () => {
+  const report = await scanRepository(fixture);
+  assert.equal(report.graph.nodes.find((node) => node.id === 'src/util.ts')?.lines, 3);
+});
+
+test('countLines numbers lines the way an editor does', () => {
+  assert.equal(countLines(''), 0);
+  assert.equal(countLines('one'), 1);
+  assert.equal(countLines('one\n'), 1);
+  assert.equal(countLines('one\ntwo'), 2);
+  assert.equal(countLines('one\r\ntwo\r\n'), 2);
+  assert.equal(countLines('\n\n'), 2);
 });
 
 test('scanRepository resolves internal JS/TS edges', async () => {

@@ -223,7 +223,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
 
     const placeInRail = () => {
       const railWidth = win.offsetWidth || width;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, firstFreeRailTop());
+      const top = firstFreeRailTop();
+      // Keep the window on screen: a tall panel opened below another (e.g. Settings below
+      // the Legend) would otherwise run past the bottom edge, leaving its controls
+      // unreachable. The body scrolls within whatever height is left.
+      const available = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+      win.style.maxHeight = `${available}px`;
+      place(window.innerWidth - railWidth - RAIL_RIGHT, top);
     };
 
     const position = saved.position ?? config.position ?? {};

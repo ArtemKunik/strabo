@@ -346,15 +346,25 @@ calls. `POST /vulnerabilities` remains a host-injectable seam for an external pr
 ## LLM narrator (opt-in)
 
 `GET /narrator`, `POST /narrator`, and `GET /narrator/runs` expose an optional narrative
-layer over recorded evidence. **It is inert by default**: without an endpoint, a model, and
-the key environment variable, `GET /narrator` reports `configured: false` and nothing is
-sent anywhere.
+layer over recorded evidence; `GET /narrator/models`, `POST /narrator/test`,
+`POST /narrator/key`, and `DELETE /narrator/key` back the in-app setup. **It is inert by default**: without an endpoint and a model,
+`GET /narrator` reports `configured: false` and nothing is sent anywhere.
 
+- It is set up in **Settings → Narrator**: pick a provider preset (Ollama, LM Studio,
+  OpenAI, Anthropic, OpenRouter, or Custom), fetch the provider's model list, choose the key
+  source, toggle whether recorded source snippets are sent, set the request budget, and
+  **Test connection**. The one line *Narrator is off · Set up →* opens it.
 - The endpoint must be `https:` or a loopback `http:` address; a plaintext call off the
   machine is refused rather than attempted.
-- The key is read from the environment at call time and sent as an `Authorization: Bearer`
-  header. It is never part of the config, and never appears in a status reply, an audit
-  entry, or a log line.
+- The key comes from an environment variable named in the settings, or from a key stored on
+  this machine: write-only, bound to the endpoint host, kept in the state directory with
+  owner-only permissions, and never logged, cached, or audited. Changing the endpoint host
+  clears the stored key. It is sent as an `Authorization: Bearer` header and never appears
+  in a status reply, an audit entry, or a log line.
+- Environment variables still win: a field set by `STRABO_NARRATOR_*` is shown as locked and
+  a browser write to it is rejected, so a managed deployment cannot be overridden from the
+  UI. Settings writes are accepted only from the page's own origin.
+- Anthropic uses its OpenAI-compatible endpoint, so no provider-specific adapter is needed.
 - Only recorded evidence is sent by default. Source snippets are included only when
   `STRABO_NARRATOR_SEND_SOURCE` is set. Evidence and source are wrapped in delimited tags as
   untrusted data, and a literal closing tag inside them is neutralised so it cannot inject

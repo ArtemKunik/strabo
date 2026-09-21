@@ -562,9 +562,16 @@ function selectNode(id) {
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
     onOpenMemberMap: (target) => {
-      openMemberMap(target).catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
+      // The member map is a drill-down from the passport. Open it through its window
+      // controller (so it centres, raises above the passport, and takes focus), then
+      // retire the passport window instead of leaving the two stacked.
+      openMemberMap(target)
+        .then(() => {
+          floatingWindows.find((controller) => controller.key === 'inspector')?.close();
+        })
+        .catch((error) => {
+          elements.status.textContent = `Error: ${error.message}`;
+        });
     },
     // A System-view unit may ask the opt-in narrator to name its group.
     ...(current?.system && !current?.systemUnit
@@ -737,9 +744,12 @@ async function openMemberMap(id) {
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
   };
-  elements.memberView.hidden = false;
   store.set('ui', { memberOpen: true, node: id });
   store.set('member', { stepIndex: 0, find: '' });
+  // Open through the window controller, not `memberView.hidden = false` directly: the
+  // controller raises the window above the passport and lands focus in it. Setting the
+  // `hidden` attribute alone let the window appear behind the passport, silently.
+  floatingWindows.find((controller) => controller.key === 'member')?.open();
   refreshDock();
 }
 

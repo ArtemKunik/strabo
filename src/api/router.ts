@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { browseDirectories } from '../boundary/browse.ts';
 import { loadCatalogue } from '../integrations/catalogue.ts';
+import { createNarratorKeyStore, type NarratorKeyStore } from '../narrator/key-store.ts';
 import { createRepositoryStore, type RepositoryStore } from '../state/repository-store.ts';
 import { createSettingsStore, type SettingsStore } from '../state/settings-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
@@ -29,9 +30,13 @@ export function createStraboRouter(
   config: StraboConfig,
   store?: RepositoryStore,
   settingsStore?: SettingsStore,
+  narratorStores?: { keyStore?: NarratorKeyStore; env?: NodeJS.ProcessEnv },
 ): Router {
   const router = Router();
   const repositoryStore = store ?? createRepositoryStore();
+  const effectiveSettingsStore = settingsStore ?? createSettingsStore();
+  const narratorKeyStore = narratorStores?.keyStore ?? createNarratorKeyStore();
+  const narratorEnv = narratorStores?.env;
 
   router.get('/health', (_request, response) => {
     response.json({ ok: true });
@@ -59,14 +64,25 @@ export function createStraboRouter(
     }
   });
 
+  // Settings may change the narrator at runtime, so both read one store and one key store.
+  const settingsOptions = {
+    ...(narratorEnv ? { env: narratorEnv } : {}),
+    keyStore: narratorKeyStore,
+  };
   router.use(createGraphRouter(config));
   router.use(createAnalysisRouter(config));
   router.use(createRiskRouter(config));
   router.use(createDelegateRouter(config));
-  router.use(createNarratorRouter(config));
+  router.use(
+    createNarratorRouter(config, undefined, {
+      settingsStore: effectiveSettingsStore,
+      keyStore: narratorKeyStore,
+      ...(narratorEnv ? { env: narratorEnv } : {}),
+    }),
+  );
   router.use(createSymbolsRouter(config));
   router.use(createRepositoriesRouter(config, repositoryStore));
-  router.use(createSettingsRouter(config, settingsStore));
+  router.use(createSettingsRouter(config, effectiveSettingsStore, settingsOptions));
   router.use(createVulnerabilityRouter(config));
   router.use(createLineageRouter(config));
   router.use(createWorkspaceRouter(config));

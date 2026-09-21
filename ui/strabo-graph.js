@@ -58,12 +58,23 @@ export function passportFor(model, id) {
     .filter((edge) => edge.target === id)
     .map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
 
-  const metrics = [
-    { label: 'Direct importers', value: usedBy.length },
-    { label: 'Blast radius', value: node.transitiveDependents ?? 0 },
+  const metrics = [{ label: 'Direct importers', value: usedBy.length }];
+  if (typeof node.systemUnit === 'string' && !node.id.endsWith('#support')) {
+    // L17: at L1 the blast radius reports the in-unit count first, the outside count apart.
+    metrics.push(
+      { label: 'Blast radius in unit', value: node.inUnitDependents ?? 0 },
+      { label: 'Blast radius outside', value: node.outsideDependents ?? 0 },
+    );
+  } else {
+    metrics.push({ label: 'Blast radius', value: node.transitiveDependents ?? 0 });
+  }
+  metrics.push(
     { label: 'Direct imports', value: imports.length },
     { label: 'Depends on (all)', value: node.transitiveDependencies ?? 0 },
-  ];
+  );
+  if (typeof node.lines === 'number') {
+    metrics.push({ label: 'Lines', value: node.lines });
+  }
   // A System-view unit carries its component and shelf counts where a file carries none.
   if (typeof node.files === 'number') {
     metrics.push({ label: 'Files', value: node.files });
@@ -96,7 +107,14 @@ export function mapCounts(model) {
     } else {
       modules += 1;
     }
-    const key = isBlock ? String(node.id) : topLevelDirectory(node.id);
+    // A System drill-down lists the open unit's layers, not one chip per file.
+    const key = model.systemUnit
+      ? node.collapsed
+        ? 'outside units'
+        : node.systemLayer ?? 'unit'
+      : isBlock
+        ? String(node.id)
+        : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
 
@@ -106,7 +124,7 @@ export function mapCounts(model) {
       label: key,
       count,
       // Block ids are whole directories; file ids filter by their directory prefix.
-      filter: key === '.' ? '' : isBlock ? key : `${key}/`,
+      filter: key === '.' ? '' : isBlock && !model.systemUnit ? key : `${key}/`,
     }));
 
   return { tests, modules, entries };
@@ -119,6 +137,14 @@ export function mapCounts(model) {
  * drawing encodes and how to read it.
  */
 export function readingLegend(model) {
+  if (model?.systemUnit) {
+    return [
+      'box = unit frame',
+      'lane = layer',
+      'edge = selected file import',
+      'badge = files in another unit',
+    ];
+  }
   if (model?.system) {
     return ['box = build unit', 'size = files', 'edge = import between units', 'shelf = support files'];
   }
@@ -166,6 +192,18 @@ export function buildGraphQuery(state, options = {}) {
   }
   if (state.mode === 'system') {
     params.set('system', '1');
+    if (state.systemUnit) {
+      params.set('systemUnit', state.systemUnit);
+      if (state.showOutside) {
+        params.set('outside', '1');
+        if (state.unitFile) {
+          params.set('selected', state.unitFile);
+        }
+        if (state.expandedUnits?.length) {
+          params.set('expanded', state.expandedUnits.join(','));
+        }
+      }
+    }
   } else if (state.mode === 'block') {
     params.set('blockDepth', String(state.depth ?? 1));
     if (state.prefix) {
@@ -211,6 +249,9 @@ export function buildElements(model) {
       kind: edge.kind,
       evidenceLine: edge.evidence?.line,
       evidenceSpecifier: edge.evidence?.specifier,
+      // In a System drill-down, `unit` edges are hidden until their file is selected;
+      // `outside` edges are the L17 links and stay visible.
+      scope: edge.scope,
     },
   }));
 
@@ -327,8 +368,20 @@ export function findPath(model, from, to, maxHops = 12) {
   return null;
 }
 
-/** Breadcrumb segments for the current block prefix, root last. */
+/**
+ * Breadcrumb segments for the current drill-down, root last.
+ *
+ * Block mode walks the path prefix; System mode is `System › unit` when a unit is open,
+ * and a single `System` crumb at L0. File mode has no drill-down.
+ */
 export function breadcrumb(state) {
+  if (state.mode === 'system') {
+    const crumbs = [{ label: 'System', prefix: '' }];
+    if (state.systemUnit) {
+      crumbs.push({ label: state.systemUnitLabel ?? state.systemUnit, prefix: state.systemUnit });
+    }
+    return crumbs;
+  }
   if (state.mode !== 'block') {
     return [];
   }

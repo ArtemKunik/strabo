@@ -8,7 +8,7 @@ import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository
 import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
-import { buildSystemViewModel, buildViewModel } from '../../view/view-model.ts';
+import { buildSystemUnitViewModel, buildSystemViewModel, buildViewModel } from '../../view/view-model.ts';
 import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 
 /**
@@ -17,6 +17,8 @@ import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
  *
  * Optional `blockDepth`/`blockPrefix` request a rolled-up path-block graph and permit
  * drill-down by one path segment; a normal file graph must not pay for roll-up work.
+ * `system=1` rolls up to build units; `systemUnit=<id>` opens one unit's files, and
+ * `outside=1` with `selected=<file>` attaches that file's cross-unit links.
  */
 export function createGraphRouter(config: StraboConfig): Router {
   const router = Router();
@@ -44,8 +46,27 @@ export function createGraphRouter(config: StraboConfig): Router {
 
       // The System view rolls the file graph up into build units; it takes precedence over
       // any block-depth parameters a stale URL still carries.
-      if (parseBoolean(request.query.system)) {
+      const systemUnit = asString(request.query.systemUnit);
+      if (parseBoolean(request.query.system) || systemUnit) {
         const report = buildSystemReport(repository.root, repository.name, cached.report.graph);
+        if (systemUnit) {
+          const model = buildSystemUnitViewModel(
+            report,
+            cached.report.graph,
+            systemUnit,
+            descriptor,
+            cache,
+            {
+              showOutside: parseBoolean(request.query.outside),
+              selectedFile: asString(request.query.selected),
+              expandedUnits: asString(request.query.expanded)?.split(',').filter(Boolean),
+            },
+          );
+          if (model) {
+            response.json(model);
+            return;
+          }
+        }
         response.json(buildSystemViewModel(report, descriptor, cache));
         return;
       }
