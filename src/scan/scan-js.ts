@@ -1,6 +1,7 @@
 import type { Diagnostic, ExternalImport, GraphEdge } from '../types.ts';
 import { loadAliasTables, resolveAliased, type AliasTables } from '../resolve/aliases.ts';
-import { resolveRelative } from '../resolve/index.ts';
+import { resolveRelative, resolveTargetPath } from '../resolve/index.ts';
+import { isGeneratedPath } from './exclusions.ts';
 
 export interface JsTsScanResult {
   edges: GraphEdge[];
@@ -100,6 +101,12 @@ export function scanJsTsEdges(
         continue;
       }
       if (isAssetSpecifier(match.specifier)) {
+        continue;
+      }
+      // A dot-relative specifier that names build output (a package launcher importing
+      // `../dist/cli.js`) targets a directory the scan excludes by design, not a missing
+      // authored file; treat it as out of scope like an asset rather than report it.
+      if (isDotRelative(match.specifier) && isGeneratedPath(resolveTargetPath(file, match.specifier))) {
         continue;
       }
       diagnostics.push({

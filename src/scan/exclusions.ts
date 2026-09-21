@@ -16,6 +16,17 @@ const GENERATED_DIRS = new Set([
   'obj',
 ]);
 
+/**
+ * True when any path segment names a generated-output directory.
+ *
+ * References that point into build output (`../dist/cli.js`) name a directory the
+ * scan excludes by design, so callers can treat them as out of scope instead of
+ * reporting the target as a missing authored file.
+ */
+export function isGeneratedPath(relativePath: string): boolean {
+  return relativePath.split('/').some((segment) => GENERATED_DIRS.has(segment));
+}
+
 const FILENAME_MARKERS = [
   '.min.js',
   '.min.css',

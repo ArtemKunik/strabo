@@ -83,6 +83,14 @@ export function tryCandidates(
   return null;
 }
 
+/**
+ * The repository-relative path a relative specifier names, normalised against the
+ * importer but not checked against the file set (cf. `resolveRelative`).
+ */
+export function resolveTargetPath(from: string, specifier: string): string {
+  return normalize(fromDir(from), specifier);
+}
+
 function fromDir(file: string): string {
   const index = file.lastIndexOf('/');
   return index === -1 ? '' : file.slice(0, index);

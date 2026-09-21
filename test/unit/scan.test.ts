@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -63,6 +65,26 @@ test('bare package specifiers are external: no edge and no diagnostic', async ()
 
   assert.equal(hasEdge, false);
   assert.equal(hasDiagnostic, false);
+});
+
+test('references into generated output are out of scope, not unresolved', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-generated-'));
+  try {
+    fs.mkdirSync(path.join(root, 'bin'));
+    fs.mkdirSync(path.join(root, 'src'));
+    fs.writeFileSync(path.join(root, 'bin', 'strabo.js'), "import '../dist/cli.js';\n");
+    fs.writeFileSync(path.join(root, 'src', 'cli.ts'), 'export const cli = 1;\n');
+    fs.writeFileSync(path.join(root, 'src', 'dangling.ts'), "import './missing.ts';\n");
+
+    const report = await scanRepository(root);
+    const buildOutput = report.graph.diagnostics.find((item) => item.specifier === '../dist/cli.js');
+    const missing = report.graph.diagnostics.find((item) => item.specifier === './missing.ts');
+
+    assert.equal(buildOutput, undefined);
+    assert.ok(missing, 'a genuinely missing authored file still reports unresolved');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('asset imports are out of scope and are not reported as unresolved', async () => {
