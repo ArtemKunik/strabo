@@ -7,6 +7,7 @@ import { classifyExclusion, excludedDirectory, looksMinified } from './exclusion
 import { collectPolyglotExternalImports } from './external-polyglot.ts';
 import { detectEntryPoints } from './entry-points.ts';
 import { findGitIgnoredFiles } from './gitignore.ts';
+import { scanJsTsCalls } from './calls.ts';
 import { scanJsTsEdges } from './scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from './scan-polyglot.ts';
 
@@ -86,9 +87,10 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     lines: countLines(contentByFile.get(id) as string),
   }));
 
-  const [jsScan, polyglot] = await Promise.all([
+  const [jsScan, polyglot, calls] = await Promise.all([
     scanJsTsEdges(files, contentByFile, { root }),
     scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
+    scanJsTsCalls(files, contentByFile, { root }),
   ]);
 
   const externalImports: ExternalImport[] = [
@@ -98,9 +100,11 @@ export async function scanRepository(root: string): Promise<ScanReport> {
 
   const graphDiagnostics = [...diagnostics, ...jsScan.diagnostics, ...polyglot.diagnostics];
 
+  // Call edges are appended last: they always parallel an import edge, and a consumer that
+  // keeps the first edge per pair (block roll-up) must keep the import, not the call.
   const graph: Graph = {
     nodes,
-    edges: [...jsScan.edges, ...polyglot.edges],
+    edges: [...jsScan.edges, ...polyglot.edges, ...calls.edges],
     diagnostics: graphDiagnostics,
     excluded,
     externalImports,

@@ -56,3 +56,14 @@ Feature: Timeline and compare versions
     When I open the working-tree review
     And I right-click the review panel
     Then the delegate menu title is "pending working tree"
+
+  @branches
+  Scenario: Reviewing a branch against the base
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "timeline-repo" folder
+    And I use the selected folder
+    And I open the branches panel
+    Then the branches panel lists "feature/acceptance" with unmerged work
+    When I select the "feature/acceptance" branch
+    Then the review panel reports a branch review with a merge verdict

@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import express from 'express';
 
 import { createStraboRouter } from '../../src/index.ts';
 import type { StraboConfig } from '../../src/index.ts';
+import { createNarratorKeyStore } from '../../src/narrator/key-store.ts';
+import { createSettingsStore } from '../../src/state/settings-store.ts';
 import {
   NARRATOR_DEFAULT_BUDGET,
   NARRATOR_DEFAULT_KEY_ENV,
@@ -197,16 +202,33 @@ test('createNarratorClient turns a provider failure into an unavailable reply', 
 async function withHost(config: StraboConfig, run: (base: string) => Promise<void>): Promise<void> {
   const app = express();
   app.use(express.json());
-  // An isolated, empty environment so status locks and key source never depend on the
-  // machine the tests run on.
-  app.use('/api/strabo', createStraboRouter(config, undefined, undefined, { env: {} }));
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  const { port } = server.address() as AddressInfo;
+  // An isolated environment *and* isolated stores, so the status locks, any persisted
+  // narrator settings, and the on-machine key never depend on the machine the tests run on.
+  // Without a temp settings file `createSettingsStore()` reads the developer's real config.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-narrator-'));
   try {
-    await run(`http://127.0.0.1:${port}`);
+    app.use(
+      '/api/strabo',
+      createStraboRouter(
+        config,
+        undefined,
+        createSettingsStore({ file: path.join(dir, 'settings.json') }),
+        {
+          env: {},
+          keyStore: createNarratorKeyStore({ file: path.join(dir, 'narrator-key.json') }),
+        },
+      ),
+    );
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    const { port } = server.address() as AddressInfo;
+    try {
+      await run(`http://127.0.0.1:${port}`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   } finally {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

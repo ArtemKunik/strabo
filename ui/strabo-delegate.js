@@ -45,8 +45,8 @@ export function closeContextMenu() {
 
 /**
  * Show a custom context menu at viewport coordinates.
- * `items` are `{ label, hint?, action? }`; an item without an action renders
- * as a non-interactive header. The menu closes on any click, scroll, resize,
+ * `items` are `{ label, hint?, title?, action? }`; an item without an action renders
+ * as an inactive entry, with `title` as the tooltip saying why. The menu closes on any click, scroll, resize,
  * or Escape. Returns a cleanup function.
  */
 export function showContextMenu({ x, y, title, items }) {
@@ -72,6 +72,9 @@ export function showContextMenu({ x, y, title, items }) {
     button.type = 'button';
     button.className = 'agent-menu-item';
     button.setAttribute('role', 'menuitem');
+    if (item.title) {
+      button.title = item.title;
+    }
     const label = document.createElement('span');
     label.textContent = item.label;
     button.append(label);

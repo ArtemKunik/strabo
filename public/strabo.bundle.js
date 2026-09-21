@@ -235,6 +235,7 @@ function shortcutSheet() {
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
     { keys: "T", action: "Timeline" },
+    { keys: "N", action: "Branches" },
     { keys: "R", action: "Review working-tree changes" },
     { keys: "V", action: "Dependency risk" },
     { keys: "G", action: "Delegate the selected files" },
@@ -850,7 +851,7 @@ function reviewFileLabel(file) {
   return `${file.status} \xB7 ${rename} \xB7 ${counts}`;
 }
 function reviewGroups(files) {
-  const order = ["commit", "staged", "unstaged", "untracked"];
+  const order = ["commit", "branch", "staged", "unstaged", "untracked"];
   const groups = new Map(order.map((name) => [name, []]));
   for (const file of files ?? []) {
     const list = groups.get(file.group) ?? groups.get("unstaged");
@@ -2486,6 +2487,9 @@ function showContextMenu({ x, y, title, items }) {
     button2.type = "button";
     button2.className = "agent-menu-item";
     button2.setAttribute("role", "menuitem");
+    if (item.title) {
+      button2.title = item.title;
+    }
     const label = document.createElement("span");
     label.textContent = item.label;
     button2.append(label);
@@ -3174,19 +3178,40 @@ function buildGroupNamingEvidence(model, id) {
   ];
   return lines.join("\n");
 }
-var MEMBER_NARRATION_INSTRUCTION = "Explain this type's recorded members and data flow in plain language, using only the recorded evidence. Do not infer behaviour from names, and say when something is not recorded.";
+var MEMBER_NARRATION_INSTRUCTION = 'In three to five sentences of plain prose, say what this file appears to be for, what relies on it, and anything a reviewer should know. Do not use lists, headings, or markdown, and do not repeat counts the reader can already see. The path, member names, and import relationships are recorded and may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
+function fileStem(file) {
+  const base = String(file ?? "").split(/[\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  return dot > 0 ? base.slice(0, dot) : base;
+}
 function recordedList(items) {
   return Array.isArray(items) && items.length > 0 ? items.join(", ") : "none recorded";
 }
-function buildMemberNarratorEvidence(memberMap) {
+function buildMemberNarratorEvidence(memberMap, context = {}) {
   const types = memberMap?.types ?? [];
   if (types.length === 0) {
     return "No type is recorded for this file.";
   }
+  const file = context.file ?? memberMap?.file;
+  const moduleName = file ? fileStem(file) : null;
   const lines = [];
+  if (file) {
+    lines.push(`File: ${file}`);
+  }
+  if (Array.isArray(context.imports)) {
+    lines.push(`Recorded imports (${context.imports.length}): ${recordedList(context.imports.slice(0, 12))}`);
+  }
+  if (Array.isArray(context.usedBy)) {
+    lines.push(`Recorded used-by (${context.usedBy.length}): ${recordedList(context.usedBy.slice(0, 12))}`);
+  }
   for (const type of types) {
-    lines.push(`Type: ${type.name} (${type.visibility ?? "visibility not recorded"})`);
-    lines.push(`Fields: ${(type.fields ?? []).length}`);
+    const isModule = Boolean(moduleName) && type.name === moduleName;
+    lines.push(
+      isModule ? "Module-level members (declared directly in the file, not in a class):" : `Type: ${type.name} (${type.visibility ?? "visibility not recorded"})`
+    );
+    if (!isModule || (type.fields ?? []).length > 0) {
+      lines.push(`Fields: ${(type.fields ?? []).length}`);
+    }
     for (const field2 of type.fields ?? []) {
       const mutable = field2.mutable === false ? "readonly" : "mutable";
       const declared = field2.declaredIn ? ` \xB7 declared in ${field2.declaredIn}` : "";
@@ -3212,6 +3237,10 @@ function buildMemberNarratorEvidence(memberMap) {
     lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
     lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
   }
+  const inventory = context.functions ? buildNarratorEvidence({ functions: context.functions }) : "";
+  if (inventory && !inventory.startsWith("No function inventory")) {
+    lines.push("", "Function metrics, signals, and same-file calls:", inventory);
+  }
   return lines.join("\n");
 }
 function buildNarratorEvidence(result) {
@@ -3236,6 +3265,65 @@ function buildNarratorEvidence(result) {
     }
   }
   return lines.join("\n");
+}
+function narrativeBlocks(text) {
+  const inline = (value) => {
+    const runs = [];
+    const pattern = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+    let last = 0;
+    for (const match of value.matchAll(pattern)) {
+      if (match.index > last) {
+        runs.push({ text: value.slice(last, match.index) });
+      }
+      runs.push(match[1] !== void 0 ? { text: match[1], code: true } : { text: match[2], strong: true });
+      last = match.index + match[0].length;
+    }
+    if (last < value.length) {
+      runs.push({ text: value.slice(last) });
+    }
+    return runs;
+  };
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ type: "p", runs: inline(paragraph.join(" ")) });
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      blocks.push(list);
+      list = null;
+    }
+  };
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const item = /^(?:(\d+)[.)]|[-*•])\s+(.*)$/.exec(line);
+    if (line === "") {
+      flushParagraph();
+      flushList();
+    } else if (item) {
+      flushParagraph();
+      const type = item[1] !== void 0 ? "ol" : "ul";
+      if (list && list.type !== type) {
+        flushList();
+      }
+      list = list ?? { type, items: [] };
+      list.items.push(inline(item[2]));
+    } else {
+      flushList();
+      paragraph.push(line.replace(/^#{1,6}\s+/, ""));
+    }
+  }
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+function narratorMenuState(status) {
+  const reason = narratorDisabledReason(status);
+  return reason ? { enabled: false, hint: reason } : { enabled: true, hint: null };
 }
 
 // ui/strabo-workspace.js
@@ -4277,6 +4365,64 @@ function appendOutsideLinks(container, model, id, node, handlers) {
     container.append(block);
   }
 }
+function renderNarrativeReply(target, reply) {
+  if (reply?.available !== true) {
+    target.replaceChildren(narratorReplyLabel(reply));
+    return;
+  }
+  const nodes = [];
+  for (const block of narrativeBlocks(reply.text)) {
+    const inline = (runs) => runs.map((run) => {
+      if (!run.code && !run.strong) {
+        return document.createTextNode(run.text);
+      }
+      const element2 = document.createElement(run.code ? "code" : "strong");
+      element2.textContent = run.text;
+      return element2;
+    });
+    if (block.type === "p") {
+      const paragraph = document.createElement("p");
+      paragraph.append(...inline(block.runs));
+      nodes.push(paragraph);
+    } else {
+      const list = document.createElement(block.type);
+      for (const item of block.items) {
+        const entry = document.createElement("li");
+        entry.append(...inline(item));
+        list.append(entry);
+      }
+      nodes.push(list);
+    }
+  }
+  const attribution = document.createElement("p");
+  attribution.className = "narrator-attribution";
+  attribution.textContent = NARRATOR_ATTRIBUTION;
+  target.replaceChildren(...nodes, attribution);
+}
+function renderNarrationPanel(container, state2, handlers = {}) {
+  const heading = document.createElement("h3");
+  heading.textContent = `Narrator \xB7 ${state2.label}`;
+  const reply = document.createElement("div");
+  reply.className = "narrator-reply";
+  reply.dataset.role = "narrative";
+  if (state2.phase === "loading") {
+    reply.textContent = "Asking the narrator\u2026";
+  } else if (state2.phase === "error") {
+    reply.textContent = `Narrator unavailable: ${state2.message}`;
+  } else {
+    renderNarrativeReply(reply, state2.reply);
+  }
+  const nodes = [heading, reply];
+  if (state2.phase === "done" && state2.reply?.available !== true && handlers.onOpenNarratorSettings) {
+    const setup = document.createElement("button");
+    setup.type = "button";
+    setup.className = "narrator-setup";
+    setup.textContent = "Open narrator settings \u2192";
+    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
+    nodes.push(setup);
+  }
+  container.replaceChildren(...nodes);
+}
 function appendNarratorBlock(container, handlers, { id, label }) {
   if (!handlers.onNarrate) {
     return;
@@ -4316,14 +4462,7 @@ function appendNarratorBlock(container, handlers, { id, label }) {
     button2.disabled = true;
     reply.replaceChildren("Asking the narrator\u2026");
     try {
-      const narrated = await handlers.onNarrate();
-      reply.replaceChildren(narratorReplyLabel(narrated));
-      if (narrated?.available === true) {
-        const attribution = document.createElement("p");
-        attribution.className = "narrator-attribution";
-        attribution.textContent = NARRATOR_ATTRIBUTION;
-        reply.append(attribution);
-      }
+      renderNarrativeReply(reply, await handlers.onNarrate());
     } catch (error) {
       reply.replaceChildren(`Narrator unavailable: ${error.message}`);
     } finally {
@@ -5056,10 +5195,238 @@ function renderTimeline(container, result, onSelect2, options = {}) {
   }
   container.append(list);
 }
+function ageInDays(iso, now = Date.now()) {
+  const time = Date.parse(iso ?? "");
+  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 864e5)) : null;
+}
+function formatAge(days) {
+  if (days === null || days === void 0) return "";
+  if (days < 1) return "today";
+  if (days < 14) return `${days}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  if (days < 730) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+var STALE_BRANCH_DAYS = 90;
+function branchTags(branch, now = Date.now()) {
+  const tags = [];
+  if (branch.isBase) tags.push({ text: "base", tone: "none" });
+  if (branch.current) tags.push({ text: "checked out", tone: "none" });
+  if (branch.kind === "remote") tags.push({ text: "remote only", tone: "none" });
+  if (branch.againstBase?.merged) tags.push({ text: "merged", tone: "better" });
+  if (branch.upstream?.gone) {
+    tags.push({ text: "upstream gone", tone: "worse" });
+  } else if (branch.upstream && (branch.upstream.ahead > 0 || branch.upstream.behind > 0)) {
+    const parts = [];
+    if (branch.upstream.ahead > 0) parts.push(`${branch.upstream.ahead} to push`);
+    if (branch.upstream.behind > 0) parts.push(`${branch.upstream.behind} to pull`);
+    tags.push({ text: parts.join(", "), tone: "worse" });
+  } else if (!branch.upstream && branch.kind === "local" && !branch.isBase) {
+    tags.push({ text: "no upstream", tone: "none" });
+  }
+  const age = ageInDays(branch.tip?.date, now);
+  if (age !== null && age >= STALE_BRANCH_DAYS) tags.push({ text: "stale", tone: "worse" });
+  return tags;
+}
+function renderBranches(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Branches";
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close branches");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  if (!result || result.available === false) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "branches-unavailable";
+    note2.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
+    container.append(note2);
+    return;
+  }
+  const baseLine = document.createElement("p");
+  baseLine.className = "evidence branch-base";
+  baseLine.dataset.role = "branches-base";
+  if (result.base) {
+    const label = document.createElement("label");
+    label.textContent = "Compared with ";
+    const select = document.createElement("select");
+    select.dataset.role = "branches-base-select";
+    for (const name of /* @__PURE__ */ new Set([result.base.name, ...result.branches.map((branch) => branch.name)])) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      option.selected = name === result.base.name;
+      select.append(option);
+    }
+    select.addEventListener("change", () => handlers.onBase?.(select.value));
+    label.append(select);
+    baseLine.append(label);
+    const why = result.base.source === "remote-default" ? " \xB7 the remote\u2019s default branch" : result.base.source === "current" ? " \xB7 checked out, no trunk found" : "";
+    baseLine.append(document.createTextNode(`${why} \xB7 as of the last fetch`));
+  } else {
+    baseLine.textContent = "No base branch found; divergence is not measured.";
+  }
+  container.append(baseLine);
+  const others = result.branches.filter((branch) => !branch.isBase);
+  const unmerged = others.filter((branch) => branch.againstBase && !branch.againstBase.merged).length;
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "branches-summary";
+  summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
+  container.append(summary);
+  const maxCount = Math.max(
+    1,
+    ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
+  );
+  const list = document.createElement("ul");
+  list.className = "branch-list";
+  list.dataset.role = "branches-list";
+  for (const branch of result.branches) {
+    const item = document.createElement("li");
+    item.className = "branch-row";
+    if (branch.current) item.classList.add("current-branch");
+    if (handlers.selected && handlers.selected === branch.name) item.classList.add("selected-branch");
+    const button2 = document.createElement("button");
+    button2.type = "button";
+    button2.className = "branch";
+    button2.dataset.branch = branch.name;
+    button2.textContent = branch.name;
+    if (branch.isBase) {
+      button2.disabled = true;
+      button2.title = "The base every other branch is compared with";
+    } else if (handlers.onSelect) {
+      button2.title = `Review ${branch.name} against ${result.base?.name ?? "the base"}`;
+      button2.addEventListener("click", () => handlers.onSelect(branch));
+    }
+    item.append(button2);
+    if (branch.againstBase) {
+      item.append(divergenceBar(branch.againstBase, maxCount));
+    }
+    const meta = document.createElement("span");
+    meta.className = "evidence branch-meta";
+    const age = formatAge(ageInDays(branch.tip?.date));
+    meta.textContent = `${branch.tip.shortHash} \xB7 ${branch.tip.author}${age ? ` \xB7 ${age}` : ""} \xB7 ${branch.tip.subject}`;
+    item.append(meta);
+    const tags = branchTags(branch);
+    if (tags.length > 0) {
+      const tagLine = document.createElement("span");
+      tagLine.className = "branch-tags";
+      tagLine.dataset.role = "branch-tags";
+      for (const tag of tags) {
+        const chip = document.createElement("span");
+        chip.className = `metric-delta ${tag.tone}`;
+        chip.textContent = tag.text;
+        tagLine.append(chip);
+      }
+      item.append(tagLine);
+    }
+    list.append(item);
+  }
+  container.append(list);
+}
+function divergenceBar(counts, maxCount) {
+  const bar = document.createElement("span");
+  bar.className = "divergence";
+  bar.dataset.role = "branch-divergence";
+  bar.title = `${counts.behind} commit(s) behind the base \xB7 ${counts.ahead} ahead`;
+  const behind = document.createElement("span");
+  behind.className = "divergence-count";
+  behind.textContent = `\u2193${counts.behind}`;
+  const track = document.createElement("span");
+  track.className = "divergence-track";
+  const left = document.createElement("span");
+  left.className = "divergence-fill behind";
+  left.style.width = `${counts.behind / maxCount * 50}%`;
+  const right = document.createElement("span");
+  right.className = "divergence-fill ahead";
+  right.style.width = `${counts.ahead / maxCount * 50}%`;
+  track.append(left, right);
+  const ahead = document.createElement("span");
+  ahead.className = "divergence-count";
+  ahead.textContent = `\u2191${counts.ahead}`;
+  bar.append(behind, track, ahead);
+  return bar;
+}
+function renderBranchDivergence(container, branch, handlers = {}) {
+  const meta = document.createElement("p");
+  meta.className = "evidence";
+  meta.dataset.role = "review-branch";
+  meta.textContent = `${branch.ahead} commit(s) ahead of ${branch.base} \xB7 ${branch.behind} behind \xB7 merge base ${branch.mergeBase.slice(0, 7)}`;
+  container.append(meta);
+  const merge = document.createElement("p");
+  merge.dataset.role = "review-merge";
+  if (!branch.conflicts.available) {
+    merge.className = "unavailable";
+    merge.textContent = `Trial merge unavailable (needs Git 2.38+): ${branch.conflicts.detail}`;
+  } else if (branch.conflicts.clean) {
+    merge.className = "merge-verdict clean";
+    merge.textContent = branch.behind > 0 ? `Merges cleanly into ${branch.base}, which has moved ${branch.behind} commit(s) on.` : `Merges cleanly into ${branch.base}.`;
+  } else {
+    merge.className = "merge-verdict conflicted";
+    merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
+  }
+  container.append(merge);
+  const fileList = (role, heading, entries, describe) => {
+    if (entries.length === 0) return;
+    const title = document.createElement("h4");
+    title.textContent = `${heading} (${entries.length})`;
+    container.append(title);
+    const list = document.createElement("ul");
+    list.dataset.role = role;
+    for (const entry of entries.slice(0, 100)) {
+      const id = typeof entry === "string" ? entry : entry.id;
+      const item = document.createElement("li");
+      const button2 = document.createElement("button");
+      button2.type = "button";
+      button2.className = "link";
+      button2.dataset.path = id;
+      button2.textContent = id;
+      if (handlers.onSelect) button2.addEventListener("click", () => handlers.onSelect(id));
+      item.append(button2);
+      const detail = describe?.(entry);
+      if (detail) {
+        const span = document.createElement("span");
+        span.className = "evidence";
+        span.textContent = detail;
+        item.append(span);
+      }
+      list.append(item);
+    }
+    container.append(list);
+  };
+  const conflicted = new Set(branch.conflicts.available ? branch.conflicts.paths : []);
+  fileList("review-conflicts", "Conflicting files", [...conflicted]);
+  fileList(
+    "review-overlap",
+    "Also changed on the base",
+    branch.overlap.filter((file) => !conflicted.has(file)),
+    () => branch.conflicts.available ? "merges without conflict" : null
+  );
+  fileList(
+    "review-moved-underneath",
+    "Moved underneath the branch",
+    branch.movedUnderneath,
+    (entry) => `changed on the base \xB7 imported by ${entry.via}${entry.distance > 1 ? ` (distance ${entry.distance})` : ""}`
+  );
+  if (!branch.checkedOut) {
+    const note2 = document.createElement("p");
+    note2.className = "unavailable";
+    note2.dataset.role = "review-branch-graph";
+    note2.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
+    container.append(note2);
+  }
+}
 function renderReview(container, result, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
-  title.textContent = result?.kind === "commit" ? "Commit review" : "Working tree review";
+  title.textContent = result?.kind === "commit" ? "Commit review" : result?.kind === "branch" ? `Branch review \xB7 ${result.ref}` : "Working tree review";
   container.append(title);
   if (handlers.onClose) {
     const dismiss = document.createElement("button");
@@ -5091,10 +5458,13 @@ function renderReview(container, result, handlers = {}) {
   summary.dataset.role = "review-summary";
   summary.textContent = `${totals.files} file(s) \xB7 +${totals.insertions} \u2212${totals.deletions}${totals.uncounted > 0 ? ` \xB7 ${totals.uncounted} uncounted` : ""}`;
   container.append(summary);
+  if (result.branch) {
+    renderBranchDivergence(container, result.branch, handlers);
+  }
   if ((result.files ?? []).length === 0) {
     const note2 = document.createElement("p");
     note2.className = "unavailable";
-    note2.textContent = result.kind === "commit" ? "This commit recorded no file changes." : "No pending changes.";
+    note2.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
     container.append(note2);
   }
   for (const [group, files] of reviewGroups(result.files)) {
@@ -5263,6 +5633,7 @@ function metricCell(delta, title) {
 }
 var REVIEW_GROUP_LABELS = {
   commit: "Changed",
+  branch: "Changed on the branch",
   staged: "Staged",
   unstaged: "Unstaged",
   untracked: "Untracked"
@@ -7053,12 +7424,15 @@ var elements = {
   tbTimeline: document.getElementById("tb-timeline"),
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
+  tbBranches: document.getElementById("tb-branches"),
   tbClear: document.getElementById("tb-clear"),
   tbOverflow: document.getElementById("tb-overflow"),
   tbOverflowMenu: document.getElementById("tb-overflow-menu"),
   groupCount: document.getElementById("group-count"),
   tbDelegateGroup: document.getElementById("tb-delegate-group"),
   timelinePanel: document.getElementById("timeline-panel"),
+  branchesPanel: document.getElementById("branches-panel"),
+  narrationPanel: document.getElementById("narration-panel"),
   folderDialog: document.getElementById("folder-dialog"),
   folderPath: document.getElementById("folder-path"),
   folderNote: document.getElementById("folder-note"),
@@ -7078,6 +7452,8 @@ var elements = {
 var memberData = null;
 var memberTimer = null;
 var selectedCommitHash = null;
+var selectedBranchName = null;
+var branchBase = null;
 var browsedFolder = null;
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
@@ -7148,6 +7524,7 @@ async function scan({ refresh = false } = {}) {
     selected = null;
     selectedEdgeId = null;
     selectedCommitHash = null;
+    selectedBranchName = null;
     state.renderedGeneration = generation;
     if (model.systemUnit) {
       state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
@@ -7412,43 +7789,78 @@ async function narrateGroup(id) {
   if (narratorStatus === null) {
     narratorStatus = await fetchNarratorStatus();
   }
-  const response = await fetch(`${API_PATH}/narrator`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      instruction: GROUP_NAMING_INSTRUCTION,
-      evidence: buildGroupNamingEvidence(current, id)
-    })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return body;
+  return postNarration(
+    GROUP_NAMING_INSTRUCTION,
+    buildGroupNamingEvidence(current, id)
+  );
 }
 async function narrateFile(result) {
-  const response = await fetch(`${API_PATH}/narrator`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      instruction: "Summarise the recorded complexity, signals, and call wiring in this file.",
-      evidence: buildNarratorEvidence(result)
-    })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return body;
+  return postNarration(
+    "Summarise the recorded complexity, signals, and call wiring in this file.",
+    buildNarratorEvidence(result)
+  );
 }
 async function narrateMemberMap() {
+  return postNarration(
+    MEMBER_NARRATION_INSTRUCTION,
+    fileNarrationEvidence(memberData?.file, memberData, memberData?.importIds, memberData?.consumerIds)
+  );
+}
+function fileNarrationEvidence(file, source, imports, usedBy) {
+  if (source?.memberMap?.types?.length > 0) {
+    return buildMemberNarratorEvidence(source.memberMap, {
+      file,
+      imports: imports ?? void 0,
+      usedBy: usedBy ?? void 0,
+      functions: source.functions
+    });
+  }
+  return buildNarratorEvidence({ functions: source?.functions });
+}
+function isNarratable(id) {
+  if (!id || !current || state.mode === "block" || id.endsWith("#support")) {
+    return false;
+  }
+  return current.nodes.some((candidate) => candidate.id === id);
+}
+async function narrateNode(id) {
+  const label = current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
+  const showPanel = (panelState) => {
+    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
+  };
+  showPanel({ label, phase: "loading" });
+  floatingWindows.find((controller) => controller.key === "narration")?.open();
+  try {
+    let reply;
+    if (current?.system && !current?.systemUnit) {
+      reply = await narrateGroup(id);
+    } else {
+      const params = new URLSearchParams({ file: id });
+      if (state.repository) {
+        params.set("repository", state.repository);
+      }
+      const result = await request(`/symbols?${params.toString()}`);
+      const passport = passportFor(current, id);
+      reply = await postNarration(
+        MEMBER_NARRATION_INSTRUCTION,
+        fileNarrationEvidence(
+          id,
+          result,
+          passport?.imports.map((entry) => entry.id),
+          passport?.usedBy.map((entry) => entry.id)
+        )
+      );
+    }
+    showPanel({ label, phase: "done", reply });
+  } catch (error) {
+    showPanel({ label, phase: "error", message: error.message });
+  }
+}
+async function postNarration(instruction, evidence) {
   const response = await fetch(`${API_PATH}/narrator`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      instruction: MEMBER_NARRATION_INSTRUCTION,
-      evidence: buildMemberNarratorEvidence(memberData?.memberMap)
-    })
+    body: JSON.stringify({ instruction, evidence })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -7499,7 +7911,9 @@ async function openMemberMap(id) {
     symbols: result.symbols,
     health,
     metrics: health?.metrics ?? null,
-    consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null
+    consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
+    importIds: passport ? passport.imports.map((entry) => entry.id) : null,
+    functions: result.functions
   };
   if (narratorStatus === null) {
     narratorStatus = await fetchNarratorStatus();
@@ -7721,6 +8135,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
   else if (key === "v") elements.tbRisk.click();
+  else if (key === "n") elements.tbBranches.click();
   else if (key === "g" && groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 async function toggleTimeline() {
@@ -7751,11 +8166,52 @@ async function toggleTimeline() {
     draw(new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])));
   }
 }
+async function toggleBranches() {
+  if (!elements.branchesPanel.hidden) {
+    elements.branchesPanel.hidden = true;
+    return;
+  }
+  elements.branchesPanel.hidden = false;
+  await loadBranches();
+}
+async function loadBranches() {
+  const params = new URLSearchParams();
+  if (state.repository) params.set("repository", state.repository);
+  if (branchBase) params.set("base", branchBase);
+  const query = params.toString() ? `?${params}` : "";
+  const result = await request(`/analysis/branches${query}`);
+  if (result?.available && result.base) branchBase = result.base.name;
+  renderBranches(elements.branchesPanel, result, {
+    selected: selectedBranchName,
+    onSelect: (branch) => {
+      selectBranch(branch.name).catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
+    onBase: (name) => {
+      branchBase = name;
+      loadBranches().catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
+    onClose: () => {
+      elements.branchesPanel.hidden = true;
+    }
+  });
+}
+async function selectBranch(name) {
+  selectedBranchName = name;
+  const against = branchBase ? `&against=${encodeURIComponent(branchBase)}` : "";
+  await showReview(`?branch=${encodeURIComponent(name)}${against}`, null, name);
+  for (const row of elements.branchesPanel.querySelectorAll(".branch-row")) {
+    row.classList.toggle("selected-branch", row.querySelector(".branch")?.dataset.branch === name);
+  }
+}
 async function selectCommit(commit) {
   selectedCommitHash = commit.hash;
   await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
 }
-async function showReview(query, commit = null) {
+async function showReview(query, commit = null, branchName = null) {
   const separator = query ? "&" : "?";
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : "";
   const data = await request(`/analysis/review${query}${repository}`);
@@ -7772,7 +8228,7 @@ async function showReview(query, commit = null) {
     onClose: closeReview,
     onSelect: (id) => selectNode(id)
   });
-  const label = commit ? commit.shortHash : "working tree";
+  const label = branchName ?? (commit ? commit.shortHash : "working tree");
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
 }
 function closeReview() {
@@ -8482,6 +8938,11 @@ elements.tbBoundaries.addEventListener("click", () => {
   state.prefix = "";
   scan();
 });
+elements.tbBranches.addEventListener("click", () => {
+  toggleBranches().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
 elements.tbTimeline.addEventListener("click", () => {
   toggleTimeline().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
@@ -8547,7 +9008,7 @@ if (elements.tbOverflow) {
     });
     items[next].focus();
   });
-  for (const id of ["tb-timeline", "tb-review", "tb-risk"]) {
+  for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk"]) {
     document.getElementById(id)?.addEventListener("click", () => closeOverflowMenu({ restoreFocus: true }));
   }
   document.addEventListener("click", (event) => {
@@ -8635,9 +9096,22 @@ function diagnosticDelegateTarget(text) {
   };
 }
 function reviewDelegateTarget(result) {
-  const label = result.kind === "commit" && result.commit ? `commit ${result.commit.shortHash}` : "pending working tree";
+  const label = result.kind === "branch" && result.branch ? `branch ${result.branch.branch} against ${result.branch.base}` : result.kind === "commit" && result.commit ? `commit ${result.commit.shortHash}` : "pending working tree";
   const evidence = [];
-  if (result.commit) {
+  if (result.branch) {
+    const branch = result.branch;
+    evidence.push(
+      `branch: ${branch.branch} is ${branch.ahead} commit(s) ahead of ${branch.base} and ${branch.behind} behind; merge base ${branch.mergeBase}`
+    );
+    if (branch.conflicts.available) {
+      evidence.push(
+        branch.conflicts.clean ? `trial merge into ${branch.base}: clean` : `trial merge into ${branch.base}: conflicts in ${branch.conflicts.paths.join(", ")}`
+      );
+    }
+    for (const entry of branch.movedUnderneath.slice(0, 30)) {
+      evidence.push(`changed on ${branch.base} since the merge base, imported by ${entry.via}: ${entry.id}`);
+    }
+  } else if (result.commit) {
     evidence.push(`commit: ${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.subject}`);
   }
   for (const file of result.files ?? []) {
@@ -8766,6 +9240,20 @@ async function delegateToAgent(agent, target) {
     });
   }
 }
+function narrateMenuItems(target) {
+  if (target?.kind !== "node") {
+    return [];
+  }
+  const menuState = isNarratable(target.id) ? narratorMenuState(narratorStatus) : { enabled: false, hint: "Narrate works on a file or a System unit \u2014 open the folder to reach its files." };
+  return [
+    {
+      label: "\u2726 Narrate",
+      hint: menuState.enabled ? "model-generated" : "unavailable",
+      ...menuState.enabled ? { action: () => narrateNode(target.id) } : { title: menuState.hint }
+    },
+    { separator: true }
+  ];
+}
 function openDelegateMenu(target, x, y) {
   if (!target) {
     return;
@@ -8778,6 +9266,7 @@ function openDelegateMenu(target, x, y) {
     y,
     title: menuTitle,
     items: [
+      ...narrateMenuItems(target),
       { label: "\u25B6 Delegate to OpenCode", hint: "opens TUI", action: () => delegateToAgent("opencode", target) },
       { label: "\u25B6 Delegate to Claude", hint: "opens TUI", action: () => delegateToAgent("claude", target) },
       { separator: true },
@@ -8847,7 +9336,8 @@ var floatingWindows = initFloatingWindows({
       title: "Review",
       dockLabel: "Review",
       width: 400,
-      titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
+      // The heading's own text, without the dismiss button's `×`.
+      titleFrom: (panel) => panel.querySelector("h3")?.firstChild?.textContent?.trim() ?? "",
       onOpen: () => {
         if (elements.reviewPanel.hidden) toggleReview();
       },
@@ -8882,6 +9372,38 @@ var floatingWindows = initFloatingWindows({
       },
       onClose: () => {
         elements.timelinePanel.hidden = true;
+      }
+    },
+    {
+      key: "branches",
+      element: elements.branchesPanel,
+      title: "Branches",
+      dockLabel: "Branches",
+      width: 420,
+      onOpen: () => {
+        if (elements.branchesPanel.hidden) {
+          toggleBranches().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      },
+      onClose: () => {
+        elements.branchesPanel.hidden = true;
+      }
+    },
+    {
+      key: "narration",
+      element: elements.narrationPanel,
+      title: "Narrator",
+      dockLabel: "Narrator",
+      width: 420,
+      canOpen: () => elements.narrationPanel.childElementCount > 0,
+      blockedTitle: "Right-click a file or unit and choose Narrate first",
+      onBlocked: () => {
+        elements.status.textContent = "Right-click a file or unit and choose Narrate first.";
+      },
+      onClose: () => {
+        elements.narrationPanel.hidden = true;
       }
     },
     {
@@ -9057,6 +9579,9 @@ if (window.STRABO_TEST) {
     passport: () => showPassport()
   };
 }
+fetchNarratorStatus().then((status) => {
+  narratorStatus ?? (narratorStatus = status);
+});
 loadCatalogue().then(() => {
   state.mode = clientPrefs.defaultDetail;
   elements.detail.value = clientPrefs.defaultDetail;

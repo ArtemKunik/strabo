@@ -50,7 +50,7 @@ export function reviewFileLabel(file) {
 
 /** Count reviewed files by group so the panel can label staged vs unstaged vs untracked. */
 export function reviewGroups(files) {
-  const order = ['commit', 'staged', 'unstaged', 'untracked'];
+  const order = ['commit', 'branch', 'staged', 'unstaged', 'untracked'];
   const groups = new Map(order.map((name) => [name, []]));
   for (const file of files ?? []) {
     const list = groups.get(file.group) ?? groups.get('unstaged');

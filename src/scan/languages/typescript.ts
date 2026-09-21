@@ -518,7 +518,7 @@ const TYPESCRIPT_ACCESS: AccessRules = {
  */
 const TSX_EXTENSIONS = ['.tsx', '.jsx', '.js', '.mjs', '.cjs'];
 
-function grammarFor(file: string): GrammarLanguage {
+export function grammarFor(file: string): GrammarLanguage {
   const lower = file.toLowerCase();
   return TSX_EXTENSIONS.some((extension) => lower.endsWith(extension))
     ? TSX_LANGUAGE

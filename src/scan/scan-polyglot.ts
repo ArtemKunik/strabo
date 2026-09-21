@@ -13,26 +13,34 @@ export interface PolyglotResult {
   diagnostics: Diagnostic[];
 }
 
-const emptyResult: PolyglotResult = { edges: [], diagnostics: [] };
+let queue: Promise<unknown> = Promise.resolve();
 
-let queue: Promise<PolyglotResult> = Promise.resolve(emptyResult);
+/**
+ * Serialise tree-sitter work so the process-global parser state is never mutated concurrently.
+ *
+ * Every scan that parses (polyglot resolution, the JS/TS call graph) chains onto this one
+ * queue, so two scans of different repositories cannot interleave parser calls. A rejected
+ * task does not poison the queue: the next work item starts from a resolved promise.
+ */
+export function serializeParserWork<T>(work: () => Promise<T>): Promise<T> {
+  const task = queue.then(work);
+  queue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  return task;
+}
 
 /**
  * Serialise polyglot scans so shared parser state is never mutated concurrently.
  *
- * Parser runtime state is process-global, so scans run one at a time through this queue.
- * Errors are re-thrown after the queue resets so callers are not left with silently empty results.
+ * Errors are re-thrown to the caller while the shared queue stays usable for later work.
  */
 export function scanPolyglotEdges(
   files: readonly string[],
   contentByFile?: ReadonlyMap<string, string>,
 ): Promise<PolyglotResult> {
-  const task = queue.then(() => extractAndResolve(files, contentByFile));
-  queue = task.then(
-    (result) => result,
-    (error) => { queue = Promise.resolve(emptyResult); throw error; },
-  );
-  return task;
+  return serializeParserWork(() => extractAndResolve(files, contentByFile));
 }
 
 async function extractAndResolve(

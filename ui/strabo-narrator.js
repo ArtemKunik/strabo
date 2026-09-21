@@ -149,12 +149,27 @@ export function buildGroupNamingEvidence(model, id) {
 }
 
 /**
- * The instruction for explaining a file's member map. The narrator describes the recorded
- * members and data flow only; it never claims wiring the scan did not record.
+ * The instruction for narrating one file from its recorded members, wiring, and neighbours.
+ *
+ * The reply is short prose about what the file is for and what a reviewer should know, not a
+ * restatement of the counts already on screen. Paths, names, and import relationships are
+ * recorded, so the narrator may read meaning from them, but it must word that as a reading
+ * ("appears to") and never claim wiring or behaviour the recorded evidence does not show.
  */
 export const MEMBER_NARRATION_INSTRUCTION =
-  'Explain this type\'s recorded members and data flow in plain language, using only the ' +
-  'recorded evidence. Do not infer behaviour from names, and say when something is not recorded.';
+  'In three to five sentences of plain prose, say what this file appears to be for, what ' +
+  'relies on it, and anything a reviewer should know. Do not use lists, headings, or ' +
+  'markdown, and do not repeat counts the reader can already see. The path, member names, ' +
+  'and import relationships are recorded and may be read for meaning; word that as a reading ' +
+  '("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and ' +
+  'say so briefly when something is not recorded.';
+
+/** The file's base name without its extension, which the scan uses to name module-level members. */
+function fileStem(file) {
+  const base = String(file ?? '').split(/[\/]/).pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(0, dot) : base;
+}
 
 /** A recorded list as prose, or an explicit "none recorded" rather than an empty string. */
 function recordedList(items) {
@@ -164,19 +179,42 @@ function recordedList(items) {
 /**
  * Build the recorded evidence sent to the narrator from a file's member map.
  *
- * Only recorded facts are included: each type's fields and methods with their visibility and
- * recorded read/write wiring, and the data-flow panels. An unrecorded type, member, or flow
- * is named as such rather than guessed at.
+ * Only recorded facts are included: the file and its recorded neighbours, each type's fields
+ * and methods with their visibility and recorded read/write wiring, and the data-flow panels.
+ * An unrecorded type, member, or flow is named as such rather than guessed at.
+ *
+ * `context` carries what the member map alone cannot say: `file`, the recorded `imports` and
+ * `usedBy` ids, and the file's `functions` report. Members declared straight in the file, not
+ * in a class, are recorded under a name derived from the file; they are described as
+ * module-level so the narrator does not mistake that name for a declared type.
  */
-export function buildMemberNarratorEvidence(memberMap) {
+export function buildMemberNarratorEvidence(memberMap, context = {}) {
   const types = memberMap?.types ?? [];
   if (types.length === 0) {
     return 'No type is recorded for this file.';
   }
+  const file = context.file ?? memberMap?.file;
+  const moduleName = file ? fileStem(file) : null;
   const lines = [];
+  if (file) {
+    lines.push(`File: ${file}`);
+  }
+  if (Array.isArray(context.imports)) {
+    lines.push(`Recorded imports (${context.imports.length}): ${recordedList(context.imports.slice(0, 12))}`);
+  }
+  if (Array.isArray(context.usedBy)) {
+    lines.push(`Recorded used-by (${context.usedBy.length}): ${recordedList(context.usedBy.slice(0, 12))}`);
+  }
   for (const type of types) {
-    lines.push(`Type: ${type.name} (${type.visibility ?? 'visibility not recorded'})`);
-    lines.push(`Fields: ${(type.fields ?? []).length}`);
+    const isModule = Boolean(moduleName) && type.name === moduleName;
+    lines.push(
+      isModule
+        ? 'Module-level members (declared directly in the file, not in a class):'
+        : `Type: ${type.name} (${type.visibility ?? 'visibility not recorded'})`,
+    );
+    if (!isModule || (type.fields ?? []).length > 0) {
+      lines.push(`Fields: ${(type.fields ?? []).length}`);
+    }
     for (const field of type.fields ?? []) {
       const mutable = field.mutable === false ? 'readonly' : 'mutable';
       const declared = field.declaredIn ? ` · declared in ${field.declaredIn}` : '';
@@ -203,6 +241,10 @@ export function buildMemberNarratorEvidence(memberMap) {
     lines.push(`Data flow resources: ${recordedList(flow.resources)}`);
     lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
     lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
+  }
+  const inventory = context.functions ? buildNarratorEvidence({ functions: context.functions }) : '';
+  if (inventory && !inventory.startsWith('No function inventory')) {
+    lines.push('', 'Function metrics, signals, and same-file calls:', inventory);
   }
   return lines.join('\n');
 }
@@ -241,4 +283,80 @@ export function buildNarratorEvidence(result) {
     }
   }
   return lines.join('\n');
+}
+
+/**
+ * Split a model reply into displayable blocks: paragraphs, and ordered or bulleted lists.
+ *
+ * Small models return light markdown even when told not to. Each block is a list of inline
+ * runs, `{ text }` or `{ text, code: true }` (backticked) or `{ text, strong: true }`, so the
+ * renderer builds text nodes and elements only and never parses the reply as HTML.
+ */
+export function narrativeBlocks(text) {
+  const inline = (value) => {
+    const runs = [];
+    const pattern = /`([^`]+)`|\*\*([^*]+)\*\*/g;
+    let last = 0;
+    for (const match of value.matchAll(pattern)) {
+      if (match.index > last) {
+        runs.push({ text: value.slice(last, match.index) });
+      }
+      runs.push(match[1] !== undefined ? { text: match[1], code: true } : { text: match[2], strong: true });
+      last = match.index + match[0].length;
+    }
+    if (last < value.length) {
+      runs.push({ text: value.slice(last) });
+    }
+    return runs;
+  };
+
+  const blocks = [];
+  let paragraph = [];
+  let list = null;
+  const flushParagraph = () => {
+    if (paragraph.length > 0) {
+      blocks.push({ type: 'p', runs: inline(paragraph.join(' ')) });
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      blocks.push(list);
+      list = null;
+    }
+  };
+
+  for (const raw of String(text ?? '').split(/\r?\n/)) {
+    const line = raw.trim();
+    const item = /^(?:(\d+)[.)]|[-*•])\s+(.*)$/.exec(line);
+    if (line === '') {
+      flushParagraph();
+      flushList();
+    } else if (item) {
+      flushParagraph();
+      const type = item[1] !== undefined ? 'ol' : 'ul';
+      if (list && list.type !== type) {
+        flushList();
+      }
+      list = list ?? { type, items: [] };
+      list.items.push(inline(item[2]));
+    } else {
+      flushList();
+      paragraph.push(line.replace(/^#{1,6}\s+/, ''));
+    }
+  }
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
+/**
+ * Whether the right-click Narrate item is usable, and the tooltip explaining why not.
+ *
+ * It is offered on the same footing as the Narrate button: inactive, with the reason, while
+ * the narrator is off or failing, rather than clickable and failing.
+ */
+export function narratorMenuState(status) {
+  const reason = narratorDisabledReason(status);
+  return reason ? { enabled: false, hint: reason } : { enabled: true, hint: null };
 }

@@ -27,6 +27,21 @@ export function ensureTimelineRepo() {
     // Nothing to commit on a re-run; the history already exists.
   }
 
+  // A branch with its own work for the Branches panel. Created before the working tree is
+  // dirtied, and left unchecked-out so the scenario reviews a branch the map is not showing.
+  let hasFeature = true;
+  try {
+    git('rev-parse', '--verify', '-q', 'refs/heads/feature/acceptance');
+  } catch {
+    hasFeature = false;
+  }
+  if (!hasFeature) {
+    git('checkout', '-q', '-b', 'feature/acceptance');
+    fs.writeFileSync(path.join(root, 'src', 'a.ts'), "import { b } from './b.ts';\nexport const a = b + 1;\n");
+    git('commit', '-q', '-am', 'feature work');
+    git('checkout', '-q', '-');
+  }
+
   // Leave an uncommitted change so comparing a revision with the working tree has impact.
   const file = path.join(root, 'src', 'b.ts');
   const content = fs.readFileSync(file, 'utf8');

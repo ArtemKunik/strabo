@@ -22,8 +22,10 @@ import {
   renderFunctions,
   renderInspector,
   renderLegend,
+  renderBranches,
   renderMemberMap,
   renderMembers,
+  renderNarrationPanel,
   renderOverlayPanel,
   renderRepositoryPassport,
   renderReview,
@@ -42,6 +44,7 @@ import {
   buildGroupNamingEvidence,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
+  narratorMenuState,
 } from './strabo-narrator.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
 import { crossRepoNodeIds } from './strabo-workspace.js';
@@ -251,12 +254,15 @@ const elements = {
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
+  tbBranches: document.getElementById('tb-branches'),
   tbClear: document.getElementById('tb-clear'),
   tbOverflow: document.getElementById('tb-overflow'),
   tbOverflowMenu: document.getElementById('tb-overflow-menu'),
   groupCount: document.getElementById('group-count'),
   tbDelegateGroup: document.getElementById('tb-delegate-group'),
   timelinePanel: document.getElementById('timeline-panel'),
+  branchesPanel: document.getElementById('branches-panel'),
+  narrationPanel: document.getElementById('narration-panel'),
   folderDialog: document.getElementById('folder-dialog'),
   folderPath: document.getElementById('folder-path'),
   folderNote: document.getElementById('folder-note'),
@@ -278,6 +284,9 @@ const elements = {
 let memberData = null;
 let memberTimer = null;
 let selectedCommitHash = null;
+let selectedBranchName = null;
+/** The base the Branches panel compares with; null lets the server pick the trunk. */
+let branchBase = null;
 
 let browsedFolder = null;
 
@@ -369,6 +378,7 @@ async function scan({ refresh = false } = {}) {
     selected = null;
     selectedEdgeId = null;
     selectedCommitHash = null;
+    selectedBranchName = null;
     state.renderedGeneration = generation;
     if (model.systemUnit) {
       state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
@@ -690,19 +700,10 @@ async function narrateGroup(id) {
   if (narratorStatus === null) {
     narratorStatus = await fetchNarratorStatus();
   }
-  const response = await fetch(`${API_PATH}/narrator`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      instruction: GROUP_NAMING_INSTRUCTION,
-      evidence: buildGroupNamingEvidence(current, id),
-    }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return body;
+  return postNarration(
+    GROUP_NAMING_INSTRUCTION,
+    buildGroupNamingEvidence(current, id),
+  );
 }
 
 /**
@@ -712,19 +713,10 @@ async function narrateGroup(id) {
  * narrative text, rendered apart from the recorded facts and never applied to the source.
  */
 async function narrateFile(result) {
-  const response = await fetch(`${API_PATH}/narrator`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      instruction: 'Summarise the recorded complexity, signals, and call wiring in this file.',
-      evidence: buildNarratorEvidence(result),
-    }),
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return body;
+  return postNarration(
+    'Summarise the recorded complexity, signals, and call wiring in this file.',
+    buildNarratorEvidence(result),
+  );
 }
 
 /**
@@ -734,13 +726,83 @@ async function narrateFile(result) {
  * model-generated attribution, and never changes the recorded view.
  */
 async function narrateMemberMap() {
+  return postNarration(
+    MEMBER_NARRATION_INSTRUCTION,
+    fileNarrationEvidence(memberData?.file, memberData, memberData?.importIds, memberData?.consumerIds),
+  );
+}
+
+/**
+ * The recorded evidence for narrating one file: its members, wiring, functions, and import
+ * neighbours when it declares members, else its function inventory. `source` is anything with
+ * `memberMap` and `functions`, such as a `/symbols` result or the open member map's data.
+ */
+function fileNarrationEvidence(file, source, imports, usedBy) {
+  if (source?.memberMap?.types?.length > 0) {
+    return buildMemberNarratorEvidence(source.memberMap, {
+      file,
+      imports: imports ?? undefined,
+      usedBy: usedBy ?? undefined,
+      functions: source.functions,
+    });
+  }
+  return buildNarratorEvidence({ functions: source?.functions });
+}
+
+/** True when a graph node is something the narrator can describe: a file or a System unit. */
+function isNarratable(id) {
+  if (!id || !current || state.mode === 'block' || id.endsWith('#support')) {
+    return false;
+  }
+  return current.nodes.some((candidate) => candidate.id === id);
+}
+
+/**
+ * Narrate one graph node from its right-click menu and show the reply in the Narrator window.
+ *
+ * A System unit is named from its recorded facts; a file is narrated from its recorded members,
+ * functions, and import neighbours. The reply is model-generated and the window says so.
+ */
+async function narrateNode(id) {
+  const label = current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
+  const showPanel = (panelState) => {
+    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
+  };
+  showPanel({ label, phase: 'loading' });
+  floatingWindows.find((controller) => controller.key === 'narration')?.open();
+  try {
+    let reply;
+    if (current?.system && !current?.systemUnit) {
+      reply = await narrateGroup(id);
+    } else {
+      const params = new URLSearchParams({ file: id });
+      if (state.repository) {
+        params.set('repository', state.repository);
+      }
+      const result = await request(`/symbols?${params.toString()}`);
+      const passport = passportFor(current, id);
+      reply = await postNarration(
+        MEMBER_NARRATION_INSTRUCTION,
+        fileNarrationEvidence(
+          id,
+          result,
+          passport?.imports.map((entry) => entry.id),
+          passport?.usedBy.map((entry) => entry.id),
+        ),
+      );
+    }
+    showPanel({ label, phase: 'done', reply });
+  } catch (error) {
+    showPanel({ label, phase: 'error', message: error.message });
+  }
+}
+
+/** POST recorded evidence to the narrator and return its reply. */
+async function postNarration(instruction, evidence) {
   const response = await fetch(`${API_PATH}/narrator`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      instruction: MEMBER_NARRATION_INSTRUCTION,
-      evidence: buildMemberNarratorEvidence(memberData?.memberMap),
-    }),
+    body: JSON.stringify({ instruction, evidence }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -795,6 +857,8 @@ async function openMemberMap(id) {
     health,
     metrics: health?.metrics ?? null,
     consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
+    importIds: passport ? passport.imports.map((entry) => entry.id) : null,
+    functions: result.functions,
   };
   // The member map's narrator affordance needs the status before it renders.
   if (narratorStatus === null) {
@@ -1057,6 +1121,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
   else if (key === 'v') elements.tbRisk.click();
+  else if (key === 'n') elements.tbBranches.click();
   else if (key === 'g' && groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 
@@ -1093,6 +1158,56 @@ async function toggleTimeline() {
   }
 }
 
+/**
+ * Show branches against a base; selecting one reviews its work since it left the base.
+ * The base starts as the server's choice (the remote's default branch) and follows the
+ * panel's picker after that.
+ */
+async function toggleBranches() {
+  if (!elements.branchesPanel.hidden) {
+    elements.branchesPanel.hidden = true;
+    return;
+  }
+  elements.branchesPanel.hidden = false;
+  await loadBranches();
+}
+
+async function loadBranches() {
+  const params = new URLSearchParams();
+  if (state.repository) params.set('repository', state.repository);
+  if (branchBase) params.set('base', branchBase);
+  const query = params.toString() ? `?${params}` : '';
+  const result = await request(`/analysis/branches${query}`);
+  if (result?.available && result.base) branchBase = result.base.name;
+  renderBranches(elements.branchesPanel, result, {
+    selected: selectedBranchName,
+    onSelect: (branch) => {
+      selectBranch(branch.name).catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
+    onBase: (name) => {
+      branchBase = name;
+      loadBranches().catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    },
+    onClose: () => {
+      elements.branchesPanel.hidden = true;
+    },
+  });
+}
+
+/** Review a branch against the panel's base and annotate the map with its impact. */
+async function selectBranch(name) {
+  selectedBranchName = name;
+  const against = branchBase ? `&against=${encodeURIComponent(branchBase)}` : '';
+  await showReview(`?branch=${encodeURIComponent(name)}${against}`, null, name);
+  for (const row of elements.branchesPanel.querySelectorAll('.branch-row')) {
+    row.classList.toggle('selected-branch', row.querySelector('.branch')?.dataset.branch === name);
+  }
+}
+
 /** Compare a revision with the working tree and annotate the map with the impact. */
 async function selectCommit(commit) {
   selectedCommitHash = commit.hash;
@@ -1106,7 +1221,7 @@ async function selectCommit(commit) {
  * The review result is rendered verbatim; a file outside the graph is reported as such
  * instead of being drawn as if it had impact.
  */
-async function showReview(query, commit = null) {
+async function showReview(query, commit = null, branchName = null) {
   const separator = query ? '&' : '?';
   const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
   const data = await request(`/analysis/review${query}${repository}`);
@@ -1125,7 +1240,7 @@ async function showReview(query, commit = null) {
     onClose: closeReview,
     onSelect: (id) => selectNode(id),
   });
-  const label = commit ? commit.shortHash : 'working tree';
+  const label = branchName ?? (commit ? commit.shortHash : 'working tree');
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
 }
 
@@ -1984,6 +2099,12 @@ elements.tbBoundaries.addEventListener('click', () => {
   state.prefix = '';
   scan();
 });
+elements.tbBranches.addEventListener('click', () => {
+  toggleBranches().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+
 elements.tbTimeline.addEventListener('click', () => {
   toggleTimeline().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
@@ -2057,7 +2178,7 @@ if (elements.tbOverflow) {
     });
     items[next].focus();
   });
-  for (const id of ['tb-timeline', 'tb-review', 'tb-risk']) {
+  for (const id of ['tb-timeline', 'tb-branches', 'tb-review', 'tb-risk']) {
     document.getElementById(id)?.addEventListener('click', () => closeOverflowMenu({ restoreFocus: true }));
   }
   document.addEventListener('click', (event) => {
@@ -2178,9 +2299,29 @@ function diagnosticDelegateTarget(text) {
  * and what depends on them — the same evidence rendered in the panel, nothing more.
  */
 function reviewDelegateTarget(result) {
-  const label = result.kind === 'commit' && result.commit ? `commit ${result.commit.shortHash}` : 'pending working tree';
+  const label =
+    result.kind === 'branch' && result.branch
+      ? `branch ${result.branch.branch} against ${result.branch.base}`
+      : result.kind === 'commit' && result.commit
+        ? `commit ${result.commit.shortHash}`
+        : 'pending working tree';
   const evidence = [];
-  if (result.commit) {
+  if (result.branch) {
+    const branch = result.branch;
+    evidence.push(
+      `branch: ${branch.branch} is ${branch.ahead} commit(s) ahead of ${branch.base} and ${branch.behind} behind; merge base ${branch.mergeBase}`,
+    );
+    if (branch.conflicts.available) {
+      evidence.push(
+        branch.conflicts.clean
+          ? `trial merge into ${branch.base}: clean`
+          : `trial merge into ${branch.base}: conflicts in ${branch.conflicts.paths.join(', ')}`,
+      );
+    }
+    for (const entry of branch.movedUnderneath.slice(0, 30)) {
+      evidence.push(`changed on ${branch.base} since the merge base, imported by ${entry.via}: ${entry.id}`);
+    }
+  } else if (result.commit) {
     evidence.push(`commit: ${result.commit.shortHash} · ${result.commit.author} · ${result.commit.subject}`);
   }
   for (const file of result.files ?? []) {
@@ -2327,6 +2468,30 @@ async function delegateToAgent(agent, target) {
   }
 }
 
+/**
+ * The Narrate entry for a right-clicked node, listed first with a separator, or nothing for a
+ * target the narrator cannot describe. While the narrator is off or failing the entry stays in
+ * the menu but inactive, with the reason as its tooltip, like the Narrate buttons.
+ */
+function narrateMenuItems(target) {
+  if (target?.kind !== 'node') {
+    return [];
+  }
+  const menuState = isNarratable(target.id)
+    ? narratorMenuState(narratorStatus)
+    : { enabled: false, hint: 'Narrate works on a file or a System unit — open the folder to reach its files.' };
+  return [
+    {
+      label: '✦ Narrate',
+      hint: menuState.enabled ? 'model-generated' : 'unavailable',
+      ...(menuState.enabled
+        ? { action: () => narrateNode(target.id) }
+        : { title: menuState.hint }),
+    },
+    { separator: true },
+  ];
+}
+
 /** Right-click menu for one delegated item: launch, or copy the prompt. */
 function openDelegateMenu(target, x, y) {
   if (!target) {
@@ -2340,6 +2505,7 @@ function openDelegateMenu(target, x, y) {
     y,
     title: menuTitle,
     items: [
+      ...narrateMenuItems(target),
       { label: '▶ Delegate to OpenCode', hint: 'opens TUI', action: () => delegateToAgent('opencode', target) },
       { label: '▶ Delegate to Claude', hint: 'opens TUI', action: () => delegateToAgent('claude', target) },
       { separator: true },
@@ -2428,7 +2594,8 @@ const floatingWindows = initFloatingWindows({
       title: 'Review',
       dockLabel: 'Review',
       width: 400,
-      titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
+      // The heading's own text, without the dismiss button's `×`.
+      titleFrom: (panel) => panel.querySelector('h3')?.firstChild?.textContent?.trim() ?? '',
       onOpen: () => {
         if (elements.reviewPanel.hidden) toggleReview();
       },
@@ -2463,6 +2630,38 @@ const floatingWindows = initFloatingWindows({
       },
       onClose: () => {
         elements.timelinePanel.hidden = true;
+      },
+    },
+    {
+      key: 'branches',
+      element: elements.branchesPanel,
+      title: 'Branches',
+      dockLabel: 'Branches',
+      width: 420,
+      onOpen: () => {
+        if (elements.branchesPanel.hidden) {
+          toggleBranches().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      },
+      onClose: () => {
+        elements.branchesPanel.hidden = true;
+      },
+    },
+    {
+      key: 'narration',
+      element: elements.narrationPanel,
+      title: 'Narrator',
+      dockLabel: 'Narrator',
+      width: 420,
+      canOpen: () => elements.narrationPanel.childElementCount > 0,
+      blockedTitle: 'Right-click a file or unit and choose Narrate first',
+      onBlocked: () => {
+        elements.status.textContent = 'Right-click a file or unit and choose Narrate first.';
+      },
+      onClose: () => {
+        elements.narrationPanel.hidden = true;
       },
     },
     {
@@ -2644,6 +2843,11 @@ if (window.STRABO_TEST) {
     passport: () => showPassport(),
   };
 }
+
+// The right-click Narrate entry needs the narrator status before the first menu opens.
+fetchNarratorStatus().then((status) => {
+  narratorStatus ??= status;
+});
 
 loadCatalogue()
   .then(() => {

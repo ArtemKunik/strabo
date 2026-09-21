@@ -24,6 +24,8 @@ const {
   renderFolderList,
   renderFunctions,
   renderLegend,
+  renderNarrationPanel,
+  renderNarrativeReply,
   renderOverlayPanel,
   renderShortcuts,
   renderWorkspace,
@@ -317,4 +319,43 @@ test('renderFunctions virtualizes large files and keeps the summary', () => {
   const rows = [...target.querySelectorAll('.function-virtual-row')];
   assert.ok(rows.length > 0 && rows.length < 120, `expected a window of rows, got ${rows.length}`);
   assert.match(target.querySelector('.function-virtual-detail').textContent, /fn000/);
+});
+
+test('renderNarrativeReply builds prose, code, and lists as nodes and never parses HTML', () => {
+  const target = container();
+  renderNarrativeReply(target, {
+    available: true,
+    text: 'Calls `run()` twice <img src=x onerror=alert(1)>.\n\n1. one\n2. two',
+  });
+  assert.equal(target.querySelectorAll('img').length, 0, 'markup in a reply stays text');
+  assert.equal(target.querySelector('p code').textContent, 'run()');
+  assert.deepEqual([...target.querySelectorAll('ol li')].map((item) => item.textContent), ['one', 'two']);
+  assert.match(target.querySelector('.narrator-attribution').textContent, /not recorded evidence/);
+
+  renderNarrativeReply(target, { available: false, reason: 'not-configured' });
+  assert.match(target.textContent, /Narrator unavailable: not-configured/);
+  assert.equal(target.querySelector('.narrator-attribution'), null);
+});
+
+test('renderNarrationPanel shows loading, the reply, and a way to the settings when it is off', () => {
+  const target = container();
+  renderNarrationPanel(target, { label: 'ui/strabo-virtual.js', phase: 'loading' });
+  assert.match(target.querySelector('h3').textContent, /Narrator · ui\/strabo-virtual\.js/);
+  assert.match(target.textContent, /Asking the narrator/);
+
+  renderNarrationPanel(target, { label: 'a.js', phase: 'done', reply: { available: true, text: 'A helper.' } });
+  assert.match(target.querySelector('[data-role="narrative"]').textContent, /A helper\./);
+  assert.equal(target.querySelector('button'), null);
+
+  let opened = 0;
+  renderNarrationPanel(
+    target,
+    { label: 'a.js', phase: 'done', reply: { available: false, reason: 'not-configured' } },
+    { onOpenNarratorSettings: () => (opened += 1) },
+  );
+  target.querySelector('button.narrator-setup').click();
+  assert.equal(opened, 1);
+
+  renderNarrationPanel(target, { label: 'a.js', phase: 'error', message: 'boom' });
+  assert.match(target.textContent, /Narrator unavailable: boom/);
 });

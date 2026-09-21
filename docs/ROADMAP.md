@@ -29,6 +29,7 @@ record is reported as `unavailable`, never invented.
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q8 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run) |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
+| 19 | Branches | B1 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -1113,6 +1114,36 @@ monorepo (target 50k files). Only if parsing is still the largest share, spike t
 core for one language behind the same `Graph` output and compare. Acceptance: the P1
 benchmark shows each slice's gain, and the graph output is unchanged byte for byte (except
 timing metadata) before and after P2-P5.
+
+## Phase 19 - Branches
+
+Where every branch stands against the trunk, and what merging one would do.
+
+- **B1 (done).** `GET /analysis/branches[?base=]` lists local branches and remote-only
+  branches (a remote a local branch tracks is folded into that branch's upstream column),
+  newest first and capped at 100. Each carries its tip, its sync with the upstream
+  (`ahead`/`behind`/`gone`, from `%(upstream:track)`), and its divergence from the base
+  (`%(ahead-behind:)` on Git 2.41+, `rev-list --left-right --count` otherwise); `merged`
+  means ahead is zero. The base is the one asked for, else `origin/HEAD`, else
+  `main`/`master`/`trunk`/`develop`, else HEAD, and the result names which. Counts are as
+  fresh as the last fetch; Strabo never fetches.
+- `GET /analysis/review?branch=<name>[&against=<base>]` reviews `merge-base..tip`, the
+  pull-request comparison, so the base's newer commits never show as branch work. It adds
+  `branch`: ahead/behind, the merge base, `overlap` (paths both sides changed), `conflicts`
+  from a real trial merge (`git merge-tree --write-tree`, Git 2.38+, reported unavailable
+  on an older Git rather than as clean), and `movedUnderneath`: base-side changes the
+  branch's files import, with the nearest branch file that reaches each. Change metrics are
+  measured between the two recorded revisions (`computeRangeMetrics`). Impact runs on the
+  checked-out graph, and the Change passport is only computed when the branch is checked
+  out, since it reads the working tree; the panel says so otherwise.
+- UI: **Branches** (`N`, in the overflow menu) lists branches with a behind/ahead bar around
+  the base, age, and tags (`merged`, `to push`/`to pull`, `upstream gone`, `no upstream`,
+  `stale` after 90 days), with a base picker. Selecting a branch opens the review panel as
+  a Branch review with the merge verdict, conflicting files, and what moved underneath,
+  and annotates the map like any other review. Right-click delegation carries the verdict.
+
+Unit coverage is `test/unit/branches.test.ts` and `test/unit/branches-panel.test.ts`; the
+browser scenario is `timeline.feature` `@branches`.
 
 ## Phase 6 - Release readiness
 

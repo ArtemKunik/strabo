@@ -30,6 +30,7 @@ export type EdgeKind =
   | 'require'
   | 'dynamic-import'
   | 're-export'
+  | 'call'
   | 'package'
   | 'namespace'
   | 'table'

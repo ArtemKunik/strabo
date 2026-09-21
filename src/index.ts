@@ -13,7 +13,9 @@ export { scanRepository, collectSourceFiles, isTestLike, isSourceExtension } fro
 export { detectEntryPoints } from './scan/entry-points.ts';
 export type { EntryPoint } from './scan/entry-points.ts';
 export { scanJsTsEdges } from './scan/scan-js.ts';
-export { scanPolyglotEdges, languageOf, isPolyglotSource } from './scan/scan-polyglot.ts';
+export { scanJsTsCalls } from './scan/calls.ts';
+export type { CallGraphResult, CallGraphOptions } from './scan/calls.ts';
+export { scanPolyglotEdges, serializeParserWork, languageOf, isPolyglotSource } from './scan/scan-polyglot.ts';
 export {
   availableGrammarLanguages,
   grammarPath,

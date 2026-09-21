@@ -192,6 +192,7 @@ export function shortcutSheet() {
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
     { keys: 'T', action: 'Timeline' },
+    { keys: 'N', action: 'Branches' },
     { keys: 'R', action: 'Review working-tree changes' },
     { keys: 'V', action: 'Dependency risk' },
     { keys: 'G', action: 'Delegate the selected files' },

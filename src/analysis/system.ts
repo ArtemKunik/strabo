@@ -165,6 +165,11 @@ function aggregateEdges(
   }
   const byPair = new Map<string, SystemEdge>();
   for (const edge of graph.edges) {
+    // A call edge always parallels an import edge for the same pair, so counting both would
+    // double the unit weight. The unit view stays import coupling; calls are a file-level lens.
+    if (edge.kind === 'call') {
+      continue;
+    }
     if (!components.has(edge.source) || !components.has(edge.target)) {
       continue;
     }

@@ -295,6 +295,33 @@ Then('the overlay panel reports changed files', async function () {
   assert.ok(Number(match[1]) > 0, `expected at least one changed file, got ${match[1]}`);
 });
 
+When('I open the branches panel', async function () {
+  await clickToolbarAction(this.page, 'tb-branches');
+  await this.page.waitForSelector('#branches-panel [data-role="branches-list"]', { timeout: 15_000 });
+});
+
+Then('the branches panel lists {string} with unmerged work', async function (name) {
+  const row = this.page.locator('#branches-panel .branch-row', {
+    has: this.page.locator(`.branch[data-branch="${name}"]`),
+  });
+  const divergence = (await row.locator('[data-role="branch-divergence"]').textContent()) ?? '';
+  assert.match(divergence, /↑1/);
+  assert.doesNotMatch((await row.textContent()) ?? '', /merged/);
+});
+
+When('I select the {string} branch', async function (name) {
+  await this.page.click(`#branches-panel .branch[data-branch="${name}"]`);
+  await this.page.waitForSelector('#review-panel [data-role="review-merge"]', { timeout: 15_000 });
+});
+
+Then('the review panel reports a branch review with a merge verdict', async function () {
+  const panel = (await this.page.textContent('#review-panel')) ?? '';
+  assert.match(panel, /Branch review · feature\/acceptance/);
+  assert.match(panel, /1 commit\(s\) ahead of/);
+  assert.match((await this.page.textContent('#review-panel [data-role="review-merge"]')) ?? '', /Merges cleanly/);
+  assert.match(panel, /Changed on the branch \(1\)/);
+});
+
 When('I open the working-tree review', async function () {
   await clickToolbarAction(this.page, 'tb-review');
   await this.page.waitForFunction(

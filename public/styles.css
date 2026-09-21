@@ -483,6 +483,9 @@ button.primary {
   top: 10px;
   left: 12px;
   transform: none;
+  /* Above the floating windows (z-index 50): the canvas actions, including the System
+     back-to-units control, must stay clickable even when a panel is dragged over them. */
+  z-index: 60;
   display: flex;
   gap: 4px;
   align-items: center;
@@ -1147,8 +1150,40 @@ button.primary {
 
 .narrator-reply {
   margin-top: 6px;
-  white-space: pre-wrap;
+  max-width: 72ch;
   color: var(--ink-1);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.narrator-reply p {
+  margin: 0 0 8px;
+}
+
+.narrator-reply ol,
+.narrator-reply ul {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.narrator-reply code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-3, var(--line-soft));
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.narration-panel {
+  padding: 12px 14px;
+  font-size: 12px;
+  background: var(--bg-0);
+}
+
+.narration-panel h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  word-break: break-all;
 }
 
 .narrator-attribution {
@@ -1435,6 +1470,10 @@ button.primary {
   padding: 10px 14px;
 }
 
+.float-body .narration-panel {
+  padding: 10px 14px;
+}
+
 .float-body .legend {
   padding: 10px 14px;
 }
@@ -1587,6 +1626,147 @@ button.primary {
   font-size: 12px;
   text-align: left;
   word-break: break-word;
+}
+
+/* Branches: one row per branch, with divergence from the base drawn around a centre line. */
+.branches-panel li.branch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 6px 0 6px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.branches-panel li.branch-row::before {
+  display: none;
+}
+
+.branches-panel li.current-branch {
+  border-left-color: var(--accent);
+}
+
+.branches-panel li.selected-branch {
+  border-left-color: var(--status-warning);
+  background: var(--wash);
+}
+
+.branch-base select {
+  margin-left: 4px;
+  max-width: 60%;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--input-bg);
+  color: var(--ink-1);
+  font: inherit;
+  font-family: var(--font-mono);
+}
+
+.branch {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.branch:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.branch-meta,
+.branch-tags {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.branch-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.branch-tags .metric-delta {
+  border: 1px solid var(--line);
+}
+
+.divergence {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.divergence-track {
+  position: relative;
+  display: inline-block;
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--wash);
+}
+
+.divergence-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--ink-3);
+}
+
+.divergence-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.divergence-fill.behind {
+  right: 50%;
+  border-radius: 3px 0 0 3px;
+  background: var(--ink-3);
+}
+
+.divergence-fill.ahead {
+  left: 50%;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.merge-verdict {
+  margin: 6px 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--line);
+  background: var(--wash);
+}
+
+.merge-verdict.clean {
+  border-left-color: var(--status-good);
+}
+
+.merge-verdict.conflicted {
+  border-left-color: var(--status-critical);
 }
 
 .overlay-panel {
@@ -2379,6 +2559,20 @@ table.change-metrics td:first-child .link {
   margin-top: 0;
   border-top: none;
   padding-top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.member-narrator .narrator-note,
+.member-narrator .narrator-setup {
+  margin: 0;
+}
+
+.member-narrator .narrator-reply {
+  flex-basis: 100%;
+  margin-top: 4px;
 }
 
 .member-body {

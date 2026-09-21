@@ -68,8 +68,10 @@ import {
   buildGroupNamingEvidence,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
+  narrativeBlocks,
   narratorDisabledReason,
   narratorKeyLabel,
+  narratorMenuState,
   narratorNeedsSetup,
   narratorReplyLabel,
   narratorStatusLabel,
@@ -1214,6 +1216,76 @@ test('buildMemberNarratorEvidence lists recorded members and data flow only', ()
 test('the member narration instruction forbids inferring beyond recorded evidence', () => {
   assert.match(MEMBER_NARRATION_INSTRUCTION, /recorded evidence/);
   assert.match(MEMBER_NARRATION_INSTRUCTION, /not recorded/);
+});
+
+test('buildMemberNarratorEvidence frames module-level members and adds the file neighbours', () => {
+  const evidence = buildMemberNarratorEvidence(
+    {
+      file: 'ui/strabo-virtual.js',
+      types: [
+        {
+          name: 'strabo-virtual',
+          fields: [],
+          methods: [{ name: 'virtualRange', visibility: 'public', parameters: 5, reads: [], writes: [] }],
+        },
+      ],
+      dataFlow: { available: false, detail: 'No field references were recorded in this file.' },
+    },
+    {
+      imports: [],
+      usedBy: ['ui/strabo-panels.js', 'ui/strabo.js'],
+      functions: {
+        available: true,
+        file: 'ui/strabo-virtual.js',
+        functions: [{ name: 'virtualRange', line: 4, metrics: { decisionPoints: 3, maxNestingDepth: 1, lines: 20 } }],
+      },
+    },
+  );
+  assert.match(evidence, /^File: ui\/strabo-virtual\.js/);
+  assert.match(evidence, /Recorded imports \(0\): none recorded/);
+  assert.match(evidence, /Recorded used-by \(2\): ui\/strabo-panels\.js, ui\/strabo\.js/);
+  assert.match(evidence, /Module-level members \(declared directly in the file/);
+  assert.doesNotMatch(evidence, /Type: strabo-virtual/, 'the file-derived name must not read as a declared type');
+  assert.doesNotMatch(evidence, /Fields: 0/);
+  assert.match(evidence, /complexity 3, nesting 1, lines 20/);
+});
+
+test('the narration instruction asks for short prose, allows a hedged reading, and bars invention', () => {
+  assert.match(MEMBER_NARRATION_INSTRUCTION, /three to five sentences/);
+  assert.match(MEMBER_NARRATION_INSTRUCTION, /appears to/);
+  assert.match(MEMBER_NARRATION_INSTRUCTION, /never invent/);
+});
+
+test('narrativeBlocks turns light markdown into paragraphs, lists, and inline runs', () => {
+  const blocks = narrativeBlocks(
+    'It wraps `virtualRange` and is **hot**.\n\nNotes:\n1. first\n2) second\n- a\n\n## Heading\nDone',
+  );
+  assert.deepEqual(blocks[0], {
+    type: 'p',
+    runs: [
+      { text: 'It wraps ' },
+      { text: 'virtualRange', code: true },
+      { text: ' and is ' },
+      { text: 'hot', strong: true },
+      { text: '.' },
+    ],
+  });
+  assert.deepEqual(
+    blocks.map((block) => block.type),
+    ['p', 'p', 'ol', 'ul', 'p'],
+  );
+  assert.equal(blocks[2].items.length, 2);
+  assert.deepEqual(blocks[4].runs, [{ text: 'Heading Done' }]);
+  assert.deepEqual(narrativeBlocks(''), []);
+});
+
+test('narratorMenuState is inactive with the reason while the narrator is off or failing', () => {
+  assert.deepEqual(narratorMenuState({ configured: true, model: 'm' }), { enabled: true, hint: null });
+  assert.equal(narratorMenuState(null).enabled, false);
+  assert.match(narratorMenuState({ configured: false }).hint ?? '', /off/i);
+  const failing = narratorMenuState({ configured: true, model: 'm', reason: 'not-authenticated', detail: 'set X' });
+  assert.equal(failing.enabled, false);
+  assert.match(failing.hint ?? '', /set X/);
 });
 
 test('workspaceSummary reports the recorded counts or says it is unrecorded', () => {
