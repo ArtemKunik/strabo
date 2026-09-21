@@ -26,7 +26,7 @@ record is reported as `unavailable`, never invented.
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution); follow-ups N1-N5 planned (in-app narrator setup) |
-| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; system drill-down L14-L17 and the tier lens L9-L13 remain) |
+| 16 | Logical grouping (System view) and tier lens | In progress (L0-L8 done: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13 done: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17 and unit cards L18-L22 remain) |
 | 17 | Module quality and change impact | Q1-Q4 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact); Q5-Q8 planned |
 | 18 | Scan and analysis performance | Planned (P1-P7) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -790,7 +790,24 @@ unit's recorded facts (`buildGroupNamingEvidence`) with an instruction that the 
 only name and describe, never create, merge, or split a group; the reply renders under the
 Phase 15 model-generated attribution. The `@polyglot` scenario runs against
 `test/fixtures/system-repo` (a Gradle app, two Cargo crates, a scripts folder), so the unit
-detection is exercised in the browser as well as in unit tests. Still to do: the tier lens.
+detection is exercised in the browser as well as in unit tests.
+**L9-L13 (done)** the tier lens: `src/analysis/tiers.ts` classifies every file into a role
+tier (frontend, api, domain, data, integration, infra, build, tests, unclassified) from
+framework imports, annotations, file kinds, and path tokens, strongest evidence first, keeping
+a `mixed` file and an `unclassified` one rather than forcing a choice, and honouring declared
+overrides in `strabo.groups.yml`; it rolls the files up per unit with the unit’s role, builds
+the tier × unit matrix with per-cell and per-tier stats, checks each in-unit import for an
+upward or skip-layer direction, extracts table names from SQL, ORM annotations, and
+string-literal SQL, and records outbound calls and the endpoints declared in the repository’s
+OpenAPI documents, joining a call to the endpoint it reaches here by method and path.
+`GET /analysis/tiers` serves it. On the map, the tier lens colours nodes by tier and filters
+to one tier (choosing a tier switches to Files mode). The panel (`ui/strabo-tier-panel.js`)
+draws the matrix, the per-tier shares, the direction check, and the trace — calls and endpoints
+above the table index — and `applyTierDirections` paints the direction check on the map: both
+ends of a wrong-way edge take a status ring and the edge thickens, with upward and skip-layer
+reading apart by shape, not hue alone. The middle of the full chain (which handler serves an
+endpoint) still comes from the Phase 11 service flows, and the table side only reaches as far
+as the files that name the table.
 
 ### System drill-down
 
@@ -896,7 +913,7 @@ skip-layer edges) as an overlay and in the unit swim lanes. **L13** table extrac
 end-to-end trace (screen → endpoint → handler → repository → table). Acceptance:
 `test/acceptance/features/tier-lens.feature`, with a fixture of a React client, an Axum
 service with a handler that queries SQL directly (flagged `mixed` and skip-layer), a
-migration, and a CI workflow.
+migration, and a CI workflow. All four slices have landed (see the landed note above).
 
 ## Phase 17 - Module quality and change impact
 
