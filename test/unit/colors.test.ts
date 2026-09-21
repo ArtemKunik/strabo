@@ -169,6 +169,39 @@ test('the one neutral node fill is defined and equal to the reserved surface', (
   assert.ok(light.get('--node-fill'));
 });
 
+test('the tier hues clear 3:1 on both surfaces in both themes (L10)', () => {
+  const tiers = ['frontend', 'api', 'domain', 'data', 'integration', 'infra', 'build', 'tests'].map(
+    (tier) => `--tier-${tier}`,
+  );
+  for (const [name, tokens] of [
+    ['dark', dark],
+    ['light', light],
+  ]) {
+    for (const surface of ['--bg-1', '--bg-2']) {
+      const background = tokens.get(surface);
+      assert.ok(background, `${name} ${surface} should be defined`);
+      for (const token of tiers) {
+        const value = tokens.get(token);
+        assert.ok(value, `${name} ${token} should be defined`);
+        const ratio = contrast(value, background);
+        assert.ok(
+          ratio >= 3,
+          `${name} ${token} (${value}) on ${surface} is ${ratio.toFixed(2)}:1, below 3:1`,
+        );
+      }
+    }
+  }
+
+  const values = tiers.map((token) => dark.get(token));
+  assert.equal(new Set(values).size, 8, 'the eight tier hues should be distinct');
+  const reserved = ['--accent', '--status-good', '--status-warning', '--status-serious', '--status-critical'].map(
+    (token) => dark.get(token),
+  );
+  for (const value of values) {
+    assert.ok(!reserved.includes(value), `${value} reuses a reserved accent or status hue`);
+  }
+});
+
 test('the categorical set is three hues plus a neutral, assigned in fixed order', () => {
   assert.equal(clusterSeriesClass(1), 'series-1');
   assert.equal(clusterSeriesClass(2), 'series-2');

@@ -14,6 +14,7 @@ export * from './strabo-a11y.js';
 export * from './strabo-virtual.js';
 export * from './strabo-graph.js';
 export * from './strabo-islands.js';
+export * from './strabo-tiers.js';
 export * from './strabo-links.js';
 export * from './strabo-overlays.js';
 export * from './strabo-member-map.js';
