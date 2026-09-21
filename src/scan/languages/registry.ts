@@ -8,9 +8,31 @@ import { extractSqlSymbols } from './sql.ts';
 import { extractTypeScriptSymbols } from './typescript.ts';
 import type { SymbolExtraction } from './symbols.ts';
 
+/**
+ * Sources the file being extracted provably depends on, keyed by repository-relative path.
+ *
+ * Only a language that splits one type across files needs this: C++ declares a class's
+ * fields in a header and defines its methods in the implementation, so the implementation
+ * alone cannot say what its own methods touch. The caller supplies the sources — taken from
+ * the edges the scan already recorded — so the extractor never reads the filesystem, never
+ * guesses a path, and never reaches outside the scan ceiling.
+ */
+export interface SymbolContext {
+  related: ReadonlyMap<string, string>;
+}
+
 export interface SymbolExtractor {
   language: string;
-  extract: (file: string, content: string) => Promise<SymbolExtraction>;
+  extract: (
+    file: string,
+    content: string,
+    context?: SymbolContext,
+  ) => Promise<SymbolExtraction>;
+  /**
+   * True when the language splits a type across files, so gathering `context.related` is
+   * worth the reads. Languages that declare a type in one file leave it unset.
+   */
+  usesRelatedSources?: boolean;
   /**
    * `false` when the language has members but no methods that read or write them (SQL
    * columns), so there is no wiring to measure. Cohesion is then reported unavailable
@@ -45,13 +67,13 @@ export const SYMBOL_EXTRACTORS: Record<string, SymbolExtractor> = {
   '.cjs': { language: 'javascript', extract: extractTypeScriptSymbols },
   '.py': { language: 'python', extract: extractPythonSymbols },
   // A `.h` may hold C or C++; the C++ grammar reads both, so it is the safe reading.
-  '.cpp': { language: 'cpp', extract: extractCppSymbols },
-  '.cc': { language: 'cpp', extract: extractCppSymbols },
-  '.cxx': { language: 'cpp', extract: extractCppSymbols },
-  '.hpp': { language: 'cpp', extract: extractCppSymbols },
-  '.hh': { language: 'cpp', extract: extractCppSymbols },
-  '.hxx': { language: 'cpp', extract: extractCppSymbols },
-  '.h': { language: 'cpp', extract: extractCppSymbols },
+  '.cpp': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.cc': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.cxx': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.hpp': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.hh': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.hxx': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
+  '.h': { language: 'cpp', extract: extractCppSymbols, usesRelatedSources: true },
   '.sql': { language: 'sql', extract: extractSqlSymbols, tracksAccess: false },
 };
 

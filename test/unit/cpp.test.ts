@@ -252,13 +252,57 @@ test('scanning the C++ fixture resolves includes and reports only the real miss'
   );
 });
 
-test("a .cpp cannot attribute access to fields its header declares", async () => {
-  // Extraction is per file, so the implementation sees methods but not the class's fields.
-  // This is reported as no recorded access rather than as a fabricated zero-cohesion class.
+test('without its header, an implementation records no access rather than a false zero', async () => {
   const source = 'void Widget::render() { count_ = 0; }';
 
   const { symbols, accesses } = await extractCppSymbols('widget.cpp', source);
 
   assert.equal(symbols.find((symbol) => symbol.name === 'render')?.owner, 'Widget');
   assert.deepEqual(accesses, []);
+});
+
+test('an implementation borrows the fields its header declares, and says where from', async () => {
+  const header = [
+    'class Widget {',
+    'public:',
+    '  void render();',
+    '  void reset();',
+    'private:',
+    '  int count_ = 0;',
+    '};',
+  ].join('\n');
+  const source = ['void Widget::render() {', '  count_ += 1;', '  this->reset();', '}'].join('\n');
+
+  const { symbols, accesses, calls } = await extractCppSymbols('src/widget.cpp', source, {
+    related: new Map([['include/widget.h', header]]),
+  });
+
+  const field = symbols.find((symbol) => symbol.name === 'count_');
+  assert.equal(field?.owner, 'Widget');
+  assert.equal(field?.visibility, 'private');
+  assert.equal(field?.declaredIn, 'include/widget.h', 'the borrowed member names its source');
+  assert.ok(accesses?.some((entry) => entry.field === 'count_' && entry.method === 'render'));
+  // `reset` is declared only in the header, and is still a provable call target.
+  assert.ok(calls?.some((entry) => entry.method === 'render' && entry.callee === 'reset'));
+});
+
+test('a member declared in this file carries no declaredIn', async () => {
+  const source = ['class Widget {', '  int here_ = 0;', 'public:', '  int read() { return here_; }', '};'].join('\n');
+
+  const { symbols } = await extractCppSymbols('widget.h', source);
+
+  assert.equal(symbols.find((symbol) => symbol.name === 'here_')?.declaredIn, undefined);
+});
+
+test('an unrelated header contributes nothing to the file that includes it', async () => {
+  // Only a type this file actually implements can have its state explained here.
+  const unrelated = ['class Logger {', 'public:', '  int sink_ = 0;', '};'].join('\n');
+  const source = 'void Widget::render() { }';
+
+  const { symbols } = await extractCppSymbols('src/widget.cpp', source, {
+    related: new Map([['src/util/log.h', unrelated]]),
+  });
+
+  assert.equal(symbols.some((symbol) => symbol.name === 'sink_'), false);
+  assert.equal(symbols.some((symbol) => symbol.name === 'Logger'), false);
 });

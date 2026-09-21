@@ -10,6 +10,7 @@ import { buildFunctions, type FunctionsReport } from '../../analysis/functions.t
 import { rankHotspots } from '../../analysis/hotspots.ts';
 import { computeArchitectureHealth } from '../../analysis/health.ts';
 import { computeImpact } from '../../analysis/impact.ts';
+import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
@@ -115,7 +116,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       if (extractor) {
         try {
           const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
-          const result = await extractor.extract(file, content);
+          const related = extractor.usesRelatedSources
+            ? collectRelatedSources(repository.root, cached.report.graph, file)
+            : undefined;
+          const result = await extractor.extract(file, content, related ? { related } : undefined);
           symbols = result.symbols;
           accesses = result.accesses ?? [];
         } catch {

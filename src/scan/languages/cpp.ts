@@ -3,6 +3,7 @@ import type { Node } from 'web-tree-sitter';
 import type { Diagnostic, EdgeEvidence, GraphEdge } from '../../types.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
+import type { SymbolContext } from './registry.ts';
 import { withParser } from './parser-runtime.ts';
 import {
   type AccessRules,
@@ -245,7 +246,15 @@ function directoryOf(file: string): string {
  * member, with the body's measurements attached to the declaration, so a method does not
  * appear twice in the member map.
  */
-export async function extractCppSymbols(file: string, content: string): Promise<SymbolExtraction> {
+export async function extractCppSymbols(
+  file: string,
+  content: string,
+  context?: SymbolContext,
+): Promise<SymbolExtraction> {
+  // Resolved before the parser is taken: the shared parser is not reentrant, so the headers
+  // are parsed to completion first rather than from inside this file's own parse.
+  const inherited = await inheritedDeclarations(context?.related);
+
   return withParser(CPP_LANGUAGE, (parser) => {
     const diagnostics: Diagnostic[] = [];
     const symbols: CodeSymbol[] = [];
@@ -435,6 +444,22 @@ export async function extractCppSymbols(file: string, content: string): Promise<
       visitTop(child);
     }
 
+    // A class's fields live in its header, so an implementation file borrows them for the
+    // types it actually implements here. Other headers it includes contribute nothing: only
+    // an owner with a method body in this file can have its state explained by this file.
+    const implementedOwners = new Set(methodBodies.map((entry) => entry.owner));
+    for (const owner of implementedOwners) {
+      for (const field of inherited.fields.get(owner) ?? []) {
+        const owned = fieldsByOwner.get(owner) ?? new Set<string>();
+        fieldsByOwner.set(owner, owned);
+        if (owned.has(field.name)) {
+          continue;
+        }
+        owned.add(field.name);
+        symbols.push(field);
+      }
+    }
+
     const accesses: MemberAccess[] = [];
     for (const entry of methodBodies) {
       const fields = fieldsByOwner.get(entry.owner);
@@ -452,12 +477,15 @@ export async function extractCppSymbols(file: string, content: string): Promise<
       }
     }
 
-    const declared = new Set(
-      symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
-    );
-    const types = new Set(
-      symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
-    );
+    // A method declared only in the header is still a provable call target from here.
+    const declared = new Set([
+      ...symbols.filter((symbol) => symbol.kind === 'method').map((symbol) => symbol.name),
+      ...inherited.methods,
+    ]);
+    const types = new Set([
+      ...symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+      ...inherited.types,
+    ]);
     const calls = methodBodies.flatMap((entry) =>
       collectFunctionCalls(entry.body, declared, types, entry.owner, entry.method, CPP_CALLS),
     );
@@ -468,6 +496,57 @@ export async function extractCppSymbols(file: string, content: string): Promise<
 }
 
 const TYPE_SPECIFIERS = new Set(['class_specifier', 'struct_specifier', 'union_specifier']);
+
+interface InheritedDeclarations {
+  /** Fields per owning type, already carrying the header they were declared in. */
+  fields: Map<string, CodeSymbol[]>;
+  methods: Set<string>;
+  types: Set<string>;
+}
+
+const NO_INHERITANCE: InheritedDeclarations = {
+  fields: new Map(),
+  methods: new Set(),
+  types: new Set(),
+};
+
+/**
+ * Read the declarations a file's own headers provide.
+ *
+ * Each header is extracted the same way any C++ file is, without a context of its own, so
+ * the walk is one level deep: a header's headers are the caller's to supply if they matter.
+ */
+async function inheritedDeclarations(
+  related: ReadonlyMap<string, string> | undefined,
+): Promise<InheritedDeclarations> {
+  if (!related || related.size === 0) {
+    return NO_INHERITANCE;
+  }
+  const fields = new Map<string, CodeSymbol[]>();
+  const methods = new Set<string>();
+  const types = new Set<string>();
+
+  for (const [path, source] of related) {
+    const { symbols } = await extractCppSymbols(path, source);
+    for (const symbol of symbols) {
+      if (symbol.kind === 'method') {
+        methods.add(symbol.name);
+        continue;
+      }
+      if (symbol.kind === 'type') {
+        types.add(symbol.name);
+        continue;
+      }
+      if (symbol.kind !== 'field' || symbol.owner === '') {
+        continue;
+      }
+      const owned = fields.get(symbol.owner) ?? [];
+      fields.set(symbol.owner, owned);
+      owned.push({ ...symbol, declaredIn: symbol.declaredIn ?? path });
+    }
+  }
+  return { fields, methods, types };
+}
 
 function methodSymbol(
   node: Node,

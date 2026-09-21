@@ -20,6 +20,15 @@ export interface CodeSymbol {
   mutable?: boolean;
   parameters?: number;
   line: number;
+  /**
+   * The file that declares this member, when that is not the file being extracted.
+   *
+   * C++ splits a class between a header and its implementation, so an implementation file
+   * reports the fields its header declares in order to explain what its methods touch. The
+   * declaring file is named so the member map can say where it came from, and `line` refers
+   * to that file. Absent for a member declared in the file being extracted.
+   */
+  declaredIn?: string;
   /** Body measurements for a function or method; absent for data members and signatures. */
   metrics?: FunctionMetrics;
 }
