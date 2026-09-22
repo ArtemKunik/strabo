@@ -2028,8 +2028,13 @@ function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
 }
 var LABEL_DETAIL_ZOOM = 0.65;
 var labelsVisible = true;
+var labelsForceAll = false;
 function setLabelsVisible(cy, visible) {
   labelsVisible = Boolean(visible);
+  applyLabelBudget(cy, true);
+}
+function setLabelsForceAll(cy, visible) {
+  labelsForceAll = Boolean(visible);
   applyLabelBudget(cy, true);
 }
 function freezeLabels(cy) {
@@ -2070,7 +2075,7 @@ function applyLabelBudget(cy, force = false) {
   }
   cy.scratch("_straboLabelDetail", detailed);
   cy.scratch("_straboLabelBudgetZoom", zoom);
-  const wanted = cy.nodes().filter((node) => node.visible() && node.data("kind") !== "unit" && node.data("kind") !== "shelf").filter((node) => detailed || node.data("hub") || node.selected()).toArray();
+  const wanted = cy.nodes().filter((node) => node.visible() && node.data("kind") !== "unit" && node.data("kind") !== "shelf").filter((node) => labelsForceAll || detailed || node.data("hub") || node.selected()).toArray();
   const shown = chooseLabels(wanted, zoom);
   cy.batch(() => {
     cy.nodes().forEach((node) => {
@@ -3256,6 +3261,13 @@ function createView(container) {
       labelTimer = 0;
       labelsFrozen = false;
       setLabelsVisible(cy, visible);
+    },
+    /**
+     * Force a file name under every drawn node, not only hubs, selections, and the zoomed-in
+     * view. The collision budget still applies, so only the boxes that fit are drawn.
+     */
+    setLabelsForceAll(visible) {
+      setLabelsForceAll(cy, visible);
     },
     render(model) {
       baseModel = model;
@@ -9750,7 +9762,14 @@ var SETTINGS_KEY = "strabo.settings.v1";
 var THEMES = ["system", "dark", "light"];
 var DETAIL_MODES = ["block", "file"];
 function defaultSettings() {
-  return { theme: "system", defaultDetail: "block", labels: true, reduceMotion: false, commitEnabled: false };
+  return {
+    theme: "system",
+    defaultDetail: "block",
+    labels: true,
+    allLabels: false,
+    reduceMotion: false,
+    commitEnabled: false
+  };
 }
 function sanitize(parsed, defaults) {
   const settings = { ...defaults };
@@ -9760,6 +9779,7 @@ function sanitize(parsed, defaults) {
   if (THEMES.includes(parsed.theme)) settings.theme = parsed.theme;
   if (DETAIL_MODES.includes(parsed.defaultDetail)) settings.defaultDetail = parsed.defaultDetail;
   if (typeof parsed.labels === "boolean") settings.labels = parsed.labels;
+  if (typeof parsed.allLabels === "boolean") settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
   if (typeof parsed.commitEnabled === "boolean") settings.commitEnabled = parsed.commitEnabled;
   return settings;
@@ -10150,6 +10170,7 @@ function renderSettings(container, handlers = {}) {
       )
     ),
     field("Show node labels", checkboxInput(prefs.labels, (value) => handlers.onPref?.("labels", value))),
+    field("Show a file name under every file", checkboxInput(prefs.allLabels, (value) => handlers.onPref?.("allLabels", value))),
     note2("Preferences are stored in this browser.")
   );
   container.append(local);
@@ -10492,6 +10513,7 @@ function applyClientPrefs() {
   applyAppearance(clientPrefs);
   view.applyTheme();
   view.setLabelsVisible(clientPrefs.labels);
+  view.setLabelsForceAll(clientPrefs.allLabels);
 }
 applyClientPrefs();
 var elements = {
@@ -10534,6 +10556,7 @@ var elements = {
   tbBoundaries: document.getElementById("tb-boundaries"),
   tbCalls: document.getElementById("tb-calls"),
   tbCoChange: document.getElementById("tb-cochange"),
+  tbLabels: document.getElementById("tb-labels"),
   tbTimeline: document.getElementById("tb-timeline"),
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
@@ -10689,6 +10712,7 @@ async function scan({ refresh = false } = {}) {
     updateUnitsButton();
     updateEdgeKindButton();
     updateCoChangeButton();
+    updateLabelsButton();
     updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
@@ -11361,6 +11385,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "b") elements.tbBoundaries.click();
   else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
   else if (key === "h" && state.mode === "file") elements.tbCoChange?.click();
+  else if (key === "l" && state.mode === "file") elements.tbLabels?.click();
   else if (key === "s" && selected && isFileNode(selected)) viewSource(selected);
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
@@ -11598,6 +11623,16 @@ var settingsStatus = "";
 var settingsStatusError = false;
 var narratorPresets = [];
 var narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
+function setClientPref(key, value) {
+  clientPrefs = { ...clientPrefs, [key]: value };
+  writeSettings(clientPrefs);
+  applyClientPrefs();
+  updateLabelsButton();
+  renderSettingsView();
+  if (key === "commitEnabled" && state.overlay === "impact") {
+    applyOverlay();
+  }
+}
 function renderSettingsView() {
   if (!elements.settingsPanel) return;
   renderSettings(elements.settingsPanel, {
@@ -11611,15 +11646,7 @@ function renderSettingsView() {
     },
     status: settingsStatus || null,
     statusError: settingsStatusError,
-    onPref: (key, value) => {
-      clientPrefs = { ...clientPrefs, [key]: value };
-      writeSettings(clientPrefs);
-      applyClientPrefs();
-      renderSettingsView();
-      if (key === "commitEnabled" && state.overlay === "impact") {
-        applyOverlay();
-      }
-    },
+    onPref: (key, value) => setClientPref(key, value),
     onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
     onNarratorChange: async (patch2) => {
@@ -12212,6 +12239,16 @@ function updateCoChangeButton() {
   elements.tbCoChange.classList.toggle("active", shown && state.coChange);
   elements.tbCoChange.setAttribute("aria-pressed", String(shown && state.coChange));
 }
+function updateLabelsButton() {
+  if (!elements.tbLabels) {
+    return;
+  }
+  const shown = state.mode === "file";
+  const on = shown && Boolean(clientPrefs.allLabels);
+  elements.tbLabels.hidden = !shown;
+  elements.tbLabels.classList.toggle("active", on);
+  elements.tbLabels.setAttribute("aria-pressed", String(on));
+}
 function updateOutsideButton() {
   if (!elements.tbOutside) {
     return;
@@ -12572,6 +12609,9 @@ if (elements.tbCoChange) {
       elements.status.textContent = `Error: ${error.message}`;
     });
   });
+}
+if (elements.tbLabels) {
+  elements.tbLabels.addEventListener("click", () => setClientPref("allLabels", !clientPrefs.allLabels));
 }
 elements.tbBranches.addEventListener("click", () => {
   toggleBranches().catch((error) => {
