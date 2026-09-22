@@ -700,6 +700,84 @@ test('renderSource shows a file line by line, numbered and marked at the evidenc
   assert.equal(target.querySelectorAll('.source-mode').length, 0);
 });
 
+test('renderSource colours a supported file with .tok-* spans that read back as the line', () => {
+  const target = container();
+  const content = 'package com.acme\nfun main() {\n    return "hi"\n}\n';
+  renderSource(target, {
+    file: 'app/Main.kt',
+    ref: null,
+    mode: 'content',
+    loading: false,
+    error: null,
+    content,
+    line: null,
+    hasDiff: false,
+  });
+
+  const rows = [...target.querySelectorAll('.src-line')];
+  const first = rows[0].querySelector('.src-code');
+  assert.equal(first.querySelector('.tok-keyword').textContent, 'package');
+  assert.equal(rows[1].querySelector('.tok-keyword').textContent, 'fun');
+  assert.equal(rows[1].querySelector('.tok-function').textContent, 'main');
+  assert.equal(rows[2].querySelector('.tok-keyword').textContent, 'return');
+  assert.equal(rows[2].querySelector('.tok-string').textContent, '"hi"');
+
+  // The highlighter adds colour only: each line's rendered text is still the source line.
+  const lines = content.replace(/\n$/, '').split('\n');
+  assert.deepEqual(
+    rows.map((row) => row.querySelector('.src-code').textContent),
+    lines,
+  );
+});
+
+test('renderSource leaves an unsupported language plain and still colourless-safe', () => {
+  const target = container();
+  renderSource(target, {
+    file: 'notes.md',
+    ref: null,
+    mode: 'content',
+    loading: false,
+    error: null,
+    content: '# title\nplain text\n',
+    line: null,
+    hasDiff: false,
+  });
+
+  const rows = [...target.querySelectorAll('.src-line')];
+  assert.equal(rows[0].querySelector('.src-code').querySelectorAll('span').length, 0);
+  assert.equal(rows[0].querySelector('.src-code').textContent, '# title');
+});
+
+test('renderSource colours every language the scanner resolves', () => {
+  const cases = [
+    ['A.java', 'class A { int n = 1; }', 'class'],
+    ['a.rs', 'pub fn go() {}', 'pub'],
+    ['A.cs', 'public class A {}', 'public'],
+    ['a.kt', 'fun go() {}', 'fun'],
+    ['a.py', 'def go(): pass', 'def'],
+    ['a.cpp', '#include <vector>', '#include'],
+    ['a.sql', 'SELECT id FROM t', 'SELECT'],
+  ];
+  for (const [file, line, keyword] of cases) {
+    const target = container();
+    renderSource(target, {
+      file,
+      ref: null,
+      mode: 'content',
+      loading: false,
+      error: null,
+      content: `${line}\n`,
+      line: null,
+      hasDiff: false,
+    });
+    const code = target.querySelector('.src-code');
+    const first = code.querySelector('span');
+    assert.ok(first, `${file} should highlight`);
+    assert.equal(first.textContent, keyword, file);
+    assert.equal(code.textContent, line, file);
+  }
+});
+
 test('renderSource reports an empty file, a loading panel, and an unavailable one', () => {
   const empty = container();
   renderSource(empty, { file: 'a.ts', mode: 'content', loading: false, content: '' });

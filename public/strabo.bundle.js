@@ -9793,9 +9793,33 @@ function sourceLine(kind, gutters, text, mark, tokens) {
   }
   const code = document.createElement("span");
   code.className = "src-code";
-  code.textContent = text === "" ? "\xA0" : text;
+  appendTokens(code, text, tokens);
   row.append(code);
   return row;
+}
+function appendTokens(code, text, tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    code.textContent = text === "" ? "\xA0" : text;
+    return;
+  }
+  if (tokens.map((token) => token.text).join("") !== text) {
+    code.textContent = text === "" ? "\xA0" : text;
+    return;
+  }
+  if (text === "") {
+    code.textContent = "\xA0";
+    return;
+  }
+  for (const token of tokens) {
+    if (!token.type) {
+      code.append(document.createTextNode(token.text));
+      continue;
+    }
+    const span = document.createElement("span");
+    span.className = `tok-${token.type}`;
+    span.textContent = token.text;
+    code.append(span);
+  }
 }
 function renderContentBody(body, data) {
   const content = typeof data.content === "string" ? data.content : null;

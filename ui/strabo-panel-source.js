@@ -132,9 +132,43 @@ function sourceLine(kind, gutters, text, mark, tokens) {
   }
   const code = document.createElement('span');
   code.className = 'src-code';
-  code.textContent = text === '' ? '\u00a0' : text;
+  appendTokens(code, text, tokens);
   row.append(code);
   return row;
+}
+
+
+/**
+ * Render one line into `code`, wrapping each token that carries a type in its `.tok-*` span.
+ *
+ * The highlighter's contract is that tokens concatenate back to the line, so this only ever
+ * adds colour: a plain token (or an absent token list) is written as text, and the line's
+ * text is the fallback whenever the tokens do not cover it exactly. Typed tokens set their
+ * text via the span so the `.tok-*` colour applies without any HTML parsing.
+ */
+function appendTokens(code, text, tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    code.textContent = text === '' ? '\u00a0' : text;
+    return;
+  }
+  if (tokens.map((token) => token.text).join('') !== text) {
+    code.textContent = text === '' ? '\u00a0' : text;
+    return;
+  }
+  if (text === '') {
+    code.textContent = '\u00a0';
+    return;
+  }
+  for (const token of tokens) {
+    if (!token.type) {
+      code.append(document.createTextNode(token.text));
+      continue;
+    }
+    const span = document.createElement('span');
+    span.className = `tok-${token.type}`;
+    span.textContent = token.text;
+    code.append(span);
+  }
 }
 
 
