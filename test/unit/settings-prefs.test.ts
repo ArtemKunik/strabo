@@ -37,6 +37,7 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
       theme: 'neon',
       defaultDetail: 'file',
       labels: false,
+      allLabels: 'yes',
       reduceMotion: 'yes',
       extra: 1,
     }),
@@ -45,6 +46,7 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
     theme: 'system',
     defaultDetail: 'file',
     labels: false,
+    allLabels: false,
     reduceMotion: false,
     commitEnabled: false,
   });
@@ -53,13 +55,14 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
 test('writeSettings round-trips a sanitized preference set', () => {
   const storage = fakeStorage();
   writeSettings(
-    { theme: 'light', defaultDetail: 'file', labels: false, reduceMotion: true, commitEnabled: true },
+    { theme: 'light', defaultDetail: 'file', labels: false, allLabels: true, reduceMotion: true, commitEnabled: true },
     storage,
   );
   assert.deepEqual(readSettings(storage), {
     theme: 'light',
     defaultDetail: 'file',
     labels: false,
+    allLabels: true,
     reduceMotion: true,
     commitEnabled: true,
   });

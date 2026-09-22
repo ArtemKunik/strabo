@@ -28,9 +28,23 @@ const LABEL_DETAIL_ZOOM = 0.65;
 /** When false, the settings panel asked for a label-free map. */
 let labelsVisible = true;
 
+/** When true, every drawn node earns a label, not only hubs, selections, and the zoomed-in view. */
+let labelsForceAll = false;
+
 /** Show or hide every node label. Islands draw their own layer and are unaffected. */
 export function setLabelsVisible(cy, visible) {
   labelsVisible = Boolean(visible);
+  applyLabelBudget(cy, true);
+}
+
+/**
+ * Force a label onto every drawn node, rather than only hubs, selections, and nodes above the
+ * detail zoom. The collision budget still applies, so a dense map stays readable: `chooseLabels`
+ * drops the boxes that would overlap. A caller that turns every label off wins. Islands draw
+ * their own layer and are unaffected.
+ */
+export function setLabelsForceAll(cy, visible) {
+  labelsForceAll = Boolean(visible);
   applyLabelBudget(cy, true);
 }
 
@@ -109,7 +123,7 @@ export function applyLabelBudget(cy, force = false) {
     // A unit or shelf draws no canvas label and a filtered-out node is not drawn at all:
     // neither may take label room from a node that is.
     .filter((node) => node.visible() && node.data('kind') !== 'unit' && node.data('kind') !== 'shelf')
-    .filter((node) => detailed || node.data('hub') || node.selected())
+    .filter((node) => labelsForceAll || detailed || node.data('hub') || node.selected())
     .toArray();
   const shown = chooseLabels(wanted, zoom);
   cy.batch(() => {

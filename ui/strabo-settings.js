@@ -1,7 +1,7 @@
 /**
  * The Settings panel: client preferences and the runtime server settings.
  *
- * Client preferences (theme, default detail, labels, reduce motion) live in localStorage
+ * Client preferences (theme, default detail, labels, all labels, reduce motion) live in localStorage
  * and take effect immediately. Server settings (the scan ceiling and the online risk
  * switch) are read from `/settings` and written back with `PUT /settings`; the server
  * persists them, so they survive a restart. Whether the ceiling may be widened is a
@@ -23,7 +23,14 @@ export const DETAIL_MODES = ['block', 'file'];
 
 /** The client preference defaults, also the shape `readSettings` always returns. */
 export function defaultSettings() {
-  return { theme: 'system', defaultDetail: 'block', labels: true, reduceMotion: false, commitEnabled: false };
+  return {
+    theme: 'system',
+    defaultDetail: 'block',
+    labels: true,
+    allLabels: false,
+    reduceMotion: false,
+    commitEnabled: false,
+  };
 }
 
 function sanitize(parsed, defaults) {
@@ -34,6 +41,7 @@ function sanitize(parsed, defaults) {
   if (THEMES.includes(parsed.theme)) settings.theme = parsed.theme;
   if (DETAIL_MODES.includes(parsed.defaultDetail)) settings.defaultDetail = parsed.defaultDetail;
   if (typeof parsed.labels === 'boolean') settings.labels = parsed.labels;
+  if (typeof parsed.allLabels === 'boolean') settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === 'boolean') settings.reduceMotion = parsed.reduceMotion;
   if (typeof parsed.commitEnabled === 'boolean') settings.commitEnabled = parsed.commitEnabled;
   return settings;
@@ -524,6 +532,7 @@ export function renderSettings(container, handlers = {}) {
       ),
     ),
     field('Show node labels', checkboxInput(prefs.labels, (value) => handlers.onPref?.('labels', value))),
+    field('Show a file name under every file', checkboxInput(prefs.allLabels, (value) => handlers.onPref?.('allLabels', value))),
     note('Preferences are stored in this browser.'),
   );
   container.append(local);

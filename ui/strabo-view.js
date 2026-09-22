@@ -39,6 +39,7 @@ import {
   applyLabelBudget,
   freezeLabels,
   rescaleLabels,
+  setLabelsForceAll as setLabelsForceAllState,
   setLabelsVisible as setLabelsVisibleState,
 } from './strabo-labels.js';
 
@@ -410,6 +411,13 @@ export function createView(container) {
       labelTimer = 0;
       labelsFrozen = false;
       setLabelsVisibleState(cy, visible);
+    },
+    /**
+     * Force a file name under every drawn node, not only hubs, selections, and the zoomed-in
+     * view. The collision budget still applies, so only the boxes that fit are drawn.
+     */
+    setLabelsForceAll(visible) {
+      setLabelsForceAllState(cy, visible);
     },
     render(model) {
       baseModel = model;

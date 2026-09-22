@@ -309,6 +309,7 @@ function applyClientPrefs() {
   applyAppearance(clientPrefs);
   view.applyTheme();
   view.setLabelsVisible(clientPrefs.labels);
+  view.setLabelsForceAll(clientPrefs.allLabels);
 }
 
 applyClientPrefs();
@@ -353,6 +354,7 @@ const elements = {
   tbBoundaries: document.getElementById('tb-boundaries'),
   tbCalls: document.getElementById('tb-calls'),
   tbCoChange: document.getElementById('tb-cochange'),
+  tbLabels: document.getElementById('tb-labels'),
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
@@ -544,6 +546,7 @@ async function scan({ refresh = false } = {}) {
     updateUnitsButton();
     updateEdgeKindButton();
     updateCoChangeButton();
+    updateLabelsButton();
     updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
@@ -1379,6 +1382,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
   else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
+  else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();
   else if (key === 's' && selected && isFileNode(selected)) viewSource(selected);
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
@@ -1682,6 +1686,22 @@ let narratorPresets = [];
 /** Transient Narrator-section UI state (key mode, fetched models, last test result). */
 let narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
 
+/**
+ * Apply one client preference: persist it, restyle the map, and reflect it in the settings
+ * panel and the toolbar. Shared by the Settings checkboxes and the in-graph toolbar toggle.
+ */
+function setClientPref(key, value) {
+  clientPrefs = { ...clientPrefs, [key]: value };
+  writeSettings(clientPrefs);
+  applyClientPrefs();
+  updateLabelsButton();
+  renderSettingsView();
+  // The commit action is drawn by the impact overlay, so re-render it when it toggles.
+  if (key === 'commitEnabled' && state.overlay === 'impact') {
+    applyOverlay();
+  }
+}
+
 function renderSettingsView() {
   if (!elements.settingsPanel) return;
   renderSettings(elements.settingsPanel, {
@@ -1695,16 +1715,7 @@ function renderSettingsView() {
     },
     status: settingsStatus || null,
     statusError: settingsStatusError,
-    onPref: (key, value) => {
-      clientPrefs = { ...clientPrefs, [key]: value };
-      writeSettings(clientPrefs);
-      applyClientPrefs();
-      renderSettingsView();
-      // The commit action is drawn by the impact overlay, so re-render it when it toggles.
-      if (key === 'commitEnabled' && state.overlay === 'impact') {
-        applyOverlay();
-      }
-    },
+    onPref: (key, value) => setClientPref(key, value),
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
@@ -2449,6 +2460,18 @@ function updateCoChangeButton() {
   elements.tbCoChange.setAttribute('aria-pressed', String(shown && state.coChange));
 }
 
+/** The labels button appears in file mode; its pressed state follows the preference. */
+function updateLabelsButton() {
+  if (!elements.tbLabels) {
+    return;
+  }
+  const shown = state.mode === 'file';
+  const on = shown && Boolean(clientPrefs.allLabels);
+  elements.tbLabels.hidden = !shown;
+  elements.tbLabels.classList.toggle('active', on);
+  elements.tbLabels.setAttribute('aria-pressed', String(on));
+}
+
 /** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
 function updateOutsideButton() {
   if (!elements.tbOutside) {
@@ -2872,6 +2895,9 @@ if (elements.tbCoChange) {
       elements.status.textContent = `Error: ${error.message}`;
     });
   });
+}
+if (elements.tbLabels) {
+  elements.tbLabels.addEventListener('click', () => setClientPref('allLabels', !clientPrefs.allLabels));
 }
 elements.tbBranches.addEventListener('click', () => {
   toggleBranches().catch((error) => {
