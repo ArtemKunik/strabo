@@ -52,7 +52,7 @@ export { SYMBOL_EXTRACTORS, symbolExtractorFor } from './scan/languages/registry
 export type { SymbolExtractor, SymbolContext } from './scan/languages/registry.ts';
 export { collectRelatedSources } from './analysis/related-sources.ts';
 export { addNamespacePrefixes, namespaceDepth, looksInternal } from './scan/languages/namespace.ts';
-export { classifyExclusion, looksMinified } from './scan/exclusions.ts';
+export { classifyExclusion, classifyLockfile, classifyViewExclusion, looksMinified } from './scan/exclusions.ts';
 
 export { resolveRelative, normalize as normalizePath, tryCandidates } from './resolve/index.ts';
 export { loadAliasTables, resolveAliased } from './resolve/aliases.ts';
@@ -64,7 +64,9 @@ export {
   rankHubs,
   findDirectedPath,
   neighbourhood,
+  relationshipOf,
 } from './analysis/analysis.ts';
+export type { Adjacency, AdjacencyOptions } from './analysis/analysis.ts';
 export { buildPositions, buildSystemPositions } from './analysis/layout.ts';
 export {
   blockRegion,
@@ -130,8 +132,10 @@ export {
   parseNumstat,
 } from './analysis/review.ts';
 export type { BranchDivergence, ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
-export { computeChangePassport } from './analysis/change-passport.ts';
+export { CHANGE_RISK_WEIGHTS, computeChangePassport } from './analysis/change-passport.ts';
 export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
+export { IMPACT_TIER_LABELS } from './analysis/review-types.ts';
+export type { ChangeEdge, ChangeRisk, ChangeRiskSignal, GraphProvenance } from './analysis/review-types.ts';
 export {
   buildFileImpactPassport,
   computeFileImpactPassport,
@@ -220,7 +224,7 @@ export { buildMemberMap } from './analysis/member-map.ts';
 export type { MemberMap, MemberMapType, DataFlowPanels } from './analysis/member-map.ts';
 export { buildFunctions } from './analysis/functions.ts';
 export type { FunctionEntry, FunctionCallSite, FunctionsReport } from './analysis/functions.ts';
-export { computeSignals, SIGNAL_THRESHOLDS } from './analysis/signals.ts';
+export { computeSignals, SIGNAL_THRESHOLDS, CHANGE_RISK_THRESHOLDS, CHANGE_RISK_SIGNAL_LABELS } from './analysis/signals.ts';
 export type { FunctionSignal, FunctionSignalKind } from './analysis/signals.ts';
 export { rankHotspots } from './analysis/hotspots.ts';
 export type { Hotspot, HotspotReport } from './analysis/hotspots.ts';

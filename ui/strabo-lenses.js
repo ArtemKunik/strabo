@@ -96,6 +96,24 @@ export function applyCoChange(cy, on) {
 }
 
 /**
+ * Show or hide the hidden-coupling lens (K3). Off by default; `on` reveals the co-change
+ * edges whose files share commits with no import path in either direction, drawn distinctly
+ * from the general co-change lens. Their `hiddenCoupling` data flag is the source of truth,
+ * so this only toggles visibility and never invents an edge.
+ */
+export function applyHiddenCoupling(cy, on) {
+  const visible = on === true;
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      if (edge.data('hiddenCoupling') !== true) {
+        continue;
+      }
+      edge.toggleClass('edge-hidden-coupling-hidden', !visible);
+    }
+  });
+}
+
+/**
  * Thin the edges by level of detail at far zoom on a large graph.
  *
  * The rule is pure ({@link edgeLodHidden}); this walks the live edges and applies it. It

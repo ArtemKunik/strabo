@@ -10,6 +10,9 @@ function document(overrides: Partial<ReportDocument> = {}): ReportDocument {
     base: 'HEAD~1',
     baseRevision: 'abc',
     head: 'def',
+    fingerprint: 'abc:deadbeef',
+    scanTime: '2026-01-01T00:00:00.000Z',
+    stale: false,
     generatedAt: '2026-01-01T00:00:00.000Z',
     changedFiles: [],
     reach: { changed: [], affected: [], outsideGraph: [] },
@@ -92,4 +95,13 @@ test('renderMarkdown marks an unreadable base unavailable rather than empty', ()
 test('renderMarkdown says so when nothing structural changed', () => {
   const markdown = renderMarkdown(document());
   assert.match(markdown, /no structural change/);
+});
+
+test('renderMarkdown names the graph fingerprint, scan time, and staleness', () => {
+  const markdown = renderMarkdown(
+    document({ fingerprint: 'abc123:deadbeef', scanTime: '2026-02-02T00:00:00.000Z', stale: true }),
+  );
+  assert.match(markdown, /abc123:deadbeef/);
+  assert.match(markdown, /scanned 2026-02-02T00:00:00\.000Z/);
+  assert.match(markdown, /stale: older than the working tree/);
 });

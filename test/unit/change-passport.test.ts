@@ -5,9 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { computeChangePassport } from '../../src/index.ts';
-import { reviewWorkingTree } from '../../src/index.ts';
-import { scanRepository } from '../../src/index.ts';
+import {
+  CHANGE_RISK_THRESHOLDS,
+  CHANGE_RISK_WEIGHTS,
+  computeChangePassport,
+  computeStructuralDiff,
+  reviewCommit,
+  reviewWorkingTree,
+  scanRepository,
+} from '../../src/index.ts';
 
 const created: string[] = [];
 
@@ -250,3 +256,207 @@ test('computeChangePassport includes tiered impact for importers', async () => {
    assert.ok(change.impact!.definite.includes('src/app.py') || change.impact!.possible.includes('src/app.py'), 'app.py should be in impact');
    assert.ok(change.impact!.reachable.includes('src/app.py'), 'app.py should be reachable');
  });
+
+test('tiered impact labels a recorded reference and never says definite', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/lib.py'), 'def exported_func():\n    pass\n');
+  fs.writeFileSync(path.join(root, 'src/app.py'), 'from src.lib import exported_func\n\ndef run():\n    return exported_func()\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(path.join(root, 'src/lib.py'), 'def exported_func():\n    return 42\n');
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) return;
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const change = passport.files.find((entry) => entry.path === 'src/lib.py');
+  assert.ok(change?.impact, 'the changed file has tiered impact');
+  const labels = change!.impact!.labels;
+  assert.equal(labels.recordedReference, 'recorded reference to a changed symbol');
+  assert.equal(labels.otherDirectImporter, 'other direct importer');
+  assert.doesNotMatch(JSON.stringify(labels), /definite/i, 'no user-facing label says "definite"');
+});
+
+test('change risk sums contributing signals so a zero signal does not erase the score', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/solo.ts'), 'export function solo(x: number): number {\n  return x;\n}\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(
+    path.join(root, 'src/solo.ts'),
+    'export function solo(x: number): number {\n  if (x > 0) {\n    return x;\n  }\n  return 0;\n}\n',
+  );
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) return;
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const change = passport.files.find((entry) => entry.path === 'src/solo.ts');
+  assert.ok(change?.risk, 'a touched function carries a risk even with no recorded reference');
+  assert.equal(change!.risk!.inputs.recordedReferences, 0, 'no importer names the changed symbol');
+  assert.ok(change!.risk!.score > 0, 'the other signals still sum to a positive score');
+  assert.equal(change!.risk!.signals.length, 4);
+  const references = change!.risk!.signals.find((signal) => signal.kind === 'recorded-references');
+  assert.ok(references, 'the zero signal is still shown');
+  assert.equal(references!.value, 0);
+  assert.equal(references!.threshold, CHANGE_RISK_THRESHOLDS.recordedReferences);
+  assert.equal(references!.contribution, 0);
+  for (const signal of change!.risk!.signals) {
+    assert.ok(signal.label.length > 0, 'every signal names itself');
+    assert.ok(signal.threshold > 0, 'every signal names its threshold');
+  }
+  // The score is exactly the weighted sum of the components it is shown with.
+  const [lines, complexity, references2, untested] = change!.risk!.signals;
+  const expected = Math.round(
+    100 *
+      (CHANGE_RISK_WEIGHTS.linesTouched * lines!.contribution +
+        CHANGE_RISK_WEIGHTS.touchedComplexity * complexity!.contribution +
+        CHANGE_RISK_WEIGHTS.recordedReferences * references2!.contribution +
+        CHANGE_RISK_WEIGHTS.untestedShare * untested!.contribution),
+  );
+  assert.equal(change!.risk!.score, expected);
+});
+
+test('function changes carry added, removed, and changed with both sides metrics', async () => {
+  const root = tempDir();
+  const file = path.join(root, 'src/fns.ts');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    [
+      'export function keep(): number {',
+      '  return 1;',
+      '}',
+      '',
+      'export function grow(x: number): number {',
+      '  return x;',
+      '}',
+      '',
+      'export function gone(): number {',
+      '  return 3;',
+      '}',
+      '',
+    ].join('\n'),
+  );
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(
+    file,
+    [
+      'export function keep(): number {',
+      '  return 1;',
+      '}',
+      '',
+      'export function grow(x: number): number {',
+      '  if (x > 0) {',
+      '    return x;',
+      '  }',
+      '  return 0;',
+      '}',
+      '',
+      'export function fresh(): number {',
+      '  return 4;',
+      '}',
+      '',
+    ].join('\n'),
+  );
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) return;
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const change = passport.files.find((entry) => entry.path === 'src/fns.ts');
+  assert.ok(change);
+  const byName = new Map(change.functions.map((fn) => [fn.name, fn]));
+  assert.equal(byName.has('keep'), false, 'an untouched function is not reported');
+
+  const grow = byName.get('grow');
+  assert.ok(grow);
+  assert.equal(grow!.change, 'changed');
+  assert.equal(grow!.decisionPointsBefore, 1);
+  assert.equal(grow!.decisionPointsAfter, 2);
+  assert.ok((grow!.linesBefore ?? 0) > 0 && (grow!.linesAfter ?? 0) > 0);
+
+  const gone = byName.get('gone');
+  assert.ok(gone);
+  assert.equal(gone!.change, 'removed');
+  assert.equal(gone!.decisionPointsBefore, 1);
+  assert.equal(gone!.decisionPointsAfter, null, 'a removed function has no reviewed side');
+  assert.equal(gone!.linesAfter, null);
+
+  const fresh = byName.get('fresh');
+  assert.ok(fresh);
+  assert.equal(fresh!.change, 'added');
+  assert.equal(fresh!.decisionPointsBefore, null, 'an added function has no base side');
+  assert.equal(fresh!.decisionPointsAfter, 1);
+  assert.equal(fresh!.linesBefore, null);
+});
+
+test('a commit that removes an import shows the edge removed and drops the former importer', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, 'src/lib.ts'),
+    ['export function libFn(x: number): number {', '  return x;', '}'].join('\n'),
+  );
+  fs.writeFileSync(
+    path.join(root, 'src/app.ts'),
+    ["import { libFn } from './lib';", '', 'export function run(x: number): number {', '  return libFn(x);', '}'].join('\n'),
+  );
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+
+  fs.writeFileSync(
+    path.join(root, 'src/app.ts'),
+    ['export function run(x: number): number {', '  return x;', '}'].join('\n'),
+  );
+  fs.writeFileSync(
+    path.join(root, 'src/lib.ts'),
+    ['export function libFn(x: number): number {', '  if (x > 0) {', '    return x;', '  }', '  return 0;', '}'].join('\n'),
+  );
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'remove import');
+
+  const report = await scanRepository(root);
+  const review = await reviewCommit(root, report.graph, 'HEAD');
+  assert.equal(review.available, true);
+  if (!review.available) return;
+  assert.ok(review.files.some((file) => file.path === 'src/app.ts'), 'the former importer is a changed file');
+
+  const structural = await computeStructuralDiff(root, 'HEAD^', {
+    headGraph: report.graph,
+    repository: 'fixture',
+  });
+  assert.equal(structural.available, true);
+  if (!structural.available) return;
+  assert.ok(
+    structural.diff.edgesRemoved.some((edge) => edge.source === 'src/app.ts' && edge.target === 'src/lib.ts'),
+    'the removed import is a removed edge in the two-graph diff',
+  );
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD^', report.graph, structural.diff);
+  const lib = passport.files.find((entry) => entry.path === 'src/lib.ts');
+  assert.ok(lib, 'the imported file is in the passport');
+  assert.ok(
+    lib!.edgesRemoved.some((edge) => edge.source === 'src/app.ts' && edge.target === 'src/lib.ts'),
+    'the passport reports the edge removed from both graphs',
+  );
+  assert.deepEqual(lib!.edgesAdded, []);
+  const importers = [...(lib!.impact?.definite ?? []), ...(lib!.impact?.possible ?? [])];
+  assert.equal(importers.includes('src/app.ts'), false, 'the former importer is not listed as impacted');
+
+  const affected = review.impact.affected.filter((entry) => entry.distance > 0).map((entry) => entry.id);
+  assert.equal(affected.includes('src/app.ts'), false, 'the former importer is not listed as affected');
+});

@@ -17,13 +17,14 @@ import { createIslandLayer } from './strabo-island-layer.js';
 import { applyViewportPerf, createCytoscape } from './strabo-cytoscape.js';
 import { createUnitCardLayer } from './strabo-unit-card-layer.js';
 import { applyGraphDiff } from './strabo-graph-sync.js';
-import { buildCoChangeElements } from './strabo-core.js';
+import { buildCoChangeElements, buildHiddenCouplingElements } from './strabo-core.js';
 import { createEdgeFocus } from './strabo-edge-focus.js';
 import { createEdgeHighlight } from './strabo-edge-highlight.js';
 import {
   applyCoChange,
   applyEdgeKind,
   applyEdgeLod,
+  applyHiddenCoupling,
   applyTier,
   applyTierDirections,
   dimOutside,
@@ -87,6 +88,10 @@ export function createView(container) {
   // into the rendered model as extra dashed edges; the lens only shows or hides them.
   let coChangeReport = null;
   let coChangeOn = false;
+  // The K3 hidden-coupling lens: a separate report and flag so it and the general co-change
+  // lens never double-draw a pair. Off unless the hidden-coupling review overlay is active.
+  let hiddenCouplingReport = null;
+  let hiddenCouplingOn = false;
 
   /** Rebuild the rendered model, replaying the operator's island moves over `baseModel`. */
   function renderModel() {
@@ -101,6 +106,14 @@ export function createView(container) {
       islandModel = {
         ...islandModel,
         edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport)],
+      };
+    }
+    // The hidden-coupling lens draws only the no-import-path pairs, with a distinct kind, so
+    // it reads as its own overlay rather than a filtered copy of the general one.
+    if (hiddenCouplingOn && hiddenCouplingReport) {
+      islandModel = {
+        ...islandModel,
+        edges: [...islandModel.edges, ...buildHiddenCouplingElements(islandModel, hiddenCouplingReport)],
       };
     }
     lastModel = islandModel;
@@ -121,6 +134,7 @@ export function createView(container) {
     edgeHighlight.rebuild();
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
+    applyHiddenCoupling(cy, hiddenCouplingOn);
     // A render forces the label and edge-LOD pass; drop any pending settle and un-freeze.
     clearTimeout(labelTimer);
     labelTimer = 0;
@@ -455,6 +469,17 @@ export function createView(container) {
     setCoChange(report, on = true) {
       coChangeReport = report;
       coChangeOn = on === true && report !== null;
+      renderModel();
+    },
+    /**
+     * Draw the K3 hidden-coupling lens: the co-change edges with no import path either way.
+     *
+     * A separate report from `setCoChange` so the two lenses never double-draw a pair; pass
+     * `null` or `{ on: false }` to clear it. A re-render, not a rescan.
+     */
+    setHiddenCoupling(report, on = true) {
+      hiddenCouplingReport = report;
+      hiddenCouplingOn = on === true && report !== null;
       renderModel();
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */

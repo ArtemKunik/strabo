@@ -372,12 +372,14 @@ export function resolvePython(facts: readonly PythonFileFacts[]): PythonResoluti
     seen.add(key);
     // A package's `__init__.py` re-exports its submodules and members; the edge declares the
     // package layout rather than depending on the target's contents.
+    const packageLayout = isPackageInit(source);
     edges.push({
       source,
       target,
       kind: 'import',
       evidence: { line, specifier, resolution },
-      role: isPackageInit(source) ? 'declare' : 'use',
+      role: packageLayout ? 'declare' : 'use',
+      relationship: packageLayout ? 'executable-module' : 'import',
     });
   };
 

@@ -54,7 +54,24 @@ export function moveText(before, after, format = (value) => String(value)) {
   return { tone: 'shed', text: `shed −${format(-delta)}` };
 }
 
-function riskCell(risk) {
+/**
+ * How a current-graph figure is labelled: a cell read from a graph older than the working
+ * tree says so, and where a revision's own graph is unavailable the reading is named an
+ * approximation. `approximate` is the caller's knowledge that no per-revision graph was
+ * built; `provenance` carries the served graph's own freshness.
+ */
+function graphDetail(provenance, approximate = false) {
+  const stale = provenance?.stale === true;
+  if (approximate) {
+    return {
+      detail: stale ? 'approximation: current graph · stale' : 'approximation: current graph',
+      stale,
+    };
+  }
+  return { detail: stale ? 'current graph · stale' : 'current graph', stale };
+}
+
+function riskCell(risk, provenance) {
   if (!risk) {
     return { key: 'risk', label: 'Risk', value: '—', detail: 'not measurable', tone: 'none' };
   }
@@ -62,7 +79,7 @@ function riskCell(risk) {
     key: 'risk',
     label: 'Risk',
     value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
-    detail: 'current snapshot',
+    detail: graphDetail(provenance).detail,
     tone: riskTone(risk.band),
   };
 }
@@ -71,7 +88,8 @@ function riskCell(risk) {
 export function filePassportCells(card) {
   const complexity = card?.complexity ?? {};
   const snapshot = card?.snapshot ?? {};
-  const cells = [riskCell(card?.risk)];
+  const provenance = card?.provenance;
+  const cells = [riskCell(card?.risk, provenance)];
 
   const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
   cells.push({
@@ -91,21 +109,36 @@ export function filePassportCells(card) {
     tone: coherence ? (coherence.score >= 67 ? 'flat' : 'grown') : 'none',
   });
 
+  const blastGraph = graphDetail(provenance, card?.graphApproximation === true);
   cells.push({
     key: 'blast',
     label: 'Blast radius',
     value: String(snapshot.blastRadius ?? 0),
-    detail: 'current graph',
+    detail: blastGraph.detail,
     tone: 'none',
   });
 
+  // "Direct importers" and "Direct imports" are two directions of one relationship, so they
+  // stay separate rows: one count can never stand in for the other.
   cells.push({
-    key: 'imports',
-    label: 'Importers / imports',
-    value: `${snapshot.directImporters ?? 0} / ${snapshot.directImports ?? 0}`,
-    detail: 'current graph',
+    key: 'importers',
+    label: 'Direct importers',
+    value: String(snapshot.directImporters ?? 0),
+    detail: 'files',
     tone: 'none',
   });
+  cells.push({
+    key: 'imports',
+    label: 'Direct imports',
+    value: String(snapshot.directImports ?? 0),
+    detail: 'files',
+    tone: 'none',
+  });
+
+  const symbolReferences = symbolReferenceCell(card?.symbolReferences);
+  if (symbolReferences) {
+    cells.push(symbolReferences);
+  }
 
   const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
   cells.push({
@@ -121,7 +154,9 @@ export function filePassportCells(card) {
 
 /** The grid cells for the change-set or revision roll-up. */
 export function totalsPassportCells(totals) {
-  const cells = [riskCell(totals?.risk)];
+  const provenance = totals?.provenance;
+  const approximate = totals?.graphApproximation === true;
+  const cells = [riskCell(totals?.risk, provenance)];
   cells.push({
     key: 'max-complexity',
     label: 'Max complexity',
@@ -140,16 +175,27 @@ export function totalsPassportCells(totals) {
     key: 'blast',
     label: 'Blast radius',
     value: String(totals?.blastRadius ?? 0),
-    detail: 'current graph',
+    detail: graphDetail(provenance, approximate).detail,
+    tone: 'none',
+  });
+  cells.push({
+    key: 'importers',
+    label: 'Direct importers',
+    value: String(totals?.directImporters ?? 0),
+    detail: 'files',
     tone: 'none',
   });
   cells.push({
     key: 'imports',
-    label: 'Importers / imports',
-    value: `${totals?.directImporters ?? 0} / ${totals?.directImports ?? 0}`,
-    detail: 'current graph',
+    label: 'Direct imports',
+    value: String(totals?.directImports ?? 0),
+    detail: 'files',
     tone: 'none',
   });
+  const symbolReferences = symbolReferenceCell(totals?.symbolReferences);
+  if (symbolReferences) {
+    cells.push(symbolReferences);
+  }
   cells.push({
     key: 'average-complexity',
     label: 'Average complexity',
@@ -158,6 +204,55 @@ export function totalsPassportCells(totals) {
     tone: 'none',
   });
   return cells;
+}
+
+/**
+ * The symbol-references row: "N references to M files", or null when the passport recorded
+ * no per-symbol reference count. Never invented — a caller without the measure gets no row.
+ */
+function symbolReferenceCell(references) {
+  const total = references?.total;
+  const files = references?.files;
+  if (typeof total !== 'number') {
+    return null;
+  }
+  return {
+    key: 'symbol-references',
+    label: 'Symbol references',
+    value: `${total} reference${total === 1 ? '' : 's'} to ${typeof files === 'number' ? files : 0} file${files === 1 ? '' : 's'}`,
+    detail: 'recorded',
+    tone: 'none',
+  };
+}
+
+/**
+ * One contributing change-risk signal as a row: the label, its value, its threshold, and its
+ * weighted contribution — so a score can never be read without the components it summed.
+ */
+export function riskSignalEntries(signals) {
+  return (signals ?? []).map((signal) => ({
+    kind: signal.kind,
+    label: signal.label,
+    value: signal.value,
+    threshold: signal.threshold,
+    contribution: signal.contribution,
+    detail: `value ${signal.value} / threshold ${signal.threshold} · contribution ${signal.contribution}`,
+  }));
+}
+
+/**
+ * The line naming the additive score and the components it summed. `weights` is the server's
+ * weight per signal kind when it was carried; otherwise the components are named without them.
+ */
+export function riskScoreText(risk) {
+  if (!risk) {
+    return null;
+  }
+  const components = (risk.signals ?? [])
+    .map((signal) => `${signal.label.toLowerCase()} ${signal.value}/${signal.threshold}`)
+    .join(' + ');
+  const suffix = components ? ` = ${components}` : '';
+  return `Risk ${risk.score}/100${suffix}`;
 }
 
 /** `owner.name`, or the bare name for a module function. */

@@ -1,16 +1,22 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import { getCachedGraph } from '../cache/graph-cache.ts';
-import { scanRepository } from '../scan/scan.ts';
+import { cacheRoot, getCachedGraph } from '../cache/graph-cache.ts';
+import { scanJsTsCalls } from '../scan/calls.ts';
 import { detectEntryPoints } from '../scan/entry-points.ts';
+import { classifyExclusion, excludedDirectory, looksMinified } from '../scan/exclusions.ts';
+import { collectPolyglotExternalImports } from '../scan/external-polyglot.ts';
+import { scanJsTsEdges } from '../scan/scan-js.ts';
+import { isPolyglotSource, scanPolyglotEdges } from '../scan/scan-polyglot.ts';
+import { countLines, directoryOf, isSourceExtension, isTestLike } from '../scan/scan.ts';
 import { revisionFromFingerprint } from '../status.ts';
-import type { Graph } from '../types.ts';
+import type { Diagnostic, Exclusion, Graph } from '../types.ts';
 import { computeCoverage } from './coverage.ts';
 import { computeCycles, type CycleGroup } from './cycles.ts';
+import { contentAtRevision } from './git-content.ts';
 import { isSafeRevision } from './impact.ts';
 import { buildTierReport, type TierDirection } from './tiers.ts';
 
@@ -22,9 +28,10 @@ const run = promisify(execFile);
  * reach appeared or disappeared.
  *
  * `diffGraphs` is pure. `computeStructuralDiff` is the one caller that needs a second
- * graph: the cache is keyed by a single fingerprint, so the base graph is scanned from a
- * temporary `git worktree --detach`, cached by revision, and removed whichever way the scan
- * goes. A base that cannot be read is reported `unavailable`, never as an empty diff.
+ * graph: the base graph is scanned from the blobs at its commit (`git show <rev>:<path>`,
+ * never a working-tree checkout), cached in memory, and persisted on disk keyed by the
+ * resolved commit. A base that cannot be read is reported `unavailable`, never as an empty
+ * diff.
  */
 
 export interface StructuralTierEdge {
@@ -90,13 +97,144 @@ export type StructuralDiffResult =
     }
   | { available: false; reason: StructuralUnavailableReason; detail?: string };
 
-/** Bounded, in-memory base graphs. A worktree scan is the expensive part of the diff. */
+/** Bump when the cached graph/context shape changes. */
+export const REVISION_GRAPH_VERSION = 'revision-graph-1';
+/** Bounded, in-memory base graphs. Building a revision's graph is the expensive part. */
 const BASE_CACHE_LIMIT = 4;
-const baseGraphs = new Map<string, { graph: Graph; context: StructuralContext }>();
+/** Bounded entries per repository in the persisted store. */
+const REVISION_DISK_LIMIT = 20;
 
-/** Drop the base-graph cache; tests call this between cases. */
+interface RevisionGraphState {
+  graph: Graph;
+  context: StructuralContext;
+}
+
+/** Where a revision graph came from, so a caller can tell a cache hit from a build. */
+export type RevisionGraphSource = 'memory' | 'disk' | 'build';
+
+export interface RevisionGraphResult extends RevisionGraphState {
+  source: RevisionGraphSource;
+}
+
+const baseGraphs = new Map<string, RevisionGraphState>();
+
+interface RevisionStore {
+  get(key: string): RevisionGraphState | null;
+  set(key: string, value: RevisionGraphState): void;
+}
+
+const revisionStores = new Map<string, RevisionStore>();
+
+/** Drop the base-graph caches (memory and parsed disk stores); tests call this between cases. */
 export function clearStructuralDiffCache(): void {
   baseGraphs.clear();
+  revisionStores.clear();
+}
+
+/** Path of the persisted revision-graph store for a root. Exposed for diagnostics and tests. */
+export function revisionGraphCachePath(root: string): string {
+  const key = path.resolve(root);
+  return path.join(
+    cacheRoot(),
+    `strabo-${REVISION_GRAPH_VERSION}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}.json`,
+  );
+}
+
+/**
+ * The persisted, commit-keyed store beside the graph cache, per repository root.
+ *
+ * Graphs never change once a commit exists, so an entry is keyed by the resolved commit
+ * hash (and the repository name, which the context depends on). The file is rewritten
+ * atomically on each new entry; the oldest entries are dropped past the limit. A missing,
+ * unreadable, or wrong-version file starts empty, and a malformed entry is ignored rather
+ * than trusted.
+ */
+function revisionStore(root: string): RevisionStore {
+  const rootKey = path.resolve(root);
+  const existing = revisionStores.get(rootKey);
+  if (existing) return existing;
+
+  const file = revisionGraphCachePath(rootKey);
+  let entries: Record<string, RevisionGraphState> = {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      version?: string;
+      entries?: Record<string, RevisionGraphState>;
+    };
+    if (parsed.version === REVISION_GRAPH_VERSION && parsed.entries && typeof parsed.entries === 'object') {
+      entries = parsed.entries;
+    }
+  } catch {
+    // Missing or unreadable: start empty.
+  }
+
+  const store: RevisionStore = {
+    get(key) {
+      const entry = entries[key];
+      if (!entry || !Array.isArray(entry.graph?.nodes) || !Array.isArray(entry.graph?.edges) || !entry.context) {
+        return null;
+      }
+      return entry;
+    },
+    set(key, value) {
+      entries[key] = value;
+      const keys = Object.keys(entries);
+      for (const stale of keys.slice(0, Math.max(0, keys.length - REVISION_DISK_LIMIT))) delete entries[stale];
+      try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        const temporary = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(temporary, JSON.stringify({ version: REVISION_GRAPH_VERSION, entries }));
+        fs.renameSync(temporary, file);
+      } catch {
+        // The cache is an optimisation; a write failure keeps the in-memory entry.
+      }
+    },
+  };
+  revisionStores.set(rootKey, store);
+  return store;
+}
+
+/**
+ * The graph and structural context at a resolved commit, from memory then disk, or built
+ * from the blobs at that commit. `source` tells a caller which tier answered, so a test can
+ * prove a cache hit without counting subprocesses.
+ *
+ * `commit` is the canonical commit hash `computeStructuralDiff` resolves with
+ * `rev-parse <ref>^{commit}`; the cache key must not be a movable ref like `HEAD`.
+ */
+export async function revisionGraph(
+  root: string,
+  commit: string,
+  repository: string,
+): Promise<RevisionGraphResult> {
+  const memoryKey = `${path.resolve(root)}\u0000${repository}\u0000${commit}`;
+  const inMemory = baseGraphs.get(memoryKey);
+  if (inMemory) {
+    // Refresh the LRU position.
+    baseGraphs.delete(memoryKey);
+    baseGraphs.set(memoryKey, inMemory);
+    return { ...inMemory, source: 'memory' };
+  }
+
+  const store = revisionStore(root);
+  const diskKey = `${repository}\u0000${commit}`;
+  const onDisk = store.get(diskKey);
+  if (onDisk) {
+    rememberRevisionGraph(memoryKey, onDisk);
+    return { ...onDisk, source: 'disk' };
+  }
+
+  const built = await buildRevisionGraph(root, commit, repository);
+  rememberRevisionGraph(memoryKey, built);
+  store.set(diskKey, built);
+  return { ...built, source: 'build' };
+}
+
+function rememberRevisionGraph(key: string, state: RevisionGraphState): void {
+  baseGraphs.set(key, state);
+  if (baseGraphs.size > BASE_CACHE_LIMIT) {
+    baseGraphs.delete(baseGraphs.keys().next().value as string);
+  }
 }
 
 /**
@@ -195,10 +333,10 @@ export interface StructuralDiffOptions {
 /**
  * Diff the graph at `base` against the head graph.
  *
- * The base graph is scanned from a detached temporary worktree so the existing pipeline
- * produces it unchanged. The worktree is removed in a `finally`, even when the scan or the
- * context read throws, and it is created under the OS temp directory, never inside the
- * scanned tree. A resolved base whose scan fails is `base-scan-failed`, not an empty diff.
+ * The base graph is built from the committed blobs at the resolved commit
+ * (`git show <rev>:<path>`), so the working tree is never checked out or written. The
+ * graph is cached in memory (LRU) and persisted on disk, both keyed by the resolved commit
+ * hash. A base whose blobs or graph cannot be read is `base-scan-failed`, not an empty diff.
  */
 export async function computeStructuralDiff(
   root: string,
@@ -231,19 +369,14 @@ export async function computeStructuralDiff(
     headRevision = revisionFromFingerprint(cached.fingerprint);
   }
 
-  const key = `${path.resolve(root)}\u0000${baseRevision}`;
-  let baseState = baseGraphs.get(key);
-  const cachedHit = baseState !== undefined;
-  if (!baseState) {
-    const materialized = await materializeBaseGraph(root, baseRevision, repository);
-    if (!materialized.available) {
-      return materialized;
-    }
-    baseState = { graph: materialized.graph, context: materialized.context };
-    baseGraphs.set(key, baseState);
-    if (baseGraphs.size > BASE_CACHE_LIMIT) {
-      baseGraphs.delete(baseGraphs.keys().next().value as string);
-    }
+  let baseState: RevisionGraphState;
+  let cachedHit: boolean;
+  try {
+    const resolved = await revisionGraph(root, baseRevision, repository);
+    baseState = resolved;
+    cachedHit = resolved.source !== 'build';
+  } catch (error) {
+    return { available: false, reason: 'base-scan-failed', detail: firstLine(error) };
   }
 
   const headContext = structuralContext(root, repository, headGraph);
@@ -251,51 +384,114 @@ export async function computeStructuralDiff(
   return { available: true, base, baseRevision, headRevision, diff, cached: cachedHit };
 }
 
-/* ------------------------------------------------------------------ Base worktree */
+/* ------------------------------------------------------------------ Revision blobs */
 
-type MaterializedBase =
-  | { available: true; graph: Graph; context: StructuralContext }
-  | { available: false; reason: StructuralUnavailableReason; detail?: string };
+/** Concurrent `git show` reads: enough to hide process latency without a spawn storm. */
+const REVISION_READ_CONCURRENCY = 8;
 
-async function materializeBaseGraph(
+/**
+ * Build a revision's graph from its committed blobs, reading each source file with
+ * `git show <rev>:<path>`. The working tree is never checked out or written. The recorded
+ * facts the diff needs (tier edges, entry points, test reach) come from `structuralContext`,
+ * as on the head side.
+ */
+async function buildRevisionGraph(
   root: string,
-  baseRevision: string,
+  commit: string,
   repository: string,
-): Promise<MaterializedBase> {
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-base-'));
-  const worktree = path.join(parent, 'worktree');
-  let added = false;
-  try {
-    await git(root, ['worktree', 'add', '--detach', worktree, baseRevision]);
-    added = true;
-    const report = await scanRepository(worktree);
-    const context = structuralContext(worktree, repository, report.graph);
-    return { available: true, graph: report.graph, context };
-  } catch (error) {
-    return {
-      available: false,
-      reason: 'base-scan-failed',
-      detail: firstLine(error),
-    };
-  } finally {
-    if (added) {
-      try {
-        await git(root, ['worktree', 'remove', '--force', worktree]);
-      } catch {
-        // Fall through to a direct removal; the prune below forgets the metadata.
-      }
-    }
-    try {
-      fs.rmSync(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    } catch {
-      // Best effort: the path is under the OS temp directory.
-    }
-    try {
-      await git(root, ['worktree', 'prune']);
-    } catch {
-      // Pruning is cleanup; a failure does not change the diff.
-    }
+): Promise<RevisionGraphState> {
+  const files = await listRevisionFiles(root, commit);
+  const contentByFile = await readRevisionContents(root, commit, files);
+  const retained = [...contentByFile.keys()].sort();
+  const graph = await assembleRevisionGraph(root, retained, contentByFile);
+  return { graph, context: structuralContext(root, repository, graph) };
+}
+
+/** The tracked source files at a commit, minus what the working-tree walk would exclude. */
+async function listRevisionFiles(root: string, commit: string): Promise<string[]> {
+  const stdout = await git(root, ['ls-tree', '-r', '--name-only', '-z', commit]);
+  const files: string[] = [];
+  for (const file of stdout.split('\0')) {
+    if (!file || !isSourceExtension(file) || revisionExclusion(file)) continue;
+    files.push(file);
   }
+  return files.sort();
+}
+
+/** The exclusion the working-tree walk would apply to a tracked path, if any. */
+function revisionExclusion(file: string): Exclusion | null {
+  const segments = file.split('/');
+  for (let depth = 1; depth < segments.length; depth += 1) {
+    const pruned = excludedDirectory(segments.slice(0, depth).join('/'));
+    if (pruned) return { path: file, reason: pruned.reason, detail: pruned.detail };
+  }
+  return classifyExclusion(file);
+}
+
+/** Read a revision's files through `git show`, bounded and skipping minified blobs. */
+async function readRevisionContents(
+  root: string,
+  commit: string,
+  files: readonly string[],
+): Promise<Map<string, string>> {
+  const contentByFile = new Map<string, string>();
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (cursor < files.length) {
+      const file = files[cursor];
+      cursor += 1;
+      if (file === undefined) return;
+      const content = await contentAtRevision(root, commit, file);
+      if (content === null || looksMinified(content)) continue;
+      contentByFile.set(file, content);
+    }
+  };
+  const workers = Array.from(
+    { length: Math.min(REVISION_READ_CONCURRENCY, files.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return contentByFile;
+}
+
+/**
+ * Nodes and edges for a revision, from the same extractors `scanRepository` runs. Only the
+ * manifest/config reads that feed entry detection and alias resolution stay on the working
+ * tree, since the extractors have no injectable manifest source.
+ */
+async function assembleRevisionGraph(
+  root: string,
+  files: readonly string[],
+  contentByFile: ReadonlyMap<string, string>,
+): Promise<Graph> {
+  const entryByFile = new Map(detectEntryPoints(root, files).map((entry) => [entry.file, entry.reason]));
+  const nodes: Graph['nodes'] = files.map((id) => ({
+    id,
+    kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
+    directory: directoryOf(id),
+    ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
+    lines: countLines(contentByFile.get(id) as string),
+  }));
+
+  const [jsScan, polyglot, calls] = await Promise.all([
+    scanJsTsEdges(files, contentByFile, { root }),
+    scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
+    scanJsTsCalls(files, contentByFile, { root }),
+  ]);
+
+  const diagnostics: Diagnostic[] = [...jsScan.diagnostics, ...polyglot.diagnostics];
+  const externalImports = [
+    ...jsScan.externalImports,
+    ...collectPolyglotExternalImports(files, contentByFile, diagnostics),
+  ];
+
+  return {
+    nodes,
+    edges: [...jsScan.edges, ...polyglot.edges, ...calls.edges],
+    diagnostics,
+    excluded: [],
+    externalImports,
+  };
 }
 
 /* ------------------------------------------------------------------ Helpers */

@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
-import type { Graph } from '../types.ts';
+import type { Exclusion, Graph } from '../types.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
-import { classifyExclusion } from '../scan/exclusions.ts';
+import { classifyViewExclusion } from '../scan/exclusions.ts';
 
 const run = promisify(execFile);
 
@@ -39,6 +39,11 @@ export type ReviewResult =
       files: ReviewFile[];
       totals: ReviewTotals;
       impact: ReviewImpact;
+      /**
+       * Changed paths dropped from the review, each with the reason it was left out — a
+       * generated bundle or a lockfile. Named rather than silently discarded.
+       */
+      excluded?: Exclusion[];
       /** Cohesion before/after for the changed files, when the caller computed it. */
       cohesion?: ChangePassport;
     }
@@ -88,7 +93,7 @@ export async function reviewCommit(
       git(root, ['show', '--first-parent', '--format=', '--name-status', '-z', '-M', ref]),
       git(root, ['show', '--first-parent', '--format=', '--numstat', '-z', '-M', ref]),
     ]);
-    const files = mergeChanges(
+    const { files, excluded } = mergeChanges(
       parseNameStatus(nameStatus),
       parseNumstat(numstat),
       graph,
@@ -102,6 +107,7 @@ export async function reviewCommit(
       files,
       totals: totalChanges(files),
       impact: impactFor(graph, files),
+      excluded,
     };
   } catch (error) {
     return gitFailure(error);
@@ -133,27 +139,34 @@ export async function reviewWorkingTree(root: string, graph: Graph): Promise<Rev
       graph,
       'unstaged',
     );
-    const untrackedFiles = parseNullList(untracked)
-      .filter((file) => classifyExclusion(file)?.reason !== 'generated')
-      .map((file): ReviewFile => {
-        const lines = countLines(path.join(root, file));
-        return {
+    const excluded: Exclusion[] = [...staged.excluded, ...unstaged.excluded];
+    const untrackedFiles = parseNullList(untracked).flatMap((file): ReviewFile[] => {
+      const exclusion = classifyViewExclusion(file);
+      if (exclusion) {
+        excluded.push(exclusion);
+        return [];
+      }
+      const lines = countLines(path.join(root, file));
+      return [
+        {
           path: file,
           status: 'untracked',
           group: 'untracked',
           insertions: lines,
           deletions: lines === null ? null : 0,
           inGraph: graph.nodes.some((node) => node.id === file),
-        };
-      });
+        },
+      ];
+    });
 
-    const files = [...staged, ...unstaged, ...untrackedFiles];
+    const files = [...staged.files, ...unstaged.files, ...untrackedFiles];
     return {
       available: true,
       kind: 'working-tree',
       files,
       totals: totalChanges(files),
       impact: impactFor(graph, files),
+      excluded,
     };
   } catch (error) {
     return gitFailure(error);
@@ -288,20 +301,32 @@ function parseNullList(stdout: string): string[] {
   return stdout.split('\0').filter((entry) => entry !== '');
 }
 
+/** A change set split into the files to review and the exclusions that dropped the rest. */
+export interface MergedChanges {
+  files: ReviewFile[];
+  excluded: Exclusion[];
+}
+
 export function mergeChanges(
   changes: ParsedChange[],
   counts: Map<string, { insertions: number | null; deletions: number | null }>,
   graph: Graph,
   group: ReviewGroup,
-): ReviewFile[] {
+): MergedChanges {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
-  return changes
-    // Generated output (a built bundle, its source map, minified files) is out of scope:
-    // it mirrors authored source, so reviewing it inflates every change set.
-    .filter((change) => classifyExclusion(change.path)?.reason !== 'generated')
-    .map((change): ReviewFile => {
-      const stat = counts.get(change.path) ?? { insertions: null, deletions: null };
-      return {
+  const excluded: Exclusion[] = [];
+  const files = changes.flatMap((change): ReviewFile[] => {
+    // Generated output (a built bundle, its source map, minified files) and lockfiles are
+    // out of scope: they mirror or restate authored source, so reviewing them inflates
+    // every change set. The exclusion is named so the drop is visible, not silent.
+    const exclusion = classifyViewExclusion(change.path);
+    if (exclusion) {
+      excluded.push(exclusion);
+      return [];
+    }
+    const stat = counts.get(change.path) ?? { insertions: null, deletions: null };
+    return [
+      {
         path: change.path,
         ...(change.previousPath ? { previousPath: change.previousPath } : {}),
         status: change.status,
@@ -309,9 +334,11 @@ export function mergeChanges(
         insertions: stat.insertions,
         deletions: stat.deletions,
         inGraph: nodeIds.has(change.path),
-      };
-    })
-    .sort((a, b) => a.path.localeCompare(b.path));
+      },
+    ];
+  });
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, excluded };
 }
 
 export function totalChanges(files: ReviewFile[]): ReviewTotals {

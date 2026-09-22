@@ -139,9 +139,48 @@ export function overlayFor(kind, data) {
       return ownershipOverlay(data);
     case 'smells':
       return smellsOverlay(data);
+    case 'hidden-coupling':
+      return hiddenCouplingOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
+}
+
+/**
+ * The hidden-coupling lens: co-change pairs joined by no import path in either direction
+ * (K3). This is the only overlay that annotates *edges*, so it returns the hidden edges for
+ * the view to draw distinctly as well as the node classes and panel text.
+ *
+ * A pair with no listable commit is not drawn, and a non-hidden edge is left out entirely,
+ * so the lens never shows a coupling the history or the graph did not record.
+ */
+export function hiddenCouplingOverlay(report) {
+  if (!report || report.unavailable === true) {
+    return {
+      classes: new Map(),
+      edges: [],
+      summary: 'no Git history read',
+      items: [],
+      emptyNote: report?.detail ?? 'Co-change is unavailable: no Git history was read.',
+    };
+  }
+  const edges = (report.edges ?? []).filter(
+    (edge) => edge.hidden === true && Array.isArray(edge.commits) && edge.commits.length > 0,
+  );
+  const classes = new Map();
+  for (const edge of edges) {
+    classes.set(edge.source, 'ov-hidden-coupling');
+    classes.set(edge.target, 'ov-hidden-coupling');
+  }
+  return {
+    classes,
+    edges,
+    summary: `${edges.length} hidden co-change pair(s) · no import path either way`,
+    items: edges.map(
+      (edge) =>
+        `${edge.source} ↔ ${edge.target} · ${edge.commitsShared ?? edge.commits.length} shared commit(s) · ratio ${edge.ratio}`,
+    ),
+  };
 }
 
 /**

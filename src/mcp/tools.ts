@@ -25,6 +25,12 @@ const MAX_TRUNCATION_NOTES = 50;
 const EVIDENCE_UNAVAILABLE =
   'no recorded graph export was available, so edge evidence was not attached';
 
+const TIER_UNIT_UNAVAILABLE =
+  'the tier lens was not available, so tier and unit were not attached';
+
+const TIER_UNCLASSIFIED =
+  'the tier lens did not classify this file (it was unreadable or beyond the classification cap)';
+
 const REPOSITORY_SCHEMA = {
   type: 'string',
   description: 'Repository name or path inside the scan ceiling; defaults to the configured root.',
@@ -328,19 +334,104 @@ async function fetchEdgeIndex(
   return envelope ? buildEdgeIndex(envelope.edges) : null;
 }
 
+/**
+ * The canonical tier lens, reduced to what a file-level tool needs: each classified file's
+ * tier and the unit roots. The full tier report is never handed back, only used to compose
+ * the two fields, so a file-level result stays small.
+ */
+interface TierUnitIndex {
+  tierByFile: Map<string, { tier: string; mixed: boolean; evidence: unknown[] }>;
+  unitIds: string[];
+}
+
+/** Read the tier lens so a file-level tool can name the file's tier and unit. */
+async function fetchTierUnitIndex(
+  dispatch: ApiDispatch,
+  args: Record<string, unknown>,
+): Promise<TierUnitIndex | null> {
+  const result = await getRaw(dispatch, '/analysis/tiers', args);
+  if (result.status < 200 || result.status >= 300) {
+    return null;
+  }
+  let body: unknown = result.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(body)) {
+    return null;
+  }
+  const tierByFile = new Map<string, { tier: string; mixed: boolean; evidence: unknown[] }>();
+  if (Array.isArray(body.files)) {
+    for (const entry of body.files) {
+      if (isRecord(entry) && typeof entry.file === 'string' && typeof entry.tier === 'string') {
+        tierByFile.set(entry.file, {
+          tier: entry.tier,
+          mixed: entry.mixed === true,
+          evidence: Array.isArray(entry.evidence) ? entry.evidence : [],
+        });
+      }
+    }
+  }
+  const unitIds: string[] = [];
+  if (Array.isArray(body.units)) {
+    for (const unit of body.units) {
+      if (isRecord(unit) && typeof unit.id === 'string') {
+        unitIds.push(unit.id);
+      }
+    }
+  }
+  return { tierByFile, unitIds };
+}
+
+/**
+ * The unit a file belongs to, composed from the tier lens's own unit roots: the longest
+ * enclosing unit id, else the root. This is the published `assignUnits` rule, not a second
+ * classification.
+ */
+function unitFor(file: string, unitIds: readonly string[]): string {
+  const roots = unitIds.filter((id) => id !== '.').sort((a, b) => b.length - a.length);
+  return roots.find((id) => file === id || file.startsWith(`${id}/`)) ?? '.';
+}
+
+/** The tier and unit fields for one file, or an explicit `unavailable` marker when absent. */
+function tierUnitFields(tier: TierUnitIndex | null, file: string): Record<string, unknown> {
+  if (!tier) {
+    return { tier: null, unit: null, tierUnavailable: TIER_UNIT_UNAVAILABLE };
+  }
+  const entry = tier.tierByFile.get(file);
+  const unit = unitFor(file, tier.unitIds);
+  if (!entry) {
+    return { tier: null, unit, tierNote: TIER_UNCLASSIFIED };
+  }
+  return {
+    tier: entry.tier,
+    unit,
+    ...(entry.mixed ? { tierMixed: true } : {}),
+    tierEvidence: entry.evidence,
+  };
+}
+
 async function getWithEvidence(
   dispatch: ApiDispatch,
   args: Record<string, unknown>,
   path: string,
   extra: Record<string, string | undefined>,
-  augment: (body: unknown, index: EdgeIndex | null) => unknown,
+  augment: (body: unknown, index: EdgeIndex | null, tier: TierUnitIndex | null) => unknown,
+  withTier = false,
 ): Promise<McpToolResult> {
   const result = await getRaw(dispatch, path, args, extra);
   if (result.status < 200 || result.status >= 300) {
     return toResult(result, args);
   }
-  const index = await fetchEdgeIndex(dispatch, args);
-  return toResult({ status: result.status, body: augment(result.body, index) }, args);
+  const [index, tier] = await Promise.all([
+    fetchEdgeIndex(dispatch, args),
+    withTier ? fetchTierUnitIndex(dispatch, args) : Promise.resolve(null),
+  ]);
+  return toResult({ status: result.status, body: augment(result.body, index, tier) }, args);
 }
 
 /** A path hop carries the recorded import line and specifier behind it, not just the target. */
@@ -373,27 +464,45 @@ function attachPathEvidence(body: unknown, index: EdgeIndex | null): unknown {
 }
 
 /** A file passport carries the recorded edges into and out of the file, evidence included. */
-function attachFileEvidence(body: unknown, index: EdgeIndex | null, file: string): unknown {
+function attachFileEvidence(
+  body: unknown,
+  index: EdgeIndex | null,
+  file: string,
+  tier: TierUnitIndex | null = null,
+): unknown {
   if (!isRecord(body)) {
     return body;
   }
+  const identified = { ...body, ...tierUnitFields(tier, file) };
   if (!index) {
-    return { ...body, imports: [], importers: [], evidenceUnavailable: EVIDENCE_UNAVAILABLE };
+    return { ...identified, imports: [], importers: [], evidenceUnavailable: EVIDENCE_UNAVAILABLE };
   }
   return {
-    ...body,
+    ...identified,
     imports: [...(index.outgoing.get(file) ?? [])],
     importers: [...(index.incoming.get(file) ?? [])],
   };
 }
 
-/** Each affected file names the recorded edge that reached it from one hop closer. */
-function attachImpactEvidence(body: unknown, index: EdgeIndex | null): unknown {
+/** Each affected file names the recorded edge that reached it from one hop closer, and its tier and unit. */
+function attachImpactEvidence(
+  body: unknown,
+  index: EdgeIndex | null,
+  tier: TierUnitIndex | null = null,
+): unknown {
   if (!isRecord(body)) {
     return body;
   }
+  const affected = Array.isArray(body.affected)
+    ? body.affected.map((entry) =>
+        isRecord(entry) && typeof entry.id === 'string'
+          ? { ...entry, ...tierUnitFields(tier, entry.id) }
+          : entry,
+      )
+    : body.affected;
+  const withTier = { ...body, affected };
   if (!index) {
-    return { ...body, edges: [], evidenceUnavailable: EVIDENCE_UNAVAILABLE };
+    return { ...withTier, edges: [], evidenceUnavailable: EVIDENCE_UNAVAILABLE };
   }
   const distance = new Map<string, number>();
   for (const entry of Array.isArray(body.affected) ? body.affected : []) {
@@ -415,7 +524,7 @@ function attachImpactEvidence(body: unknown, index: EdgeIndex | null): unknown {
       edges.push(candidate);
     }
   }
-  return { ...body, edges };
+  return { ...withTier, edges };
 }
 
 function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
@@ -434,7 +543,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_context',
       description:
-        'The change-impact passport for one file: current-graph snapshot, complexity, signals, and pending-change deltas, with the recorded import edges and their evidence.',
+        'The change-impact passport for one file: current-graph snapshot, complexity, signals, and pending-change deltas, with the recorded import edges and their evidence, plus the file tier and build unit.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -453,7 +562,8 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
           args,
           '/analysis/impact-passport',
           { file },
-          (body, index) => attachFileEvidence(body, index, file),
+          (body, index, tier) => attachFileEvidence(body, index, file, tier),
+          true,
         );
       },
     },
@@ -488,7 +598,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_impact',
       description:
-        'Reverse-dependency impact of the pending change set, or of one revision against its first parent, with the recorded edge that reached each affected file.',
+        'Reverse-dependency impact of the pending change set, or of one revision against its first parent, with the recorded edge that reached each affected file and each affected file tier and unit.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -506,6 +616,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
           '/analysis/impact',
           { base: stringArg(args, 'base') },
           attachImpactEvidence,
+          true,
         ),
     },
     {

@@ -57,10 +57,12 @@ import {
   GROUP_NAMING_INSTRUCTION,
   MEMBER_NARRATION_INSTRUCTION,
   REVIEW_NARRATION_INSTRUCTION,
+  ROUTE_STEP_INSTRUCTION,
   buildGroupNamingEvidence,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
   buildReviewNarrationEvidence,
+  buildRouteStepEvidence,
   narratorMenuState,
 } from './strabo-narrator.js';
 import { openCommitDialog } from './strabo-commit.js';
@@ -854,7 +856,14 @@ function impactPassportSet(card) {
   if (!card || card.path === undefined) {
     return null;
   }
-  return { scope: 'file', baseline: card.status === 'added' ? null : 'HEAD', files: [card], totals: null, capped: false };
+  return {
+    scope: 'file',
+    baseline: card.status === 'added' ? null : 'HEAD',
+    files: [card],
+    totals: null,
+    capped: false,
+    ...(card.provenance ? { provenance: card.provenance } : {}),
+  };
 }
 
 /** Handlers that let the Functions tab ask the opt-in narrator about the recorded evidence. */
@@ -881,6 +890,14 @@ async function fetchNarratorStatus() {
   } catch {
     return { configured: false, reason: 'not-configured' };
   }
+}
+
+/** Resolve the narrator status once, so a panel can render its narration controls honestly. */
+async function ensureNarratorStatus() {
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  return narratorStatus;
 }
 
 /**
@@ -1003,30 +1020,35 @@ async function narrateNode(id) {
 /**
  * Ask the opt-in narrator for the guided tour: passport plus reading route become the evidence.
  *
- * The tour is model-generated narrative, shown in the Narrator window under the same
- * attribution as every other reply, and never changes the route or the map.
+ * The reply returns to the route panel's narrator block, which renders it inline under the
+ * model-generated attribution; the tour never changes the route or the map. A failed request
+ * throws so the shared affordance reports the reason.
  */
 async function narrateRouteTour() {
   const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-  const showPanel = (panelState) => {
-    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
-  };
-  showPanel({ label: 'Guided tour', phase: 'loading' });
-  floatingWindows.find((controller) => controller.key === 'narration')?.open();
-  try {
-    const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(state.repository ? { repository: state.repository } : {}),
-    });
-    const reply = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
-    }
-    showPanel({ label: 'Guided tour', phase: 'done', reply });
-  } catch (error) {
-    showPanel({ label: 'Guided tour', phase: 'error', message: error.message });
+  const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(state.repository ? { repository: state.repository } : {}),
+  });
+  const reply = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
   }
+  return reply;
+}
+
+/**
+ * Ask the opt-in narrator to explain one file's place in the reading route.
+ *
+ * Only the recorded step and the route summary are sent; the reply renders inline in the route
+ * panel and never reorders the route.
+ */
+async function narrateRouteStep(step) {
+  return postNarration(
+    ROUTE_STEP_INSTRUCTION,
+    buildRouteStepEvidence(step, currentRoute?.summary),
+  );
 }
 
 /** POST recorded evidence to the narrator and return its reply. */
@@ -1981,6 +2003,7 @@ async function showRoute(preferredFile) {
   try {
     const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
     currentRoute = report;
+    await ensureNarratorStatus();
     const steps = routeSteps(report);
     const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
     routeIndex =
@@ -1990,11 +2013,9 @@ async function showRoute(preferredFile) {
     renderRouteView();
   } catch (error) {
     currentRoute = null;
-    renderRoutePanel(elements.routePanel, null, {}, {});
-    const note = document.createElement('p');
-    note.className = 'unavailable';
-    note.textContent = error.message;
-    elements.routePanel.append(note);
+    renderRoutePanel(elements.routePanel, null, { error: error.message }, {
+      onRetry: () => showRoute(preferredFile),
+    });
   }
   refreshDock();
 }
@@ -2002,11 +2023,13 @@ async function showRoute(preferredFile) {
 function renderRouteView() {
   renderRoutePanel(elements.routePanel, currentRoute, {
     index: routeIndex,
-    ...(narratorStatus?.configured === false ? { narratorConfigured: false } : {}),
+    narratorStatus,
   }, {
     onStep: (index) => stepRoute(index),
     onFocus: (file) => focusRouteFile(file),
     onNarrateTour: () => narrateRouteTour(),
+    onNarrateStep: (step) => narrateRouteStep(step),
+    onOpenNarratorSettings: openNarratorSettings,
   });
 }
 
@@ -2076,6 +2099,7 @@ function clearOverlay() {
   state.overlay = 'none';
   elements.overlay.value = 'none';
   view.overlay(null);
+  view.setHiddenCoupling(null, false);
   renderOverlayPanel(elements.overlayPanel, '', null);
   refreshDock();
 }
@@ -2147,6 +2171,7 @@ const OVERLAY_TITLES = {
   'module-depth': 'Module depth',
   ownership: 'Ownership',
   smells: 'Smells',
+  'hidden-coupling': 'Hidden coupling (co-change, no import path)',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -2158,10 +2183,11 @@ const OVERLAY_ENDPOINTS = {
   'module-depth': '/analysis/module-depth',
   ownership: '/analysis/ownership',
   smells: '/analysis/smells',
+  'hidden-coupling': '/analysis/co-change',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells'];
+const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling'];
 
 /**
  * Load the selected review analysis and annotate the graph. Overlays annotate only what
@@ -2182,6 +2208,9 @@ async function applyOverlay(generation) {
   }
   const overlay = overlayFor(kind, data);
   view.overlay(overlay.classes);
+  // K3: the hidden-coupling lens draws the no-import-path co-change edges itself, distinctly
+  // from the general co-change lens, and clears them for every other overlay.
+  view.setHiddenCoupling(kind === 'hidden-coupling' ? data : null, kind === 'hidden-coupling');
   // The Change impact list is the working tree's own changes, so it is where the opt-in
   // commit action lives. It generates a message with the narrator, then commits and pushes.
   const actions = [];

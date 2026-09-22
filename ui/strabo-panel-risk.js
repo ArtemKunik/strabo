@@ -15,11 +15,26 @@ import {
   impactFunctionLabel,
   passportHeading,
   riskBandLabel,
+  riskScoreText,
+  riskSignalEntries,
   riskTone,
   totalsPassportCells,
 } from './strabo-impact.js';
 
 import { button, unavailableNote } from './strabo-panel-kit.js';
+
+
+/** The graph fingerprint and scan time behind a passport, and its staleness (T6). */
+function provenanceLine(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return null;
+  }
+  const short = String(provenance.fingerprint).split(':')[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt ? ` · scanned ${provenance.scannedAt.slice(0, 19).replace('T', ' ')}` : '';
+  const behind = typeof provenance.behind === 'number' && provenance.behind > 0 ? ` · ${provenance.behind} behind` : '';
+  const stale = provenance.stale === true ? ' · stale: the working tree has moved on' : '';
+  return `graph ${short}${scanned}${behind}${stale}`;
+}
 
 
 /**
@@ -40,17 +55,42 @@ export function renderImpactPassport(container, set, handlers = {}) {
 
   const caption = document.createElement('p');
   caption.className = 'unavailable';
+  caption.dataset.role = 'impact-caption';
   caption.textContent = set.baseline
     ? `Current graph; compared with ${set.baseline}.`
     : 'Current graph; no baseline revision was available.';
   container.append(caption);
 
+  const provenance = set.provenance ?? set.files[0]?.provenance ?? set.totals?.provenance ?? null;
+  const approximate = set.graphApproximation === true;
+  const line = provenanceLine(provenance);
+  if (line) {
+    const note = document.createElement('p');
+    note.className = 'evidence';
+    note.dataset.role = 'impact-provenance';
+    note.textContent = line;
+    if (provenance.stale === true) {
+      note.classList.add('is-stale');
+    }
+    container.append(note);
+  }
+
+  // R4: where a revision's graph is unavailable the cells are the current graph read as an
+  // approximation; the flag travels into the grid so each current-graph cell says so.
+  if (approximate) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'impact-approximation';
+    note.textContent = 'approximation: current graph';
+    container.append(note);
+  }
+
   if (set.scope === 'file') {
-    container.append(impactCard(set.files[0], false));
+    container.append(impactCard({ ...set.files[0], provenance }, false, approximate));
     return;
   }
 
-  container.append(impactCard(set.totals, true));
+  container.append(impactCard({ ...(set.totals ?? {}), provenance }, true, approximate));
   const list = document.createElement('ul');
   list.className = 'impact-files';
   list.dataset.role = 'impact-files';
@@ -65,14 +105,15 @@ export function renderImpactPassport(container, set, handlers = {}) {
 }
 
 
-function impactCard(card, totals) {
+function impactCard(card, totals, approximate = false) {
   const wrapper = document.createElement('div');
   wrapper.className = 'impact-card';
   wrapper.dataset.role = totals ? 'impact-totals' : 'impact-file-card';
 
   const grid = document.createElement('div');
   grid.className = 'impact-grid';
-  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
+  const flagged = card ? { ...card, graphApproximation: approximate } : card;
+  const cells = totals ? totalsPassportCells(flagged) : filePassportCells(flagged);
   for (const cell of cells) {
     const item = document.createElement('div');
     item.className = 'impact-cell';
@@ -98,6 +139,38 @@ function impactCard(card, totals) {
       'impact-signals',
     ),
   );
+
+  // T4: the pending-change risk is an additive score shown only with the contributing
+  // signals, each with the value and threshold it reads. A score never appears alone.
+  if (card?.risk && Array.isArray(card.risk.signals) && card.risk.signals.length > 0) {
+    const risk = document.createElement('div');
+    risk.className = 'impact-list impact-risk-score';
+    const scoreHeading = document.createElement('h5');
+    scoreHeading.textContent = 'Change risk (additive)';
+    risk.append(scoreHeading);
+    const scoreLine = document.createElement('p');
+    scoreLine.className = 'overlay-summary';
+    scoreLine.dataset.role = 'change-risk-score';
+    scoreLine.textContent = riskScoreText(card.risk);
+    risk.append(scoreLine);
+    const signals = document.createElement('ul');
+    signals.dataset.role = 'change-risk-signals';
+    for (const signal of riskSignalEntries(card.risk.signals)) {
+      const item = document.createElement('li');
+      item.dataset.kind = signal.kind;
+      const label = document.createElement('span');
+      label.textContent = signal.label;
+      item.append(label);
+      const evidence = document.createElement('span');
+      evidence.className = 'evidence';
+      evidence.textContent = `· value ${signal.value} / threshold ${signal.threshold} · contribution ${signal.contribution}`;
+      item.append(evidence);
+      signals.append(item);
+    }
+    risk.append(signals);
+    wrapper.append(risk);
+  }
+
   wrapper.append(
     impactList(
       'Most complex functions',

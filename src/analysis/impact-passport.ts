@@ -362,12 +362,15 @@ export function snapshotFor(
     blastRadius: blastRadiusByFile.get(file) ?? 0,
     directImporters: (backward.get(file) ?? []).length,
     directImports: (forward.get(file) ?? []).length,
+    // The maps the scanner hands in follow barrel re-exports (see `computeFileImpactPassport`
+    // and `computeChangePassport`), so the passport says so rather than leaving it implicit.
+    countsIncludeReExports: true,
   };
 }
 
 /** The current-state passport for one file, independent of any change. */
 export async function computeFileImpactPassport(root: string, graph: Graph, file: string): Promise<FileImpactPassport> {
-  const { forward, backward } = buildAdjacency(graph);
+  const { forward, backward } = buildAdjacency(graph, { includeReExports: true });
   // Only this file's blast radius is needed, so it is one traversal rather than the whole
   // graph's transitive metric map.
   const snapshot = snapshotFor(file, forward, backward, new Map([[file, reachableSize(file, backward)]]));
@@ -472,7 +475,7 @@ export function rollUpImpactPassports(
   baseline: string | null,
   capped: boolean,
 ): ImpactPassportSet {
-  const { forward, backward } = buildAdjacency(graph);
+  const { forward, backward } = buildAdjacency(graph, { includeReExports: true });
   const changed = new Set(files.map((file) => file.path));
 
   const reachable = new Set<string>();
@@ -549,6 +552,8 @@ export function rollUpImpactPassports(
     blastRadius: reachable.size,
     directImporters: importers.size,
     directImports: imports.size,
+    // Reachability and the direct sets above are built over re-export edges.
+    countsIncludeReExports: true,
     signals,
     mostComplex: mostComplex
       .sort((a, b) => b.complexity - a.complexity || a.name.localeCompare(b.name))

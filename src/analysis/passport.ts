@@ -1,5 +1,5 @@
 import type { Graph } from '../types.ts';
-import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
+import { buildAdjacency, computeGraphMetrics, relationshipOf } from './analysis.ts';
 import { computeCoverage } from './coverage.ts';
 import { computeCycles } from './cycles.ts';
 
@@ -137,7 +137,7 @@ export function computeRepositoryPassport(
 
   const reExportsByFile = new Map<string, number>();
   for (const edge of graph.edges) {
-    if (edge.role === 'declare' && edge.source !== edge.target) {
+    if (relationshipOf(edge) === 're-export' && edge.source !== edge.target) {
       reExportsByFile.set(edge.source, (reExportsByFile.get(edge.source) ?? 0) + 1);
     }
   }

@@ -66,8 +66,8 @@ Canonical names and aliases share one implementation, so they cannot drift.
 | Alias | Canonical | Answers |
 | --- | --- | --- |
 | `strabo_passport` | `get_overview` | repository passport: languages, size, entry points, hubs, cycles, unreached modules |
-| `strabo_file` | `get_context` | one file's change-impact passport, with its recorded import edges and their evidence |
-| `strabo_impact` | `get_impact` | reverse-dependency impact of the pending change set or a revision |
+| `strabo_file` | `get_context` | one file's change-impact passport, with its recorded import edges, their evidence, and its tier and unit |
+| `strabo_impact` | `get_impact` | reverse-dependency impact of the pending change set or a revision, each affected file with its tier and unit |
 | `strabo_review` | `get_change_risk` | the pending working-tree change set and its rolled-up risk |
 | `strabo_path` | `get_dependency_path` | the shortest recorded path between two files, each hop with evidence |
 
@@ -76,6 +76,21 @@ Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_de
 File-level tools carry the recorded edge, not only the target path: each edge is the graph's
 own record with `evidence.line` (the 1-based import line) and `evidence.specifier` (the
 specifier as authored), so a claim can be checked against the source.
+
+`strabo_file` also carries the file's tier and unit, composed from the canonical `get_tier`
+lens rather than a second classifier:
+
+- `tier` is the role the file plays (`frontend`, `api`, `domain`, `data`, `integration`,
+  `infra`, `build`, `tests`, or `unclassified`), with `tierEvidence` listing the recorded
+  evidence behind it and `tierMixed: true` when two tiers share the strongest evidence.
+- `unit` is the build unit the file belongs to, from the tier lens's own unit roots (the
+  longest enclosing unit, else the root `.`).
+- `strabo_impact` attaches the same `tier` and `unit` to every entry in `affected`.
+
+Tier and unit are never guessed. When the tier lens cannot be read at all, the result names
+`tierUnavailable` and leaves both fields `null`; when the lens simply did not classify the
+file, `tier` is `null` with a `tierNote` explaining why, and the unit is still derived from
+the path.
 
 ## Bounded results
 
@@ -99,3 +114,5 @@ Strabo reports only what the scan recorded. A fact it does not have is named, ne
   rather than fabricated.
 - When edge evidence could not be read, the file-level result carries
   `evidenceUnavailable` instead of empty edges that would look complete.
+- When the tier lens could not be read, `strabo_file` and `strabo_impact` carry
+  `tierUnavailable` and leave `tier` and `unit` `null`, rather than inferring a role.

@@ -142,6 +142,9 @@ test('the file-level tools carry the recorded import line and specifier on every
   assert.match(pathBody.edges[0]?.evidence.specifier ?? '', /cycle-b/);
 
   const fileBody = JSON.parse(await toolText(handler, 'strabo_file', { file: 'src/index.ts' })) as {
+    tier: string | null;
+    unit: string | null;
+    tierEvidence: unknown[];
     imports: Array<{ evidence: { line: number; specifier: string } }>;
   };
   assert.ok(fileBody.imports.length >= 3);
@@ -149,6 +152,9 @@ test('the file-level tools carry the recorded import line and specifier on every
     assert.equal(typeof edge.evidence.line, 'number');
     assert.equal(typeof edge.evidence.specifier, 'string');
   }
+  assert.equal(typeof fileBody.tier, 'string');
+  assert.equal(typeof fileBody.unit, 'string');
+  assert.ok(Array.isArray(fileBody.tierEvidence));
 
   const importerBody = JSON.parse(await toolText(handler, 'strabo_file', { file: 'src/util.ts' })) as {
     importers: Array<{ evidence: { line: number; specifier: string } }>;
@@ -158,6 +164,62 @@ test('the file-level tools carry the recorded import line and specifier on every
     assert.equal(typeof edge.evidence.line, 'number');
     assert.equal(typeof edge.evidence.specifier, 'string');
   }
+});
+
+test('the aliased file tool carries tier and unit and stays paged', async () => {
+  const tierReport = {
+    files: [
+      {
+        file: 'src/a.ts',
+        tier: 'domain',
+        mixed: false,
+        evidence: [{ tier: 'domain', strength: 'path-token', detail: 'path token `domain`' }],
+      },
+      { file: 'src/b.ts', tier: 'data', mixed: false, evidence: [] },
+    ],
+    units: [{ id: 'src', name: 'src', role: 'library', roleEvidence: '', files: 2, tiers: {} }],
+  };
+  const passport = {
+    path: 'src/a.ts',
+    status: 'modified',
+    testsToRun: [],
+    untestedDependents: Array.from({ length: 130 }, (_, index) => `src/d${index}.ts`),
+  };
+  const dispatch: ApiDispatch = async (_method, path) => {
+    if (path.startsWith('/export')) {
+      return { status: 200, body: JSON.stringify({ edges: [] }) };
+    }
+    if (path.startsWith('/analysis/tiers')) {
+      return { status: 200, body: tierReport };
+    }
+    if (path.startsWith('/analysis/impact-passport')) {
+      return { status: 200, body: passport };
+    }
+    return { status: 404, body: { error: 'not found' } };
+  };
+  const tools = createTools(dispatch);
+  const file = tools.find((tool) => tool.name === 'strabo_file');
+  assert.ok(file);
+
+  const parsed = JSON.parse((await file.call({ file: 'src/a.ts' })).content[0]?.text ?? '{}') as {
+    tier: string;
+    unit: string;
+    tierEvidence: unknown[];
+    truncated: boolean;
+    listsTruncated: number;
+    untestedDependents: unknown[];
+    truncation: Array<{ path: string; shown: number; total: number; omitted: number; nextOffset: number }>;
+  };
+  assert.equal(parsed.tier, 'domain');
+  assert.equal(parsed.unit, 'src');
+  assert.equal(parsed.tierEvidence.length, 1);
+  assert.equal(parsed.truncated, true);
+  assert.equal(parsed.listsTruncated, 1);
+  assert.equal(parsed.untestedDependents.length, MCP_DEFAULT_PAGE);
+  assert.equal(parsed.truncation[0]?.path, 'untestedDependents');
+  assert.equal(parsed.truncation[0]?.total, 130);
+  assert.equal(parsed.truncation[0]?.omitted, 130 - MCP_DEFAULT_PAGE);
+  assert.equal(parsed.truncation[0]?.nextOffset, MCP_DEFAULT_PAGE);
 });
 
 test('the impact tool names the recorded edge that reached each affected file', async () => {
@@ -195,6 +257,19 @@ test('the impact tool names the recorded edge that reached each affected file', 
         },
       };
     }
+    if (path.startsWith('/analysis/tiers')) {
+      return {
+        status: 200,
+        body: {
+          files: [
+            { file: 'src/a.ts', tier: 'domain', mixed: false, evidence: [] },
+            { file: 'src/b.ts', tier: 'data', mixed: false, evidence: [] },
+            { file: 'src/c.ts', tier: 'api', mixed: false, evidence: [] },
+          ],
+          units: [{ id: 'src' }],
+        },
+      };
+    }
     return { status: 404, body: { error: 'not found' } };
   };
 
@@ -203,6 +278,7 @@ test('the impact tool names the recorded edge that reached each affected file', 
   assert.ok(impact);
 
   const parsed = JSON.parse((await impact.call({})).content[0]?.text ?? '{}') as {
+    affected: Array<{ id: string; tier: string; unit: string }>;
     edges: Array<{ source: string; target: string; evidence: { line: number; specifier: string } }>;
   };
   assert.deepEqual(
@@ -215,4 +291,12 @@ test('the impact tool names the recorded edge that reached each affected file', 
   for (const edge of parsed.edges) {
     assert.equal(typeof edge.evidence.specifier, 'string');
   }
+  assert.deepEqual(
+    parsed.affected.map((entry) => [entry.id, entry.tier, entry.unit]),
+    [
+      ['src/b.ts', 'data', 'src'],
+      ['src/a.ts', 'domain', 'src'],
+      ['src/c.ts', 'api', 'src'],
+    ],
+  );
 });

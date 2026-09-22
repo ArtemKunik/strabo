@@ -500,6 +500,28 @@ function passportFileList(entries, handlers, label) {
 }
 
 
+/**
+ * The graph fingerprint and scan time behind a passport, with a stale label when the served
+ * graph is older than the working tree (T6). Never invents a revision: an absent fingerprint
+ * yields no line at all.
+ */
+export function passportProvenanceText(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return '';
+  }
+  const short = String(provenance.fingerprint).split(':')[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt
+    ? ` · scanned ${provenance.scannedAt.slice(0, 19).replace('T', ' ')}`
+    : '';
+  const behind =
+    typeof provenance.behind === 'number' && provenance.behind > 0
+      ? ` · ${provenance.behind} behind`
+      : '';
+  const stale = provenance.stale === true ? ' · stale: the working tree has moved on' : '';
+  return `graph ${short}${scanned}${behind}${stale}`;
+}
+
+
 /** A list of rows that name no selectable file (languages, directories). */
 function passportPlainList(entries, label) {
   const list = document.createElement('ul');
@@ -530,6 +552,15 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
   if (!report) {
     container.append(passportNote('No passport was recorded for this repository.'));
     return;
+  }
+
+  const provenance = report.provenance ?? null;
+  if (provenance && provenance.fingerprint) {
+    const line = document.createElement('p');
+    line.className = provenance.stale === true ? 'evidence is-stale' : 'evidence';
+    line.dataset.role = 'passport-provenance';
+    line.textContent = passportProvenanceText(provenance);
+    container.append(line);
   }
 
   const size = report.size ?? {};

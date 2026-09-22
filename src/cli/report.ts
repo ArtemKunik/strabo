@@ -14,7 +14,7 @@ import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { collectFindings, parseFailOnRules, type CheckRule } from '../check/check.ts';
 import { readEnv } from '../config.ts';
-import { revisionFromFingerprint } from '../status.ts';
+import { computeFreshness, revisionFromFingerprint } from '../status.ts';
 import { collectFailOnValues } from './check.ts';
 
 const run = promisify(execFile);
@@ -46,6 +46,12 @@ export interface ReportDocument {
   base: string;
   baseRevision: string | null;
   head: string | null;
+  /** The graph fingerprint the report's figures were read from. */
+  fingerprint: string | null;
+  /** When the graph was scanned (ISO 8601), apart from when the report was generated. */
+  scanTime: string;
+  /** True when the served graph is older than the working tree. */
+  stale: boolean;
   generatedAt: string;
   changedFiles: ReportChange[];
   reach: {
@@ -84,6 +90,7 @@ export async function runReportCommand(
   const cached = await getCachedGraph(repository.root);
   const graph = cached.report.graph;
   const head = revisionFromFingerprint(cached.fingerprint);
+  const freshness = await computeFreshness(repository.root, cached.fingerprint, cached.report.scannedAt);
 
   const structural = await computeStructuralDiff(repository.root, base, {
     headGraph: graph,
@@ -122,6 +129,9 @@ export async function runReportCommand(
     base,
     baseRevision: structural.available ? structural.baseRevision : null,
     head,
+    fingerprint: cached.fingerprint,
+    scanTime: cached.report.scannedAt,
+    stale: freshness.stale,
     generatedAt: new Date().toISOString(),
     changedFiles,
     reach: {
@@ -185,6 +195,9 @@ export function renderMarkdown(document: ReportDocument): string {
   lines.push(`# Strabo report · ${document.repository}`);
   lines.push(
     `Base \`${document.base}\` (${document.baseRevision ?? 'unresolved'}) → HEAD \`${document.head ?? 'unresolved'}\` · ${document.generatedAt}`,
+  );
+  lines.push(
+    `Graph \`${document.fingerprint ?? 'no fingerprint'}\` scanned ${document.scanTime}${document.stale ? ' · stale: older than the working tree' : ''}`,
   );
   lines.push('');
 

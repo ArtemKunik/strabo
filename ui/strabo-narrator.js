@@ -411,6 +411,43 @@ export function buildReviewNarrationEvidence(result) {
 }
 
 /**
+ * The instruction for explaining one file's place in the reading route. The narrator reads the
+ * recorded position and wiring; it never reorders the route or claims a fact it was not given.
+ */
+export const ROUTE_STEP_INSTRUCTION =
+  'Explain in one short paragraph why this file sits where it does in the repository reading ' +
+  'route, using only the recorded evidence. Name what reaches it and what it depends on only ' +
+  'when that is recorded, and say plainly when a fact is not recorded.';
+
+/**
+ * Build the recorded evidence sent to the narrator for one reading-route step.
+ *
+ * Only the step's recorded facts and the route's own summary are included; an absent step is
+ * stated as such rather than filled in, and no ordering claim is made beyond what was recorded.
+ */
+export function buildRouteStepEvidence(step, routeSummary) {
+  if (!step) {
+    return 'no route step is recorded';
+  }
+  const lines = [];
+  lines.push(`file: ${step.file}`);
+  lines.push(`unit: ${step.unit ?? 'not recorded'}`);
+  lines.push(
+    `reached: ${step.from ? `from ${step.from}` : 'this is a declared entry point'}`,
+  );
+  lines.push(`depth from its entry point: ${step.depth ?? 'not recorded'}`);
+  lines.push(`recorded importers: ${step.fanIn ?? 0}`);
+  lines.push(`tier: ${step.tier ?? 'not recorded'}`);
+  if (routeSummary) {
+    lines.push(
+      `route: ${routeSummary.entryPoints ?? 0} entry point(s), ${routeSummary.routed ?? 0} routed, ` +
+        `${routeSummary.unreached ?? 0} no entry point reaches, ${routeSummary.units ?? 0} unit(s)`,
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * Split a model reply into displayable blocks: paragraphs, and ordered or bulleted lists.
  *
  * Small models return light markdown even when told not to. Each block is a list of inline

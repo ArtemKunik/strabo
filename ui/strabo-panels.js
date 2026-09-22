@@ -25,6 +25,7 @@ export {
   renderWorkspace,
   renderWorkspaceTools,
   renderRepositoryPassport,
+  passportProvenanceText,
 } from './strabo-panel-workspace.js';
 
 export {
@@ -56,6 +57,7 @@ export {
 export {
   renderOverlayPanel,
   renderEdgeEvidence,
+  evidenceProvenanceText,
   renderTimeline,
 } from './strabo-panel-overlay.js';
 

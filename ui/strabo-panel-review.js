@@ -12,6 +12,11 @@ import {
   reviewGroups,
 } from './strabo-core.js';
 
+import {
+  riskScoreText,
+  riskSignalEntries,
+} from './strabo-impact.js';
+
 import { backButton, button, wiring } from './strabo-panel-kit.js';
 
 import { appendNarratorBlock } from './strabo-panel-narrative.js';
@@ -19,6 +24,8 @@ import { appendNarratorBlock } from './strabo-panel-narrative.js';
 import { renderBranchDivergence } from './strabo-panel-branches.js';
 
 import { renderImpactPassport } from './strabo-panel-risk.js';
+
+import { passportProvenanceText } from './strabo-panel-workspace.js';
 
 
 /**
@@ -185,6 +192,17 @@ export function renderReview(container, result, handlers = {}) {
     container.append(meta);
   }
 
+  // T6: the graph fingerprint and scan time behind the review's figures. A served graph older
+  // than the working tree is labelled stale, so a number read from a stale scan says so.
+  const provenance = passportProvenanceText(result.provenance);
+  if (provenance) {
+    const line = document.createElement('p');
+    line.className = result.provenance?.stale === true ? 'evidence is-stale' : 'evidence';
+    line.dataset.role = 'review-provenance';
+    line.textContent = provenance;
+    container.append(line);
+  }
+
   const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
   const summary = document.createElement('p');
   summary.className = 'overlay-summary';
@@ -275,7 +293,9 @@ export function renderReview(container, result, handlers = {}) {
     const impactSection = document.createElement('div');
     impactSection.className = 'impact-passport-section';
     container.append(impactSection);
-    renderImpactPassport(impactSection, result.impactPassport, handlers);
+    // R4: a change-set or revision passport is computed on the current graph, because no
+    // graph for the compared revision was built; the cells are labelled an approximation.
+    renderImpactPassport(impactSection, { ...result.impactPassport, graphApproximation: true }, handlers);
   }
 
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
@@ -462,6 +482,17 @@ function renderChangePassport(container, passport) {
     : 'Cohesion from recorded member wiring; no baseline revision was available.';
   container.append(caption);
 
+  // T6: the graph fingerprint and scan time behind the passport, labelled stale when the
+  // working tree has moved past the served graph.
+  const provenance = passportProvenanceText(passport.provenance);
+  if (provenance) {
+    const line = document.createElement('p');
+    line.className = passport.provenance?.stale === true ? 'evidence is-stale' : 'evidence';
+    line.dataset.role = 'change-passport-provenance';
+    line.textContent = provenance;
+    container.append(line);
+  }
+
   const list = document.createElement('ul');
   list.className = 'change-passport';
   list.dataset.role = 'change-passport';
@@ -480,6 +511,7 @@ function renderChangePassport(container, passport) {
     value.textContent = delta.text;
     value.title = change.note ?? '';
     item.append(value);
+    item.append(changeRiskBlock(change));
     list.append(item);
   }
   container.append(list);
@@ -490,4 +522,57 @@ function renderChangePassport(container, passport) {
     note.textContent = 'Only the first files in the change set were measured.';
     container.append(note);
   }
+}
+
+
+/**
+ * The pending-change risk for one changed file: the additive score with each contributing
+ * signal's value and threshold (T4), plus the two-sided edge deltas the structural diff
+ * recorded. The score is rendered only alongside the signals it summed from.
+ */
+function changeRiskBlock(change) {
+  const block = document.createElement('div');
+  block.className = 'change-risk';
+
+  const edges = [...(change.edgesAdded ?? []).map((edge) => `+ ${edge.source} → ${edge.target} (${edge.kind})`),
+    ...(change.edgesRemoved ?? []).map((edge) => `− ${edge.source} → ${edge.target} (${edge.kind})`)];
+  if (edges.length > 0) {
+    const list = document.createElement('ul');
+    list.className = 'change-edges';
+    list.dataset.role = 'change-edges';
+    for (const edge of edges) {
+      const item = document.createElement('li');
+      item.textContent = edge;
+      list.append(item);
+    }
+    block.append(list);
+  }
+
+  const risk = change.risk;
+  if (!risk || !Array.isArray(risk.signals) || risk.signals.length === 0) {
+    return block;
+  }
+  const score = document.createElement('p');
+  score.className = 'overlay-summary';
+  score.dataset.role = 'change-risk-score';
+  score.textContent = riskScoreText(risk);
+  block.append(score);
+
+  const signals = document.createElement('ul');
+  signals.className = 'change-risk-signals';
+  signals.dataset.role = 'change-risk-signals';
+  for (const signal of riskSignalEntries(risk.signals)) {
+    const item = document.createElement('li');
+    item.dataset.kind = signal.kind;
+    const label = document.createElement('span');
+    label.textContent = signal.label;
+    item.append(label);
+    const evidence = document.createElement('span');
+    evidence.className = 'evidence';
+    evidence.textContent = `· value ${signal.value} / threshold ${signal.threshold} · contribution ${signal.contribution}`;
+    item.append(evidence);
+    signals.append(item);
+  }
+  block.append(signals);
+  return block;
 }

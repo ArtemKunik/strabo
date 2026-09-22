@@ -5,13 +5,14 @@ import { STAGE_NAMES, formatBenchmark } from '../../scripts/bench.mjs';
 
 function sampleResult() {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: '2026-01-02T03:04:05.000Z',
     root: 'D:\\repo',
     rootName: 'repo',
     revision: { head: 'abc123', dirty: false, gitUrl: null },
     fingerprint: 'abc123:deadbeef',
     cacheDir: 'C:\\cache\\bench',
+    outputPath: null,
     files: { scanned: 3, edges: 2, diagnostics: 0, excluded: 1 },
     graphCache: {
       cold: { status: 'miss', ms: 100.25 },
@@ -27,6 +28,22 @@ function sampleResult() {
       source: `${stage}-source`,
       includes: `${stage}-includes`,
     })),
+    firstPaint: {
+      passport: {
+        coldMs: 3.5,
+        warmMs: 1.25,
+        approximate: false,
+        source: 'passport-source',
+        includes: 'passport-includes',
+      },
+      system: {
+        coldMs: 8.5,
+        warmMs: 4.25,
+        approximate: false,
+        source: 'system-source',
+        includes: 'system-includes',
+      },
+    },
     notes: ['a note'],
   };
 }
@@ -55,4 +72,14 @@ test('the benchmark formatter is deterministic and covers every stage', () => {
   assert.match(first, /miss/);
   assert.match(first, /memory/);
   assert.match(first, /disk/);
+});
+
+test('the benchmark formatter reports first paint for the passport and System view', () => {
+  const first = formatBenchmark(sampleResult());
+
+  assert.match(first, /First paint/);
+  assert.match(first, /passport/);
+  assert.match(first, /system/);
+  assert.match(first, /passport-source/);
+  assert.match(first, /system-source/);
 });

@@ -221,6 +221,17 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   appendFact(facts, 'Resolution', evidence.resolutionLabel);
   container.append(facts);
 
+  // T6: the graph fingerprint and scan time behind the evidence, labelled stale when the
+  // served graph is older than the working tree.
+  const provenance = evidence.provenance ?? handlers.provenance ?? null;
+  if (provenance && provenance.fingerprint) {
+    const line = document.createElement('p');
+    line.className = provenance.stale === true ? 'evidence is-stale' : 'evidence';
+    line.dataset.role = 'edge-provenance';
+    line.textContent = evidenceProvenanceText(provenance);
+    container.append(line);
+  }
+
   if (handlers.onViewSource) {
     const source = document.createElement('button');
     source.type = 'button';
@@ -247,6 +258,24 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
     clear.addEventListener('click', () => handlers.onClear());
     container.append(clear);
   }
+}
+
+
+/**
+ * The graph fingerprint and scan time behind an edge's evidence, with a stale label when the
+ * served graph is older than the working tree (T6). Absent a fingerprint, no line is shown.
+ */
+export function evidenceProvenanceText(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return '';
+  }
+  const short = String(provenance.fingerprint).split(':')[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt
+    ? ` · scanned ${String(provenance.scannedAt).slice(0, 19).replace('T', ' ')}`
+    : '';
+  return provenance.stale === true
+    ? `graph ${short}${scanned} · stale: the working tree has moved on`
+    : `graph ${short}${scanned}`;
 }
 
 

@@ -171,7 +171,7 @@ export async function reviewBranch(
       getCommit(root, tip),
       trialMerge(root, base.hash, tip),
     ]);
-    const files = mergeChanges(parseNameStatus(nameStatus), parseNumstat(numstat), graph, 'branch');
+    const { files, excluded } = mergeChanges(parseNameStatus(nameStatus), parseNumstat(numstat), graph, 'branch');
     const [behind = 0, ahead = 0] = counts.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
     const baseChangedAll = baseChangedRaw.split('\0').filter(Boolean);
     const baseChanged = baseChangedAll.slice(0, MAX_BASE_CHANGED);
@@ -204,6 +204,7 @@ export async function reviewBranch(
         graph,
         files.map((file) => file.path),
       ),
+      excluded,
     };
   } catch (error) {
     return gitFailure(error);

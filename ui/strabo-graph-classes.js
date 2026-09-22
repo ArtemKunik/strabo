@@ -8,7 +8,7 @@
 import { TIER_ORDER } from './strabo-core.js';
 
 /** Classes an analysis overlay can put on a node. */
-export const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner', 'ov-cross-repo', 'ov-smell'];
+export const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner', 'ov-cross-repo', 'ov-smell', 'ov-hidden-coupling'];
 
 /**
  * Classes the graph applies after building elements. An incremental render reuses existing
@@ -23,6 +23,7 @@ export const RESET_CLASSES = [
   'edge-faded',
   'edge-kind-hidden',
   'edge-cochange-hidden',
+  'edge-hidden-coupling-hidden',
   'edge-lod-hidden',
   'label-hidden',
   'filtered-out',

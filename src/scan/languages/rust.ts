@@ -425,6 +425,7 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
     specifier: string,
     resolution: 'exact' | 'module-tree',
     role: GraphEdge['role'] = 'use',
+    relationship: GraphEdge['relationship'] = 'import',
   ): void => {
     if (source === target) {
       return;
@@ -435,7 +436,7 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
     }
     seen.add(key);
     pairs.add(`${source}\u0000${target}`);
-    edges.push({ source, target, kind, evidence: { line, specifier, resolution }, role });
+    edges.push({ source, target, kind, evidence: { line, specifier, resolution }, role, relationship });
   };
 
   for (const fileFacts of facts) {
@@ -446,7 +447,7 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
       const target = resolveModFile(module, fileFacts, context);
       if (target) {
         // `mod x;` only declares the module tree; it is not a dependency on x's contents.
-        push(fileFacts.file, target, 'namespace', module.line, `mod ${module.name}`, 'exact', 'declare');
+        push(fileFacts.file, target, 'namespace', module.line, `mod ${module.name}`, 'exact', 'declare', 'module-declaration');
       } else {
         diagnostics.push({
           file: fileFacts.file,
@@ -469,6 +470,8 @@ export function resolveRust(facts: RustFileFacts[]): RustResolution {
           reference.line,
           reference.segments.join('::'),
           'module-tree',
+          'use',
+          reference.reexport ? 're-export' : 'import',
         );
         continue;
       }

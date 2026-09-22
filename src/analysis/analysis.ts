@@ -1,4 +1,4 @@
-import type { Graph, GraphEdge } from '../types.ts';
+import type { EdgeRelationship, Graph, GraphEdge } from '../types.ts';
 
 export interface Adjacency {
   forward: Map<string, string[]>;
@@ -6,14 +6,45 @@ export interface Adjacency {
 }
 
 /**
+ * The explicit relationship an edge records.
+ *
+ * Falls back for a graph recorded before the field existed: a `re-export` kind is a re-export,
+ * a `declare` `namespace` edge is a Rust module declaration, and any other `declare` edge is a
+ * Python package layout edge.
+ */
+export function relationshipOf(edge: GraphEdge): EdgeRelationship {
+  if (edge.relationship) {
+    return edge.relationship;
+  }
+  if (edge.kind === 're-export') {
+    return 're-export';
+  }
+  if (edge.role === 'declare') {
+    return edge.kind === 'namespace' ? 'module-declaration' : 'executable-module';
+  }
+  return 'import';
+}
+
+export interface AdjacencyOptions {
+  /** Include module-tree declarations (Rust `mod`, Python package layout). Default false. */
+  includeDeclare?: boolean;
+  /**
+   * Include re-export edges even when they are drawn as `declare` (a barrel `index.ts`).
+   * Default false, matching direct fan-in/fan-out; impact and blast radius set it.
+   */
+  includeReExports?: boolean;
+}
+
+/**
  * Build forward (source -> targets) and backward (target -> sources) adjacency maps.
  *
- * A `declare` edge (Rust `mod`, a Python `__init__` or TypeScript barrel re-export) only
- * describes the module tree, so it is left out of adjacency. Metrics, impact, coverage, and
- * cycles all read through this map, so leaving it here is what keeps a declaration from
- * inflating blast radius. Pass `{ includeDeclare: true }` to count every drawn edge.
+ * A `declare` edge (Rust `mod`, a Python `__init__` layout edge, a TypeScript barrel
+ * re-export) only describes the module tree, so it is left out of direct adjacency. That
+ * keeps fan-in/fan-out from counting a declaration as a dependency. Pass
+ * `{ includeReExports: true }` to follow a barrel re-export for impact and blast radius;
+ * pass `{ includeDeclare: true }` to count every drawn edge.
  */
-export function buildAdjacency(graph: Graph, options: { includeDeclare?: boolean } = {}): Adjacency {
+export function buildAdjacency(graph: Graph, options: AdjacencyOptions = {}): Adjacency {
   const forward = new Map<string, string[]>();
   const backward = new Map<string, string[]>();
   for (const node of graph.nodes) {
@@ -24,7 +55,10 @@ export function buildAdjacency(graph: Graph, options: { includeDeclare?: boolean
     if (edge.source === edge.target) {
       continue;
     }
-    if (!options.includeDeclare && edge.role === 'declare') {
+    const relationship = relationshipOf(edge);
+    const isDeclaration = relationship === 'module-declaration' || relationship === 'executable-module';
+    const followReExport = options.includeReExports === true && relationship === 're-export';
+    if (!options.includeDeclare && !followReExport && (edge.role === 'declare' || isDeclaration)) {
       continue;
     }
     forward.get(edge.source)?.push(edge.target);

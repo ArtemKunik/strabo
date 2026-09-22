@@ -43,6 +43,11 @@ export interface FunctionChange {
   owner: string;
   /** 1-based line of the function declaration. */
   line: number;
+  /**
+   * What happened to the function between the two sides: added, removed, or changed. Only
+   * functions that moved are reported, so there is no `unchanged`.
+   */
+  change: 'added' | 'removed' | 'changed';
   /** Decision points before the change; null when the base cannot be read. */
   decisionPointsBefore: number | null;
   /** Decision points after the change; null when the reviewed copy cannot be read. */
@@ -90,28 +95,65 @@ export interface PublicSurfaceChange {
   symbols: SymbolChange[];
 }
 
+/**
+ * User-facing labels for the tiered impact.
+ *
+ * `definite` is an internal key only: a recorded specifier naming a changed symbol is
+ * evidence of a connection, not evidence of a behavioural break, so the label shown to a
+ * reader says "recorded reference", never "definite".
+ */
+export const IMPACT_TIER_LABELS = {
+  recordedReference: 'recorded reference to a changed symbol',
+  otherDirectImporter: 'other direct importer',
+  reachable: 'transitively reachable',
+} as const;
+
 /** Tiered impact of a change on the dependency graph. */
 export interface TieredImpact {
-  /** Importers whose recorded specifier names a changed symbol — definite impact. */
+  /** Importers whose recorded specifier names a changed symbol — a recorded reference. */
   definite: string[];
   /** Other direct importers — possible impact. */
   possible: string[];
   /** The transitive set over use edges — reachable impact. */
   reachable: string[];
+  /** User-facing labels for each tier; the `definite` key is never displayed. */
+  labels: typeof IMPACT_TIER_LABELS;
 }
 
-/** The pending-change risk and the inputs it multiplies, so the number can be checked. */
+/** One contributing signal behind the pending-change risk: its value and its threshold. */
+export interface ChangeRiskSignal {
+  kind: 'lines-touched' | 'touched-complexity' | 'recorded-references' | 'untested-share';
+  /** User-facing label for the signal. */
+  label: string;
+  /** The recorded value the signal reads. */
+  value: number;
+  /** The value at which the signal contributes in full; fixed, so the signal is reproducible. */
+  threshold: number;
+  /** `value / threshold`, capped at 1; 0 only when the value is 0. */
+  contribution: number;
+}
+
+/**
+ * The pending-change risk: contributing signals, each with its value and threshold, plus an
+ * optional additive 0-100 score summed from them.
+ *
+ * Additive rather than multiplicative, so one zero signal (say, no importer names the changed
+ * symbol) no longer erases otherwise significant risk. The score is never shown without the
+ * signals it was summed from.
+ */
 export interface ChangeRisk {
-  /** linesTouched × touchedComplexity × definiteImpact × untestedShare. */
+  /** 0-100, rounded, summed from `signals`. */
   score: number;
+  /** The contributing signals, each with the value and threshold behind it. */
+  signals: ChangeRiskSignal[];
   inputs: {
     /** Lines in the touched functions on the reviewed side. */
     linesTouched: number;
     /** Sum of decision points in the touched functions. */
     touchedComplexity: number;
-    /** Size of the definite-impact set. */
-    definiteImpact: number;
-    /** Share of the change and its definite dependents that no test reaches. */
+    /** Importers whose recorded specifier names a changed symbol. */
+    recordedReferences: number;
+    /** Share of the change and its recorded references that no test reaches. */
     untestedShare: number;
   };
 }
@@ -186,12 +228,35 @@ export interface ImpactFunction {
   delta: number | null;
 }
 
+/**
+ * The graph a passport or report was computed from, attached at the serialization layer.
+ *
+ * `stale` is a comparison against the working tree now: a fingerprint that no longer matches
+ * means the served graph is older than the tree, and the figures read from it are labelled so.
+ */
+export interface GraphProvenance {
+  /** The cache fingerprint the served graph was built under: `<HEAD>:<statusHash>`. */
+  fingerprint: string | null;
+  /** The indexed revision parsed from the fingerprint, or null when there is none. */
+  revision: string | null;
+  /** ISO 8601 time the served graph was scanned. */
+  scannedAt: string;
+  /** The working tree's fingerprint at serve time; differs from `fingerprint` when stale. */
+  currentFingerprint: string | null;
+  /** Commits between the indexed revision and the working tree, or null. */
+  behind: number | null;
+  /** True when the served graph is older than the working tree. */
+  stale: boolean;
+}
+
 /** The current-graph counts a passport reports. */
 export interface ImpactSnapshot {
-  /** Transitive dependents over use edges. */
+  /** Transitive dependents over use and re-export edges. */
   blastRadius: number;
   directImporters: number;
   directImports: number;
+  /** True when the three counts above followed re-export edges (a barrel `index.ts`). */
+  countsIncludeReExports?: boolean;
 }
 
 /**
@@ -216,6 +281,8 @@ export interface FileImpactPassport {
   testsToRun: string[];
   untestedDependents: string[];
   note?: string;
+  /** The graph this card was computed from, when the serializer attached it. */
+  provenance?: GraphProvenance;
 }
 
 /** The passport rolled up over every file in a change set or revision. */
@@ -228,10 +295,12 @@ export interface ImpactTotals {
   coherence: number | null;
   /** Summed changed-symbol count across the files. */
   changedSymbols: number;
-  /** Distinct files reachable from any changed file over use edges. */
+  /** Distinct files reachable from any changed file over use and re-export edges. */
   blastRadius: number;
   directImporters: number;
   directImports: number;
+  /** True when the three counts above followed re-export edges (a barrel `index.ts`). */
+  countsIncludeReExports?: boolean;
   signals: ImpactSignal[];
   mostComplex: ImpactFunction[];
   functionsUnchanged: number;
@@ -245,6 +314,15 @@ export interface ImpactPassportSet {
   files: FileImpactPassport[];
   totals: ImpactTotals;
   capped: boolean;
+  /** The graph this roll-up was computed from, when the serializer attached it. */
+  provenance?: GraphProvenance;
+}
+
+/** One recorded dependency edge that appeared or disappeared, from the two graphs. */
+export interface ChangeEdge {
+  source: string;
+  target: string;
+  kind: string;
 }
 
 /** Cohesion of one changed file on each side of the review, from recorded member wiring. */
@@ -263,7 +341,11 @@ export interface CohesionChange {
   functions: FunctionChange[];
   /** Public surface diff (exported/pub symbols added, removed, changed). */
   publicSurface: PublicSurfaceChange[];
-  /** Tiered impact: definite (specifier names a changed symbol), possible (other direct importers), reachable (transitive). */
+  /** Dependency edges touching this file that appeared between the two graphs. */
+  edgesAdded: ChangeEdge[];
+  /** Dependency edges touching this file that disappeared between the two graphs. */
+  edgesRemoved: ChangeEdge[];
+  /** Tiered impact: recorded reference (specifier names a changed symbol), possible (other direct importers), reachable (transitive). */
   impact: TieredImpact | null;
   /** Test files whose forward closure reaches this file: the tests to run. */
   testsToRun: string[];
@@ -285,6 +367,8 @@ export interface ChangePassport {
   baseline: string | null;
   /** True when there were more changed files than were measured. */
   capped: boolean;
+  /** The graph this passport was computed from, when the serializer attached it. */
+  provenance?: GraphProvenance;
 }
 
 /**

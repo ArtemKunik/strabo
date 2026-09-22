@@ -34,6 +34,30 @@ export const SIGNAL_THRESHOLDS = {
   manyParameters: 5,
 } as const;
 
+/**
+ * Thresholds for the change-risk signals.
+ *
+ * A change-risk signal reuses the metric-derived threshold where one applies — a touched
+ * function past the long-function or high-complexity line — and names the rest, so every
+ * signal the risk shows carries the value and the threshold that produced it.
+ */
+export const CHANGE_RISK_THRESHOLDS = {
+  linesTouched: SIGNAL_THRESHOLDS.longFunction,
+  touchedComplexity: SIGNAL_THRESHOLDS.highComplexity,
+  /** Importers whose recorded specifier names a changed symbol. */
+  recordedReferences: 5,
+  /** Share of the change and its references no test reaches, 0-1. */
+  untestedShare: 1,
+} as const;
+
+/** Human-readable label per change-risk signal, so the value is never shown alone. */
+export const CHANGE_RISK_SIGNAL_LABELS = {
+  'lines-touched': 'Lines touched',
+  'touched-complexity': 'Touched complexity',
+  'recorded-references': 'Recorded references',
+  'untested-share': 'Untested share',
+} as const;
+
 /** Human-readable label per signal kind, for a passport or panel. */
 export const FUNCTION_SIGNAL_LABELS: Record<FunctionSignalKind, string> = {
   'nested-loops': 'Nested loops',

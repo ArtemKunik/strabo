@@ -18,7 +18,7 @@ public entry points:
 | --------------- | ---------------------------------------------------------------------------------------------- |
 | `strabo`        | scanner, view model, symbol extractors, repository artifact scanner, router factory, server factory, optional lineage pack |
 | `strabo/server` | `createStraboServer` — self-contained Express app serving `public/` and mounting the router at `/api/strabo` |
-| `strabo` CLI    | `strabo [path]` starts the standalone server; `strabo export`, `strabo check`, and `strabo mcp` are the headless surfaces (Phase 21). The root is read from the path argument, `STRABO_ROOT`, or the working directory, plus `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` |
+| `strabo` CLI    | `strabo [path]` starts the standalone server; `strabo export`, `strabo check`, and `strabo mcp` are the headless surfaces (interoperability, landed). The root is read from the path argument, `STRABO_ROOT`, or the working directory, plus `STRABO_CONFIG`, `STRABO_SCAN_CEILING`, `PORT` |
 
 The same scanner, analysis, API, and browser UI are used in standalone and embedded
 modes, so there is exactly one implementation of Strabo behaviour.

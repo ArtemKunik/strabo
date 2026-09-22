@@ -534,6 +534,53 @@ export function buildCoChangeElements(model, report, startIndex = 0) {
   return edges;
 }
 
+/**
+ * Build the hidden-coupling-only edge set for the K3 lens.
+ *
+ * Only pairs the co-change report flagged `hidden` (no import path in either direction) and
+ * that carry a listable commit are drawn, with a distinct `kind` so the stylesheet can draw
+ * them differently from the general co-change lens. Off by default: it is applied only when
+ * the hidden-coupling review overlay is the active lens.
+ */
+export function buildHiddenCouplingElements(model, report, startIndex = 0) {
+  const ids = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = [];
+  (report?.edges ?? []).forEach((edge, offset) => {
+    if (edge.hidden !== true) {
+      return;
+    }
+    if (!ids.has(edge.source) || !ids.has(edge.target)) {
+      return;
+    }
+    if (!Array.isArray(edge.commits) || edge.commits.length === 0) {
+      return;
+    }
+    edges.push({
+      group: 'edges',
+      data: {
+        id: `hid${startIndex + offset}`,
+        source: edge.source,
+        target: edge.target,
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        kind: 'hidden-coupling',
+        weight: edge.commitsShared ?? edge.commits.length,
+        edgeWidth: edgeStrokeWidth(edge.commitsShared ?? edge.commits.length),
+        evidenceLine: null,
+        evidenceSpecifier: `${edge.commitsShared} shared commit(s), no import path`,
+        scope: undefined,
+        coChange: true,
+        hiddenCoupling: true,
+        hidden: true,
+        ratio: edge.ratio,
+        commitsShared: edge.commitsShared,
+        commits: edge.commits,
+      },
+    });
+  });
+  return edges;
+}
+
 /** Cytoscape positions are `{ x, y }`; never leak the `id` field from the API. */
 function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
@@ -721,6 +768,28 @@ export function edgeEvidenceFor(model, edgeId) {
     specifier: evidence.specifier ?? null,
     resolution: evidence.resolution ?? null,
     resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? 'not recorded',
+    provenance: graphProvenanceFromModel(model),
+  };
+}
+
+/**
+ * The fingerprint and scan time behind a served graph, read from the model's cache metadata.
+ *
+ * The graph route carries `cache.fingerprint`, `cache.generatedAt`, and `cache.stale`; an
+ * absent fingerprint yields null rather than an invented revision (T6).
+ */
+export function graphProvenanceFromModel(model) {
+  const cache = model?.cache;
+  if (!cache || !cache.fingerprint) {
+    return null;
+  }
+  return {
+    fingerprint: cache.fingerprint,
+    revision: String(cache.fingerprint).split(':')[0] || null,
+    scannedAt: cache.generatedAt ?? null,
+    currentFingerprint: null,
+    behind: null,
+    stale: cache.stale === true,
   };
 }
 

@@ -77,13 +77,25 @@ try {
   );
   execSync(`npm install --no-audit --no-fund "${tarball}"`, { cwd: consumer, stdio: ['ignore', 'inherit', 'inherit'] });
 
-  // A tiny repository so the shipped scanner and a grammar-backed resolver both run.
+  // A tiny repository so the shipped scanner and grammar-backed resolvers both run. Java
+  // proves a package-based resolver; Python proves a module-tree resolver, so the packed
+  // grammar set is exercised by more than one language.
   const repo = path.join(consumer, 'repo');
   fs.mkdirSync(path.join(repo, 'src', 'main', 'java', 'com', 'acme'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'src', 'main', 'java', 'com', 'acme', 'Helper.java'), 'package com.acme;\npublic class Helper {}\n');
   fs.writeFileSync(
     path.join(repo, 'src', 'main', 'java', 'com', 'acme', 'Main.java'),
     'package com.acme;\nimport com.acme.Helper;\npublic class Main { private Helper helper; }\n',
+  );
+
+  for (const dir of ['app', 'app/models', 'app/services']) {
+    fs.mkdirSync(path.join(repo, 'src', dir), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'src', dir, '__init__.py'), '');
+  }
+  fs.writeFileSync(path.join(repo, 'src', 'app', 'models', 'user.py'), 'class User:\n    pass\n');
+  fs.writeFileSync(
+    path.join(repo, 'src', 'app', 'services', 'user_service.py'),
+    'from app.models.user import User\n\n\ndef get_user():\n    return User()\n',
   );
 
   fs.writeFileSync(
@@ -100,6 +112,14 @@ assert.ok(ids.includes('src/main/java/com/acme/Main.java'), 'java file scanned')
 assert.ok(
   report.graph.edges.some((edge) => edge.source.endsWith('Main.java') && edge.target.endsWith('Helper.java')),
   'java import resolved using packaged grammar assets',
+);
+assert.ok(ids.includes('src/app/services/user_service.py'), 'python file scanned');
+assert.ok(
+  report.graph.edges.some(
+    (edge) =>
+      edge.source === 'src/app/services/user_service.py' && edge.target === 'src/app/models/user.py',
+  ),
+  'python import resolved using packaged grammar assets',
 );
 assert.ok(
   !report.graph.diagnostics.some((d) => /No parser grammar available/.test(d.message)),
@@ -119,7 +139,10 @@ console.log('consumer verification passed');
 
   console.log('Running the shipped package in the consumer...');
   const output = execSync('node verify.mjs', { cwd: consumer }).toString().trim();
-  check(output.includes('consumer verification passed'), 'installed package scans, resolves Java, and serves');
+  check(
+    output.includes('consumer verification passed'),
+    'installed package scans, resolves Java and Python, and serves',
+  );
 
   // A fixture repository whose second commit adds a cycle, so `strabo report` has two
   // revisions to diff structurally. The base graph is scanned from a temporary worktree.

@@ -16,7 +16,10 @@ import {
   snapshotFor,
 } from './impact-passport.ts';
 import { isSafeRevision } from './impact.ts';
-import type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
+import { CHANGE_RISK_SIGNAL_LABELS, CHANGE_RISK_THRESHOLDS } from './signals.ts';
+import type { StructuralDiff } from './structural-diff.ts';
+import { IMPACT_TIER_LABELS } from './review-types.ts';
+import type { ChangeEdge, ChangePassport, ChangeRisk, ChangeRiskSignal, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
 
 const run = promisify(execFile);
 const MAX_FILES = 40;
@@ -28,17 +31,19 @@ export async function computeChangePassport(
   files: readonly ReviewFile[],
   baseline: string | null,
   graph: Graph,
+  structural?: Pick<StructuralDiff, 'edgesAdded' | 'edgesRemoved'>,
 ): Promise<ChangePassport> {
   const safeBaseline = baseline && isSafeRevision(baseline) ? baseline : null;
   const measured = files.slice(0, MAX_FILES);
   const changes: CohesionChange[] = [];
-  const { forward, backward } = buildAdjacency(graph);
-  const graphMetrics = computeGraphMetrics(graph);
+  const traversal = buildAdjacency(graph, { includeReExports: true });
+  const { forward, backward } = traversal;
+  const graphMetrics = computeGraphMetrics(graph, traversal);
   const coverage = computeCoverage(graph);
   const reached = new Set([...coverage.reached, ...coverage.testFiles]);
   const testsByFile = computeTestReachByFile(graph);
   for (const file of measured) {
-    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, reached));
+    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, reached, structural));
   }
   return { files: changes, baseline: safeBaseline, capped: files.length > measured.length };
 }
@@ -53,6 +58,7 @@ async function cohesionChange(
   blastRadius: ReadonlyMap<string, number>,
   testsByFile: Map<string, string[]>,
   reached: Set<string>,
+  structural?: Pick<StructuralDiff, 'edgesAdded' | 'edgesRemoved'>,
 ): Promise<CohesionChange> {
   const base: Pick<CohesionChange, 'path' | 'status' | 'previousPath'> = {
     path: file.path,
@@ -60,6 +66,8 @@ async function cohesionChange(
     ...(file.previousPath ? { previousPath: file.previousPath } : {}),
   };
   const snapshot = snapshotFor(file.path, forward, backward, blastRadius);
+  const edgesAdded = edgesTouching(structural?.edgesAdded, file);
+  const edgesRemoved = edgesTouching(structural?.edgesRemoved, file);
 
   // Which tests to run, and which dependents no test reaches, are answered for every file,
   // even one whose language has no extractor.
@@ -84,10 +92,10 @@ async function cohesionChange(
 
   const extractor = symbolExtractorFor(file.path);
   if (!extractor) {
-    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
+    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
   }
   if (extractor.tracksAccess === false) {
-    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('this language records no member access') };
+    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('this language records no member access') };
   }
 
   const sourcePath = file.previousPath ?? file.path;
@@ -129,6 +137,8 @@ async function cohesionChange(
     note,
     functions,
     publicSurface,
+    edgesAdded,
+    edgesRemoved,
     impact,
     testsToRun,
     untestedDependents,
@@ -137,11 +147,48 @@ async function cohesionChange(
   };
 }
 
+/** The recorded edges from a structural diff that touch this file, as import deltas. */
+function edgesTouching(
+  edges: readonly { source: string; target: string; kind: string }[] | undefined,
+  file: ReviewFile,
+): ChangeEdge[] {
+  if (!edges || edges.length === 0) return [];
+  const paths = new Set([file.path, ...(file.previousPath ? [file.previousPath] : [])]);
+  return edges
+    .filter((edge) => paths.has(edge.source) || paths.has(edge.target))
+    .map((edge) => ({ source: edge.source, target: edge.target, kind: edge.kind }));
+}
+
+/** How each change-risk signal is weighted in the additive score. Kept explicit. */
+export const CHANGE_RISK_WEIGHTS = {
+  linesTouched: 0.35,
+  touchedComplexity: 0.3,
+  recordedReferences: 0.2,
+  untestedShare: 0.15,
+} as const;
+
+function riskSignal(
+  kind: ChangeRiskSignal['kind'],
+  value: number,
+  threshold: number,
+): ChangeRiskSignal {
+  const contribution = threshold <= 0 ? 0 : Math.min(1, value / threshold);
+  return {
+    kind,
+    label: CHANGE_RISK_SIGNAL_LABELS[kind],
+    value,
+    threshold,
+    contribution: Number(contribution.toFixed(3)),
+  };
+}
+
 /**
- * linesTouched × touchedComplexity × definiteImpact × untestedShare, with each input kept.
+ * The pending-change risk as contributing signals, each with its value and threshold, and an
+ * additive 0-100 score summed from them.
  *
- * A product, not a percentile: the passport is about one pending change, so there is no
- * repository to rank against. Null when nothing measurable was touched.
+ * Additive, not a product: one zero signal no longer erases the rest, so a change that
+ * touches many lines with no recorded reference still reads as risk. Null only when nothing
+ * measurable was touched at all, so a score is never shown without its signals.
  */
 function computeChangeRisk(
   filePath: string,
@@ -149,8 +196,8 @@ function computeChangeRisk(
   impact: TieredImpact | null,
   reached: ReadonlySet<string>,
 ): ChangeRisk | null {
-  const definiteImpact = impact?.definite.length ?? 0;
-  if (functions.length === 0 && definiteImpact === 0) {
+  const recordedReferences = impact?.definite.length ?? 0;
+  if (functions.length === 0 && recordedReferences === 0) {
     return null;
   }
   let linesTouched = 0;
@@ -162,14 +209,28 @@ function computeChangeRisk(
   const candidates = [filePath, ...(impact?.definite ?? [])];
   const reachedCount = candidates.filter((candidate) => reached.has(candidate)).length;
   const untestedShare = candidates.length === 0 ? 1 : (candidates.length - reachedCount) / candidates.length;
-  const score = linesTouched * touchedComplexity * definiteImpact * untestedShare;
+
+  const signals: ChangeRiskSignal[] = [
+    riskSignal('lines-touched', linesTouched, CHANGE_RISK_THRESHOLDS.linesTouched),
+    riskSignal('touched-complexity', touchedComplexity, CHANGE_RISK_THRESHOLDS.touchedComplexity),
+    riskSignal('recorded-references', recordedReferences, CHANGE_RISK_THRESHOLDS.recordedReferences),
+    riskSignal('untested-share', Number(untestedShare.toFixed(3)), CHANGE_RISK_THRESHOLDS.untestedShare),
+  ];
+  const score = Math.round(
+    100 *
+      (CHANGE_RISK_WEIGHTS.linesTouched * signals[0]!.contribution +
+        CHANGE_RISK_WEIGHTS.touchedComplexity * signals[1]!.contribution +
+        CHANGE_RISK_WEIGHTS.recordedReferences * signals[2]!.contribution +
+        CHANGE_RISK_WEIGHTS.untestedShare * signals[3]!.contribution),
+  );
 
   return {
-    score: Math.round(score * 1000) / 1000,
+    score,
+    signals,
     inputs: {
       linesTouched,
       touchedComplexity,
-      definiteImpact,
+      recordedReferences,
       untestedShare: Number(untestedShare.toFixed(3)),
     },
   };
@@ -231,6 +292,7 @@ function computeTieredImpact(
     definite,
     possible,
     reachable: [...reachable],
+    labels: IMPACT_TIER_LABELS,
   };
 }
 
@@ -325,81 +387,95 @@ async function computeFunctionChanges(
     return [];
   }
 
-  const hunks = baseline && beforeExtraction !== null
-    ? await getDiffHunks(root, baseline, file.path)
-    : [];
+  const beforeMap = indexFunctions(beforeFunctions);
+  const afterMap = indexFunctions(afterFunctions);
 
-  if (hunks.length === 0 && beforeExtraction !== null && afterExtraction !== null) {
-    const beforeNames = new Set(beforeFunctions.map((f) => `${f.owner}\u0000${f.name}`));
-    const afterNames = new Set(afterFunctions.map((f) => `${f.owner}\u0000${f.name}`));
-    const added = afterFunctions.filter((f) => !beforeNames.has(`${f.owner}\u0000${f.name}`));
-    const removed = beforeFunctions.filter((f) => !afterNames.has(`${f.owner}\u0000${f.name}`));
-    return [...added.map((f) => functionChangeFromEntry(f)), ...removed.map((f) => functionChangeFromEntry(f))];
-  }
+  // A function present on only one side was added or removed outright; a modified body is
+  // found by the diff hunks when a baseline is available, and by the recorded metrics when
+  // it is not. Both sides' metrics are carried, so the delta is real.
+  const touched = new Set<string>();
+  for (const id of afterMap.keys()) if (!beforeMap.has(id)) touched.add(id);
+  for (const id of beforeMap.keys()) if (!afterMap.has(id)) touched.add(id);
 
-  if (hunks.length > 0) {
-    const beforeMap = new Map<string, FunctionEntry>();
-    for (const f of beforeFunctions) {
-      beforeMap.set(`${f.owner}\u0000${f.name}`, f);
-    }
-    const afterMap = new Map<string, FunctionEntry>();
-    for (const f of afterFunctions) {
-      afterMap.set(`${f.owner}\u0000${f.name}`, f);
-    }
-
-    const touched = new Set<string>();
-    for (const hunk of hunks) {
-      for (const [key] of beforeMap) {
-        if (hunkOverlapsHunk(beforeMap.get(key)!, hunk, true)) {
-          touched.add(key);
+  if (beforeExtraction !== null && afterExtraction !== null) {
+    const hunks = baseline ? await getDiffHunks(root, baseline, file.path) : [];
+    if (hunks.length > 0) {
+      for (const hunk of hunks) {
+        for (const [key, fn] of beforeMap) {
+          if (hunkOverlapsHunk(fn, hunk, true)) touched.add(key);
+        }
+        for (const [key, fn] of afterMap) {
+          if (hunkOverlapsHunk(fn, hunk, false)) touched.add(key);
         }
       }
-      for (const [key] of afterMap) {
-        if (hunkOverlapsHunk(afterMap.get(key)!, hunk, false)) {
-          touched.add(key);
-        }
+    } else {
+      for (const [key, fn] of beforeMap) {
+        const after = afterMap.get(key);
+        if (after && !sameFunction(fn, after)) touched.add(key);
       }
     }
-
-    if (touched.size === 0) {
-      for (const key of afterMap.keys()) {
-        touched.add(key);
-      }
-    }
-
-    const changedFunctions: FunctionChange[] = [];
-    for (const key of touched) {
-      const fn = afterMap.get(key) ?? beforeMap.get(key);
-      if (fn) {
-        changedFunctions.push(functionChangeFromEntry(fn));
-      }
-    }
-    return changedFunctions;
   }
 
-  return [];
+  const changedFunctions: FunctionChange[] = [];
+  for (const key of touched) {
+    changedFunctions.push(functionChange(beforeMap.get(key) ?? null, afterMap.get(key) ?? null));
+  }
+  return changedFunctions.sort(
+    (a, b) => a.owner.localeCompare(b.owner) || a.name.localeCompare(b.name),
+  );
 }
 
 function functionsOf(file: string, extraction: SymbolExtraction): FunctionEntry[] {
   return buildFunctions(file, extraction.symbols, extraction.calls ?? []).functions;
 }
 
-function functionChangeFromEntry(fn: FunctionEntry): FunctionChange {
-  const beforeMetrics = fn.metrics;
+function indexFunctions(functions: readonly FunctionEntry[]): Map<string, FunctionEntry> {
+  const map = new Map<string, FunctionEntry>();
+  for (const fn of functions) {
+    map.set(`${fn.owner}\u0000${fn.name}`, fn);
+  }
+  return map;
+}
+
+/** True when the two sides record the same shape and signals, so nothing changed. */
+function sameFunction(before: FunctionEntry, after: FunctionEntry): boolean {
+  return (
+    (before.metrics?.decisionPoints ?? null) === (after.metrics?.decisionPoints ?? null) &&
+    (before.metrics?.maxNestingDepth ?? null) === (after.metrics?.maxNestingDepth ?? null) &&
+    (before.metrics?.lines ?? null) === (after.metrics?.lines ?? null) &&
+    signalKey(before) === signalKey(after)
+  );
+}
+
+function signalKey(fn: FunctionEntry): string {
+  return fn.signals
+    .map((signal) => signal.kind)
+    .sort()
+    .join('\u0000');
+}
+
+/** A function change with both sides' recorded metrics, so added/removed/changed is exact. */
+function functionChange(before: FunctionEntry | null, after: FunctionEntry | null): FunctionChange {
+  const anchor = after ?? before;
+  const beforeSignals = before?.signals.map((signal) => signal.kind) ?? [];
+  const afterSignals = after?.signals.map((signal) => signal.kind) ?? [];
+  const beforeSet = new Set(beforeSignals);
+  const afterSet = new Set(afterSignals);
   return {
-    name: fn.name,
-    owner: fn.owner,
-    line: fn.line,
-    decisionPointsBefore: beforeMetrics?.decisionPoints ?? null,
-    decisionPointsAfter: beforeMetrics?.decisionPoints ?? null,
-    nestingBefore: beforeMetrics?.maxNestingDepth ?? null,
-    nestingAfter: beforeMetrics?.maxNestingDepth ?? null,
-    signalsBefore: fn.signals.map((s) => s.kind),
-    signalsAfter: fn.signals.map((s) => s.kind),
-    signalIntroduced: false,
-    signalResolved: false,
-    linesBefore: beforeMetrics?.lines ?? null,
-    linesAfter: beforeMetrics?.lines ?? null,
+    name: anchor?.name ?? '',
+    owner: anchor?.owner ?? '',
+    line: anchor?.line ?? 0,
+    change: before === null ? 'added' : after === null ? 'removed' : 'changed',
+    decisionPointsBefore: before?.metrics?.decisionPoints ?? null,
+    decisionPointsAfter: after?.metrics?.decisionPoints ?? null,
+    nestingBefore: before?.metrics?.maxNestingDepth ?? null,
+    nestingAfter: after?.metrics?.maxNestingDepth ?? null,
+    signalsBefore: beforeSignals,
+    signalsAfter: afterSignals,
+    signalIntroduced: afterSignals.some((kind) => !beforeSet.has(kind)),
+    signalResolved: beforeSignals.some((kind) => !afterSet.has(kind)),
+    linesBefore: before?.metrics?.lines ?? null,
+    linesAfter: after?.metrics?.lines ?? null,
   };
 }
 
@@ -433,16 +509,18 @@ async function getDiffHunks(root: string, base: string, file: string): Promise<D
   return hunks;
 }
 
+/** True when the function's line range and the hunk's line range overlap on one side. */
 function hunkOverlapsHunk(
   fn: { line: number; metrics?: { lines: number } },
   hunk: DiffHunk,
   useOld: boolean,
 ): boolean {
   const fnStart = fn.line;
-  const fnEnd = fnStart + (fn.metrics?.lines ?? 0);
+  const fnEnd = fnStart + Math.max(0, (fn.metrics?.lines ?? 1) - 1);
   const hunkStart = useOld ? hunk.oldStart : hunk.newStart;
-  const hunkEnd = hunkStart + (useOld ? hunk.oldCount : hunk.newCount);
-  return fnStart >= hunkStart && fnStart <= hunkEnd;
+  const hunkCount = useOld ? hunk.oldCount : hunk.newCount;
+  const hunkEnd = hunkStart + Math.max(0, hunkCount - 1);
+  return fnStart <= hunkEnd && hunkStart <= fnEnd;
 }
 
 function noteFor(options: {

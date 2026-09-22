@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildAdjacency, computeGraphMetrics } from '../src/analysis/analysis.ts';
 import { clearHistoryCache, collectHistory } from '../src/analysis/history.ts';
 import { computeRepositoryPassport } from '../src/analysis/passport.ts';
+import { buildSystemReport } from '../src/analysis/system.ts';
 import {
+  CACHE_ARTIFACT_VERSION,
   cacheRoot,
   clearDiskCache,
   clearMemoryCache,
@@ -20,6 +22,7 @@ import { findGitIgnoredFiles } from '../src/scan/gitignore.ts';
 import { scanJsTsEdges } from '../src/scan/scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from '../src/scan/scan-polyglot.ts';
 import { collectSourceFiles, isSourceExtension } from '../src/scan/scan.ts';
+import { buildSystemViewModel } from '../src/view/view-model.ts';
 
 /**
  * Phase 18 P1: report where a scan's time goes, cold and warm, and record it.
@@ -114,11 +117,63 @@ async function measureScanStages(root) {
   };
 }
 
-export async function runBenchmark(repoArg) {
+/**
+ * Time the first usable payload of the two server documents that open a repository.
+ *
+ * The routes are `GET /analysis/passport` (the repository passport) and
+ * `GET /graph?system=1` (the System view model). Each role is timed cold then warm: the
+ * second call measures steady state after manifests and filesystem entries are in cache.
+ * The System row includes building the report, because that is what the route does before
+ * it can return a model.
+ */
+async function measureFirstPaint(root, repository, cached) {
+  const report = cached.report;
+  const cache = {
+    status: cached.status,
+    fingerprint: cached.fingerprint,
+    artifactVersion: CACHE_ARTIFACT_VERSION,
+    generatedAt: report.scannedAt,
+    stale: cached.stale,
+  };
+  const passport = () =>
+    computeRepositoryPassport(repository.name, report.graph, report.extensionCounts);
+  const system = () =>
+    buildSystemViewModel(
+      buildSystemReport(root, repository.name, report.graph),
+      repository,
+      cache,
+      report.graph,
+    );
+
+  const passportCold = await timed(passport);
+  const passportWarm = await timed(passport);
+  const systemCold = await timed(system);
+  const systemWarm = await timed(system);
+
+  return {
+    passport: {
+      coldMs: passportCold.ms,
+      warmMs: passportWarm.ms,
+      approximate: false,
+      source: 'computeRepositoryPassport (GET /analysis/passport)',
+      includes: 'languages, entry points, directories, top files, cycles, unreached files',
+    },
+    system: {
+      coldMs: systemCold.ms,
+      warmMs: systemWarm.ms,
+      approximate: false,
+      source: 'buildSystemReport + buildSystemViewModel (GET /graph?system=1)',
+      includes: 'unit roll-up, layers, communities, unit cards, positions',
+    },
+  };
+}
+
+export async function runBenchmark(repoArg, outArg) {
   const root = resolveRoot(repoArg);
   const repository = await describeRepository(root);
   const rev = await fingerprint(root);
   const benchDir = benchDirectory();
+  const outputPath = typeof outArg === 'string' && outArg.trim() !== '' ? path.resolve(outArg) : null;
 
   // Empty every cache the measured paths read before the cold pass.
   clearMemoryCache(root);
@@ -142,6 +197,7 @@ export async function runBenchmark(repoArg) {
   const report = cold.value.report;
   const metrics = await timed(() => computeGraphMetrics(report.graph, buildAdjacency(report.graph)));
   const analysis = await timed(() => computeRepositoryPassport(root, report.graph, report.extensionCounts));
+  const firstPaint = await measureFirstPaint(root, repository, cold.value);
 
   const measured = {
     walk: { coldMs: scan.ms.walk, approximate: false, source: 'collectSourceFiles', includes: 'directory walk' },
@@ -199,13 +255,14 @@ export async function runBenchmark(repoArg) {
   }));
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     root,
     rootName: repository.name,
     revision: { head: repository.head, dirty: repository.dirty, gitUrl: repository.gitUrl },
     fingerprint: rev,
     cacheDir: benchDir,
+    outputPath,
     files: {
       scanned: report.graph.nodes.length,
       edges: report.graph.edges.length,
@@ -223,11 +280,13 @@ export async function runBenchmark(repoArg) {
       commitsScanned: historyCold.value.commitsScanned,
     },
     stages,
+    firstPaint,
     notes: [
       'Stage rows call the nearest production function; scanRepository exposes no per-stage seam.',
       'parse, extract, and resolve overlap: each enclosing edge pass also performs the other two steps, so the rows are not additive.',
       'The cold graph-cache miss is timed after the cold stage pass, so its parser runtime is warm; one-time grammar loading is inside the stage pass, not that number.',
       'Node construction (entry points, line counts) and external-import collection are not separately measured.',
+      'First paint rows time the builder the server calls for that payload; the System row also builds the report and reads manifests, so it is not a pure in-memory number.',
     ],
   };
 }
@@ -247,7 +306,7 @@ export function formatBenchmark(result) {
   lines.push(`revision     ${result.revision.head ?? 'no git'}${result.revision.dirty ? ' (dirty)' : ''}`);
   lines.push(`fingerprint  ${result.fingerprint ?? 'none (no git)'}`);
   lines.push(`generated    ${result.generatedAt}`);
-  lines.push(`results      ${result.cacheDir}`);
+  lines.push(`results      ${result.outputPath ?? result.cacheDir}`);
   lines.push('');
 
   lines.push('Graph cache (real getCachedGraph):');
@@ -268,6 +327,17 @@ export function formatBenchmark(result) {
     );
   }
   lines.push('');
+  lines.push('First paint (server payload builders, cold then warm):');
+  lines.push(`  ${padRight('payload', 9)} ${padRight('cold ms', 10)} ${padRight('warm ms', 10)} source`);
+  for (const [payload, entry] of Object.entries(result.firstPaint)) {
+    lines.push(
+      `  ${padRight(payload, 9)} ${padRight(milliseconds(entry.coldMs), 10)} ${padRight(
+        milliseconds(entry.warmMs),
+        10,
+      )} ${entry.source}`,
+    );
+  }
+  lines.push('');
   lines.push(
     `Files: ${result.files.scanned} scanned, ${result.files.edges} edges, ` +
       `${result.files.diagnostics} diagnostics, ${result.files.excluded} excluded`,
@@ -283,19 +353,47 @@ export function formatBenchmark(result) {
 }
 
 function writeResult(result) {
-  fs.mkdirSync(result.cacheDir, { recursive: true });
-  const stamp = result.generatedAt.replace(/[:.]/g, '-');
-  const slug = result.rootName.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'repo';
-  const file = path.join(result.cacheDir, `bench-${slug}-${stamp}.json`);
+  const file =
+    result.outputPath ??
+    (() => {
+      const stamp = result.generatedAt.replace(/[:.]/g, '-');
+      const slug = result.rootName.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '') || 'repo';
+      return path.join(result.cacheDir, `bench-${slug}-${stamp}.json`);
+    })();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(result, null, 2));
   return file;
 }
 
-async function main(repoArg) {
-  const result = await runBenchmark(repoArg);
-  if (isInsideRoot(result.cacheDir, result.root)) {
+/**
+ * Parse `--out <path>` / `--out=<path>` and a single positional repository path.
+ *
+ * `STRABO_BENCH_OUT` is the environment equivalent of `--out`; an explicit flag wins.
+ */
+function parseArgs(argv) {
+  let repo;
+  let out = process.env.STRABO_BENCH_OUT;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--out') {
+      out = argv[index + 1];
+      index += 1;
+    } else if (arg.startsWith('--out=')) {
+      out = arg.slice('--out='.length);
+    } else if (repo === undefined) {
+      repo = arg;
+    }
+  }
+  return { repo, out };
+}
+
+async function main(args) {
+  const options = parseArgs(args);
+  const result = await runBenchmark(options.repo, options.out);
+  const targetDir = result.outputPath ? path.dirname(result.outputPath) : result.cacheDir;
+  if (isInsideRoot(targetDir, result.root)) {
     process.stderr.write(
-      `Warning: bench results land inside the scanned tree (${result.cacheDir}); set STRABO_BENCH_DIR outside it.\n`,
+      `Warning: bench results land inside the scanned tree (${targetDir}); pass --out outside it or set STRABO_BENCH_DIR.\n`,
     );
   }
   process.stdout.write(`${formatBenchmark(result)}\n`);
@@ -306,5 +404,5 @@ async function main(repoArg) {
 const entry = process.argv[1];
 const isDirectRun = entry !== undefined && import.meta.url === pathToFileURL(path.resolve(entry)).href;
 if (isDirectRun) {
-  await main(process.argv[2]);
+  await main(process.argv.slice(2));
 }

@@ -9,6 +9,7 @@ import { computeCoverage } from '../../src/index.ts';
 import { analyzeModuleDepth } from '../../src/index.ts';
 import { computeImpact, getChangedFiles } from '../../src/index.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../src/index.ts';
+import { reviewCommit } from '../../src/index.ts';
 import { scanRepository } from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 
@@ -83,6 +84,52 @@ test('computeImpact walks reverse edges and reports distance from the change', a
       ['a.ts', 2],
     ],
   );
+});
+
+test('a commit that only rebuilds a generated bundle reviews empty and names the exclusion', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'public'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src.ts'), 'export const value = 1;\n');
+  fs.writeFileSync(path.join(root, 'public/app.bundle.js'), 'window.app = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  fs.writeFileSync(path.join(root, 'public/app.bundle.js'), 'window.app = 2;\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'rebuild');
+
+  const report = await scanRepository(root);
+  const review = await reviewCommit(root, report.graph, 'HEAD');
+
+  assert.ok(review.available);
+  assert.deepEqual(review.files, []);
+  assert.equal(review.totals.files, 0);
+  const named = (review.excluded ?? []).find((entry) => entry.path === 'public/app.bundle.js');
+  assert.equal(named?.reason, 'generated');
+  assert.equal(named?.detail, '.bundle.js');
+});
+
+test('a lockfile change is out of the review and names the lockfile exclusion', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'src.ts'), 'export const value = 1;\n');
+  fs.writeFileSync(path.join(root, 'package-lock.json'), '{}\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  fs.writeFileSync(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'lock');
+
+  const report = await scanRepository(root);
+  const review = await reviewCommit(root, report.graph, 'HEAD');
+
+  assert.ok(review.available);
+  assert.deepEqual(review.files, []);
+  const named = (review.excluded ?? []).find((entry) => entry.path === 'package-lock.json');
+  assert.equal(named?.reason, 'lockfile');
+  assert.equal(named?.detail, 'package-lock.json');
 });
 
 /**

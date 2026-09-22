@@ -28,14 +28,18 @@ record is reported as `unavailable`, never invented.
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution; Member-map Narrate from the recorded members and data flow); follow-ups N1-N5 done (in-app narrator setup) |
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q9 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run; the Change impact passport card) |
-| 18 | Scan and analysis performance | Planned (P1-P7; P1 is the gate for Phases 22-25) |
-| 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions) |
-| 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings) |
-| 21 | Interoperability: exports, headless checks, and the agent surface | Done (I1-I8: json/dot/mermaid/svg export + `--site`; `/status` freshness, badge, background rebuild; `check` rules + baseline; MCP stdio server reusing the router; cross-surface contract tests); I9-I12 follow-up planned |
-| 22 | Reading route | Planned (W1-W4) |
-| 23 | Change coupling | Planned (K1-K4) |
-| 24 | Headless report and structural diff | Planned (X1-X4) |
-| 25 | Measured coverage | Planned (V1-V4) |
+| 18 | Scan and analysis performance | Planned (P1-P7; the benchmark gate is Phase 21 G4) |
+| 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
+| 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
+| 21 | Gate: verification, provenance, benchmark | Partial (G1 CI added, acceptance stays non-blocking; G2 scans Java and Python; G3 provenance audited, human sign-off blank; G4 first-paint added, no committed 20k-50k result) |
+| 22 | Correctness and trust | Done except T2's symbol-reference row, which awaits a recorded count |
+| 23 | Revision-aware change review | Done |
+| 24 | Serve agents over MCP | Done |
+| 25 | Change coupling | Done |
+| 26 | Headless report and structural diff | Landed (X1-X4 done) |
+| 27 | Measured coverage | Landed (V1-V4 done) |
+| — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
+| — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
 
 ## Phase 1 - Map legibility and interaction
@@ -1144,14 +1148,15 @@ core for one language behind the same `Graph` output and compare. Acceptance: th
 benchmark shows each slice's gain, and the graph output is unchanged byte for byte (except
 timing metadata) before and after P2-P5.
 
-**The gate before Phase 22.** P1 is not only the performance plan's first slice; it gates
-Phases 22-25. Strabo exists to make large unfamiliar codebases legible, and it has so far
-met fixtures and itself. Before Phase 22 lands, P1 runs on at least one operator-supplied
-repository of 20k-50k files, cold and warm, and records where time goes (walk, read, parse,
-extract, resolve, metrics, analysis, **git history**) and whether the first paint of the
-passport, System view, and a Files-mode filter stays usable. If a number is bad, P2-P5 come
-before Phase 22. Phases 23 and 25 add git passes of their own, so the gate times git mining
-too, not only the scan.
+**The gate (Phase 21 G4).** P1 is not only the performance plan's first slice; it gates the
+delivery phases of the next evolution. Strabo exists to make large unfamiliar codebases
+legible, and it has so far met fixtures and itself. Before Phase 24 lands, P1 runs on at
+least one operator-supplied repository of 20k-50k files, cold and warm, and records where
+time goes (walk, read, parse, extract, resolve, metrics, analysis, **git history**) and
+whether the first paint of the passport, System view, and a Files-mode filter stays usable.
+If a number is bad, P2-P5 come before Phase 24. Phase 23's revision graphs and Phase 25's
+co-change mining add git passes of their own, so the gate times git mining too, not only the
+scan.
 
 ## Phase 19 - Branches
 
@@ -1306,13 +1311,14 @@ reopens the last one.
 
 Spec: `test/acceptance/features/repository-map.feature` (scenario `@repository`).
 
-## Phase 21 - Interoperability: exports, headless checks, and the agent surface
+## Interoperability: exports, headless checks, and the agent surface (landed)
 
-Strabo's facts are already computed; they are just trapped behind a browser at the
-server's origin. Three consumers want the same facts without a human opening the map:
-CI, other tools, and coding agents. This phase turns the existing router into a stable
-headless contract and adds a portable export, rather than building new analysis. Every
-output stays evidence-bounded: an export carries what the scan recorded, an agent tool
+This shipped as phase 21 of the earlier plan and is kept here as the record of the landed
+interoperability surface. Strabo's facts are already computed; they were trapped behind a
+browser at the server's origin. Three consumers wanted the same facts without a human
+opening the map: CI, other tools, and coding agents. It turned the existing router into a
+stable headless contract and added a portable export, rather than building new analysis.
+Every output stays evidence-bounded: an export carries what the scan recorded, an agent tool
 answers `unavailable` where a fact was not recorded, and the CLI fails a build only on a
 rule the operator explicitly asked for.
 
@@ -1408,127 +1414,253 @@ baselined; `GET /export?format=json` round-trips to the graph contract; an MCP c
 `get_dependency_path` and receives the same evidence as `GET /analysis/impact`. Spec:
 `test/acceptance/features/interoperability.feature`.
 
-### Agent surface follow-up (I9-I12)
+The MCP follow-up that was tracked here (tool aliases, bounded results, edge evidence,
+`docs/MCP.md`) is now Phase 24, which supersedes these notes with landed states.
 
-Phase 21 already ships the MCP server (`strabo mcp`, `src/mcp/server.ts`,
-`src/mcp/tools.ts`) with `get_overview`, `get_context`, `get_dependency_path`, `get_impact`,
-`get_risk`, `get_change_risk`, `get_cycles`, `get_smells`, `get_tier`, and `get_dead_code`.
-The next evolution's "serve agents over MCP" is therefore this follow-up, not a new phase.
+## Phase 21 - Gate: verification, provenance, benchmark
 
-- **I9 - Tool aliases.** Add `strabo_passport`, `strabo_file`, `strabo_impact`,
-  `strabo_review`, and `strabo_path` as aliases of the existing tools, so an agent prompt can
-  name what it asks for. The existing names are never renamed; a client that uses them keeps
-  working.
-- **I10 - Bounded, paged results.** `toResult` (`src/mcp/tools.ts`) returns
-  `JSON.stringify(body)` for the whole analysis, so a passport on a large repository hands an
-  agent one unbounded string. Cap every tool result, page the lists, and make a truncated list
-  say it was truncated rather than look complete.
-- **I11 - Evidence on every edge.** `strabo_file`, `strabo_impact`, and `strabo_path` carry
-  the import line (and, from Phase 23, the co-change commits) behind each edge, not only the
-  target path.
-- **I12 - `docs/MCP.md`.** A config snippet for Claude Code and opencode, the read-only
-  boundary, and the `unavailable` contract.
+Finish the release-readiness work that already exists instead of starting a new initiative.
 
-Acceptance: an MCP client test drives each tool against the fixtures and asserts that every
-edge it returns carries evidence and that an oversized list names its truncation.
+- **G1 - One green suite.** *Partial.* `.github/workflows/ci.yml` runs `npm ci`, `npm run
+  typecheck`, `npm test`, `npm run build`, and `npm run test:pack` on every push and pull
+  request. Acceptance is a separate `continue-on-error` job, so it does not yet gate; make it
+  required once it is stable.
+- **G2 - Clean-tarball proof.** *Partial.* `test:pack` (`scripts/verify-package.mjs`) packs a
+  real tarball, installs it in a clean consumer, starts the shipped server entry
+  (`/health`), and runs `strabo report` from the installed package (`scripts/verify-package.mjs:35-145`).
+  The installed package now scans and resolves Java and Python; the extraction checklist's
+  "one scan per supported language" is not yet met for the other seven.
+- **G3 - Provenance.** *Partial.* `docs/PROVENANCE.md` audits the runtime dependencies, dev
+  dependencies, vendored grammar `.wasm` files, and binary assets, and states the MIT question.
+  Its "Pending human sign-off" table is intentionally blank; a person must confirm before the
+  repository is published.
+- **G4 - Benchmark (Phase 18 P1).** *Partial.* `scripts/bench.mjs` (`npm run bench`) reports
+  walk, read, parse, extract, resolve, metrics, analysis, and history cold, with history also
+  warm (`scripts/bench.mjs:39,146-195`), and now first paint of the passport and System view,
+  cold and warm; `--out` (or `STRABO_BENCH_OUT`) writes a result under `docs/bench/`, whose
+  format `docs/bench/README.md` documents. No 20k-50k-file operator repository was available,
+  so no result is committed. If a number is unusable, Phase 18 P2-P5 precede Phase 24.
 
-## Phase 22 - Reading route
+Acceptance: CI green on main; `docs/PROVENANCE.md` exists (sign-off pending); the benchmark
+result is committed under `docs/bench/` (not yet run on an operator repository).
 
-The deliverable an hour of onboarding actually needs: an ordered list of what to read.
-Everything it needs is already recorded (`src/scan/entry-points.ts`, `src/analysis/depth.ts`,
-fan-in from `computeGraphMetrics`, tiers, units); this phase assembles it.
+## Phase 22 - Correctness and trust
 
-- **W1 - `GET /analysis/route`.** A topological walk outward from the detected entry points,
-  breadth-limited per layer, each file with why it is here (reached from X at depth n,
-  required by k files, tier, unit). Files no entry point reaches are listed separately, not
-  forced into the order.
-- **W2 - Honour the System view.** One route per unit when the repository has several, and a
-  unit-level summary before its files.
-- **W3 - Route panel.** Opened from the passport, steps through the files and focuses each on
-  the map; progress is remembered per repository in localStorage.
-- **W4 - Narrator tour (opt-in).** The passport plus the route become the evidence for a
-  five-to-seven paragraph guided tour, under the existing model-generated-narrative label.
+Numbers on screen that claim more than the evidence proves, or contradict each other.
+Several items already landed in part; each entry names what remains.
 
-Acceptance: on the polyglot fixture the route starts at every declared entry point and no
-file appears before a file that imports it within the same unit.
+- **T1 - Re-exports keep dependency paths.** *Done.* Relationship kinds are explicit —
+  `import`, `re-export`, `module-declaration` (Rust `mod`), and `executable-module` (Python)
+  (`src/types.ts:37,93`, `src/analysis/analysis.ts:16`) — and a barrel `index.ts` re-export is
+  recorded as a `re-export`, not a bare `declare` (`src/scan/scan-js.ts:60`,
+  `src/scan/languages/rust.ts:428`, `src/scan/languages/python.ts:382`). Impact and blast
+  radius traverse re-exports (`buildAdjacency` `includeReExports`); direct fan-in/fan-out still
+  exclude a barrel, and the passport says which (`countsIncludeReExports`).
+  Acceptance: A → index.ts ⇢ B lists A at distance 2 (`test/unit/re-export-impact.test.ts`).
+- **T2 - One meaning per count.** *Partial.* A unit test asserts `blastRadius >=
+  directImporters` for every node of every fixture (`test/unit/impact-passport.test.ts`), and
+  "Direct importers" and "Direct imports" are separate cells (`ui/strabo-impact.js`). The
+  symbol-reference row renders only when the data records a count; no backend exposes one yet,
+  so it stays absent rather than invented. Where a count excludes tests, both say so.
+- **T3 - Recorded reference, not definite impact.** *Done.* The user-facing labels read
+  "recorded reference to a changed symbol" (`src/analysis/change-passport.ts`,
+  `src/analysis/review-types.ts`); "definite" survives only as an internal identifier and is
+  never rendered. Evidence of connection is not evidence of a behavioural break.
+- **T4 - Signals before scores.** *Done.* Change risk is contributing signals — lines touched,
+  touched complexity, recorded references, untested share — each with value and threshold, plus
+  an optional additive 0-100 score shown only with its components
+  (`src/analysis/change-passport.ts`, `src/analysis/signals.ts` `CHANGE_RISK_THRESHOLDS`). One
+  zero factor no longer erases significant risk.
+- **T5 - Generated output out of every view.** *Done.* Generated directories and markers and
+  lockfiles are classified and dropped from change views (`src/scan/exclusions.ts:63`,
+  `src/analysis/review.ts`), and each dropped path is named in the review's `excluded` list.
+  Acceptance: a commit that only rebuilds `public/app.bundle.js` yields an empty review with
+  the exclusion named, as does a lockfile-only commit (`test/unit/review.test.ts`).
+- **T6 - Freshness on every figure.** *Done.* `graphProvenance` — fingerprint, scan time, and
+  staleness against the working tree — is attached to the repository passport, impact passport,
+  change passport, and review at the route layer (`src/api/routes/analysis.ts`, reusing
+  `computeFreshness`), carried by the CLI report (`src/cli/report.ts`), and drawn on each
+  passport and the edge-evidence overlay (`ui/strabo-panel-*.js`).
 
-## Phase 23 - Change coupling
+## Phase 23 - Revision-aware change review
 
-`src/analysis/history.ts` already computes a co-change map in one bounded git pass. Its
-*share* is drawn: `hiddenCouplingShare` and the `hidden-coupling` / `shotgun-surgery` smells
-(`src/analysis/quality.ts`, `/analysis/smells`). Its *edges* are not. Draw them.
+The change passport computes impact on the current graph and compares with HEAD. Make the
+comparison honest.
 
-- **K1 - A co-change edge kind.** Between files that changed together in at least n commits
-  with a coupling ratio above a threshold (both configurable, conservative defaults). Mass
-  commits already excluded by `history.ts` stay excluded, and the report names them.
-- **K2 - Evidence is the commits.** Hash, date, subject. An edge with no listable commits is
-  not drawn. `history.ts` today keeps only `coChange: Map<string, Set<string>>` with no date
-  or subject (`--format=%x1e%H%x1f%an`), so this slice grows the record to a per-pair commit
-  list and must budget its memory on a 50k-file repository.
-- **K3 - Hidden coupling.** A co-change edge where no import path connects the two files in
-  either direction — the config/consumer, migration/query, and schema/serializer pairs an
-  import graph cannot show. Reported as a review overlay.
-- **K4 - Map and passport.** The Module Passport gains a **Changes with** section; the map
-  draws co-change edges in a distinct dashed style, off by default.
+- **R1 - Graphs per revision.** *Done.* The base graph is built from committed blobs via
+  `git show <rev>:<path>` (`src/analysis/structural-diff.ts`; the temp worktree is gone) and
+  cached by resolved commit sha: an in-memory LRU in front of an on-disk store under
+  `cacheRoot()` (`REVISION_GRAPH_VERSION`, atomic writes, malformed or version-mismatched
+  entries ignored and rebuilt). Acceptance: the same revision is served from cache and a
+  changed revision gets a distinct key (`test/unit/revision-graph.test.ts`).
+- **R2 - Comparisons named by kind.** *Done.* The review result union names
+  `commit | working-tree | branch` (`src/analysis/review.ts:32`); a commit review uses
+  `--first-parent` (`src/analysis/review.ts:88`), a branch review is `merge-base..tip`
+  (`src/analysis/branches.ts:157,167-168`), and the panel titles each
+  (`ui/strabo-panel-review.js:149-154`). A generic two-revision review is served only by
+  range metrics / structural diff.
+- **R3 - Function and graph deltas.** *Done.* Functions added, removed, and changed carry both
+  sides' metrics and signals, and edges added and removed come from the two-graph structural
+  diff (`src/analysis/change-passport.ts`, `src/analysis/change-metrics.ts`). Acceptance: a
+  commit that removes an import shows the edge removed and does not list the former importer as
+  affected (`test/unit/change-passport.test.ts`).
+- **R4 - Approximations labelled.** *Done.* Impact cells read from the current graph are
+  labelled *approximation: current graph*, with a stale note where applicable
+  (`ui/strabo-impact.js`).
+
+Acceptance: a fixture where a commit removes an import; the commit review shows the edge
+removed and does not list the former importer as affected.
+
+## Phase 24 - Serve agents over MCP
+
+Expose recorded facts to coding agents, so an agent can ask what a file reaches before it
+edits. This supersedes the earlier interoperability phase's MCP follow-up.
+
+- **S1 - `strabo mcp [path]`.** *Done.* Stdio JSON-RPC over the same scanner, cache, and
+  `resolveRepositoryRoot` boundary (`src/cli.ts:54,68-72`, `src/mcp/server.ts:100-129`).
+  Read-only: only `initialize`, `ping`, `tools/list`, and `tools/call` are answered
+  (`src/mcp/server.ts:39-63`). No network listener.
+- **S2 - Tools returning evidence, never prose.** *Done.* `strabo_passport`, `strabo_file`,
+  `strabo_impact`, `strabo_review`, and `strabo_path` are aliases of the canonical tools
+  (`src/mcp/tools.ts:47-53`); `strabo_file` returns imports, importers, reach, owners, the
+  source line + specifier behind each edge, and now tier and unit composed from the canonical
+  tier lens, with `tierUnavailable` in the `unavailable` contract; `strabo_impact` attaches
+  tier/unit to each affected entry (`src/mcp/tools.ts`, `docs/MCP.md`).
+- **S3 - Bounded, paged results.** *Done.* Lists page at 50 (max 500) with `truncated`,
+  `listsTruncated`, and a per-list `path/shown/total/omitted/nextOffset`; an over-cap body is
+  replaced by a marker naming the cap (`src/mcp/tools.ts:16-23,108-191`).
+- **S4 - `docs/MCP.md`.** *Done.* Config for Claude Code and opencode, the read-only
+  boundary, and the `unavailable` contract (`docs/MCP.md`).
+
+Delegate stays, but MCP becomes the cross-platform way agents consume Strabo.
+
+## Phase 25 - Change coupling
+
+`src/analysis/history.ts` builds a co-change map in one bounded git pass. Its *share* is
+drawn by the `hidden-coupling` / `shotgun-surgery` smells (`src/analysis/quality.ts`,
+`/analysis/smells`); its *edges* now are too. Landed.
+
+- **K1 - A co-change edge.** *Done.* Between files that changed together in at least n
+  commits above a coupling ratio (configurable, conservative defaults)
+  (`src/analysis/co-change.ts:17-29,82-131`); mass commits stay excluded and are named
+  (`src/analysis/history.ts:266-271`, `src/analysis/co-change.ts:46-49`). Served at
+  `GET /analysis/co-change` (`src/api/routes/analysis.ts:677-693`).
+- **K2 - Evidence is the commits.** *Done.* A per-pair commit list of hash, date, and subject
+  is kept with a memory budget (`src/analysis/history.ts:38-55,85-94,208-235`); a pair with
+  no listable commits is not drawn (`src/analysis/co-change.ts:118-122`).
+- **K3 - Hidden coupling.** *Done.* A co-change pair with no transitive import path in either
+  direction is detected (`src/analysis/co-change.ts:104-108,139`) and flagged `hidden` on the
+  map and in the passport list (`ui/strabo-graph.js:527`,
+  `ui/strabo-panel-inspector.js:345-349`), and a dedicated hidden-coupling overlay draws those
+  pairs in a distinct style, off by default (`ui/strabo-overlays.js`,
+  `ui/strabo-panel-overlay.js`).
+- **K4 - Map and passport.** *Done.* The Module Passport gains a **Changes with** section
+  (`ui/strabo-panel-inspector.js:240-252,308-369`); the map draws co-change edges in a
+  distinct dashed style, off by default (`ui/strabo-stylesheet.js:95-98`,
+  `ui/strabo.js:100-101,2422-2460`). The map-lens half has no unit test.
 
 Acceptance: a fixture repository with scripted history, where a config file and its reader
 share commits without an import, surfaces exactly that pair as hidden coupling.
 
-## Phase 24 - Headless report and structural diff
+## Phase 26 - Headless report and structural diff
 
 Everything the Review panel shows, without a browser, focused on what changed in the
 architecture rather than in the text. Builds on `strabo check` (`src/check/check.ts`,
-`src/cli/check.ts`) rather than adding a fourth CLI.
+`src/cli/check.ts`) rather than adding a fourth CLI. Landed.
 
-- **X1 - Structural diff between two revisions.** Dependency edges added and removed, cycles
-  introduced and resolved, wrong-way tier edges added, entry points added, newly unreached
-  files, computed from the two graphs, not the text diff. This completes the Phase 17 pending
-  item "structural deltas" and reconciles with it rather than re-deriving it. A second full
-  graph at `base` does not exist today (the cache is keyed by one fingerprint), so the slice
-  names and budgets that cost.
-- **X2 - `strabo report [path] --base <ref> [--format md|json]`.** Changed files, reach,
-  structural diff, untested reach, hotspots touched. Markdown fits a PR description; JSON is
-  the same document for tooling.
-- **X3 - `--fail-on cycle,tier` for CI.** A comma-separated rule set extending the existing
-  `--fail-on-*` flags; a non-zero exit only for the conditions named, never by default.
-- **X4 - Review panel Structure tab.** Renders X1, so the browser and the report say the same
-  thing.
+- **X1 - Structural diff between two revisions.** *Done.* Dependency edges added and removed,
+  cycles introduced and resolved, wrong-way tier edges added, entry points added, and newly
+  unreached files, all computed from the two graphs, not the text diff
+  (`src/analysis/structural-diff.ts:57-170`), with the base graph built from committed blobs
+  and cached by commit (Phase 23 R1) and served at `GET /analysis/structural-diff`
+  (`src/api/routes/analysis.ts:120-139`). This completes the Phase 17 pending item
+  "structural deltas".
+- **X2 - `strabo report [path] --base <ref> [--format md|json]`.** *Done.* Changed files,
+  reach, structural diff, untested reach, and hotspots touched, as Markdown or JSON
+  (`src/cli/report.ts:62-143,183-241`); `test:pack` runs it from the installed tarball
+  against a fixture commit that adds a cycle (`scripts/verify-package.mjs:143-145`).
+- **X3 - `--fail-on cycle,tier` for CI.** *Done.* A comma-separated rule set extending the
+  existing `--fail-on-*` flags, with `cycle→cycles` and `tier→layer-violations` aliases
+  (`src/check/check.ts:25-54`, `src/cli/report.ts:138-159`); a non-zero exit only for the
+  conditions named, never by default. CI runs it through `test:pack` (Phase 21 G1).
+- **X4 - Review panel Structure tab.** *Done.* `renderStructuralDiff` renders X1 as a
+  **Structure** section in the review panel (`ui/strabo-panel-review.js:98-134,268-269`), so
+  the browser and the report agree. It is a section, not a tab control.
 
 Acceptance: `test:pack` runs `strabo report` from the installed tarball against a fixture
 commit that adds a cycle, and the Markdown names that cycle.
 
-## Phase 25 - Measured coverage
+## Phase 27 - Measured coverage
 
-Test reach today is graph reachability (`src/analysis/coverage.ts`, whose own comment says
-so): a file counts as reached if some test imports its way there. That overstates coverage.
-Where the repository already has measured coverage, use it.
+Test reach is graph reachability (`src/analysis/coverage.ts`): a file counts as reached if
+some test imports its way there, which overstates coverage. Where the repository already has
+measured coverage, Strabo uses it. Landed.
 
-- **V1 - Read existing reports only, never run tests.** `lcov.info`, Cobertura XML, and
-  JaCoCo XML. Paths are mapped through the scan ceiling; a path outside the graph is reported,
-  not dropped silently.
-- **V2 - Per-file and per-function line coverage** where the report records it, attached to
-  the Functions tab and the Function hotspots overlay.
-- **V3 - Report age** next to every number; a report older than HEAD's last change to the file
-  is marked stale. Per-file last-commit dates are not in the current bounded history window
-  (`DEFAULT_WINDOW_DAYS` 90, `DEFAULT_MAX_COMMITS` 2000), so the slice names how it gets them.
-- **V4 - Static reach stays the fallback**, and every coverage figure says which it is:
-  measured or reachable. Architecture health's coverage axis uses measured when available and
-  says so.
+- **V1 - Read existing reports only, never run tests.** *Done.* `lcov.info`, Cobertura XML,
+  and JaCoCo XML are parsed (`src/analysis/measured-coverage.ts:174-544`) and auto-located
+  from a bounded candidate list, within the ceiling
+  (`src/analysis/measured-coverage.ts:150-161,624-772`).
+- **V2 - Per-file and per-function line coverage.** *Done.* Attached to the Functions tab and
+  the Function hotspots overlay (`src/api/routes/symbols.ts:61-91`,
+  `ui/strabo-panel-functions.js:72-76,411-416`, `ui/strabo-overlays.js:245-267`).
+- **V3 - Report age beside every figure.** *Done.* Age and stale-versus-the-file's-last-change
+  are computed, the last commit read with a capped `git log -1`
+  (`src/analysis/measured-coverage.ts:651-653,684-687,828-852`).
+- **V4 - Measured versus reachable.** *Done.* Every coverage figure carries its basis, and
+  the health coverage axis uses measured when present and says so
+  (`src/analysis/health.ts:83-113`, `src/analysis/file-health.ts:110-162`).
 
 Acceptance: a fixture with an `lcov.info` where a file is imported by a test but has zero
 covered lines shows reachable yet measured 0%.
 
-### Not in this plan
+## Reading route (landed)
 
-New languages (take the existing nine deeper first). More member-map visuals. A hosted or
-multi-user mode. Runtime tracing (OpenTelemetry): a real signal, but it needs a running
-system, and that is a different product.
+This was phase 22 of the earlier plan; W1-W4 have shipped. The deliverable an hour
+of onboarding needs: an ordered list of what to read, assembled from recorded facts.
+
+- **W1 - `GET /analysis/route`.** *Done.* A breadth-limited outward walk from the detected
+  entry points over recorded `use` edges, each file with why it is here (reached from X at
+  depth n, fan-in, tier, unit); files no entry point reaches are listed separately, never
+  forced into the order (`src/analysis/route.ts`, `src/api/routes/analysis.ts:265`).
+- **W2 - Honour the System view.** *Done.* One route per unit, with a unit-level summary
+  before its files (`src/analysis/route.ts:60-102`).
+- **W3 - Route panel.** *Done.* Steps through the files and focuses each on the map, with
+  progress remembered per repository in localStorage (`ui/strabo-route.js`). A failed route
+  load names the failure and offers Retry, rather than reporting an absent route.
+- **W4 - Narrator tour.** *Done.* `POST /narrator/tour` builds the tour from the recorded
+  passport and route (`src/narrator/tour.ts`), and the route panel renders the reply inline
+  under the shared attribution, with a per-step narration control. The narrator stays opt-in,
+  and the tour never changes the route or the map.
+
+Acceptance: on the polyglot fixture the route starts at every declared entry point and no
+file appears before a file that imports it within the same unit (`test/unit/route.test.ts`).
+
+### Removed or frozen
+
+- **Git push / sync / publish (Phase 19 B2) — removed.** Every other part of Strabo only
+  reads; Git and the operator's existing workflow own state changes. The actions are still in
+  the tree, so removing them is open work; branch listing and branch review stay.
+- **Live database migration probes — not pursued.** Static contract and schema compatibility
+  (Phase 20) is the extension; the live read-only probe (D5) stays as a labelled experiment
+  and gets no follow-on.
+- **Narrator and member-map presentation — freeze lifted with Phase 22.** The reading route
+  landed, so the route's narrator tour (W4) shipped; the narrator keeps working over corrected
+  evidence, and further narrative features follow the same evidence-first rule.
+- **New languages — none until the existing nine pass Phase 22's acceptance.**
+- **Colour budget.** The eight tier hues conflict with the Phase 13 budget rules; resolve in
+  the rules, not by exception, before any new colour is added.
+- **Out of scope, restated:** hosted or multi-user mode, and runtime tracing
+  (OpenTelemetry) — a real signal, but it needs a running system, and that is a different
+  product.
 
 ### Working agreement for these phases
 
-- One slice per commit, subject naming the slice id (`W1: add GET /analysis/route`).
-- Every phase's first commit is its acceptance scenario, failing.
-- Before a phase is marked done, run Strabo's own review on the phase's range and read it.
+- One slice per commit; the subject names the slice (`T2: blast radius covers importers`).
+- A phase's first commit is its acceptance scenario, failing.
+- A section is marked Done only when its acceptance runs in CI. Known gaps stay listed under
+  the section as Open, not folded into Done.
+- Before a phase is marked done, run Strabo's own review on the phase's commit range and read
+  it.
 
 ## Out of concept
 

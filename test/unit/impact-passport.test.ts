@@ -4,11 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
+  buildAdjacency,
   buildFileImpactPassport,
   computeFileImpactPassport,
+  computeGraphMetrics,
   computeRisk,
+  fingerprint,
   functionFacts,
   riskBandFor,
   rollUpImpactPassports,
@@ -16,6 +20,27 @@ import {
   symbolExtractorFor,
 } from '../../src/index.ts';
 import type { FileImpactPassport, Graph } from '../../src/index.ts';
+import { snapshotFor } from '../../src/analysis/impact-passport.ts';
+import { graphProvenance } from '../../src/api/routes/analysis.ts';
+
+const fixturesRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
+
+/**
+ * The passport records `blastRadius` as the transitive dependents over the same adjacency
+ * it counts `directImporters` from, so the former can never be the smaller of the two.
+ * Assert that for every node, not a hand-picked one.
+ */
+function assertBlastRadiusCoversImporters(graph: Graph, label: string): void {
+  const { forward, backward } = buildAdjacency(graph, { includeReExports: true });
+  const { transitiveDependents } = computeGraphMetrics(graph, { forward, backward });
+  for (const node of graph.nodes) {
+    const snapshot = snapshotFor(node.id, forward, backward, transitiveDependents);
+    assert.ok(
+      snapshot.blastRadius >= snapshot.directImporters,
+      `${label}: ${node.id} records blastRadius ${snapshot.blastRadius} but directImporters ${snapshot.directImporters}`,
+    );
+  }
+}
 
 const created: string[] = [];
 
@@ -268,4 +293,58 @@ test('computeFileImpactPassport reports the current snapshot against HEAD', asyn
   assert.equal(card.mostComplex[0]?.name, 'save');
   assert.equal(card.mostComplex[0]?.delta, 1);
   assert.ok(card.coherence && card.coherence.changedSymbols >= 1);
+});
+
+test('graphProvenance carries fingerprint, scan time, and a working-tree staleness check', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+
+  const report = await scanRepository(root);
+  const indexed = await fingerprint(root);
+  const fresh = await graphProvenance(root, { fingerprint: indexed, report });
+  assert.equal(fresh.fingerprint, indexed);
+  assert.equal(fresh.revision, indexed?.split(':')[0] ?? null);
+  assert.equal(fresh.scannedAt, report.scannedAt);
+  assert.equal(fresh.currentFingerprint, indexed);
+  assert.equal(fresh.stale, false);
+  assert.equal(fresh.behind, 0);
+
+  // An edit after the scan makes the same served graph older than the working tree.
+  fs.appendFileSync(path.join(root, 'a.ts'), '// edit\n');
+  const stale = await graphProvenance(root, { fingerprint: indexed, report });
+  assert.equal(stale.stale, true, 'the served graph is older than the working tree');
+  assert.notEqual(stale.currentFingerprint, indexed);
+});
+
+test('blast radius covers direct importers for every node of every fixture', async () => {
+  const names = fs
+    .readdirSync(fixturesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.ok(names.length > 0, 'the shared fixture directory holds repositories to scan');
+  for (const name of names) {
+    const report = await scanRepository(path.join(fixturesRoot, name));
+    assertBlastRadiusCoversImporters(report.graph, name);
+  }
+
+  // The hand-built graphs the passport tests draw, including a re-export barrel: impact
+  // traversal follows it, so the barrel and its importer both fall inside the blast radius.
+  const inline: Graph = {
+    nodes: [
+      { id: 'a.ts', kind: 'module', directory: '.' },
+      { id: 'index.ts', kind: 'module', directory: '.' },
+      { id: 'b.ts', kind: 'module', directory: '.' },
+    ],
+    edges: [
+      { source: 'a.ts', target: 'index.ts', kind: 'import', evidence: { line: 1, specifier: './index', resolution: 'exact' } },
+      { source: 'index.ts', target: 'b.ts', kind: 're-export', role: 'declare', evidence: { line: 1, specifier: './b', resolution: 'exact' } },
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+  assertBlastRadiusCoversImporters(inline, 'inline re-export graph');
 });

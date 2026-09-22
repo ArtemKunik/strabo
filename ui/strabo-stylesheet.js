@@ -84,6 +84,9 @@ export function stylesheet() {
     { selector: 'node.tier-skip', style: { 'border-width': 3, 'border-style': 'dashed', 'border-color': theme.affected, 'background-opacity': 1 } },
     // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
     { selector: 'node.ov-smell', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.affected, 'background-opacity': 1 } },
+    // Hidden coupling is a co-change pair with no import path: the status serious ring marks
+    // the endpoints, and the distinct edge below carries the relationship (K3).
+    { selector: 'node.ov-hidden-coupling', style: { 'border-width': 3, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
@@ -96,6 +99,10 @@ export function stylesheet() {
     // reading survives next to an import, and hidden until the off-by-default lens is on.
     { selector: 'edge[kind = "co-change"]', style: { 'line-style': 'dashed', opacity: 0.85 } },
     { selector: 'edge.edge-cochange-hidden', style: { display: 'none' } },
+    // Hidden coupling is drawn distinctly: bigger dashes in the cycle status hue, so the
+    // no-import-path relationship reads apart from the general co-change lens (K3).
+    { selector: 'edge[kind = "hidden-coupling"]', style: { 'line-style': 'dashed', 'line-dash-pattern': [10, 6], width: 2.4, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 0.95 } },
+    { selector: 'edge.edge-hidden-coupling-hidden', style: { display: 'none' } },
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { 'line-style': 'dashed' } },

@@ -39,12 +39,33 @@ import { collectHistory } from '../../analysis/history.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
-import { revisionFromFingerprint } from '../../status.ts';
+import { getCachedGraph, type CachedGraph } from '../../cache/graph-cache.ts';
+import { computeFreshness, revisionFromFingerprint } from '../../status.ts';
+import type { GraphProvenance } from '../../analysis/review-types.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import type { Graph, StraboConfig } from '../../types.ts';
 import { parseBoolean, parsePositiveInt, isSameOriginRequest, sendError } from '../http.ts';
+
+/**
+ * The graph fingerprint and scan time behind a served passport, plus a staleness comparison
+ * against the working tree now. Reuses `computeFreshness`, so a passport reads the same
+ * revision, behind count, and stale flag the global freshness badge shows.
+ */
+export async function graphProvenance(
+  root: string,
+  cached: Pick<CachedGraph, 'fingerprint' | 'report'>,
+): Promise<GraphProvenance> {
+  const freshness = await computeFreshness(root, cached.fingerprint, cached.report.scannedAt);
+  return {
+    fingerprint: cached.fingerprint,
+    revision: revisionFromFingerprint(cached.fingerprint),
+    scannedAt: cached.report.scannedAt,
+    currentFingerprint: freshness.current.fingerprint,
+    behind: freshness.behind,
+    stale: freshness.stale,
+  };
+}
 
 /** Review-focused analyses. All of them inherit the scanner's scope. */
 export function createAnalysisRouter(config: StraboConfig): Router {
@@ -207,14 +228,15 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       const limit = parsePositiveInt(request.query.limit, 10) ?? 10;
-      response.json(
-        computeRepositoryPassport(
+      response.json({
+        ...computeRepositoryPassport(
           repository.name,
           cached.report.graph,
           cached.report.extensionCounts,
           limit,
         ),
-      );
+        provenance: await graphProvenance(repository.root, cached),
+      });
     } catch (error) {
       sendError(response, error);
     }
@@ -514,6 +536,16 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
+      // The base-vs-head edge diff, from the two scanned graphs. Reused by the passport so
+      // its per-file edge deltas and the panel's structural diff read the same base graph.
+      const structuralEdges = async (baseRevision: string) => {
+        const structural = await computeStructuralDiff(repository.root, baseRevision, {
+          headGraph: cached.report.graph,
+          headRevision: revisionFromFingerprint(cached.fingerprint),
+          repository: repository.name,
+        });
+        return structural.available ? structural.diff : undefined;
+      };
       const branch = typeof request.query.branch === 'string' ? request.query.branch : '';
       if (branch) {
         const against = typeof request.query.against === 'string' && request.query.against ? request.query.against : undefined;
@@ -524,23 +556,29 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         }
         // The passport reads the after side from the working tree, so it is only honest
         // when the branch is what is checked out.
+        const edges = review.branch.checkedOut ? await structuralEdges(review.branch.mergeBase) : undefined;
         const cohesion = review.branch.checkedOut
-          ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph)
+          ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph, edges)
           : undefined;
         const metrics = await computeRangeMetrics(repository.root, review.branch.mergeBase, review.branch.tipHash);
+        const provenance = await graphProvenance(repository.root, cached);
         response.json({
           ...review,
           ...(cohesion ? { cohesion } : {}),
           metrics,
+          provenance,
           ...(cohesion
             ? {
-                impactPassport: rollUpImpactPassports(
-                  cached.report.graph,
-                  cohesion.files.map((change) => change.impactPassport),
-                  'revision',
-                  cohesion.baseline,
-                  cohesion.capped,
-                ),
+                impactPassport: {
+                  ...rollUpImpactPassports(
+                    cached.report.graph,
+                    cohesion.files.map((change) => change.impactPassport),
+                    'revision',
+                    cohesion.baseline,
+                    cohesion.capped,
+                  ),
+                  provenance,
+                },
               }
             : {}),
         });
@@ -557,18 +595,23 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       // The baseline matches the review's own comparison: HEAD for the working tree, and
       // the first parent for a commit (which `^` names for a merge and fails on the root).
       const baseline = base ? `${base}^` : 'HEAD';
-      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph);
+      const edges = await structuralEdges(baseline);
+      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph, edges);
       const metrics = base
         ? await computeCommitMetrics(repository.root, base)
         : await computeWorkingTreeMetrics(repository.root, review.files);
-      const impactPassport = rollUpImpactPassports(
-        cached.report.graph,
-        cohesion.files.map((change) => change.impactPassport),
-        'change-set',
-        cohesion.baseline,
-        cohesion.capped,
-      );
-      response.json({ ...review, cohesion, metrics, impactPassport });
+      const provenance = await graphProvenance(repository.root, cached);
+      const impactPassport = {
+        ...rollUpImpactPassports(
+          cached.report.graph,
+          cohesion.files.map((change) => change.impactPassport),
+          'change-set',
+          cohesion.baseline,
+          cohesion.capped,
+        ),
+        provenance,
+      };
+      response.json({ ...review, cohesion, metrics, impactPassport, provenance });
     } catch (error) {
       sendError(response, error);
     }
@@ -588,7 +631,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         return;
       }
       const cached = await getCachedGraph(repository.root);
-      response.json(await computeFileImpactPassport(repository.root, cached.report.graph, file));
+      response.json({
+        ...(await computeFileImpactPassport(repository.root, cached.report.graph, file)),
+        provenance: await graphProvenance(repository.root, cached),
+      });
     } catch (error) {
       sendError(response, error);
     }

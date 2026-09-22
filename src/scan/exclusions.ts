@@ -53,6 +53,52 @@ export function classifyExclusion(relativePath: string): Exclusion | null {
   return null;
 }
 
+/**
+ * Dependency lockfiles: generated, high-volume, and rarely a review's subject.
+ *
+ * Kept apart from `classifyExclusion` on purpose. A lockfile is a legitimate input elsewhere
+ * (dependency inventory reads it), so the scanner must still see it; only the change-oriented
+ * views — review, the change passport, and the impact lists — drop it.
+ */
+const LOCKFILES = new Set([
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'bun.lock',
+  'bun.lockb',
+  'Cargo.lock',
+  'poetry.lock',
+  'Pipfile.lock',
+  'uv.lock',
+  'composer.lock',
+  'Gemfile.lock',
+  'go.sum',
+  'mix.lock',
+  'pubspec.lock',
+  'packages.lock.json',
+  'Podfile.lock',
+  'gradle.lockfile',
+  'flake.lock',
+  'paket.lock',
+]);
+
+/** Decide whether a path is a lockfile, and why. Returns null when it is retained. */
+export function classifyLockfile(relativePath: string): Exclusion | null {
+  const file = relativePath.split('/').at(-1) ?? relativePath;
+  return LOCKFILES.has(file) ? { path: relativePath, reason: 'lockfile', detail: file } : null;
+}
+
+/**
+ * The exclusion applied to change-oriented views: generated output first, then lockfiles.
+ *
+ * Narrower than the scanner's own `classifyExclusion` by design, so lockfiles stay visible to
+ * dependency analysis while never reaching a review, passport, or impact list.
+ */
+export function classifyViewExclusion(relativePath: string): Exclusion | null {
+  return classifyExclusion(relativePath) ?? classifyLockfile(relativePath);
+}
+
 /** Why a directory was pruned, and the marker that matched it. */
 export interface DirectoryExclusion {
   reason: Exclusion['reason'];

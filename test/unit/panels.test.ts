@@ -20,8 +20,11 @@ globalThis.ResizeObserver = class {
 };
 
 const {
+  evidenceProvenanceText,
+  passportProvenanceText,
   renderChangesWith,
   renderDiagnostics,
+  renderEdgeEvidence,
   renderFolderList,
   renderFunctions,
   renderImpactPassport,
@@ -31,6 +34,7 @@ const {
   renderNarrationPanel,
   renderNarrativeReply,
   renderOverlayPanel,
+  renderRepositoryPassport,
   renderReview,
   renderShortcuts,
   renderSource,
@@ -41,6 +45,8 @@ const {
   structuralTierEdgeLabel,
 } = await import('../../ui/strabo-panels.js');
 const { createVirtualList } = await import('../../ui/strabo-virtual.js');
+const { hiddenCouplingOverlay, overlayFor } = await import('../../ui/strabo-overlays.js');
+const { buildHiddenCouplingElements } = await import('../../ui/strabo-graph.js');
 
 const container = () => document.createElement('div');
 
@@ -599,7 +605,9 @@ test('renderImpactPassport renders the file card with its cells, signals, and fu
   assert.equal(target.querySelector('[data-role="impact-max-complexity"] .impact-cell-value').textContent, 'C35');
   assert.match(target.querySelector('[data-role="impact-max-complexity"] .impact-cell-detail').textContent, /grown \+C3/);
   assert.equal(target.querySelector('[data-role="impact-coherence"] .impact-cell-value').textContent, '100/100');
-  assert.equal(target.querySelector('[data-role="impact-imports"] .impact-cell-value').textContent, '0 / 5');
+  // Direct importers and direct imports are separate rows, so neither count stands for both.
+  assert.equal(target.querySelector('[data-role="impact-importers"] .impact-cell-value').textContent, '0');
+  assert.equal(target.querySelector('[data-role="impact-imports"] .impact-cell-value').textContent, '5');
   assert.match(target.querySelector('[data-role="impact-average-complexity"] .impact-cell-detail').textContent, /13 function\(s\) unchanged/);
   assert.equal(target.querySelector('[data-role="impact-signals"] li').textContent, 'High complexity logicmaximum C35');
   assert.equal(target.querySelector('[data-role="impact-most-complex"] li').textContent, 'try_dispatchC35 (+C3)');
@@ -865,4 +873,332 @@ test('renderMemberMap offers Back to the module passport', () => {  const target
   assert.match(back.getAttribute('aria-label') ?? '', /module passport/);
   back.click();
   assert.equal(backs, 1);
+});
+
+test('provenance text names the fingerprint and scan time and flags stale (T6)', () => {
+  const fresh = passportProvenanceText({
+    fingerprint: 'abcdef1234567:deadbeef',
+    scannedAt: '2026-01-05T10:20:30.000Z',
+    stale: false,
+    behind: 0,
+  });
+  assert.match(fresh, /graph abcdef1/);
+  assert.match(fresh, /scanned 2026-01-05 10:20:30/);
+  assert.doesNotMatch(fresh, /stale/);
+
+  const stale = passportProvenanceText({
+    fingerprint: 'abcdef1234567:deadbeef',
+    scannedAt: '2026-01-05T10:20:30.000Z',
+    stale: true,
+    behind: 3,
+  });
+  assert.match(stale, /3 behind/);
+  assert.match(stale, /stale: the working tree has moved on/);
+
+  // No fingerprint, no line: a revision is never invented.
+  assert.equal(passportProvenanceText(null), '');
+  assert.equal(passportProvenanceText({ fingerprint: null, scannedAt: 'x' }), '');
+
+  const edge = evidenceProvenanceText({ fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: true });
+  assert.match(edge, /^graph abcdef1 · scanned 2026-01-05 10:20:30 · stale/);
+  assert.equal(evidenceProvenanceText({ fingerprint: null }), '');
+});
+
+test('renderRepositoryPassport shows graph fingerprint and scan time (T6)', () => {
+  const target = container();
+  renderRepositoryPassport(
+    target,
+    {
+      repository: 'acme',
+      size: { files: 3, edges: 2, directories: 1, tests: 0, diagnostics: 0, excluded: 0 },
+      languages: [],
+      entryPoints: [],
+      topDirectories: [],
+      topFiles: [],
+      cycles: { total: 0, largest: [] },
+      untested: { total: 0, files: [] },
+      provenance: { fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: true, behind: 2 },
+    },
+    {},
+  );
+  const line = target.querySelector('[data-role="passport-provenance"]');
+  assert.ok(line, 'the repository passport names the graph it was computed from');
+  assert.match(line!.textContent, /graph abcdef1/);
+  assert.match(line!.textContent, /2 behind/);
+  assert.match(line!.textContent, /stale/);
+  assert.equal(line!.classList.contains('is-stale'), true);
+});
+
+test('renderImpactPassport shows provenance and labels an approximation (T6/R4)', () => {
+  const target = container();
+  renderImpactPassport(
+    target,
+    {
+      scope: 'revision',
+      baseline: 'HEAD~1',
+      capped: false,
+      graphApproximation: true,
+      provenance: { fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: false, behind: 0 },
+      files: [
+        {
+          path: 'a.ts',
+          status: 'modified',
+          risk: { score: 40, band: 'moderate', inputs: {} },
+          complexity: {},
+          coherence: null,
+          snapshot: { blastRadius: 1, directImporters: 2, directImports: 3 },
+          signals: [],
+          mostComplex: [],
+          impact: null,
+          testsToRun: [],
+          untestedDependents: [],
+        },
+      ],
+      totals: {
+        files: 1,
+        risk: { score: 40, band: 'moderate' },
+        maxComplexity: 3,
+        averageComplexity: 2,
+        coherence: null,
+        changedSymbols: 0,
+        blastRadius: 1,
+        directImporters: 2,
+        directImports: 3,
+        signals: [],
+        mostComplex: [],
+        functionsUnchanged: 0,
+        classesUnchanged: 0,
+      },
+    },
+    {},
+  );
+
+  assert.match(target.querySelector('[data-role="impact-provenance"]')!.textContent, /graph abcdef1/);
+  assert.match(target.querySelector('[data-role="impact-approximation"]')!.textContent, /approximation: current graph/);
+  // The current-graph cells carry the approximation label, not just "current graph".
+  assert.equal(
+    target.querySelector('[data-role="impact-blast"] .impact-cell-detail')!.textContent,
+    'approximation: current graph',
+  );
+  // Direct importers and direct imports stay separate rows, and both are labelled.
+  assert.equal(
+    target.querySelector('[data-role="impact-importers"] .impact-cell-value')!.textContent,
+    '2',
+  );
+  assert.equal(
+    target.querySelector('[data-role="impact-imports"] .impact-cell-value')!.textContent,
+    '3',
+  );
+});
+
+test('changeRiskBlock renders the additive score only alongside its signal components (T4)', () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'working-tree',
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+      cohesion: {
+        baseline: 'HEAD',
+        capped: false,
+        provenance: { fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: true },
+        files: [
+          {
+            path: 'src/lib.ts',
+            status: 'modified',
+            before: 50,
+            after: 60,
+            note: 'compared with HEAD',
+            functions: [],
+            publicSurface: [],
+            edgesAdded: [{ source: 'src/lib.ts', target: 'src/new.ts', kind: 'import' }],
+            edgesRemoved: [{ source: 'src/gone.ts', target: 'src/lib.ts', kind: 'import' }],
+            impact: null,
+            testsToRun: [],
+            untestedDependents: [],
+            risk: {
+              score: 63,
+              inputs: { linesTouched: 12, touchedComplexity: 4, recordedReferences: 0, untestedShare: 0.5 },
+              signals: [
+                { kind: 'lines-touched', label: 'Lines touched', value: 12, threshold: 50, contribution: 0.24 },
+                { kind: 'touched-complexity', label: 'Touched complexity', value: 4, threshold: 10, contribution: 0.4 },
+                { kind: 'recorded-references', label: 'Recorded references', value: 0, threshold: 5, contribution: 0 },
+                { kind: 'untested-share', label: 'Untested share', value: 0.5, threshold: 1, contribution: 0.5 },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    {},
+  );
+
+  // No user-facing "definite" anywhere (T3).
+  assert.doesNotMatch(target.textContent ?? '', /definite/i);
+
+  const score = target.querySelector('[data-role="change-risk-score"]');
+  assert.ok(score, 'the additive score is shown');
+  assert.match(score!.textContent, /63\/100/);
+  const signals = [...target.querySelectorAll('[data-role="change-risk-signals"] li')];
+  assert.equal(signals.length, 4, 'every contributing signal is listed');
+  assert.match(signals[0].textContent, /value 12 \/ threshold 50 · contribution 0\.24/);
+  assert.equal(signals[2].dataset.kind, 'recorded-references');
+  assert.match(signals[2].textContent, /value 0 \/ threshold 5/);
+
+  const edges = [...target.querySelectorAll('[data-role="change-edges"] li')].map((li) => li.textContent);
+  assert.deepEqual(edges, ['+ src/lib.ts → src/new.ts (import)', '− src/gone.ts → src/lib.ts (import)']);
+
+  const provenance = target.querySelector('[data-role="change-passport-provenance"]');
+  assert.match(provenance!.textContent ?? '', /graph abcdef1/);
+  assert.match(provenance!.textContent ?? '', /stale/);
+});
+
+test('renderReview marks a stale review graph and a change-set impact as an approximation (T6/R4)', () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'working-tree',
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+      provenance: { fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: true, behind: 1 },
+      impactPassport: {
+        scope: 'change-set',
+        baseline: 'HEAD',
+        capped: false,
+        files: [
+          {
+            path: 'a.ts',
+            status: 'modified',
+            risk: { score: 10, band: 'low', inputs: {} },
+            complexity: {},
+            coherence: null,
+            snapshot: { blastRadius: 0, directImporters: 0, directImports: 0 },
+            signals: [],
+            mostComplex: [],
+            impact: null,
+            testsToRun: [],
+            untestedDependents: [],
+          },
+        ],
+        totals: {
+          files: 1,
+          risk: { score: 10, band: 'low' },
+          maxComplexity: 1,
+          averageComplexity: 1,
+          coherence: null,
+          changedSymbols: 0,
+          blastRadius: 0,
+          directImporters: 0,
+          directImports: 0,
+          signals: [],
+          mostComplex: [],
+          functionsUnchanged: 0,
+          classesUnchanged: 0,
+        },
+      },
+    },
+    {},
+  );
+
+  assert.match(target.querySelector('[data-role="review-provenance"]')!.textContent, /stale/);
+  assert.match(target.querySelector('[data-role="impact-approximation"]')!.textContent, /approximation: current graph/);
+});
+
+test('renderEdgeEvidence shows the graph fingerprint and scan time (T6)', () => {
+  const target = container();
+  renderEdgeEvidence(target, {
+    id: 'e0',
+    source: 'a.ts',
+    target: 'b.ts',
+    kind: 'import',
+    line: 3,
+    specifier: './b',
+    resolutionLabel: 'exact match',
+    provenance: { fingerprint: 'abcdef1234567:deadbeef', scannedAt: '2026-01-05T10:20:30.000Z', stale: false },
+  });
+  const line = target.querySelector('[data-role="edge-provenance"]');
+  assert.ok(line, 'the edge evidence overlay names the graph it was read from');
+  assert.match(line!.textContent, /graph abcdef1/);
+  assert.match(line!.textContent, /scanned 2026-01-05 10:20:30/);
+});
+
+const coChangeReport = {
+  repository: 'demo',
+  edges: [
+    {
+      source: 'src/config.ts',
+      target: 'src/reader.ts',
+      hidden: true,
+      ratio: 0.6,
+      commitsShared: 3,
+      commits: [{ hash: 'abcdef1234', date: '2026-01-05', subject: 'retune port' }],
+    },
+    {
+      source: 'src/a.ts',
+      target: 'src/b.ts',
+      hidden: false,
+      ratio: 0.75,
+      commitsShared: 4,
+      commits: [{ hash: 'beef1234', date: '2026-01-04', subject: 'coupled' }],
+    },
+    {
+      source: 'src/empty.ts',
+      target: 'src/other.ts',
+      hidden: true,
+      ratio: 0.6,
+      commitsShared: 0,
+      commits: [],
+    },
+  ],
+};
+
+test('hiddenCouplingOverlay keeps only hidden pairs with a listable commit (K3)', () => {
+  const result = hiddenCouplingOverlay(coChangeReport);
+
+  // Only the config/reader pair is hidden *and* has evidence; the empty-commit pair is dropped.
+  assert.equal(result.edges.length, 1);
+  assert.equal(result.edges[0].source, 'src/config.ts');
+  assert.equal(result.classes.get('src/config.ts'), 'ov-hidden-coupling');
+  assert.equal(result.classes.get('src/reader.ts'), 'ov-hidden-coupling');
+  assert.equal(result.classes.has('src/a.ts'), false, 'a coupled pair with an import path is not hidden');
+  assert.match(result.summary, /1 hidden co-change pair\(s\)/);
+  assert.match(result.summary, /no import path either way/);
+  assert.match(result.items[0], /src\/config\.ts ↔ src\/reader\.ts/);
+});
+
+test('hiddenCouplingOverlay reports unavailable history rather than an empty lens', () => {
+  const result = hiddenCouplingOverlay({ unavailable: true, detail: 'no Git history' });
+  assert.equal(result.edges.length, 0);
+  assert.match(result.emptyNote ?? '', /no Git history/);
+  assert.equal(overlayFor('hidden-coupling', { unavailable: true }).edges.length, 0);
+});
+
+test('overlayFor routes the hidden-coupling kind to its overlay (K3)', () => {
+  const result = overlayFor('hidden-coupling', coChangeReport);
+  assert.equal(result.edges.length, 1);
+  assert.equal(result.classes.size, 2);
+});
+
+test('buildHiddenCouplingElements draws only hidden pairs and marks them distinctly (K3)', () => {
+  const model = {
+    nodes: [{ id: 'src/config.ts' }, { id: 'src/reader.ts' }, { id: 'src/a.ts' }, { id: 'src/b.ts' }],
+  };
+  const edges = buildHiddenCouplingElements(model, coChangeReport);
+  assert.equal(edges.length, 1);
+  const edge = edges[0];
+  assert.equal(edge.data.kind, 'hidden-coupling');
+  assert.equal(edge.data.hiddenCoupling, true);
+  assert.equal(edge.data.hidden, true);
+  assert.equal(edge.data.source, 'src/config.ts');
+  assert.equal(edge.data.target, 'src/reader.ts');
+
+  // A pair naming a file outside the graph is skipped rather than inventing a node.
+  const missing = buildHiddenCouplingElements({ nodes: [{ id: 'src/config.ts' }] }, coChangeReport);
+  assert.equal(missing.length, 0);
 });

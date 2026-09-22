@@ -266,10 +266,15 @@ test('GET /analysis/passport serves the scan-derived passport', async () => {
     entryPoints: Array<{ file: string; reason: string }>;
     topFiles: Array<{ id: string; fanIn: number }>;
     size: { files: number };
+    provenance?: { fingerprint: string | null; scannedAt: string; stale: boolean };
   };
 
   assert.deepEqual(passport.entryPoints, [{ file: 'src/main.ts', reason: 'package.json main' }]);
   assert.equal(passport.size.files, 2);
+  // T6: the passport carries the graph fingerprint and scan time, not just the figures.
+  assert.ok(passport.provenance, 'the passport carries graph provenance');
+  assert.equal(typeof passport.provenance?.scannedAt, 'string');
+  assert.equal(typeof passport.provenance?.stale, 'boolean');
   // helper.ts is imported by main.ts, so it leads the fan-in ranking.
   assert.equal(passport.topFiles[0]?.id, 'src/helper.ts');
   assert.equal(passport.topFiles[0]?.fanIn, 1);

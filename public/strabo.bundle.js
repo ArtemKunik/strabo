@@ -478,6 +478,44 @@ function buildCoChangeElements(model, report, startIndex = 0) {
   });
   return edges;
 }
+function buildHiddenCouplingElements(model, report, startIndex = 0) {
+  const ids = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = [];
+  (report?.edges ?? []).forEach((edge, offset) => {
+    if (edge.hidden !== true) {
+      return;
+    }
+    if (!ids.has(edge.source) || !ids.has(edge.target)) {
+      return;
+    }
+    if (!Array.isArray(edge.commits) || edge.commits.length === 0) {
+      return;
+    }
+    edges.push({
+      group: "edges",
+      data: {
+        id: `hid${startIndex + offset}`,
+        source: edge.source,
+        target: edge.target,
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        kind: "hidden-coupling",
+        weight: edge.commitsShared ?? edge.commits.length,
+        edgeWidth: edgeStrokeWidth(edge.commitsShared ?? edge.commits.length),
+        evidenceLine: null,
+        evidenceSpecifier: `${edge.commitsShared} shared commit(s), no import path`,
+        scope: void 0,
+        coChange: true,
+        hiddenCoupling: true,
+        hidden: true,
+        ratio: edge.ratio,
+        commitsShared: edge.commitsShared,
+        commits: edge.commits
+      }
+    });
+  });
+  return edges;
+}
 function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
 }
@@ -628,7 +666,22 @@ function edgeEvidenceFor(model, edgeId) {
     line: evidence.line ?? null,
     specifier: evidence.specifier ?? null,
     resolution: evidence.resolution ?? null,
-    resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? "not recorded"
+    resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? "not recorded",
+    provenance: graphProvenanceFromModel(model)
+  };
+}
+function graphProvenanceFromModel(model) {
+  const cache = model?.cache;
+  if (!cache || !cache.fingerprint) {
+    return null;
+  }
+  return {
+    fingerprint: cache.fingerprint,
+    revision: String(cache.fingerprint).split(":")[0] || null,
+    scannedAt: cache.generatedAt ?? null,
+    currentFingerprint: null,
+    behind: null,
+    stale: cache.stale === true
   };
 }
 var RESOLUTION_LABELS = {
@@ -1272,9 +1325,38 @@ function overlayFor(kind, data) {
       return ownershipOverlay(data);
     case "smells":
       return smellsOverlay(data);
+    case "hidden-coupling":
+      return hiddenCouplingOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
+}
+function hiddenCouplingOverlay(report) {
+  if (!report || report.unavailable === true) {
+    return {
+      classes: /* @__PURE__ */ new Map(),
+      edges: [],
+      summary: "no Git history read",
+      items: [],
+      emptyNote: report?.detail ?? "Co-change is unavailable: no Git history was read."
+    };
+  }
+  const edges = (report.edges ?? []).filter(
+    (edge) => edge.hidden === true && Array.isArray(edge.commits) && edge.commits.length > 0
+  );
+  const classes = /* @__PURE__ */ new Map();
+  for (const edge of edges) {
+    classes.set(edge.source, "ov-hidden-coupling");
+    classes.set(edge.target, "ov-hidden-coupling");
+  }
+  return {
+    classes,
+    edges,
+    summary: `${edges.length} hidden co-change pair(s) \xB7 no import path either way`,
+    items: edges.map(
+      (edge) => `${edge.source} \u2194 ${edge.target} \xB7 ${edge.commitsShared ?? edge.commits.length} shared commit(s) \xB7 ratio ${edge.ratio}`
+    )
+  };
 }
 function moduleDepthOverlay(signals) {
   const list = Array.isArray(signals) ? signals : [];
@@ -2209,6 +2291,9 @@ function stylesheet() {
     { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
     // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
     { selector: "node.ov-smell", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    // Hidden coupling is a co-change pair with no import path: the status serious ring marks
+    // the endpoints, and the distinct edge below carries the relationship (K3).
+    { selector: "node.ov-hidden-coupling", style: { "border-width": 3, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -2221,6 +2306,10 @@ function stylesheet() {
     // reading survives next to an import, and hidden until the off-by-default lens is on.
     { selector: 'edge[kind = "co-change"]', style: { "line-style": "dashed", opacity: 0.85 } },
     { selector: "edge.edge-cochange-hidden", style: { display: "none" } },
+    // Hidden coupling is drawn distinctly: bigger dashes in the cycle status hue, so the
+    // no-import-path relationship reads apart from the general co-change lens (K3).
+    { selector: 'edge[kind = "hidden-coupling"]', style: { "line-style": "dashed", "line-dash-pattern": [10, 6], width: 2.4, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 0.95 } },
+    { selector: "edge.edge-hidden-coupling-hidden", style: { display: "none" } },
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { "line-style": "dashed" } },
@@ -2583,7 +2672,7 @@ function createUnitCardLayer(container, cy, onOpen) {
 }
 
 // ui/strabo-graph-classes.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
   ...TIER_ORDER.map((tier) => `tier-${tier}`),
@@ -2593,6 +2682,7 @@ var RESET_CLASSES = [
   "edge-faded",
   "edge-kind-hidden",
   "edge-cochange-hidden",
+  "edge-hidden-coupling-hidden",
   "edge-lod-hidden",
   "label-hidden",
   "filtered-out",
@@ -2856,6 +2946,17 @@ function applyCoChange(cy, on) {
     }
   });
 }
+function applyHiddenCoupling(cy, on) {
+  const visible = on === true;
+  cy.batch(() => {
+    for (const edge of cy.edges()) {
+      if (edge.data("hiddenCoupling") !== true) {
+        continue;
+      }
+      edge.toggleClass("edge-hidden-coupling-hidden", !visible);
+    }
+  });
+}
 function applyEdgeLod(cy, { edgeCount = 0, zoom = 1 } = {}) {
   cy.batch(() => {
     for (const edge of cy.edges()) {
@@ -3006,6 +3107,8 @@ function createView(container) {
   let edgeKind = "imports";
   let coChangeReport2 = null;
   let coChangeOn = false;
+  let hiddenCouplingReport = null;
+  let hiddenCouplingOn = false;
   function renderModel() {
     if (!baseModel) {
       return;
@@ -3015,6 +3118,12 @@ function createView(container) {
       islandModel = {
         ...islandModel,
         edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport2)]
+      };
+    }
+    if (hiddenCouplingOn && hiddenCouplingReport) {
+      islandModel = {
+        ...islandModel,
+        edges: [...islandModel.edges, ...buildHiddenCouplingElements(islandModel, hiddenCouplingReport)]
       };
     }
     lastModel = islandModel;
@@ -3032,6 +3141,7 @@ function createView(container) {
     edgeHighlight.rebuild();
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
+    applyHiddenCoupling(cy, hiddenCouplingOn);
     clearTimeout(labelTimer);
     labelTimer = 0;
     labelsFrozen = false;
@@ -3305,6 +3415,17 @@ function createView(container) {
     setCoChange(report, on = true) {
       coChangeReport2 = report;
       coChangeOn = on === true && report !== null;
+      renderModel();
+    },
+    /**
+     * Draw the K3 hidden-coupling lens: the co-change edges with no import path either way.
+     *
+     * A separate report from `setCoChange` so the two lenses never double-draw a pair; pass
+     * `null` or `{ on: false }` to clear it. A re-render, not a rescan.
+     */
+    setHiddenCoupling(report, on = true) {
+      hiddenCouplingReport = report;
+      hiddenCouplingOn = on === true && report !== null;
       renderModel();
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
@@ -4455,6 +4576,27 @@ function buildReviewNarrationEvidence(result) {
       const after = file.after === null ? "\u2014" : file.after;
       lines.push(`- ${file.path}: cohesion ${before} \u2192 ${after}${file.note ? ` (${file.note})` : ""}`);
     }
+  }
+  return lines.join("\n");
+}
+var ROUTE_STEP_INSTRUCTION = "Explain in one short paragraph why this file sits where it does in the repository reading route, using only the recorded evidence. Name what reaches it and what it depends on only when that is recorded, and say plainly when a fact is not recorded.";
+function buildRouteStepEvidence(step, routeSummary) {
+  if (!step) {
+    return "no route step is recorded";
+  }
+  const lines = [];
+  lines.push(`file: ${step.file}`);
+  lines.push(`unit: ${step.unit ?? "not recorded"}`);
+  lines.push(
+    `reached: ${step.from ? `from ${step.from}` : "this is a declared entry point"}`
+  );
+  lines.push(`depth from its entry point: ${step.depth ?? "not recorded"}`);
+  lines.push(`recorded importers: ${step.fanIn ?? 0}`);
+  lines.push(`tier: ${step.tier ?? "not recorded"}`);
+  if (routeSummary) {
+    lines.push(
+      `route: ${routeSummary.entryPoints ?? 0} entry point(s), ${routeSummary.routed ?? 0} routed, ${routeSummary.unreached ?? 0} no entry point reaches, ${routeSummary.units ?? 0} unit(s)`
+    );
   }
   return lines.join("\n");
 }
@@ -6071,6 +6213,16 @@ function passportFileList(entries, handlers, label) {
   }
   return list;
 }
+function passportProvenanceText(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return "";
+  }
+  const short = String(provenance.fingerprint).split(":")[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt ? ` \xB7 scanned ${provenance.scannedAt.slice(0, 19).replace("T", " ")}` : "";
+  const behind = typeof provenance.behind === "number" && provenance.behind > 0 ? ` \xB7 ${provenance.behind} behind` : "";
+  const stale = provenance.stale === true ? " \xB7 stale: the working tree has moved on" : "";
+  return `graph ${short}${scanned}${behind}${stale}`;
+}
 function passportPlainList(entries, label) {
   const list = document.createElement("ul");
   list.className = "passport-list";
@@ -6089,6 +6241,14 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   if (!report) {
     container.append(passportNote("No passport was recorded for this repository."));
     return;
+  }
+  const provenance = report.provenance ?? null;
+  if (provenance && provenance.fingerprint) {
+    const line = document.createElement("p");
+    line.className = provenance.stale === true ? "evidence is-stale" : "evidence";
+    line.dataset.role = "passport-provenance";
+    line.textContent = passportProvenanceText(provenance);
+    container.append(line);
   }
   const size = report.size ?? {};
   const summary = document.createElement("p");
@@ -7291,6 +7451,215 @@ function buildConstellation(memberMap, consumerIds) {
   return section2;
 }
 
+// ui/strabo-impact.js
+var BAND_LABELS = {
+  low: "LOW",
+  moderate: "MODERATE",
+  high: "HIGH",
+  critical: "CRITICAL"
+};
+function riskBandLabel(band) {
+  return BAND_LABELS[band] ?? String(band ?? "").toUpperCase();
+}
+function riskTone(band) {
+  if (band === "critical") return "critical";
+  if (band === "high") return "serious";
+  if (band === "moderate") return "warning";
+  return "good";
+}
+function complexityValue(value) {
+  return value === null || value === void 0 ? "\u2014" : `C${value}`;
+}
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+function moveText(before, after, format = (value) => String(value)) {
+  if ((before === null || before === void 0) && (after === null || after === void 0)) {
+    return { tone: "none", text: "not measured" };
+  }
+  if (before === null || before === void 0) {
+    return { tone: "grown", text: `new \xB7 ${format(after)}` };
+  }
+  if (after === null || after === void 0) {
+    return { tone: "shed", text: `removed \xB7 ${format(before)}` };
+  }
+  const delta = round2(after - before);
+  if (delta === 0) return { tone: "flat", text: "unchanged" };
+  if (delta > 0) return { tone: "grown", text: `grown +${format(delta)}` };
+  return { tone: "shed", text: `shed \u2212${format(-delta)}` };
+}
+function graphDetail(provenance, approximate = false) {
+  const stale = provenance?.stale === true;
+  if (approximate) {
+    return {
+      detail: stale ? "approximation: current graph \xB7 stale" : "approximation: current graph",
+      stale
+    };
+  }
+  return { detail: stale ? "current graph \xB7 stale" : "current graph", stale };
+}
+function riskCell(risk, provenance) {
+  if (!risk) {
+    return { key: "risk", label: "Risk", value: "\u2014", detail: "not measurable", tone: "none" };
+  }
+  return {
+    key: "risk",
+    label: "Risk",
+    value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
+    detail: graphDetail(provenance).detail,
+    tone: riskTone(risk.band)
+  };
+}
+function filePassportCells(card) {
+  const complexity = card?.complexity ?? {};
+  const snapshot = card?.snapshot ?? {};
+  const provenance = card?.provenance;
+  const cells = [riskCell(card?.risk, provenance)];
+  const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(complexity.maxAfter ?? complexity.maxBefore),
+    detail: maxMove.text,
+    tone: maxMove.tone
+  });
+  const coherence = card?.coherence;
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: coherence ? `${coherence.score}/100` : "\u2014",
+    detail: coherence ? coherence.detail : card?.status === "added" ? "new file" : "no changed symbols",
+    tone: coherence ? coherence.score >= 67 ? "flat" : "grown" : "none"
+  });
+  const blastGraph = graphDetail(provenance, card?.graphApproximation === true);
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(snapshot.blastRadius ?? 0),
+    detail: blastGraph.detail,
+    tone: "none"
+  });
+  cells.push({
+    key: "importers",
+    label: "Direct importers",
+    value: String(snapshot.directImporters ?? 0),
+    detail: "files",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Direct imports",
+    value: String(snapshot.directImports ?? 0),
+    detail: "files",
+    tone: "none"
+  });
+  const symbolReferences = symbolReferenceCell(card?.symbolReferences);
+  if (symbolReferences) {
+    cells.push(symbolReferences);
+  }
+  const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: complexity.averageAfter === null || complexity.averageAfter === void 0 ? "\u2014" : String(complexity.averageAfter),
+    detail: `${averageMove.text} \xB7 ${complexity.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${complexity.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: averageMove.tone
+  });
+  return cells;
+}
+function totalsPassportCells(totals) {
+  const provenance = totals?.provenance;
+  const approximate = totals?.graphApproximation === true;
+  const cells = [riskCell(totals?.risk, provenance)];
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(totals?.maxComplexity),
+    detail: `${totals?.files ?? 0} file(s)`,
+    tone: "none"
+  });
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: totals?.coherence === null || totals?.coherence === void 0 ? "\u2014" : `${totals.coherence}/100`,
+    detail: `${totals?.changedSymbols ?? 0} changed symbol(s)`,
+    tone: totals?.coherence === null || totals?.coherence === void 0 ? "none" : "flat"
+  });
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(totals?.blastRadius ?? 0),
+    detail: graphDetail(provenance, approximate).detail,
+    tone: "none"
+  });
+  cells.push({
+    key: "importers",
+    label: "Direct importers",
+    value: String(totals?.directImporters ?? 0),
+    detail: "files",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Direct imports",
+    value: String(totals?.directImports ?? 0),
+    detail: "files",
+    tone: "none"
+  });
+  const symbolReferences = symbolReferenceCell(totals?.symbolReferences);
+  if (symbolReferences) {
+    cells.push(symbolReferences);
+  }
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: totals?.averageComplexity === null || totals?.averageComplexity === void 0 ? "\u2014" : String(totals.averageComplexity),
+    detail: `${totals?.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${totals?.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: "none"
+  });
+  return cells;
+}
+function symbolReferenceCell(references) {
+  const total = references?.total;
+  const files = references?.files;
+  if (typeof total !== "number") {
+    return null;
+  }
+  return {
+    key: "symbol-references",
+    label: "Symbol references",
+    value: `${total} reference${total === 1 ? "" : "s"} to ${typeof files === "number" ? files : 0} file${files === 1 ? "" : "s"}`,
+    detail: "recorded",
+    tone: "none"
+  };
+}
+function riskSignalEntries(signals) {
+  return (signals ?? []).map((signal) => ({
+    kind: signal.kind,
+    label: signal.label,
+    value: signal.value,
+    threshold: signal.threshold,
+    contribution: signal.contribution,
+    detail: `value ${signal.value} / threshold ${signal.threshold} \xB7 contribution ${signal.contribution}`
+  }));
+}
+function riskScoreText(risk) {
+  if (!risk) {
+    return null;
+  }
+  const components = (risk.signals ?? []).map((signal) => `${signal.label.toLowerCase()} ${signal.value}/${signal.threshold}`).join(" + ");
+  const suffix = components ? ` = ${components}` : "";
+  return `Risk ${risk.score}/100${suffix}`;
+}
+function impactFunctionLabel(fn) {
+  return fn?.owner ? `${fn.owner}.${fn.name}` : String(fn?.name ?? "");
+}
+function passportHeading(scope) {
+  if (scope === "file") return "Change impact passport";
+  if (scope === "revision") return "Revision impact passport";
+  return "Change impact passport";
+}
+
 // ui/strabo-panel-branches.js
 function ageInDays(iso, now = Date.now()) {
   const time = Date.parse(iso ?? "");
@@ -7580,148 +7949,17 @@ function renderBranchDivergence(container, branch, handlers = {}) {
   }
 }
 
-// ui/strabo-impact.js
-var BAND_LABELS = {
-  low: "LOW",
-  moderate: "MODERATE",
-  high: "HIGH",
-  critical: "CRITICAL"
-};
-function riskBandLabel(band) {
-  return BAND_LABELS[band] ?? String(band ?? "").toUpperCase();
-}
-function riskTone(band) {
-  if (band === "critical") return "critical";
-  if (band === "high") return "serious";
-  if (band === "moderate") return "warning";
-  return "good";
-}
-function complexityValue(value) {
-  return value === null || value === void 0 ? "\u2014" : `C${value}`;
-}
-function round2(value) {
-  return Math.round(value * 100) / 100;
-}
-function moveText(before, after, format = (value) => String(value)) {
-  if ((before === null || before === void 0) && (after === null || after === void 0)) {
-    return { tone: "none", text: "not measured" };
-  }
-  if (before === null || before === void 0) {
-    return { tone: "grown", text: `new \xB7 ${format(after)}` };
-  }
-  if (after === null || after === void 0) {
-    return { tone: "shed", text: `removed \xB7 ${format(before)}` };
-  }
-  const delta = round2(after - before);
-  if (delta === 0) return { tone: "flat", text: "unchanged" };
-  if (delta > 0) return { tone: "grown", text: `grown +${format(delta)}` };
-  return { tone: "shed", text: `shed \u2212${format(-delta)}` };
-}
-function riskCell(risk) {
-  if (!risk) {
-    return { key: "risk", label: "Risk", value: "\u2014", detail: "not measurable", tone: "none" };
-  }
-  return {
-    key: "risk",
-    label: "Risk",
-    value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
-    detail: "current snapshot",
-    tone: riskTone(risk.band)
-  };
-}
-function filePassportCells(card) {
-  const complexity = card?.complexity ?? {};
-  const snapshot = card?.snapshot ?? {};
-  const cells = [riskCell(card?.risk)];
-  const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
-  cells.push({
-    key: "max-complexity",
-    label: "Max complexity",
-    value: complexityValue(complexity.maxAfter ?? complexity.maxBefore),
-    detail: maxMove.text,
-    tone: maxMove.tone
-  });
-  const coherence = card?.coherence;
-  cells.push({
-    key: "coherence",
-    label: "Change coherence",
-    value: coherence ? `${coherence.score}/100` : "\u2014",
-    detail: coherence ? coherence.detail : card?.status === "added" ? "new file" : "no changed symbols",
-    tone: coherence ? coherence.score >= 67 ? "flat" : "grown" : "none"
-  });
-  cells.push({
-    key: "blast",
-    label: "Blast radius",
-    value: String(snapshot.blastRadius ?? 0),
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "imports",
-    label: "Importers / imports",
-    value: `${snapshot.directImporters ?? 0} / ${snapshot.directImports ?? 0}`,
-    detail: "current graph",
-    tone: "none"
-  });
-  const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
-  cells.push({
-    key: "average-complexity",
-    label: "Average complexity",
-    value: complexity.averageAfter === null || complexity.averageAfter === void 0 ? "\u2014" : String(complexity.averageAfter),
-    detail: `${averageMove.text} \xB7 ${complexity.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${complexity.classesUnchanged ?? 0} class(es) unchanged`,
-    tone: averageMove.tone
-  });
-  return cells;
-}
-function totalsPassportCells(totals) {
-  const cells = [riskCell(totals?.risk)];
-  cells.push({
-    key: "max-complexity",
-    label: "Max complexity",
-    value: complexityValue(totals?.maxComplexity),
-    detail: `${totals?.files ?? 0} file(s)`,
-    tone: "none"
-  });
-  cells.push({
-    key: "coherence",
-    label: "Change coherence",
-    value: totals?.coherence === null || totals?.coherence === void 0 ? "\u2014" : `${totals.coherence}/100`,
-    detail: `${totals?.changedSymbols ?? 0} changed symbol(s)`,
-    tone: totals?.coherence === null || totals?.coherence === void 0 ? "none" : "flat"
-  });
-  cells.push({
-    key: "blast",
-    label: "Blast radius",
-    value: String(totals?.blastRadius ?? 0),
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "imports",
-    label: "Importers / imports",
-    value: `${totals?.directImporters ?? 0} / ${totals?.directImports ?? 0}`,
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "average-complexity",
-    label: "Average complexity",
-    value: totals?.averageComplexity === null || totals?.averageComplexity === void 0 ? "\u2014" : String(totals.averageComplexity),
-    detail: `${totals?.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${totals?.classesUnchanged ?? 0} class(es) unchanged`,
-    tone: "none"
-  });
-  return cells;
-}
-function impactFunctionLabel(fn) {
-  return fn?.owner ? `${fn.owner}.${fn.name}` : String(fn?.name ?? "");
-}
-function passportHeading(scope) {
-  if (scope === "file") return "Change impact passport";
-  if (scope === "revision") return "Revision impact passport";
-  return "Change impact passport";
-}
-
 // ui/strabo-panel-risk.js
+function provenanceLine(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return null;
+  }
+  const short = String(provenance.fingerprint).split(":")[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt ? ` \xB7 scanned ${provenance.scannedAt.slice(0, 19).replace("T", " ")}` : "";
+  const behind = typeof provenance.behind === "number" && provenance.behind > 0 ? ` \xB7 ${provenance.behind} behind` : "";
+  const stale = provenance.stale === true ? " \xB7 stale: the working tree has moved on" : "";
+  return `graph ${short}${scanned}${behind}${stale}`;
+}
 function renderImpactPassport(container, set, handlers = {}) {
   container.replaceChildren();
   if (!set || !Array.isArray(set.files) || set.files.length === 0) {
@@ -7733,13 +7971,34 @@ function renderImpactPassport(container, set, handlers = {}) {
   container.append(heading2);
   const caption = document.createElement("p");
   caption.className = "unavailable";
+  caption.dataset.role = "impact-caption";
   caption.textContent = set.baseline ? `Current graph; compared with ${set.baseline}.` : "Current graph; no baseline revision was available.";
   container.append(caption);
+  const provenance = set.provenance ?? set.files[0]?.provenance ?? set.totals?.provenance ?? null;
+  const approximate = set.graphApproximation === true;
+  const line = provenanceLine(provenance);
+  if (line) {
+    const note3 = document.createElement("p");
+    note3.className = "evidence";
+    note3.dataset.role = "impact-provenance";
+    note3.textContent = line;
+    if (provenance.stale === true) {
+      note3.classList.add("is-stale");
+    }
+    container.append(note3);
+  }
+  if (approximate) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "impact-approximation";
+    note3.textContent = "approximation: current graph";
+    container.append(note3);
+  }
   if (set.scope === "file") {
-    container.append(impactCard(set.files[0], false));
+    container.append(impactCard({ ...set.files[0], provenance }, false, approximate));
     return;
   }
-  container.append(impactCard(set.totals, true));
+  container.append(impactCard({ ...set.totals ?? {}, provenance }, true, approximate));
   const list = document.createElement("ul");
   list.className = "impact-files";
   list.dataset.role = "impact-files";
@@ -7751,13 +8010,14 @@ function renderImpactPassport(container, set, handlers = {}) {
     container.append(unavailableNote("Only the first files in the change set were measured."));
   }
 }
-function impactCard(card, totals) {
+function impactCard(card, totals, approximate = false) {
   const wrapper = document.createElement("div");
   wrapper.className = "impact-card";
   wrapper.dataset.role = totals ? "impact-totals" : "impact-file-card";
   const grid = document.createElement("div");
   grid.className = "impact-grid";
-  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
+  const flagged = card ? { ...card, graphApproximation: approximate } : card;
+  const cells = totals ? totalsPassportCells(flagged) : filePassportCells(flagged);
   for (const cell of cells) {
     const item = document.createElement("div");
     item.className = "impact-cell";
@@ -7782,6 +8042,34 @@ function impactCard(card, totals) {
       "impact-signals"
     )
   );
+  if (card?.risk && Array.isArray(card.risk.signals) && card.risk.signals.length > 0) {
+    const risk = document.createElement("div");
+    risk.className = "impact-list impact-risk-score";
+    const scoreHeading = document.createElement("h5");
+    scoreHeading.textContent = "Change risk (additive)";
+    risk.append(scoreHeading);
+    const scoreLine = document.createElement("p");
+    scoreLine.className = "overlay-summary";
+    scoreLine.dataset.role = "change-risk-score";
+    scoreLine.textContent = riskScoreText(card.risk);
+    risk.append(scoreLine);
+    const signals = document.createElement("ul");
+    signals.dataset.role = "change-risk-signals";
+    for (const signal of riskSignalEntries(card.risk.signals)) {
+      const item = document.createElement("li");
+      item.dataset.kind = signal.kind;
+      const label = document.createElement("span");
+      label.textContent = signal.label;
+      item.append(label);
+      const evidence = document.createElement("span");
+      evidence.className = "evidence";
+      evidence.textContent = `\xB7 value ${signal.value} / threshold ${signal.threshold} \xB7 contribution ${signal.contribution}`;
+      item.append(evidence);
+      signals.append(item);
+    }
+    risk.append(signals);
+    wrapper.append(risk);
+  }
   wrapper.append(
     impactList(
       "Most complex functions",
@@ -8119,6 +8407,14 @@ function renderReview(container, result, handlers = {}) {
     meta.textContent = `${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.date.slice(0, 10)} \xB7 ${result.commit.subject}`;
     container.append(meta);
   }
+  const provenance = passportProvenanceText(result.provenance);
+  if (provenance) {
+    const line = document.createElement("p");
+    line.className = result.provenance?.stale === true ? "evidence is-stale" : "evidence";
+    line.dataset.role = "review-provenance";
+    line.textContent = provenance;
+    container.append(line);
+  }
   const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
   const summary = document.createElement("p");
   summary.className = "overlay-summary";
@@ -8191,7 +8487,7 @@ function renderReview(container, result, handlers = {}) {
     const impactSection = document.createElement("div");
     impactSection.className = "impact-passport-section";
     container.append(impactSection);
-    renderImpactPassport(impactSection, result.impactPassport, handlers);
+    renderImpactPassport(impactSection, { ...result.impactPassport, graphApproximation: true }, handlers);
   }
   const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
   const impactHeading = document.createElement("h4");
@@ -8341,6 +8637,14 @@ function renderChangePassport(container, passport) {
   caption.className = "unavailable";
   caption.textContent = passport.baseline ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.` : "Cohesion from recorded member wiring; no baseline revision was available.";
   container.append(caption);
+  const provenance = passportProvenanceText(passport.provenance);
+  if (provenance) {
+    const line = document.createElement("p");
+    line.className = passport.provenance?.stale === true ? "evidence is-stale" : "evidence";
+    line.dataset.role = "change-passport-provenance";
+    line.textContent = provenance;
+    container.append(line);
+  }
   const list = document.createElement("ul");
   list.className = "change-passport";
   list.dataset.role = "change-passport";
@@ -8357,6 +8661,7 @@ function renderChangePassport(container, passport) {
     value.textContent = delta.text;
     value.title = change.note ?? "";
     item.append(value);
+    item.append(changeRiskBlock(change));
     list.append(item);
   }
   container.append(list);
@@ -8366,6 +8671,51 @@ function renderChangePassport(container, passport) {
     note3.textContent = "Only the first files in the change set were measured.";
     container.append(note3);
   }
+}
+function changeRiskBlock(change) {
+  const block = document.createElement("div");
+  block.className = "change-risk";
+  const edges = [
+    ...(change.edgesAdded ?? []).map((edge) => `+ ${edge.source} \u2192 ${edge.target} (${edge.kind})`),
+    ...(change.edgesRemoved ?? []).map((edge) => `\u2212 ${edge.source} \u2192 ${edge.target} (${edge.kind})`)
+  ];
+  if (edges.length > 0) {
+    const list = document.createElement("ul");
+    list.className = "change-edges";
+    list.dataset.role = "change-edges";
+    for (const edge of edges) {
+      const item = document.createElement("li");
+      item.textContent = edge;
+      list.append(item);
+    }
+    block.append(list);
+  }
+  const risk = change.risk;
+  if (!risk || !Array.isArray(risk.signals) || risk.signals.length === 0) {
+    return block;
+  }
+  const score = document.createElement("p");
+  score.className = "overlay-summary";
+  score.dataset.role = "change-risk-score";
+  score.textContent = riskScoreText(risk);
+  block.append(score);
+  const signals = document.createElement("ul");
+  signals.className = "change-risk-signals";
+  signals.dataset.role = "change-risk-signals";
+  for (const signal of riskSignalEntries(risk.signals)) {
+    const item = document.createElement("li");
+    item.dataset.kind = signal.kind;
+    const label = document.createElement("span");
+    label.textContent = signal.label;
+    item.append(label);
+    const evidence = document.createElement("span");
+    evidence.className = "evidence";
+    evidence.textContent = `\xB7 value ${signal.value} / threshold ${signal.threshold} \xB7 contribution ${signal.contribution}`;
+    item.append(evidence);
+    signals.append(item);
+  }
+  block.append(signals);
+  return block;
 }
 
 // ui/strabo-panel-overlay.js
@@ -8549,6 +8899,14 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
   appendFact(facts, "Resolution", evidence.resolutionLabel);
   container.append(facts);
+  const provenance = evidence.provenance ?? handlers.provenance ?? null;
+  if (provenance && provenance.fingerprint) {
+    const line = document.createElement("p");
+    line.className = provenance.stale === true ? "evidence is-stale" : "evidence";
+    line.dataset.role = "edge-provenance";
+    line.textContent = evidenceProvenanceText(provenance);
+    container.append(line);
+  }
   if (handlers.onViewSource) {
     const source = document.createElement("button");
     source.type = "button";
@@ -8573,6 +8931,14 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
     clear.addEventListener("click", () => handlers.onClear());
     container.append(clear);
   }
+}
+function evidenceProvenanceText(provenance) {
+  if (!provenance || !provenance.fingerprint) {
+    return "";
+  }
+  const short = String(provenance.fingerprint).split(":")[0]?.slice(0, 7) || provenance.fingerprint;
+  const scanned = provenance.scannedAt ? ` \xB7 scanned ${String(provenance.scannedAt).slice(0, 19).replace("T", " ")}` : "";
+  return provenance.stale === true ? `graph ${short}${scanned} \xB7 stale: the working tree has moved on` : `graph ${short}${scanned}`;
 }
 function edgeEndpoint(id, onSelect2) {
   const button3 = document.createElement("button");
@@ -9467,7 +9833,21 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
   container.replaceChildren();
   container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
   if (!route) {
-    container.append(note("No reading route was recorded for this repository.", "unavailable"));
+    if (state2.error) {
+      container.append(note("The reading route could not be loaded.", "unavailable"));
+      container.append(note(state2.error, "route-error-detail"));
+      if (handlers.onRetry) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "route-retry";
+        retry.dataset.role = "route-retry";
+        retry.textContent = "Retry";
+        retry.addEventListener("click", () => handlers.onRetry());
+        container.append(retry);
+      }
+    } else {
+      container.append(note("No reading route was recorded for this repository.", "unavailable"));
+    }
     return;
   }
   const steps = routeSteps(route);
@@ -9506,17 +9886,40 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
       handlers.onFocus?.(step.file);
     }
   });
+  const stepNarrate = handlers.onNarrateStep ? (() => {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "route-narrate-step";
+    button3.dataset.role = "route-narrate-step";
+    button3.textContent = "Narrate this step";
+    const reason = narratorDisabledReason(state2.narratorStatus);
+    button3.disabled = steps.length === 0 || reason !== null;
+    button3.title = reason ?? "Ask the opt-in narrator to explain the current file";
+    return button3;
+  })() : null;
+  const stepReply = stepNarrate ? document.createElement("div") : null;
+  if (stepReply) {
+    stepReply.className = "narrator-reply route-step-narrative";
+    stepReply.dataset.role = "route-step-narrative";
+    stepNarrate.addEventListener("click", async () => {
+      const step = steps[index];
+      if (!step) {
+        return;
+      }
+      stepNarrate.disabled = true;
+      stepReply.replaceChildren("Asking the narrator\u2026");
+      try {
+        renderNarrativeReply(stepReply, await handlers.onNarrateStep(step));
+      } catch (error) {
+        stepReply.replaceChildren(`Narrator unavailable: ${error.message}`);
+      } finally {
+        stepNarrate.disabled = false;
+      }
+    });
+  }
   controls.append(back, counter, next, focus2);
-  if (handlers.onNarrateTour) {
-    const tour = document.createElement("button");
-    tour.type = "button";
-    tour.className = "route-narrate";
-    tour.dataset.role = "route-narrate";
-    tour.textContent = "Narrate tour";
-    tour.title = "Ask the opt-in narrator for a guided tour of this route";
-    tour.disabled = state2.narratorConfigured === false;
-    tour.addEventListener("click", () => handlers.onNarrateTour());
-    controls.append(tour);
+  if (stepNarrate) {
+    controls.append(stepNarrate);
   }
   container.append(controls);
   const current2 = steps[index];
@@ -9528,6 +9931,9 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
     currentCard.dataset.file = current2.file;
   }
   container.append(currentCard);
+  if (stepReply) {
+    container.append(stepReply);
+  }
   const summary = route.summary ?? {};
   container.append(
     note(
@@ -9577,6 +9983,17 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
       section2.append(unreached);
     }
     container.append(section2);
+  }
+  if (handlers.onNarrateTour) {
+    appendNarratorBlock(
+      container,
+      {
+        narratorStatus: state2.narratorStatus,
+        ...handlers.onOpenNarratorSettings ? { onOpenNarratorSettings: handlers.onOpenNarratorSettings } : {},
+        onNarrate: () => handlers.onNarrateTour()
+      },
+      { id: "narrate-tour", label: "Narrate tour" }
+    );
   }
 }
 
@@ -10964,7 +11381,14 @@ function impactPassportSet(card) {
   if (!card || card.path === void 0) {
     return null;
   }
-  return { scope: "file", baseline: card.status === "added" ? null : "HEAD", files: [card], totals: null, capped: false };
+  return {
+    scope: "file",
+    baseline: card.status === "added" ? null : "HEAD",
+    files: [card],
+    totals: null,
+    capped: false,
+    ...card.provenance ? { provenance: card.provenance } : {}
+  };
 }
 function functionsHandlers(result) {
   return {
@@ -10987,6 +11411,12 @@ async function fetchNarratorStatus() {
   } catch {
     return { configured: false, reason: "not-configured" };
   }
+}
+async function ensureNarratorStatus() {
+  if (narratorStatus === null) {
+    narratorStatus = await fetchNarratorStatus();
+  }
+  return narratorStatus;
 }
 async function narrateGroup(id) {
   if (narratorStatus === null) {
@@ -11064,25 +11494,22 @@ async function narrateNode(id) {
 }
 async function narrateRouteTour() {
   const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const showPanel = (panelState) => {
-    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
-  };
-  showPanel({ label: "Guided tour", phase: "loading" });
-  floatingWindows.find((controller) => controller.key === "narration")?.open();
-  try {
-    const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(state.repository ? { repository: state.repository } : {})
-    });
-    const reply = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
-    }
-    showPanel({ label: "Guided tour", phase: "done", reply });
-  } catch (error) {
-    showPanel({ label: "Guided tour", phase: "error", message: error.message });
+  const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(state.repository ? { repository: state.repository } : {})
+  });
+  const reply = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
   }
+  return reply;
+}
+async function narrateRouteStep(step) {
+  return postNarration(
+    ROUTE_STEP_INSTRUCTION,
+    buildRouteStepEvidence(step, currentRoute?.summary)
+  );
 }
 async function postNarration(instruction, evidence) {
   const response = await fetch(`${API_PATH}/narrator`, {
@@ -11867,28 +12294,29 @@ async function showRoute(preferredFile) {
   try {
     const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
     currentRoute = report;
+    await ensureNarratorStatus();
     const steps = routeSteps(report);
     const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
     routeIndex = preferred >= 0 ? clampRouteIndex(preferred, steps.length) : clampRouteIndex(readRouteProgress(window.localStorage, state.repository) ?? 0, steps.length);
     renderRouteView();
   } catch (error) {
     currentRoute = null;
-    renderRoutePanel(elements.routePanel, null, {}, {});
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = error.message;
-    elements.routePanel.append(note3);
+    renderRoutePanel(elements.routePanel, null, { error: error.message }, {
+      onRetry: () => showRoute(preferredFile)
+    });
   }
   refreshDock();
 }
 function renderRouteView() {
   renderRoutePanel(elements.routePanel, currentRoute, {
     index: routeIndex,
-    ...narratorStatus?.configured === false ? { narratorConfigured: false } : {}
+    narratorStatus
   }, {
     onStep: (index) => stepRoute(index),
     onFocus: (file) => focusRouteFile(file),
-    onNarrateTour: () => narrateRouteTour()
+    onNarrateTour: () => narrateRouteTour(),
+    onNarrateStep: (step) => narrateRouteStep(step),
+    onOpenNarratorSettings: openNarratorSettings
   });
 }
 function stepRoute(index) {
@@ -11938,6 +12366,7 @@ function clearOverlay() {
   state.overlay = "none";
   elements.overlay.value = "none";
   view.overlay(null);
+  view.setHiddenCoupling(null, false);
   renderOverlayPanel(elements.overlayPanel, "", null);
   refreshDock();
 }
@@ -12000,7 +12429,8 @@ var OVERLAY_TITLES = {
   hotspots: "Function hotspots",
   "module-depth": "Module depth",
   ownership: "Ownership",
-  smells: "Smells"
+  smells: "Smells",
+  "hidden-coupling": "Hidden coupling (co-change, no import path)"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -12010,9 +12440,10 @@ var OVERLAY_ENDPOINTS = {
   hotspots: "/analysis/functions",
   "module-depth": "/analysis/module-depth",
   ownership: "/analysis/ownership",
-  smells: "/analysis/smells"
+  smells: "/analysis/smells",
+  "hidden-coupling": "/analysis/co-change"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling"];
 async function applyOverlay(generation) {
   const kind = state.overlay;
   if (kind === "none") {
@@ -12028,6 +12459,7 @@ async function applyOverlay(generation) {
   }
   const overlay = overlayFor(kind, data);
   view.overlay(overlay.classes);
+  view.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
   const actions = [];
   if (kind === "impact" && clientPrefs.commitEnabled) {
     actions.push({

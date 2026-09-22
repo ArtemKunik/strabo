@@ -24,6 +24,18 @@ export interface GraphNode {
   lines?: number;
 }
 
+/**
+ * The explicit relationship an edge records.
+ *
+ * `import` is an ordinary dependency (a static or dynamic import, `require`, or a call).
+ * `re-export` forwards the target's names (`export … from`, Rust `pub use`).
+ * `module-declaration` declares a child module (Rust `mod x;`).
+ * `executable-module` runs the target when the source is imported (a Python package `__init__`).
+ *
+ * Absent means `import`, so a graph recorded before this field existed still reads.
+ */
+export type EdgeRelationship = 'import' | 're-export' | 'module-declaration' | 'executable-module';
+
 /** The kind of relationship an edge represents. */
 export type EdgeKind =
   | 'import'
@@ -67,12 +79,18 @@ export interface GraphEdge {
   kind: EdgeKind;
   evidence: EdgeEvidence;
   /**
-   * Whether the edge is a real dependency (`use`) or only a declaration of the module tree
-   * (`declare`): a Rust `mod x;`, a Python `__init__.py` re-export, or a TypeScript barrel
-   * `index.ts` re-export. A `declare` edge is drawn but never counted, so it cannot inflate
-   * blast radius or impact. Absent means `use`.
+   * Whether the edge is a real dependency for fan-in/fan-out (`use`) or only a declaration
+   * of the module tree (`declare`): a Rust `mod x;`, a Python `__init__.py` layout edge, or
+   * a TypeScript barrel `index.ts` re-export. A `declare` edge is drawn and left out of
+   * direct fan-in/fan-out, but a re-export is still followed when impact and blast radius
+   * opt in (see `buildAdjacency`). Absent means `use`.
    */
   role?: 'use' | 'declare';
+  /**
+   * The explicit relationship kind. `role` is the coarse counted/not-counted flag kept for
+   * backward compatibility; this names what the edge actually is. Absent means `import`.
+   */
+  relationship?: EdgeRelationship;
 }
 
 /** A fact Strabo could not turn into an edge. Diagnostics are evidence, not errors. */
@@ -96,7 +114,8 @@ export interface Exclusion {
     | 'gitignored'
     | 'minified'
     | 'unsupported'
-    | 'symlink';
+    | 'symlink'
+    | 'lockfile';
   detail?: string;
 }
 

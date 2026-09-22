@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { SIGNAL_THRESHOLDS, computeSignals } from '../../src/index.ts';
+import {
+  CHANGE_RISK_SIGNAL_LABELS,
+  CHANGE_RISK_THRESHOLDS,
+  SIGNAL_THRESHOLDS,
+  computeSignals,
+} from '../../src/index.ts';
 import type { CodeSymbol, FunctionMetrics } from '../../src/index.ts';
 
 const BASE_METRICS: FunctionMetrics = {
@@ -59,4 +64,20 @@ test('computeSignals names the recorded value in its detail', () => {
   );
   assert.equal(signals[0]?.kind, 'nested-loops');
   assert.match(signals[0]?.detail ?? '', /loop nesting 3/);
+});
+
+test('change-risk thresholds reuse the function-signal thresholds they can', () => {
+  assert.equal(CHANGE_RISK_THRESHOLDS.linesTouched, SIGNAL_THRESHOLDS.longFunction);
+  assert.equal(CHANGE_RISK_THRESHOLDS.touchedComplexity, SIGNAL_THRESHOLDS.highComplexity);
+  assert.ok(CHANGE_RISK_THRESHOLDS.recordedReferences > 0);
+  assert.equal(CHANGE_RISK_THRESHOLDS.untestedShare, 1);
+});
+
+test('every change-risk signal kind has a label', () => {
+  assert.deepEqual(Object.keys(CHANGE_RISK_SIGNAL_LABELS).sort(), [
+    'lines-touched',
+    'recorded-references',
+    'touched-complexity',
+    'untested-share',
+  ]);
 });

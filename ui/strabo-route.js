@@ -6,6 +6,9 @@
  * closing the panel and reopening it resumes where the reader stopped.
  */
 
+import { narratorDisabledReason } from './strabo-narrator.js';
+import { appendNarratorBlock, renderNarrativeReply } from './strabo-panel-narrative.js';
+
 /** One localStorage key per repository, so two repositories never share a step. */
 export const ROUTE_PROGRESS_PREFIX = 'strabo.route.progress.';
 
@@ -95,14 +98,32 @@ function note(text, className = 'overlay-note') {
  * summary above its ordered files and the unreached list last.
  *
  * `state.index` is the current step; `handlers.onStep(index)` and `handlers.onFocus(file)`
- * are wired to the controls. Nothing is drawn from thin air: an empty route says so.
+ * are wired to the controls. A null route is a load failure when `state.error` is set (with a
+ * Retry when `handlers.onRetry` is supplied) and an absent route otherwise. The opt-in narrator
+ * is offered only when its handlers are given: a per-step control and a whole-route tour whose
+ * status, Set up link, and reply come from the shared affordance. Nothing is drawn from thin air.
  */
 export function renderRoutePanel(container, route, state = {}, handlers = {}) {
   container.replaceChildren();
 
   container.append(heading('h3', `Reading route — ${route?.repository ?? 'repository'}`));
   if (!route) {
-    container.append(note('No reading route was recorded for this repository.', 'unavailable'));
+    // A failed load and an empty route are different facts; only the failure offers a retry.
+    if (state.error) {
+      container.append(note('The reading route could not be loaded.', 'unavailable'));
+      container.append(note(state.error, 'route-error-detail'));
+      if (handlers.onRetry) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'route-retry';
+        retry.dataset.role = 'route-retry';
+        retry.textContent = 'Retry';
+        retry.addEventListener('click', () => handlers.onRetry());
+        container.append(retry);
+      }
+    } else {
+      container.append(note('No reading route was recorded for this repository.', 'unavailable'));
+    }
     return;
   }
 
@@ -150,17 +171,44 @@ export function renderRoutePanel(container, route, state = {}, handlers = {}) {
     }
   });
 
+  // Per-step narration is a control beside Focus, but its reply renders under the current card.
+  const stepNarrate = handlers.onNarrateStep
+    ? (() => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'route-narrate-step';
+        button.dataset.role = 'route-narrate-step';
+        button.textContent = 'Narrate this step';
+        const reason = narratorDisabledReason(state.narratorStatus);
+        button.disabled = steps.length === 0 || reason !== null;
+        button.title = reason ?? 'Ask the opt-in narrator to explain the current file';
+        return button;
+      })()
+    : null;
+  const stepReply = stepNarrate ? document.createElement('div') : null;
+  if (stepReply) {
+    stepReply.className = 'narrator-reply route-step-narrative';
+    stepReply.dataset.role = 'route-step-narrative';
+    stepNarrate.addEventListener('click', async () => {
+      const step = steps[index];
+      if (!step) {
+        return;
+      }
+      stepNarrate.disabled = true;
+      stepReply.replaceChildren('Asking the narrator…');
+      try {
+        renderNarrativeReply(stepReply, await handlers.onNarrateStep(step));
+      } catch (error) {
+        stepReply.replaceChildren(`Narrator unavailable: ${error.message}`);
+      } finally {
+        stepNarrate.disabled = false;
+      }
+    });
+  }
+
   controls.append(back, counter, next, focus);
-  if (handlers.onNarrateTour) {
-    const tour = document.createElement('button');
-    tour.type = 'button';
-    tour.className = 'route-narrate';
-    tour.dataset.role = 'route-narrate';
-    tour.textContent = 'Narrate tour';
-    tour.title = 'Ask the opt-in narrator for a guided tour of this route';
-    tour.disabled = state.narratorConfigured === false;
-    tour.addEventListener('click', () => handlers.onNarrateTour());
-    controls.append(tour);
+  if (stepNarrate) {
+    controls.append(stepNarrate);
   }
   container.append(controls);
 
@@ -173,6 +221,9 @@ export function renderRoutePanel(container, route, state = {}, handlers = {}) {
     currentCard.dataset.file = current.file;
   }
   container.append(currentCard);
+  if (stepReply) {
+    container.append(stepReply);
+  }
 
   const summary = route.summary ?? {};
   container.append(
@@ -229,5 +280,21 @@ export function renderRoutePanel(container, route, state = {}, handlers = {}) {
     }
 
     container.append(section);
+  }
+
+  // The whole-route tour reuses the shared narrator affordance: status, a Set up link when the
+  // narrator is off, and the reply inline under the model-generated attribution.
+  if (handlers.onNarrateTour) {
+    appendNarratorBlock(
+      container,
+      {
+        narratorStatus: state.narratorStatus,
+        ...(handlers.onOpenNarratorSettings
+          ? { onOpenNarratorSettings: handlers.onOpenNarratorSettings }
+          : {}),
+        onNarrate: () => handlers.onNarrateTour(),
+      },
+      { id: 'narrate-tour', label: 'Narrate tour' },
+    );
   }
 }

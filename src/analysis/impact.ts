@@ -84,7 +84,7 @@ export function impactFromPaths(
   graph: Graph,
   paths: readonly string[],
 ): Pick<ImpactResult, 'affected' | 'outsideGraph'> {
-  const { backward } = buildAdjacency(graph);
+  const { backward } = buildAdjacency(graph, { includeReExports: true });
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   const affected = new Map<string, number>();
   const outsideGraph: string[] = [];

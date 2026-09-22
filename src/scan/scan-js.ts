@@ -57,6 +57,8 @@ export function scanJsTsEdges(
       // rather than depending on the target's contents, so it is drawn but not counted.
       const role: GraphEdge['role'] =
         match.kind === 're-export' && isBarrelFile(file) ? 'declare' : 'use';
+      const relationship: GraphEdge['relationship'] =
+        match.kind === 're-export' ? 're-export' : 'import';
       // `./` and `../` resolve against the importer; `/`-rooted specifiers are
       // bundler root-relative and belong to the alias layer below.
       if (isDotRelative(match.specifier)) {
@@ -68,6 +70,7 @@ export function scanJsTsEdges(
             kind: match.kind,
             evidence: resolved.evidence,
             role,
+            relationship,
           });
           continue;
         }
@@ -80,6 +83,7 @@ export function scanJsTsEdges(
             kind: match.kind,
             evidence: claim.resolved.evidence,
             role,
+            relationship,
           });
           continue;
         }

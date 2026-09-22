@@ -163,25 +163,58 @@ test('renderRoutePanel marks the last step and reports an absent route', () => {
   assert.equal(none.querySelector('.route-focus').disabled, true);
 });
 
-test('renderRoutePanel offers the opt-in tour only when a handler is supplied', () => {
+test('renderRoutePanel reports a load failure and offers a retry', () => {
+  const target = container();
+  let retries = 0;
+  renderRoutePanel(target, null, { error: '404 Not Found' }, { onRetry: () => (retries += 1) });
+  assert.match(target.textContent, /could not be loaded/);
+  assert.match(target.textContent, /404 Not Found/);
+  target.querySelector('[data-role="route-retry"]').dispatchEvent(new window.Event('click'));
+  assert.equal(retries, 1);
+});
+
+test('renderRoutePanel offers the opt-in tour only when a handler is supplied', async () => {
   const inert = container();
   renderRoutePanel(inert, route, {}, {});
-  assert.equal(inert.querySelector('[data-role="route-narrate"]'), null);
+  assert.equal(inert.querySelector('#narrate-tour'), null);
 
-  let tours = 0;
   const off = container();
-  renderRoutePanel(off, route, { index: 0, narratorConfigured: false }, {
-    onNarrateTour: () => (tours += 1),
+  renderRoutePanel(off, route, { index: 0, narratorStatus: { configured: false } }, {
+    onNarrateTour: async () => ({ available: true, text: 'tour' }),
+    onOpenNarratorSettings: () => {},
   });
-  const offButton = off.querySelector('[data-role="route-narrate"]');
+  const offButton = off.querySelector('#narrate-tour');
   assert.equal(offButton.disabled, true);
+  assert.ok(off.querySelector('[data-role="narrator-setup"]'));
 
   const ready = container();
-  renderRoutePanel(ready, route, { index: 0, narratorConfigured: true }, {
-    onNarrateTour: () => (tours += 1),
+  renderRoutePanel(ready, route, {
+    index: 0,
+    narratorStatus: { configured: true, model: 'm', remaining: 2, requestBudget: 5 },
+  }, {
+    onNarrateTour: async () => ({ available: true, text: 'A guided tour.' }),
   });
-  const button = ready.querySelector('[data-role="route-narrate"]');
+  const button = ready.querySelector('#narrate-tour');
   assert.equal(button.disabled, false);
   button.dispatchEvent(new window.Event('click'));
-  assert.equal(tours, 1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(ready.querySelector('.narrator-reply').textContent, /A guided tour\./);
+});
+
+test('renderRoutePanel narrates the current step inline when a handler is supplied', async () => {
+  const target = container();
+  renderRoutePanel(target, route, {
+    index: 0,
+    narratorStatus: { configured: true, model: 'm', remaining: 2, requestBudget: 5 },
+  }, {
+    onNarrateStep: async (step) => ({ available: true, text: `step ${step.file}` }),
+  });
+  const button = target.querySelector('[data-role="route-narrate-step"]');
+  assert.equal(button.disabled, false);
+  button.dispatchEvent(new window.Event('click'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(
+    target.querySelector('[data-role="route-step-narrative"]').textContent,
+    /crates\/alpha\/src\/main\.rs/,
+  );
 });
