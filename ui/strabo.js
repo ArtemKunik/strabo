@@ -16,6 +16,7 @@ import { createFrameSampler } from './strabo-perf.js';
 import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
+import { initFloatingToolbar } from './strabo-float-toolbar.js';
 import { createFreshnessBadge } from './strabo-freshness.js';
 import {
   renderBreadcrumb,
@@ -365,6 +366,7 @@ const elements = {
   tbClear: document.getElementById('tb-clear'),
   tbOverflow: document.getElementById('tb-overflow'),
   tbOverflowMenu: document.getElementById('tb-overflow-menu'),
+  graphToolbar: document.querySelector('.graph-toolbar'),
   groupCount: document.getElementById('group-count'),
   tbDelegateGroup: document.getElementById('tb-delegate-group'),
   timelinePanel: document.getElementById('timeline-panel'),
@@ -3826,6 +3828,10 @@ const floatingWindows = initFloatingWindows({
     },
   ],
 });
+
+// The canvas action toolbar floats: drag its grip to move it, its edge to resize, and the
+// placement is remembered. It opens bottom-left, clear of the top chrome.
+initFloatingToolbar(elements.graphToolbar);
 
 function refreshDock() {
   try {

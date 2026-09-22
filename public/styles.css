@@ -559,7 +559,7 @@ button.primary {
 
 .graph-toolbar {
   position: absolute;
-  top: 10px;
+  bottom: 10px;
   left: 12px;
   transform: none;
   /* Above the floating windows (z-index 50): the canvas actions, including the System
@@ -607,6 +607,54 @@ button.primary {
    and reads as a button that does nothing. */
 .graph-toolbar button[hidden] {
   display: none;
+}
+
+/* The toolbar floats: drag the grip to move it, the corner to widen it (the icon buttons
+   wrap, so it reflows). Placement and width are remembered in localStorage. */
+.tb-grip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.tb-grip:active {
+  cursor: grabbing;
+}
+
+.tb-resize {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 0 0 9px 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.tb-resize::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 4px;
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--ink-3);
+  opacity: 0.4;
+}
+
+/* A bottom-anchored toolbar opens its overflow menu upward, so the menu stays on screen. */
+.graph-toolbar.opens-up .tb-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .tb-divider {

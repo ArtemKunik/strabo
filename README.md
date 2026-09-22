@@ -629,7 +629,10 @@ for status — a changed or affected node carries the fixed status scale, and ne
 identity — so two statuses that can appear together differ by border shape as well as colour.
 The canvas toolbar offers `Focus`, `Trace impact`,
 `Start path`, `Boundaries`, `Calls`, and `Clear`; hovering a node reports its blast radius without
-selecting it. The strip along the bottom counts tests, modules, and directories, and
+selecting it. The toolbar floats: drag its grip to move it, drag its edge to widen it (the icon
+buttons wrap, so it reflows), and the placement is remembered per browser. It opens at the
+bottom-left, clear of the top chrome, and the overflow menu opens upward when it sits low. The
+strip along the bottom counts tests, modules, and directories, and
 clicking an entry filters the map. The zoom controls on the canvas adjust the viewport, and
 the status bar reports the diagnostics and exclusion counts, the node kinds on screen, and
 the active renderer (WebGL2 or canvas).

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float.js';
+import { clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
   assert.deepEqual(sanitizeSize({ width: 420, height: 300 }), { width: 420, height: 300 });
@@ -48,4 +49,26 @@ test('firstFreeSlotTop resumes below the tallest overlapping run', () => {
     { top: 100, bottom: 500 },
   ];
   assert.equal(firstFreeSlotTop(occupied, 100, { startTop: 96, gap: 12 }), 512);
+});
+
+test('clampToolbarPosition keeps a floating toolbar inside its container', () => {
+  assert.deepEqual(
+    clampToolbarPosition(500, 400, { width: 300, height: 40, boundWidth: 800, boundHeight: 500 }),
+    { left: 500, top: 400 },
+  );
+  assert.deepEqual(
+    clampToolbarPosition(700, 490, { width: 300, height: 40, boundWidth: 800, boundHeight: 500 }),
+    { left: 500, top: 460 },
+  );
+  assert.deepEqual(
+    clampToolbarPosition(-40, -10, { width: 300, height: 40, boundWidth: 800, boundHeight: 500 }),
+    { left: 0, top: 0 },
+  );
+});
+
+test('clampToolbarPosition pins to the origin when the bar is larger than the container', () => {
+  assert.deepEqual(
+    clampToolbarPosition(50, 50, { width: 900, height: 700, boundWidth: 800, boundHeight: 500 }),
+    { left: 0, top: 0 },
+  );
 });

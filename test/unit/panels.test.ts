@@ -45,6 +45,7 @@ const {
   structuralTierEdgeLabel,
 } = await import('../../ui/strabo-panels.js');
 const { createVirtualList } = await import('../../ui/strabo-virtual.js');
+const { initFloatingToolbar } = await import('../../ui/strabo-float-toolbar.js');
 const { hiddenCouplingOverlay, overlayFor } = await import('../../ui/strabo-overlays.js');
 const { buildHiddenCouplingElements } = await import('../../ui/strabo-graph.js');
 
@@ -954,6 +955,16 @@ test('renderRepositoryPassport offers an export control that passes the chosen f
   select!.value = 'html';
   button!.click();
   assert.deepEqual(formats, ['html']);
+});
+
+test('initFloatingToolbar adds a drag grip and a resize edge', () => {
+  const target = container();
+  target.innerHTML = '<button type="button">A</button>';
+  const handle = initFloatingToolbar(target);
+
+  assert.ok(handle, 'the toolbar controller is returned');
+  assert.equal(target.firstElementChild?.className, 'tb-grip');
+  assert.ok(target.querySelector('.tb-resize'), 'the resize edge is appended');
 });
 
 test('renderImpactPassport shows provenance and labels an approximation (T6/R4)', () => {

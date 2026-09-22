@@ -4225,6 +4225,150 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   return controllers;
 }
 
+// ui/strabo-float-toolbar.js
+var STORAGE_KEY2 = "strabo.float.toolbar.v1";
+var MIN_WIDTH2 = 200;
+var GAP2 = 8;
+function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
+  const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
+  const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
+  return {
+    left: Math.min(Math.max(left, 0), maxLeft),
+    top: Math.min(Math.max(top, 0), maxTop)
+  };
+}
+function readStore2(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function writeStore2(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+  }
+}
+function initFloatingToolbar(element2, options = {}) {
+  if (!element2) return null;
+  const storageKey = options.storageKey ?? STORAGE_KEY2;
+  const minWidth = options.minWidth ?? MIN_WIDTH2;
+  const container = element2.offsetParent ?? element2.parentElement ?? document.body;
+  const saved = readStore2(storageKey);
+  const grip = document.createElement("span");
+  grip.className = "tb-grip";
+  grip.setAttribute("aria-hidden", "true");
+  grip.title = "Drag to move the toolbar";
+  grip.textContent = "\u283F";
+  element2.prepend(grip);
+  const resize = document.createElement("span");
+  resize.className = "tb-resize";
+  resize.setAttribute("aria-hidden", "true");
+  resize.title = "Drag to resize";
+  element2.append(resize);
+  let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
+  const applyWidth = () => {
+    if (width) element2.style.width = `${width}px`;
+  };
+  const containerSize = () => ({
+    boundWidth: container.clientWidth || container.getBoundingClientRect().width,
+    boundHeight: container.clientHeight || container.getBoundingClientRect().height
+  });
+  const place = (left, top) => {
+    const rect = element2.getBoundingClientRect();
+    const { boundWidth, boundHeight } = containerSize();
+    const clamped = clampToolbarPosition(left, top, {
+      width: element2.offsetWidth || rect.width,
+      height: element2.offsetHeight || rect.height,
+      boundWidth,
+      boundHeight
+    });
+    element2.style.left = `${clamped.left}px`;
+    element2.style.top = `${clamped.top}px`;
+    element2.style.bottom = "auto";
+    element2.style.right = "auto";
+    updateMenuDirection();
+  };
+  const updateMenuDirection = () => {
+    const rect = element2.getBoundingClientRect();
+    const containerTop = container.getBoundingClientRect().top;
+    const center = rect.top - containerTop + rect.height / 2;
+    const { boundHeight } = containerSize();
+    element2.classList.toggle("opens-up", center > boundHeight / 2);
+  };
+  if (Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+    place(saved.left, saved.top);
+  } else {
+    updateMenuDirection();
+  }
+  applyWidth();
+  const persist = () => {
+    writeStore2(storageKey, {
+      left: parseFloat(element2.style.left),
+      top: parseFloat(element2.style.top),
+      width: parseFloat(element2.style.width) || null
+    });
+  };
+  grip.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const rect = element2.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    const startLeft = rect.left - containerRect.left;
+    const startTop = rect.top - containerRect.top;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    grip.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      place(startLeft + (moveEvent.clientX - startX), startTop + (moveEvent.clientY - startY));
+    };
+    const end = () => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", end);
+      grip.removeEventListener("pointercancel", end);
+      persist();
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  resize.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startWidth = element2.getBoundingClientRect().width;
+    const { boundWidth } = containerSize();
+    const left = parseFloat(element2.style.left);
+    const maxWidth = Math.max(minWidth, boundWidth - (Number.isFinite(left) ? left : 0) - GAP2);
+    resize.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      width = Math.min(Math.max(startWidth + (moveEvent.clientX - startX), minWidth), maxWidth);
+      applyWidth();
+    };
+    const end = () => {
+      resize.removeEventListener("pointermove", move);
+      resize.removeEventListener("pointerup", end);
+      resize.removeEventListener("pointercancel", end);
+      persist();
+    };
+    resize.addEventListener("pointermove", move);
+    resize.addEventListener("pointerup", end);
+    resize.addEventListener("pointercancel", end);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  window.addEventListener("resize", () => {
+    if (Number.isFinite(parseFloat(element2.style.left))) {
+      place(parseFloat(element2.style.left), parseFloat(element2.style.top));
+    } else {
+      updateMenuDirection();
+    }
+  });
+  return { element: element2, grip, resize };
+}
+
 // ui/strabo-freshness.js
 function createFreshnessBadge(element2, options = {}) {
   if (!element2) {
@@ -20235,6 +20379,7 @@ var elements = {
   tbClear: document.getElementById("tb-clear"),
   tbOverflow: document.getElementById("tb-overflow"),
   tbOverflowMenu: document.getElementById("tb-overflow-menu"),
+  graphToolbar: document.querySelector(".graph-toolbar"),
   groupCount: document.getElementById("group-count"),
   tbDelegateGroup: document.getElementById("tb-delegate-group"),
   timelinePanel: document.getElementById("timeline-panel"),
@@ -23053,6 +23198,7 @@ var floatingWindows = initFloatingWindows({
     }
   ]
 });
+initFloatingToolbar(elements.graphToolbar);
 function refreshDock() {
   try {
     floatingWindows?.refresh?.();
