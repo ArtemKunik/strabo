@@ -227,6 +227,29 @@ test('reviewWorkingTree splits staged, unstaged, and untracked', async () => {
   }
 });
 
+test('reviewWorkingTree keeps generated output out of scope', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'public'));
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  fs.writeFileSync(path.join(root, 'public', 'strabo.bundle.js'), 'export const bundled = 1;\n');
+  fs.writeFileSync(path.join(root, 'public', 'strabo.bundle.js.map'), '{"version":3}\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  fs.appendFileSync(path.join(root, 'a.ts'), '// edit\n');
+  fs.appendFileSync(path.join(root, 'public', 'strabo.bundle.js'), '// rebuilt\n');
+  fs.appendFileSync(path.join(root, 'public', 'strabo.bundle.js.map'), '// rebuilt\n');
+
+  const report = await scanRepository(root);
+  const result = await reviewWorkingTree(root, report.graph);
+
+  assert.equal(result.available, true);
+  if (result.available) {
+    assert.deepEqual(result.files.map((file) => file.path), ['a.ts']);
+  }
+});
+
 test('reviewWorkingTree reports unavailable without Git', async () => {
   const root = tempDir();
   const report = await scanRepository(root);

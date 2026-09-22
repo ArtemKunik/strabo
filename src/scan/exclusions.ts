@@ -31,6 +31,8 @@ const FILENAME_MARKERS = [
   '.min.js',
   '.min.css',
   '.bundle.js',
+  '.bundle.js.map',
+  '.map',
   '.generated.ts',
   '.g.ts',
   '.designer.cs',

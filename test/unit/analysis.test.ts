@@ -152,3 +152,23 @@ test('buildAdjacency leaves declare edges out of blast radius unless asked', () 
   const withDeclare = computeGraphMetrics(graph, buildAdjacency(graph, { includeDeclare: true }));
   assert.equal(withDeclare.transitiveDependents.get('src/a.rs'), 2);
 });
+
+test('buildAdjacency collapses parallel edges to unique neighbours', () => {
+  const nodes = ['src/a.ts', 'src/b.ts'].map((id) => ({
+    id,
+    kind: 'module' as const,
+    directory: 'src',
+  }));
+  // A recorded call sits beside the import; a second import of the same target also
+  // exists. Neither may make `.length` read as more than one neighbour.
+  const edges = [
+    { source: 'src/a.ts', target: 'src/b.ts', kind: 'import' as const, evidence: { line: 1, specifier: './b.ts', resolution: 'exact' as const }, role: 'use' as const },
+    { source: 'src/a.ts', target: 'src/b.ts', kind: 'call' as const, evidence: { line: 4, specifier: 'b', resolution: 'exact' as const }, role: 'use' as const },
+    { source: 'src/a.ts', target: 'src/b.ts', kind: 'import' as const, evidence: { line: 9, specifier: './b.ts', resolution: 'exact' as const }, role: 'use' as const },
+  ];
+  const graph = { nodes, edges, diagnostics: [], excluded: [] };
+
+  const { forward, backward } = buildAdjacency(graph);
+  assert.deepEqual(forward.get('src/a.ts'), ['src/b.ts']);
+  assert.deepEqual(backward.get('src/b.ts'), ['src/a.ts']);
+});

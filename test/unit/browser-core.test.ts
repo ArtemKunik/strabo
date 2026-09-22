@@ -634,6 +634,24 @@ test('passportFor reports metrics, imports, and used-by from evidence', () => {
   assert.deepEqual(passport.usedBy.map((entry) => entry.id).sort(), ['src/index.ts']);
 });
 
+test('passportFor counts distinct files, not the edges that record them', () => {
+  const withCalls = {
+    ...model,
+    edges: [
+      ...model.edges,
+      // A recorded call beside the import, plus a second import line, are one importer.
+      { source: 'src/index.ts', target: 'src/util.ts', kind: 'call', evidence: { line: 4, specifier: 'util' } },
+      { source: 'src/index.ts', target: 'src/util.ts', kind: 'import', evidence: { line: 5, specifier: './util.ts' } },
+    ],
+  };
+  const passport = passportFor(withCalls, 'src/util.ts');
+  const importers = passport.metrics.find((metric) => metric.label === 'Direct importers');
+
+  assert.equal(importers?.value, 1);
+  assert.equal(importers?.unit, 'files');
+  assert.deepEqual(passport.usedBy.map((entry) => entry.id), ['src/index.ts']);
+});
+
 test('passportFor shows the file line count when the scan recorded one', () => {
   const withLines = {
     ...model,

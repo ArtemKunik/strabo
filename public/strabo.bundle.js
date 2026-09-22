@@ -135,20 +135,24 @@ function passportFor(model, id) {
     return null;
   }
   const edges = model.edges ?? [];
-  const imports = edges.filter((edge) => edge.source === id).map((edge) => ({ id: edge.target, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
-  const usedBy = edges.filter((edge) => edge.target === id).map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
-  const metrics = [{ label: "Direct importers", value: usedBy.length }];
+  const imports = distinctByFile(
+    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
+  );
+  const usedBy = distinctByFile(
+    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
+  );
+  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
   if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
     metrics.push(
       { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
       { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
     );
   } else {
-    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0 });
+    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
   }
   metrics.push(
-    { label: "Direct imports", value: imports.length },
-    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0 }
+    { label: "Direct imports", value: imports.length, unit: "files" },
+    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
   );
   if (typeof node.lines === "number") {
     metrics.push({ label: "Lines", value: node.lines });
@@ -184,6 +188,24 @@ function passportFor(model, id) {
     imports,
     usedBy
   };
+}
+function edgeEntry(id, edge) {
+  return {
+    id,
+    line: edge.evidence?.line,
+    specifier: edge.evidence?.specifier,
+    role: edge.role
+  };
+}
+function distinctByFile(entries) {
+  const byFile = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (entry.role === "declare" || byFile.has(entry.id)) {
+      continue;
+    }
+    byFile.set(entry.id, entry);
+  }
+  return [...byFile.values()];
 }
 function coChangePartnersFor(report, file, limit = 20) {
   const edges = (report?.edges ?? []).filter(
@@ -250,6 +272,7 @@ function shortcutSheet() {
     { keys: "O", action: "Show the selected file\u2019s links to other units" },
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
+    { keys: "L", action: "Show a file name under every file" },
     { keys: "C", action: "Show recorded function calls instead of imports" },
     { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
     { keys: "S", action: "View the selected file\u2019s source" },
@@ -3467,31 +3490,31 @@ function showContextMenu({ x, y, title, items }) {
       menu.append(sep);
       continue;
     }
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "agent-menu-item";
-    button2.setAttribute("role", "menuitem");
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "agent-menu-item";
+    button3.setAttribute("role", "menuitem");
     if (item.title) {
-      button2.title = item.title;
+      button3.title = item.title;
     }
     const label = document.createElement("span");
     label.textContent = item.label;
-    button2.append(label);
+    button3.append(label);
     if (item.hint) {
       const hint = document.createElement("span");
       hint.className = "agent-menu-hint";
       hint.textContent = item.hint;
-      button2.append(hint);
+      button3.append(hint);
     }
     if (typeof item.action === "function") {
-      button2.addEventListener("click", () => {
+      button3.addEventListener("click", () => {
         closeContextMenu();
         item.action();
       });
     } else {
-      button2.disabled = true;
+      button3.disabled = true;
     }
-    menu.append(button2);
+    menu.append(button3);
   }
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
@@ -3534,15 +3557,15 @@ function showToast(message, action = null, { timeout = 6e3 } = {}) {
   text.textContent = message;
   toast.append(text);
   if (action) {
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "toast-action";
-    button2.textContent = action.label;
-    button2.addEventListener("click", () => {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "toast-action";
+    button3.textContent = action.label;
+    button3.addEventListener("click", () => {
       action.onClick?.();
       toast.remove();
     });
-    toast.append(button2);
+    toast.append(button3);
   }
   const dismiss = document.createElement("button");
   dismiss.type = "button";
@@ -3935,25 +3958,25 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         return snapshot;
       },
       dockButton() {
-        const button2 = document.createElement("button");
-        button2.type = "button";
-        button2.className = "dock-chip";
-        button2.dataset.panel = config.key;
+        const button3 = document.createElement("button");
+        button3.type = "button";
+        button3.className = "dock-chip";
+        button3.dataset.panel = config.key;
         const open = !win.hidden;
         const canOpen = !config.canOpen || config.canOpen();
-        button2.classList.toggle("active", open);
-        button2.classList.toggle("collapsed", open && isCollapsed());
-        button2.setAttribute("aria-pressed", String(open));
-        button2.textContent = config.dockLabel ?? config.title ?? config.key;
+        button3.classList.toggle("active", open);
+        button3.classList.toggle("collapsed", open && isCollapsed());
+        button3.setAttribute("aria-pressed", String(open));
+        button3.textContent = config.dockLabel ?? config.title ?? config.key;
         if (!canOpen && !open) {
-          button2.disabled = true;
+          button3.disabled = true;
           const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
-          button2.title = reason;
+          button3.title = reason;
         } else {
-          button2.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
+          button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
         }
-        button2.addEventListener("click", () => controller.toggle());
-        return button2;
+        button3.addEventListener("click", () => controller.toggle());
+        return button3;
       }
     };
     win.addEventListener("keydown", (event) => {
@@ -4123,306 +4146,48 @@ function createFreshnessBadge(element2, options = {}) {
   return { refresh, render, status: () => last };
 }
 
-// ui/strabo-highlight.js
-var words = (list) => new Set(list.split(/\s+/).filter(Boolean));
-var C_LIKE_LITERALS = "true false null";
-var LANGUAGES = {
-  javascript: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"', "'", "`"],
-    multilineQuotes: ["`"],
-    attribute: /^@[A-Za-z_$][\w$]*/,
-    keywords: words(`
-      as async await break case catch class const continue debugger declare default delete do
-      else enum export extends finally for from function get if implements import in instanceof
-      interface let namespace new of private protected public readonly return set static super
-      switch this throw try type typeof var void while with yield abstract satisfies keyof
-      infer is override accessor`),
-    literals: words(`${C_LIKE_LITERALS} undefined NaN Infinity`)
-  },
-  python: {
-    lineComments: ["#"],
-    blockComment: null,
-    quotes: ['"', "'"],
-    tripleQuotes: ['"""', "'''"],
-    attribute: /^@[A-Za-z_][\w.]*/,
-    keywords: words(`
-      and as assert async await break class continue def del elif else except finally for from
-      global if import in is lambda nonlocal not or pass raise return try while with yield
-      match case self cls`),
-    literals: words("True False None")
-  },
-  rust: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"'],
-    // A quote is a char literal only when it closes at once; otherwise it is a lifetime.
-    charLiteral: /^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\])'/,
-    attribute: /^#!?\[[^\]]*\]/,
-    macroBang: true,
-    keywords: words(`
-      as async await break const continue crate dyn else enum extern fn for if impl in let loop
-      match mod move mut pub ref return self Self static struct super trait type union unsafe
-      use where while`),
-    literals: words("true false")
-  },
-  java: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"', "'"],
-    tripleQuotes: ['"""'],
-    attribute: /^@[A-Za-z_$][\w$.]*/,
-    keywords: words(`
-      abstract assert break case catch class continue default do else enum extends final
-      finally for if implements import instanceof interface native new package private
-      protected public return static strictfp super switch synchronized this throw throws
-      transient try var void volatile while record sealed permits yield
-      boolean byte char double float int long short`),
-    literals: words(C_LIKE_LITERALS)
-  },
-  kotlin: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"', "'"],
-    tripleQuotes: ['"""'],
-    attribute: /^@[A-Za-z_][\w.]*/,
-    keywords: words(`
-      abstract annotation as break by catch class companion const constructor continue crossinline
-      data do else enum expect external final finally for fun get if import in infix init inline
-      inner interface internal is lateinit noinline object open operator out override package
-      private protected public reified return sealed set super suspend this throw try typealias
-      val value var vararg when where while`),
-    literals: words(C_LIKE_LITERALS)
-  },
-  csharp: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"', "'"],
-    tripleQuotes: ['"""'],
-    keywords: words(`
-      abstract as async await base bool break byte case catch char checked class const continue
-      decimal default delegate do double else enum event explicit extern finally fixed float for
-      foreach get goto if implicit in init int interface internal is lock long namespace new
-      object operator out override params private protected public readonly record ref required
-      return sbyte sealed set short sizeof stackalloc static string struct switch this throw try
-      typeof uint ulong unchecked unsafe ushort using var virtual void volatile when while yield`),
-    literals: words(C_LIKE_LITERALS)
-  },
-  cpp: {
-    lineComments: ["//"],
-    blockComment: ["/*", "*/"],
-    quotes: ['"', "'"],
-    directive: /^\s*#\s*\w+/,
-    keywords: words(`
-      alignas alignof and asm auto bool break case catch char class concept const consteval
-      constexpr constinit const_cast continue co_await co_return co_yield decltype default delete
-      do double dynamic_cast else enum explicit export extern float for friend goto if inline int
-      long mutable namespace new noexcept not operator or override private protected public
-      register reinterpret_cast requires return short signed sizeof static static_assert
-      static_cast struct switch template this thread_local throw try typedef typeid typename
-      union unsigned using virtual void volatile while final`),
-    literals: words("true false nullptr NULL")
-  },
-  sql: {
-    lineComments: ["--"],
-    blockComment: ["/*", "*/"],
-    quotes: ["'", '"'],
-    caseInsensitive: true,
-    keywords: words(`
-      add all alter and as asc begin between by case cast check column commit constraint create
-      cross database default delete desc distinct drop else end exists foreign from full group
-      having if in index inner insert into is join key left like limit not offset on or order
-      outer primary references replace returning right rollback select set table then transaction
-      trigger union unique update using values view when where with without rowid autoincrement
-      pragma integer int text real blob numeric varchar char boolean date timestamp`),
-    literals: words("true false null")
-  }
-};
-var EXTENSION_LANGUAGE = {
-  ".ts": "javascript",
-  ".tsx": "javascript",
-  ".mts": "javascript",
-  ".cts": "javascript",
-  ".js": "javascript",
-  ".jsx": "javascript",
-  ".mjs": "javascript",
-  ".cjs": "javascript",
-  ".py": "python",
-  ".rs": "rust",
-  ".java": "java",
-  ".kt": "kotlin",
-  ".kts": "kotlin",
-  ".cs": "csharp",
-  ".cpp": "cpp",
-  ".cc": "cpp",
-  ".cxx": "cpp",
-  ".hpp": "cpp",
-  ".hh": "cpp",
-  ".hxx": "cpp",
-  ".h": "cpp",
-  ".c": "cpp",
-  ".sql": "sql"
-};
-function languageForFile(file) {
-  if (typeof file !== "string") return null;
-  const dot = file.lastIndexOf(".");
-  if (dot < 0 || file.lastIndexOf("/") > dot || file.lastIndexOf("\\") > dot) return null;
-  return EXTENSION_LANGUAGE[file.slice(dot).toLowerCase()] ?? null;
+// ui/strabo-panel-kit.js
+function backButton(handlers, fallbackTitle) {
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "panel-back";
+  back.dataset.role = "panel-back";
+  back.textContent = "\u2190 Back";
+  back.disabled = handlers.canGoBack === false;
+  const title = handlers.backTitle ?? fallbackTitle;
+  back.title = title;
+  back.setAttribute("aria-label", title);
+  back.addEventListener("click", () => handlers.onBack?.());
+  return back;
 }
-var NUMBER = /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)[a-zA-Z]{0,3}/;
-var IDENTIFIER = /^[A-Za-z_$][\w$]*/;
-function findClose(text, from, closer, escapes) {
-  for (let index = from; index < text.length; index += 1) {
-    if (escapes && text[index] === "\\") {
-      index += 1;
-    } else if (text.startsWith(closer, index)) {
-      return index + closer.length;
-    }
-  }
-  return -1;
+function appendFact(list, term, value) {
+  const dt = document.createElement("dt");
+  dt.textContent = term;
+  const dd = document.createElement("dd");
+  dd.textContent = value;
+  list.append(dt, dd);
 }
-function tokenizeLine(line, language, state2 = null) {
-  const spec = LANGUAGES[language];
-  if (!spec) return { tokens: [{ text: line, type: null }], state: null };
-  const tokens = [];
-  let plain = "";
-  const flush = () => {
-    if (plain) tokens.push({ text: plain, type: null });
-    plain = "";
-  };
-  const emit = (text, type) => {
-    flush();
-    tokens.push({ text, type });
-  };
-  let position = 0;
-  let open = state2;
-  if (open) {
-    const end = findClose(line, 0, open.closer, open.kind === "string");
-    if (end < 0) return { tokens: [{ text: line, type: open.kind }], state: open };
-    emit(line.slice(0, end), open.kind);
-    position = end;
-    open = null;
-  }
-  if (spec.directive) {
-    const directive = spec.directive.exec(line.slice(position));
-    if (directive && position === 0) {
-      emit(directive[0], "meta");
-      position = directive[0].length;
-    }
-  }
-  while (position < line.length) {
-    const rest = line.slice(position);
-    const char = rest[0];
-    const lineComment = spec.lineComments.find((prefix) => rest.startsWith(prefix));
-    if (lineComment) {
-      emit(rest, "comment");
-      position = line.length;
-      break;
-    }
-    if (spec.blockComment && rest.startsWith(spec.blockComment[0])) {
-      const [opener, closer] = spec.blockComment;
-      const end = findClose(line, position + opener.length, closer, false);
-      if (end < 0) {
-        emit(rest, "comment");
-        open = { kind: "comment", closer };
-        position = line.length;
-        break;
-      }
-      emit(line.slice(position, end), "comment");
-      position = end;
-      continue;
-    }
-    const triple = spec.tripleQuotes?.find((quote) => rest.startsWith(quote));
-    if (triple) {
-      const end = findClose(line, position + triple.length, triple, true);
-      if (end < 0) {
-        emit(rest, "string");
-        open = { kind: "string", closer: triple };
-        position = line.length;
-        break;
-      }
-      emit(line.slice(position, end), "string");
-      position = end;
-      continue;
-    }
-    if (char === "'" && spec.charLiteral) {
-      const literal = spec.charLiteral.exec(rest);
-      if (literal) {
-        emit(literal[0], "string");
-        position += literal[0].length;
-      } else {
-        plain += char;
-        position += 1;
-      }
-      continue;
-    }
-    if (spec.quotes.includes(char)) {
-      const end = findClose(line, position + 1, char, true);
-      if (end < 0) {
-        emit(rest, "string");
-        if (spec.multilineQuotes?.includes(char)) open = { kind: "string", closer: char };
-        position = line.length;
-        break;
-      }
-      emit(line.slice(position, end), "string");
-      position = end;
-      continue;
-    }
-    if (spec.attribute && (char === "@" || char === "#")) {
-      const attribute = spec.attribute.exec(rest);
-      if (attribute) {
-        emit(attribute[0], "meta");
-        position += attribute[0].length;
-        continue;
-      }
-    }
-    if (/\d/.test(char)) {
-      const number = NUMBER.exec(rest);
-      if (number) {
-        emit(number[0], "number");
-        position += number[0].length;
-        continue;
-      }
-    }
-    const identifier = IDENTIFIER.exec(rest);
-    if (identifier) {
-      const word = identifier[0];
-      const lookup = spec.caseInsensitive ? word.toLowerCase() : word;
-      const after = rest.slice(word.length);
-      let type = null;
-      if (spec.keywords.has(lookup)) type = "keyword";
-      else if (spec.literals.has(lookup)) type = "literal";
-      else if (/^\s*\(/.test(after) || spec.macroBang && /^!\s*[([{]/.test(after)) type = "function";
-      else if (/^[A-Z]/.test(word) && /[a-z]/.test(word)) type = "type";
-      if (type === "function" && spec.macroBang && after.startsWith("!")) {
-        emit(word + "!", "function");
-        position += word.length + 1;
-        continue;
-      }
-      if (type) emit(word, type);
-      else plain += word;
-      position += word.length;
-      continue;
-    }
-    plain += char;
-    position += 1;
-  }
-  flush();
-  return { tokens, state: open };
+function wiring(text) {
+  const span = document.createElement("span");
+  span.className = "wiring";
+  span.textContent = ` \xB7 ${text}`;
+  return span;
 }
-function highlightLines(lines, language) {
-  if (!LANGUAGES[language]) return null;
-  let state2 = null;
-  return lines.map((line) => {
-    const result = tokenizeLine(line, language, state2);
-    state2 = result.state;
-    return result.tokens;
-  });
+function unavailableNote(text) {
+  const note3 = document.createElement("p");
+  note3.className = "unavailable";
+  note3.textContent = text;
+  return note3;
 }
-function highlightIsolated(lines, language) {
-  if (!LANGUAGES[language]) return null;
-  return lines.map((line) => tokenizeLine(line, language).tokens);
+function matches(name, needle) {
+  return !needle || name.toLowerCase().includes(needle);
+}
+function svgElement(name, attributes) {
+  const element2 = document.createElementNS("http://www.w3.org/2000/svg", name);
+  for (const [key, value] of Object.entries(attributes)) {
+    element2.setAttribute(key, value);
+  }
+  return element2;
 }
 
 // ui/strabo-narrator.js
@@ -4741,6 +4506,913 @@ function narratorMenuState(status) {
   return reason ? { enabled: false, hint: reason } : { enabled: true, hint: null };
 }
 
+// ui/strabo-panel-narrative.js
+function renderNarrativeReply(target, reply) {
+  if (reply?.available !== true) {
+    target.replaceChildren(narratorReplyLabel(reply));
+    return;
+  }
+  const nodes = [];
+  for (const block of narrativeBlocks(reply.text)) {
+    const inline = (runs) => runs.map((run) => {
+      if (!run.code && !run.strong) {
+        return document.createTextNode(run.text);
+      }
+      const element2 = document.createElement(run.code ? "code" : "strong");
+      element2.textContent = run.text;
+      return element2;
+    });
+    if (block.type === "p") {
+      const paragraph = document.createElement("p");
+      paragraph.append(...inline(block.runs));
+      nodes.push(paragraph);
+    } else {
+      const list = document.createElement(block.type);
+      for (const item of block.items) {
+        const entry = document.createElement("li");
+        entry.append(...inline(item));
+        list.append(entry);
+      }
+      nodes.push(list);
+    }
+  }
+  const attribution = document.createElement("p");
+  attribution.className = "narrator-attribution";
+  attribution.textContent = NARRATOR_ATTRIBUTION;
+  target.replaceChildren(...nodes, attribution);
+}
+function renderNarrationPanel(container, state2, handlers = {}) {
+  const heading2 = document.createElement("h3");
+  heading2.textContent = `Narrator \xB7 ${state2.label}`;
+  const reply = document.createElement("div");
+  reply.className = "narrator-reply";
+  reply.dataset.role = "narrative";
+  if (state2.phase === "loading") {
+    reply.textContent = "Asking the narrator\u2026";
+  } else if (state2.phase === "error") {
+    reply.textContent = `Narrator unavailable: ${state2.message}`;
+  } else {
+    renderNarrativeReply(reply, state2.reply);
+  }
+  const nodes = [heading2, reply];
+  if (state2.phase === "done" && state2.reply?.available !== true && handlers.onOpenNarratorSettings) {
+    const setup = document.createElement("button");
+    setup.type = "button";
+    setup.className = "narrator-setup";
+    setup.textContent = "Open narrator settings \u2192";
+    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
+    nodes.push(setup);
+  }
+  container.replaceChildren(...nodes);
+}
+function appendNarratorBlock(container, handlers, { id, label }) {
+  if (!handlers.onNarrate) {
+    return;
+  }
+  const block = document.createElement("div");
+  block.className = "narrator-block";
+  const note3 = document.createElement("p");
+  note3.className = "narrator-note";
+  note3.textContent = narratorStatusLabel(handlers.narratorStatus);
+  block.append(note3);
+  if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
+    const setup = document.createElement("button");
+    setup.type = "button";
+    setup.className = "narrator-setup";
+    setup.dataset.role = "narrator-setup";
+    setup.textContent = "Set up \u2192";
+    setup.title = "Open Settings at the Narrator section";
+    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
+    block.append(setup);
+  }
+  const button3 = document.createElement("button");
+  button3.type = "button";
+  button3.id = id;
+  button3.className = "narrator-button";
+  button3.textContent = label;
+  const disabledReason = narratorDisabledReason(handlers.narratorStatus);
+  if (disabledReason) {
+    button3.disabled = true;
+    button3.title = disabledReason;
+  }
+  block.append(button3);
+  const reply = document.createElement("div");
+  reply.className = "narrator-reply";
+  reply.dataset.role = "narrative";
+  block.append(reply);
+  button3.addEventListener("click", async () => {
+    button3.disabled = true;
+    reply.replaceChildren("Asking the narrator\u2026");
+    try {
+      renderNarrativeReply(reply, await handlers.onNarrate());
+    } catch (error) {
+      reply.replaceChildren(`Narrator unavailable: ${error.message}`);
+    } finally {
+      button3.disabled = false;
+    }
+  });
+  container.append(block);
+}
+
+// ui/strabo-panel-inspector.js
+var inspectorSeq = 0;
+function renderInspector(container, model, id, handlers = {}) {
+  const passport = passportFor(model, id);
+  if (!passport) {
+    container.hidden = true;
+    return;
+  }
+  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
+  container.hidden = false;
+  container.replaceChildren();
+  const title = document.createElement("h2");
+  const chip = document.createElement("span");
+  chip.className = `kind-chip kind-${passport.kind ?? "module"}`;
+  chip.textContent = passport.kind ?? "module";
+  title.append(chip);
+  title.append(document.createTextNode(node?.label ?? id));
+  container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the map"));
+  }
+  const path = document.createElement("p");
+  path.className = "passport-path";
+  path.textContent = node?.workspacePath ?? id;
+  container.append(path);
+  if (passport.why) {
+    const why = document.createElement("p");
+    why.className = "passport-why";
+    why.textContent = `Grouped by: ${passport.why}`;
+    container.append(why);
+  }
+  const actions = document.createElement("div");
+  actions.className = "inspector-actions";
+  if (handlers.onOpenWorkspace) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "primary";
+    open.textContent = "Open in Workspace";
+    open.addEventListener("click", () => handlers.onOpenWorkspace(id));
+    actions.append(open);
+  }
+  if (handlers.onViewSource) {
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "source-open";
+    source.textContent = "View source";
+    source.addEventListener("click", () => handlers.onViewSource(id));
+    actions.append(source);
+  }
+  if (handlers.onOpenMemberMap) {
+    const memberMap = document.createElement("button");
+    memberMap.type = "button";
+    memberMap.className = "member-open";
+    memberMap.id = "open-member-map";
+    memberMap.textContent = "Member map";
+    memberMap.addEventListener("click", () => handlers.onOpenMemberMap(id));
+    actions.append(memberMap);
+  }
+  if (handlers.onOpenRoute) {
+    const route = document.createElement("button");
+    route.type = "button";
+    route.className = "route-open";
+    route.id = "open-route";
+    route.textContent = "Read next";
+    route.title = "Step through the repository reading route from its entry points";
+    route.addEventListener("click", () => handlers.onOpenRoute(id));
+    actions.append(route);
+  }
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "icon-button";
+  copy.textContent = "\u29C9 Copy path";
+  copy.title = "Copy repository-relative path";
+  copy.addEventListener("click", () => {
+    const text = node?.workspacePath ?? id;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {
+      });
+    }
+    copy.textContent = "\u2713 Copied";
+    setTimeout(() => {
+      copy.textContent = "\u29C9 Copy path";
+    }, 1200);
+  });
+  actions.append(copy);
+  container.append(actions);
+  const cards = document.createElement("div");
+  cards.className = "stat-cards";
+  for (const metric of passport.metrics) {
+    const card = document.createElement("div");
+    card.className = "stat-card";
+    const value = document.createElement("div");
+    value.className = "stat-value";
+    value.textContent = String(metric.value);
+    if (metric.unit) {
+      const unit = document.createElement("span");
+      unit.className = "stat-unit";
+      unit.textContent = metric.unit;
+      value.append(unit);
+    }
+    const label = document.createElement("div");
+    label.className = "stat-label";
+    label.textContent = metric.label;
+    card.append(value, label);
+    cards.append(card);
+  }
+  container.append(cards);
+  if (model.system) {
+    if (model.systemUnit) {
+      appendOutsideLinks(container, model, id, node, handlers);
+      return;
+    }
+    const narrator = document.createElement("div");
+    narrator.className = "system-narrator";
+    appendNarratorBlock(narrator, handlers, { id: "narrate-group", label: "Name group" });
+    container.append(narrator);
+    return;
+  }
+  const tabs = document.createElement("div");
+  tabs.className = "inspector-tabs";
+  tabs.setAttribute("role", "tablist");
+  const panels = document.createElement("div");
+  panels.className = "inspector-panels";
+  const members = document.createElement("section");
+  members.dataset.role = "members";
+  const membersTitle = document.createElement("h3");
+  membersTitle.textContent = "Members";
+  members.append(membersTitle);
+  const membersBody = document.createElement("p");
+  membersBody.className = "unavailable";
+  membersBody.textContent = "Loading members\u2026";
+  members.append(membersBody);
+  const depsSection = listSection("Dependencies", id, passport.imports, handlers);
+  const dependentsSection = listSection("Dependents", id, passport.usedBy, handlers);
+  const functions = document.createElement("section");
+  functions.dataset.role = "functions";
+  const functionsTitle = document.createElement("h3");
+  functionsTitle.textContent = "Functions";
+  functions.append(functionsTitle);
+  const functionsBody = document.createElement("p");
+  functionsBody.className = "unavailable";
+  functionsBody.textContent = "Loading functions\u2026";
+  functions.append(functionsBody);
+  const impact = document.createElement("section");
+  impact.dataset.role = "impact";
+  const impactTitle = document.createElement("h3");
+  impactTitle.textContent = "Impact";
+  impact.append(impactTitle);
+  const impactBody = document.createElement("p");
+  impactBody.className = "unavailable";
+  impactBody.textContent = "Loading impact\u2026";
+  impact.append(impactBody);
+  const tabDefs = [
+    ["deps", `Dependencies (${passport.imports.length} file(s))`, depsSection],
+    ["dependents", `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
+    ["members", "Members", members],
+    ["functions", "Functions", functions],
+    ["impact", "Impact", impact]
+  ];
+  const base = `inspector-${inspectorSeq += 1}`;
+  const tabButtons = [];
+  const tabSections = [];
+  const selectTab = (index, { focus: focus2 = false } = {}) => {
+    tabButtons.forEach((button3, position) => {
+      const selected2 = position === index;
+      button3.setAttribute("aria-selected", selected2 ? "true" : "false");
+      button3.tabIndex = selected2 ? 0 : -1;
+    });
+    tabSections.forEach((section2, position) => {
+      section2.hidden = position !== index;
+    });
+    if (focus2) {
+      tabButtons[index].focus();
+    }
+  };
+  for (const [key, label, section2] of tabDefs) {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "inspector-tab";
+    tab.setAttribute("role", "tab");
+    tab.dataset.tab = key;
+    tab.textContent = label;
+    tab.id = `${base}-tab-${key}`;
+    tab.setAttribute("aria-controls", `${base}-panel-${key}`);
+    section2.id = `${base}-panel-${key}`;
+    section2.setAttribute("role", "tabpanel");
+    section2.setAttribute("aria-labelledby", tab.id);
+    section2.tabIndex = 0;
+    tab.addEventListener("click", () => selectTab(tabButtons.indexOf(tab)));
+    tab.addEventListener("keydown", (event) => {
+      const next = rovingIndex(tabButtons.indexOf(tab), tabButtons.length, event.key);
+      if (next === null) {
+        return;
+      }
+      event.preventDefault();
+      selectTab(next, { focus: true });
+    });
+    tabs.append(tab);
+    tabButtons.push(tab);
+    tabSections.push(section2);
+    panels.append(section2);
+  }
+  selectTab(0);
+  container.append(tabs, panels);
+  const changesWith = document.createElement("section");
+  changesWith.dataset.role = "changes-with";
+  const changesWithTitle = document.createElement("h3");
+  changesWithTitle.textContent = "Changes with";
+  changesWith.append(changesWithTitle);
+  const changesWithBody = document.createElement("p");
+  changesWithBody.className = "unavailable";
+  changesWithBody.textContent = "Loading co-change\u2026";
+  changesWith.append(changesWithBody);
+  container.append(changesWith);
+  const trace = document.createElement("p");
+  trace.className = "trace";
+  trace.dataset.role = "trace";
+  trace.textContent = "Use a row button to trace a directed path.";
+  container.append(trace);
+}
+function listSection(heading2, from, entries, handlers) {
+  const section2 = document.createElement("section");
+  const title = document.createElement("h3");
+  title.textContent = `${heading2} (${entries.length} file(s))`;
+  section2.append(title);
+  const list = document.createElement("ul");
+  for (const entry of entries.slice(0, 100)) {
+    const item = document.createElement("li");
+    item.dataset.delegateNode = entry.id;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "link";
+    open.textContent = entry.id;
+    open.addEventListener("click", () => handlers.onSelect?.(entry.id));
+    item.append(open);
+    if (handlers.onTrace) {
+      const trace = document.createElement("button");
+      trace.type = "button";
+      trace.className = "trace-button";
+      trace.textContent = "trace";
+      trace.addEventListener("click", () => handlers.onTrace(from, entry.id));
+      item.append(trace);
+    }
+    if (entry.line) {
+      const evidence = document.createElement("span");
+      evidence.className = "evidence";
+      evidence.textContent = `L${entry.line} ${entry.specifier ?? ""}`.trim();
+      item.append(evidence);
+    }
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
+}
+function renderChangesWith(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Changes with";
+  container.append(title);
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Co-change is unavailable: no Git history was read.";
+    container.append(note3);
+    return;
+  }
+  const partners = result.partners ?? [];
+  if (partners.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No recorded commits changed this file together with another in the window.";
+    container.append(note3);
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "passport-list";
+  list.dataset.role = "changes-with-list";
+  for (const partner of partners) {
+    const item = document.createElement("li");
+    item.dataset.delegateNode = partner.file;
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "link";
+    open.textContent = partner.file;
+    open.addEventListener("click", () => handlers.onSelect?.(partner.file));
+    item.append(open);
+    const badge = document.createElement("span");
+    badge.className = "evidence";
+    badge.hidden = !partner.hidden;
+    badge.textContent = "hidden coupling";
+    item.append(badge);
+    const summary = document.createElement("span");
+    summary.className = "evidence";
+    summary.textContent = `${partner.commitsShared} shared commit(s) \xB7 ratio ${partner.ratio}`;
+    item.append(summary);
+    const commits = document.createElement("ul");
+    commits.className = "cochange-commits";
+    for (const commit of partner.commits.slice(0, 5)) {
+      const line = document.createElement("li");
+      line.textContent = `${commit.hash.slice(0, 8)} \xB7 ${commit.date} \xB7 ${commit.subject}`;
+      commits.append(line);
+    }
+    if (partner.commits.length > 5) {
+      const more = document.createElement("li");
+      more.className = "unavailable";
+      more.textContent = `+${partner.commits.length - 5} more commit(s)`;
+      commits.append(more);
+    }
+    item.append(commits);
+    list.append(item);
+  }
+  container.append(list);
+}
+function appendOutsideLinks(container, model, id, node, handlers) {
+  const isFile = Boolean(node?.systemUnit) && !id.endsWith("#support");
+  const block = document.createElement("div");
+  block.className = "outside-links";
+  if (isFile && handlers.onShowOutside) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.id = "show-outside-links";
+    button3.className = handlers.outsideShown ? "outside-toggle active" : "outside-toggle";
+    button3.setAttribute("aria-pressed", String(Boolean(handlers.outsideShown)));
+    button3.textContent = handlers.outsideShown ? "Hide outside links" : "Show outside links";
+    button3.title = "Draw this file\u2019s links to other units (O)";
+    button3.addEventListener("click", () => handlers.onShowOutside());
+    block.append(button3);
+  }
+  const links = (model.outsideLinks ?? []).filter((link) => link.file === id);
+  for (const link of links) {
+    const badge = document.createElement("div");
+    badge.className = "outside-badge";
+    badge.dataset.unit = link.targetUnit;
+    const label = document.createElement("span");
+    label.textContent = `${link.count} file${link.count === 1 ? "" : "s"} in ${link.targetName}`;
+    badge.append(label);
+    badge.append(document.createTextNode(" \xB7 "));
+    const expand = document.createElement("button");
+    expand.type = "button";
+    expand.className = "link";
+    expand.textContent = "expand";
+    expand.addEventListener("click", () => handlers.onExpandUnit?.(link.targetUnit));
+    badge.append(expand);
+    block.append(badge);
+  }
+  if (isFile || links.length > 0) {
+    container.append(block);
+  }
+}
+
+// ui/strabo-panel-functions.js
+function renderFunctions(container, result, handlers = {}) {
+  container.replaceChildren();
+  const report = result?.functions;
+  const title = document.createElement("h3");
+  title.textContent = `Functions (${report?.functions?.length ?? 0})`;
+  container.append(title);
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Functions are not recorded for this file.";
+    container.append(note3);
+    return;
+  }
+  if (!report || report.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = report?.detail ?? "Functions are not recorded for this file.";
+    container.append(note3);
+    return;
+  }
+  if (report.functions.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No functions declared.";
+    container.append(note3);
+    return;
+  }
+  const summary = document.createElement("p");
+  summary.className = "function-summary";
+  summary.textContent = functionSummary(report);
+  container.append(summary);
+  if (result?.coverage) {
+    const coverageNote = document.createElement("p");
+    coverageNote.className = "function-coverage-basis";
+    coverageNote.textContent = `Coverage ${coverageCaption(result.coverage)}`;
+    container.append(coverageNote);
+  }
+  if (report.functions.length > FUNCTION_TABLE_VIRTUALIZE_AT) {
+    container.append(renderFunctionTableVirtual(report));
+  } else {
+    container.append(renderFunctionTable(report));
+  }
+  appendNarratorBlock(container, handlers, { id: "narrate-functions", label: "Narrate" });
+}
+var FUNCTION_TABLE_VIRTUALIZE_AT = 100;
+var FUNCTION_COLUMNS = [
+  { key: "name", label: "Function" },
+  { key: "entry", label: "Visibility / entry" },
+  { key: "lines", label: "Lines", numeric: true },
+  { key: "span", label: "Span" },
+  { key: "complexity", label: "Complexity", numeric: true },
+  { key: "nesting", label: "Nesting", numeric: true },
+  { key: "loops", label: "Loops", numeric: true },
+  { key: "calls", label: "Calls", numeric: true },
+  { key: "callers", label: "Callers" },
+  { key: "signals", label: "Signals", numeric: true },
+  { key: "coverage", label: "Coverage" }
+];
+function truncateMiddle(text, max = 30) {
+  if (text.length <= max) {
+    return text;
+  }
+  const keep = Math.max(1, Math.floor((max - 1) / 2));
+  return `${text.slice(0, keep)}\u2026${text.slice(text.length - keep)}`;
+}
+function functionSortValue(entry, key) {
+  switch (key) {
+    case "name":
+      return functionLabel(entry).toLowerCase();
+    case "entry":
+      return entry?.entry ? `${entry.entry.kind} ${entry.entry.evidence}`.toLowerCase() : String(entry?.visibility ?? "").toLowerCase();
+    case "lines":
+      return entry?.metrics?.lines ?? -1;
+    case "span":
+      return entry?.line ?? 0;
+    case "complexity":
+      return entry?.metrics?.decisionPoints ?? -1;
+    case "nesting":
+      return entry?.metrics?.maxNestingDepth ?? -1;
+    case "loops":
+      return entry?.metrics?.loops ?? -1;
+    case "calls":
+      return entry?.calls?.length ?? 0;
+    case "callers":
+      return entry?.callers?.length ?? 0;
+    case "signals":
+      return entry?.signals?.length ?? 0;
+    case "coverage":
+      return entry?.coverage?.lineCoverage ?? entry?.coverage?.hits ?? -1;
+    default:
+      return 0;
+  }
+}
+function compareFunctionEntries(a, b, key, dir) {
+  const first = functionSortValue(a, key);
+  const second = functionSortValue(b, key);
+  const order = typeof first === "string" || typeof second === "string" ? String(first).localeCompare(String(second)) : first - second;
+  if (order !== 0) {
+    return dir === "desc" ? -order : order;
+  }
+  return (b?.signals?.length ?? 0) - (a?.signals?.length ?? 0) || (b?.metrics?.decisionPoints ?? -1) - (a?.metrics?.decisionPoints ?? -1) || (a?.line ?? 0) - (b?.line ?? 0) || String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
+}
+function functionDetailContent(entry, onJump) {
+  const detail = document.createElement("div");
+  detail.className = "function-detail-content";
+  const signature = document.createElement("code");
+  signature.className = "function-signature";
+  signature.textContent = functionSignature(entry);
+  signature.title = functionSignature(entry);
+  detail.append(signature);
+  const metrics = document.createElement("div");
+  metrics.className = "function-metrics";
+  metrics.textContent = functionMetrics(entry);
+  detail.append(metrics);
+  const calls = document.createElement("div");
+  calls.className = "function-calls";
+  calls.append(document.createTextNode("calls: "));
+  if ((entry?.calls ?? []).length === 0) {
+    calls.append(document.createTextNode(functionCalls(entry)));
+  } else {
+    for (const [index, call] of (entry.calls ?? []).entries()) {
+      if (index > 0) {
+        calls.append(document.createTextNode(", "));
+      }
+      const jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "link function-callsite";
+      jump.dataset.callee = call.name;
+      jump.dataset.line = String(call.line);
+      jump.title = `Show ${call.name} (line ${call.line})`;
+      jump.textContent = `${call.name} (L${call.line})`;
+      jump.addEventListener("click", () => onJump(call.name));
+      calls.append(jump);
+    }
+  }
+  detail.append(calls);
+  const callers = document.createElement("div");
+  callers.className = "function-callers";
+  callers.textContent = `called by: ${functionCallers(entry)}`;
+  detail.append(callers);
+  const signals = document.createElement("div");
+  signals.className = "function-signals";
+  signals.textContent = `signals: ${functionSignals(entry)}`;
+  detail.append(signals);
+  const coverage = document.createElement("div");
+  coverage.className = "function-coverage-detail";
+  coverage.textContent = `coverage: ${functionCoverage(entry)}`;
+  detail.append(coverage);
+  return detail;
+}
+function signalChips(entry) {
+  const signals = entry?.signals ?? [];
+  if (signals.length === 0) {
+    const none = document.createElement("span");
+    none.className = "function-none";
+    none.title = "no cost signals";
+    none.textContent = "\u2014";
+    return none;
+  }
+  const chips = document.createElement("span");
+  chips.className = "signal-chips";
+  for (const signal of signals) {
+    const chip = document.createElement("span");
+    chip.className = "signal-chip";
+    chip.title = `${signal.kind} (${signal.detail})`;
+    chip.textContent = signal.kind;
+    chips.append(chip);
+    chips.append(document.createTextNode(" "));
+  }
+  return chips;
+}
+function jumpToFunctionRow(root, name) {
+  const rows = [...root.querySelectorAll(".function-row")];
+  const target = rows.find((row) => row.dataset.function === name);
+  if (!target) {
+    return;
+  }
+  const toggle = target.querySelector("[data-expand]");
+  if (toggle?.getAttribute("aria-expanded") === "false") {
+    toggle.click();
+  }
+  const focusable = target.querySelector(".function-name");
+  focusable?.focus();
+  if (typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ block: "nearest" });
+  }
+}
+function wireFunctionRoving(tbody) {
+  const names = () => [...tbody.querySelectorAll(".function-name")];
+  tbody.addEventListener("keydown", (event) => {
+    const current2 = names().indexOf(document.activeElement);
+    if (current2 === -1) {
+      return;
+    }
+    const next = rovingIndex(current2, names().length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    names().forEach((button3, position) => {
+      button3.tabIndex = position === next ? 0 : -1;
+    });
+    names()[next]?.focus();
+  });
+}
+function functionTableHead(entries, sort, onSort) {
+  const thead = document.createElement("thead");
+  const row = document.createElement("tr");
+  for (const column of FUNCTION_COLUMNS) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "function-sort";
+    button3.dataset.sort = column.key;
+    const active = sort.key === column.key;
+    button3.setAttribute("aria-label", `Sort by ${column.label}`);
+    button3.textContent = `${column.label}${active ? sort.dir === "desc" ? " \u25BC" : " \u25B2" : ""}`;
+    if (active) {
+      cell.setAttribute("aria-sort", sort.dir === "desc" ? "descending" : "ascending");
+    }
+    button3.addEventListener("click", () => onSort(column.key));
+    cell.append(button3);
+    row.append(cell);
+  }
+  thead.append(row);
+  return thead;
+}
+function functionTableRow(entry, onJump) {
+  const row = document.createElement("tr");
+  row.className = "function-row";
+  row.dataset.function = entry?.name ?? "";
+  const nameCell = document.createElement("td");
+  const name = document.createElement("button");
+  name.type = "button";
+  name.className = "function-name link";
+  name.dataset.expand = "true";
+  name.textContent = truncateMiddle(functionLabel(entry));
+  name.title = functionSignature(entry);
+  name.tabIndex = 0;
+  name.setAttribute("aria-expanded", "false");
+  nameCell.append(name);
+  row.append(nameCell);
+  const entryCell = document.createElement("td");
+  const badge = functionEntryBadge(entry);
+  entryCell.className = "function-entry-cell";
+  entryCell.textContent = badge || (entry?.visibility ?? "");
+  entryCell.title = badge || (entry?.visibility ?? "");
+  row.append(entryCell);
+  const linesCell = document.createElement("td");
+  linesCell.textContent = entry?.metrics ? String(entry.metrics.lines) : "\u2014";
+  linesCell.title = entry?.metrics ? `${entry.metrics.lines} lines` : "signature only; no body recorded";
+  row.append(linesCell);
+  const spanCell = document.createElement("td");
+  spanCell.textContent = entry?.metrics ? `L${entry.line}-${entry.metrics.endLine}` : "\u2014";
+  row.append(spanCell);
+  const complexityCell = document.createElement("td");
+  complexityCell.textContent = entry?.metrics ? String(entry.metrics.decisionPoints) : "\u2014";
+  row.append(complexityCell);
+  const nestingCell = document.createElement("td");
+  nestingCell.textContent = entry?.metrics ? String(entry.metrics.maxNestingDepth) : "\u2014";
+  row.append(nestingCell);
+  const loopsCell = document.createElement("td");
+  loopsCell.textContent = entry?.metrics ? String(entry.metrics.loops) : "\u2014";
+  row.append(loopsCell);
+  const callsCell = document.createElement("td");
+  if ((entry?.calls ?? []).length === 0) {
+    callsCell.textContent = "\u2014";
+    callsCell.title = functionCalls(entry);
+  } else {
+    const count = document.createElement("button");
+    count.type = "button";
+    count.className = "link function-count";
+    count.dataset.expand = "true";
+    count.textContent = String(entry.calls.length);
+    count.title = functionCalls(entry);
+    count.setAttribute("aria-label", `${entry.calls.length} same-file calls: ${functionCalls(entry)}`);
+    callsCell.append(count);
+  }
+  row.append(callsCell);
+  const callersCell = document.createElement("td");
+  if ((entry?.callers ?? []).length > 0) {
+    const count = document.createElement("button");
+    count.type = "button";
+    count.className = "link function-count";
+    count.dataset.expand = "true";
+    count.textContent = String(entry.callers.length);
+    count.title = functionCallers(entry);
+    count.setAttribute("aria-label", `${entry.callers.length} callers: ${functionCallers(entry)}`);
+    callersCell.append(count);
+  } else {
+    callersCell.textContent = badge || functionCallers(entry);
+    callersCell.title = functionCallers(entry);
+  }
+  row.append(callersCell);
+  const signalsCell = document.createElement("td");
+  signalsCell.append(signalChips(entry));
+  row.append(signalsCell);
+  const coverageCell = document.createElement("td");
+  coverageCell.className = "function-coverage";
+  coverageCell.textContent = functionCoverageLabel(entry);
+  coverageCell.title = functionCoverage(entry);
+  coverageCell.dataset.basis = entry?.coverage ? "measured" : "unavailable";
+  row.append(coverageCell);
+  const detailRow = document.createElement("tr");
+  detailRow.className = "function-detail";
+  detailRow.hidden = true;
+  const detailCell = document.createElement("td");
+  detailCell.colSpan = FUNCTION_COLUMNS.length;
+  detailCell.append(functionDetailContent(entry, (name2) => jumpToFunctionRow(row.closest("table, .function-table-virtual") ?? document, name2)));
+  detailRow.append(detailCell);
+  const toggle = () => {
+    const open = detailRow.hidden;
+    detailRow.hidden = !open;
+    for (const control of row.querySelectorAll("[data-expand]")) {
+      control.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+  };
+  for (const control of row.querySelectorAll("[data-expand]")) {
+    control.addEventListener("click", toggle);
+  }
+  const fragment = document.createDocumentFragment();
+  fragment.append(row, detailRow);
+  return fragment;
+}
+function renderFunctionTable(report) {
+  const table = document.createElement("table");
+  table.className = "function-table";
+  let sort = { key: "signals", dir: "desc" };
+  const draw = () => {
+    for (const old of [...table.children]) {
+      old.remove();
+    }
+    table.append(functionTableHead(report.functions, sort, (key) => {
+      if (sort.key === key) {
+        sort.dir = sort.dir === "desc" ? "asc" : "desc";
+      } else {
+        sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
+      }
+      draw();
+    }));
+    const tbody = document.createElement("tbody");
+    const ordered = [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
+    for (const entry of ordered) {
+      tbody.append(functionTableRow(entry, (name) => jumpToFunctionRow(table, name)));
+    }
+    wireFunctionRoving(tbody);
+    tbody.querySelectorAll(".function-name").forEach((button3, position) => {
+      button3.tabIndex = position === 0 ? 0 : -1;
+    });
+    table.append(tbody);
+  };
+  draw();
+  return table;
+}
+function renderFunctionTableVirtual(report) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "function-table-virtual";
+  let sort = { key: "signals", dir: "desc" };
+  const header = document.createElement("div");
+  header.className = "function-virtual-head";
+  wrapper.append(header);
+  const list = createVirtualList({
+    rowHeight: 30,
+    overscan: 8,
+    className: "function-virtual-list",
+    renderRow: (entry) => {
+      const row = document.createElement("div");
+      row.className = "function-row function-virtual-row";
+      row.dataset.function = entry?.name ?? "";
+      row.setAttribute("role", "button");
+      row.tabIndex = -1;
+      const name = document.createElement("span");
+      name.className = "function-name";
+      name.textContent = truncateMiddle(functionLabel(entry));
+      name.title = functionSignature(entry);
+      row.append(name);
+      const badge = functionEntryBadge(entry);
+      const meta = document.createElement("span");
+      meta.className = "function-virtual-meta";
+      const signals = entry?.signals?.length ?? 0;
+      const complexity = entry?.metrics?.decisionPoints ?? "\u2014";
+      meta.textContent = `${badge || (entry?.visibility ?? "")} \xB7 complexity ${complexity} \xB7 ${signals} signal${signals === 1 ? "" : "s"} \xB7 coverage ${functionCoverageLabel(entry)}`;
+      row.append(meta);
+      return row;
+    }
+  });
+  wrapper.append(list.element);
+  const detail = document.createElement("div");
+  detail.className = "function-virtual-detail";
+  detail.textContent = "Select a function for its signature, metrics, and call sites.";
+  wrapper.append(detail);
+  const select = (entry) => {
+    detail.replaceChildren(functionDetailContent(entry, (name) => {
+      const ordered = orderedEntries();
+      const target = ordered.find((candidate) => candidate?.name === name);
+      if (target) {
+        select(target);
+      }
+    }));
+    for (const row of list.element.querySelectorAll(".function-row")) {
+      row.classList.toggle("selected", row.dataset.function === entry?.name);
+    }
+  };
+  const orderedEntries = () => [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
+  const draw = () => {
+    header.replaceChildren(
+      functionTableHead(report.functions, sort, (key) => {
+        if (sort.key === key) {
+          sort.dir = sort.dir === "desc" ? "asc" : "desc";
+        } else {
+          sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
+        }
+        draw();
+      })
+    );
+    list.setItems(orderedEntries());
+    list.refresh();
+  };
+  list.element.addEventListener("click", (event) => {
+    const row = event.target.closest?.(".function-row");
+    const entry = orderedEntries().find((candidate) => candidate?.name === row?.dataset.function);
+    if (entry) {
+      select(entry);
+    }
+  });
+  list.element.addEventListener("keydown", (event) => {
+    const rows = [...list.element.querySelectorAll(".function-row")];
+    const current2 = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
+    const next = rovingIndex(Math.max(0, current2), rows.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    const entry = orderedEntries()[next];
+    if (entry) {
+      select(entry);
+    }
+    rows[next]?.focus?.();
+  });
+  draw();
+  const first = orderedEntries()[0];
+  if (first) {
+    select(first);
+  }
+  return wrapper;
+}
+
 // ui/strabo-workspace.js
 function workspaceSummary(report) {
   const summary = report?.summary;
@@ -4993,1348 +5665,7 @@ function probeConsent(database, checkCount) {
   return `This connects to ${database} with the connection string from its environment variable and runs ${checkCount} read-only count quer${checkCount === 1 ? "y" : "ies"}, each in its own read-only transaction with a timeout. No table row is read, and the connection string is not stored.`;
 }
 
-// ui/strabo-impact.js
-var BAND_LABELS = {
-  low: "LOW",
-  moderate: "MODERATE",
-  high: "HIGH",
-  critical: "CRITICAL"
-};
-function riskBandLabel(band) {
-  return BAND_LABELS[band] ?? String(band ?? "").toUpperCase();
-}
-function riskTone(band) {
-  if (band === "critical") return "critical";
-  if (band === "high") return "serious";
-  if (band === "moderate") return "warning";
-  return "good";
-}
-function complexityValue(value) {
-  return value === null || value === void 0 ? "\u2014" : `C${value}`;
-}
-function round2(value) {
-  return Math.round(value * 100) / 100;
-}
-function moveText(before, after, format = (value) => String(value)) {
-  if ((before === null || before === void 0) && (after === null || after === void 0)) {
-    return { tone: "none", text: "not measured" };
-  }
-  if (before === null || before === void 0) {
-    return { tone: "grown", text: `new \xB7 ${format(after)}` };
-  }
-  if (after === null || after === void 0) {
-    return { tone: "shed", text: `removed \xB7 ${format(before)}` };
-  }
-  const delta = round2(after - before);
-  if (delta === 0) return { tone: "flat", text: "unchanged" };
-  if (delta > 0) return { tone: "grown", text: `grown +${format(delta)}` };
-  return { tone: "shed", text: `shed \u2212${format(-delta)}` };
-}
-function riskCell(risk) {
-  if (!risk) {
-    return { key: "risk", label: "Risk", value: "\u2014", detail: "not measurable", tone: "none" };
-  }
-  return {
-    key: "risk",
-    label: "Risk",
-    value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
-    detail: "current snapshot",
-    tone: riskTone(risk.band)
-  };
-}
-function filePassportCells(card) {
-  const complexity = card?.complexity ?? {};
-  const snapshot = card?.snapshot ?? {};
-  const cells = [riskCell(card?.risk)];
-  const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
-  cells.push({
-    key: "max-complexity",
-    label: "Max complexity",
-    value: complexityValue(complexity.maxAfter ?? complexity.maxBefore),
-    detail: maxMove.text,
-    tone: maxMove.tone
-  });
-  const coherence = card?.coherence;
-  cells.push({
-    key: "coherence",
-    label: "Change coherence",
-    value: coherence ? `${coherence.score}/100` : "\u2014",
-    detail: coherence ? coherence.detail : card?.status === "added" ? "new file" : "no changed symbols",
-    tone: coherence ? coherence.score >= 67 ? "flat" : "grown" : "none"
-  });
-  cells.push({
-    key: "blast",
-    label: "Blast radius",
-    value: String(snapshot.blastRadius ?? 0),
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "imports",
-    label: "Importers / imports",
-    value: `${snapshot.directImporters ?? 0} / ${snapshot.directImports ?? 0}`,
-    detail: "current graph",
-    tone: "none"
-  });
-  const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
-  cells.push({
-    key: "average-complexity",
-    label: "Average complexity",
-    value: complexity.averageAfter === null || complexity.averageAfter === void 0 ? "\u2014" : String(complexity.averageAfter),
-    detail: `${averageMove.text} \xB7 ${complexity.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${complexity.classesUnchanged ?? 0} class(es) unchanged`,
-    tone: averageMove.tone
-  });
-  return cells;
-}
-function totalsPassportCells(totals) {
-  const cells = [riskCell(totals?.risk)];
-  cells.push({
-    key: "max-complexity",
-    label: "Max complexity",
-    value: complexityValue(totals?.maxComplexity),
-    detail: `${totals?.files ?? 0} file(s)`,
-    tone: "none"
-  });
-  cells.push({
-    key: "coherence",
-    label: "Change coherence",
-    value: totals?.coherence === null || totals?.coherence === void 0 ? "\u2014" : `${totals.coherence}/100`,
-    detail: `${totals?.changedSymbols ?? 0} changed symbol(s)`,
-    tone: totals?.coherence === null || totals?.coherence === void 0 ? "none" : "flat"
-  });
-  cells.push({
-    key: "blast",
-    label: "Blast radius",
-    value: String(totals?.blastRadius ?? 0),
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "imports",
-    label: "Importers / imports",
-    value: `${totals?.directImporters ?? 0} / ${totals?.directImports ?? 0}`,
-    detail: "current graph",
-    tone: "none"
-  });
-  cells.push({
-    key: "average-complexity",
-    label: "Average complexity",
-    value: totals?.averageComplexity === null || totals?.averageComplexity === void 0 ? "\u2014" : String(totals.averageComplexity),
-    detail: `${totals?.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${totals?.classesUnchanged ?? 0} class(es) unchanged`,
-    tone: "none"
-  });
-  return cells;
-}
-function impactFunctionLabel(fn) {
-  return fn?.owner ? `${fn.owner}.${fn.name}` : String(fn?.name ?? "");
-}
-function passportHeading(scope) {
-  if (scope === "file") return "Change impact passport";
-  if (scope === "revision") return "Revision impact passport";
-  return "Change impact passport";
-}
-
-// ui/view.js
-var Fragment = /* @__PURE__ */ Symbol("fragment");
-var HOST = /* @__PURE__ */ Symbol("host");
-var roots = /* @__PURE__ */ new WeakMap();
-function h(type, props, ...children) {
-  const { key = null, ...rest } = props ?? {};
-  return { type, props: rest, key, children: normalizeChildren(children) };
-}
-function host(key, create) {
-  return { type: HOST, key, create, props: {}, children: [] };
-}
-function mount(parent, vnode) {
-  const previous = roots.get(parent) ?? null;
-  const next = patch(parent, vnode, previous);
-  roots.set(parent, next);
-  return next;
-}
-function normalizeChildren(values) {
-  const out = [];
-  const visit = (value) => {
-    if (value === null || value === void 0 || value === false || value === true) {
-      return;
-    }
-    if (Array.isArray(value)) {
-      value.forEach(visit);
-      return;
-    }
-    if (typeof value === "string" || typeof value === "number") {
-      out.push({ type: "#text", text: String(value), props: {}, key: null, children: [] });
-      return;
-    }
-    if (typeof value === "object" && "type" in value) {
-      out.push(value);
-    }
-  };
-  values.forEach(visit);
-  return out;
-}
-function patch(parent, next, prev) {
-  if (next && next.type === Fragment) {
-    const prevChildren = prev?.type === Fragment ? prev.children : [];
-    if (prev && prev.type !== Fragment && prev.dom && prev.dom.parentNode === parent) {
-      parent.removeChild(prev.dom);
-    }
-    updateChildren(parent, prevChildren, next.children);
-    next.dom = parent;
-    return next;
-  }
-  if (prev?.type === Fragment) {
-    for (const child of prev.children) {
-      if (child.dom && child.dom.parentNode === parent) {
-        parent.removeChild(child.dom);
-      }
-    }
-    prev = null;
-  }
-  if (prev && next && prev.type === next.type && prev.key === next.key) {
-    updateDom(prev, next);
-    return next;
-  }
-  const dom = next ? createDom(next) : null;
-  if (next) {
-    next.dom = dom;
-  }
-  if (prev?.dom && prev.dom.parentNode === parent) {
-    if (dom) {
-      parent.replaceChild(dom, prev.dom);
-    } else {
-      parent.removeChild(prev.dom);
-    }
-  } else if (dom) {
-    parent.appendChild(dom);
-  }
-  return next;
-}
-function createDom(vnode) {
-  if (vnode.type === "#text") {
-    return document.createTextNode(vnode.text);
-  }
-  if (vnode.type === HOST) {
-    return vnode.create();
-  }
-  const dom = document.createElement(vnode.type);
-  for (const child of vnode.children) {
-    const childDom = createDom(child);
-    child.dom = childDom;
-    dom.appendChild(childDom);
-  }
-  patchProps(dom, vnode.props, {});
-  return dom;
-}
-function updateDom(prev, next) {
-  const dom = prev.dom;
-  next.dom = dom;
-  if (next.type === HOST) {
-    return;
-  }
-  if (next.type === "#text") {
-    if (dom.nodeValue !== next.text) {
-      dom.nodeValue = next.text;
-    }
-    return;
-  }
-  patchProps(dom, next.props, prev.props);
-  updateChildren(dom, prev.children, next.children);
-}
-function updateChildren(parent, prevChildren, nextChildren) {
-  const prevByKey = /* @__PURE__ */ new Map();
-  const prevUnkeyed = [];
-  for (const child of prevChildren) {
-    if (child.key !== null) {
-      prevByKey.set(child.key, child);
-    } else {
-      prevUnkeyed.push(child);
-    }
-  }
-  let unkeyedCursor = 0;
-  const next = [];
-  for (const child of nextChildren) {
-    let match = null;
-    if (child.key !== null) {
-      match = prevByKey.get(child.key) ?? null;
-    } else if (unkeyedCursor < prevUnkeyed.length) {
-      match = prevUnkeyed[unkeyedCursor];
-      unkeyedCursor += 1;
-    }
-    next.push(patchChild(parent, child, match));
-  }
-  const desired = [];
-  for (const child of next) {
-    if (child.dom && child.dom !== parent) {
-      desired.push(child.dom);
-    }
-  }
-  for (const node of [...parent.childNodes]) {
-    if (!desired.includes(node)) {
-      parent.removeChild(node);
-    }
-  }
-  for (let index = 0; index < desired.length; index += 1) {
-    const node = desired[index];
-    if (parent.childNodes[index] !== node) {
-      parent.insertBefore(node, parent.childNodes[index] ?? null);
-    }
-  }
-}
-function patchChild(parent, next, prev) {
-  if (prev && prev.type === next.type && prev.key === next.key && next.type !== Fragment) {
-    updateDom(prev, next);
-    return next;
-  }
-  const dom = createDom(next);
-  next.dom = dom;
-  return next;
-}
-function patchProps(dom, next = {}, prev = {}) {
-  const names = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
-  for (const name of names) {
-    if (prev[name] === next[name]) {
-      continue;
-    }
-    applyProp(dom, name, prev[name], next[name]);
-  }
-}
-function applyProp(dom, name, before, after) {
-  if (name === "className") {
-    dom.className = after ?? "";
-    return;
-  }
-  if (name === "style") {
-    applyStyle(dom, before, after);
-    return;
-  }
-  if (name === "dataset") {
-    applyDataset(dom, before, after);
-    return;
-  }
-  if (name === "value") {
-    const next = after ?? "";
-    if (dom.value !== next) {
-      dom.value = next;
-    }
-    return;
-  }
-  if (name === "checked" || name === "disabled" || name === "hidden") {
-    const next = Boolean(after);
-    if (dom[name] !== next) {
-      dom[name] = next;
-    }
-    return;
-  }
-  if (name.length > 2 && name.startsWith("on") && name[2] === name[2].toUpperCase()) {
-    applyEvent(dom, name.slice(2).toLowerCase(), after);
-    return;
-  }
-  setAttribute(dom, name, after);
-}
-function applyStyle(dom, before, after) {
-  const previous = before ?? {};
-  const next = after ?? {};
-  for (const key of Object.keys(previous)) {
-    if (!(key in next)) {
-      dom.style[key] = "";
-    }
-  }
-  for (const [key, value] of Object.entries(next)) {
-    dom.style[key] = value;
-  }
-}
-function applyDataset(dom, before, after) {
-  const previous = before ?? {};
-  const next = after ?? {};
-  for (const key of Object.keys(previous)) {
-    if (!(key in next)) {
-      delete dom.dataset[key];
-    }
-  }
-  for (const [key, value] of Object.entries(next)) {
-    dom.dataset[key] = String(value);
-  }
-}
-function applyEvent(dom, event, handler) {
-  const handlers = dom.__straboHandlers ?? (dom.__straboHandlers = /* @__PURE__ */ new Map());
-  const existing = handlers.get(event);
-  if (existing) {
-    dom.removeEventListener(event, existing);
-  }
-  if (typeof handler === "function") {
-    dom.addEventListener(event, handler);
-    handlers.set(event, handler);
-  } else {
-    handlers.delete(event);
-  }
-}
-function setAttribute(dom, name, value) {
-  if (value === null || value === void 0 || value === false) {
-    dom.removeAttribute(name);
-    return;
-  }
-  if (value === true) {
-    dom.setAttribute(name, "");
-    return;
-  }
-  dom.setAttribute(name, String(value));
-}
-
-// ui/strabo-panels.js
-var inspectorSeq = 0;
-function backButton(handlers, fallbackTitle) {
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "panel-back";
-  back.dataset.role = "panel-back";
-  back.textContent = "\u2190 Back";
-  back.disabled = handlers.canGoBack === false;
-  const title = handlers.backTitle ?? fallbackTitle;
-  back.title = title;
-  back.setAttribute("aria-label", title);
-  back.addEventListener("click", () => handlers.onBack?.());
-  return back;
-}
-function renderInspector(container, model, id, handlers = {}) {
-  const passport = passportFor(model, id);
-  if (!passport) {
-    container.hidden = true;
-    return;
-  }
-  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
-  container.hidden = false;
-  container.replaceChildren();
-  const title = document.createElement("h2");
-  const chip = document.createElement("span");
-  chip.className = `kind-chip kind-${passport.kind ?? "module"}`;
-  chip.textContent = passport.kind ?? "module";
-  title.append(chip);
-  title.append(document.createTextNode(node?.label ?? id));
-  container.append(title);
-  if (handlers.onBack) {
-    title.prepend(backButton(handlers, "Back to the map"));
-  }
-  const path = document.createElement("p");
-  path.className = "passport-path";
-  path.textContent = node?.workspacePath ?? id;
-  container.append(path);
-  if (passport.why) {
-    const why = document.createElement("p");
-    why.className = "passport-why";
-    why.textContent = `Grouped by: ${passport.why}`;
-    container.append(why);
-  }
-  const actions = document.createElement("div");
-  actions.className = "inspector-actions";
-  if (handlers.onOpenWorkspace) {
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "primary";
-    open.textContent = "Open in Workspace";
-    open.addEventListener("click", () => handlers.onOpenWorkspace(id));
-    actions.append(open);
-  }
-  if (handlers.onViewSource) {
-    const source = document.createElement("button");
-    source.type = "button";
-    source.className = "source-open";
-    source.textContent = "View source";
-    source.addEventListener("click", () => handlers.onViewSource(id));
-    actions.append(source);
-  }
-  if (handlers.onOpenMemberMap) {
-    const memberMap = document.createElement("button");
-    memberMap.type = "button";
-    memberMap.className = "member-open";
-    memberMap.id = "open-member-map";
-    memberMap.textContent = "Member map";
-    memberMap.addEventListener("click", () => handlers.onOpenMemberMap(id));
-    actions.append(memberMap);
-  }
-  if (handlers.onOpenRoute) {
-    const route = document.createElement("button");
-    route.type = "button";
-    route.className = "route-open";
-    route.id = "open-route";
-    route.textContent = "Read next";
-    route.title = "Step through the repository reading route from its entry points";
-    route.addEventListener("click", () => handlers.onOpenRoute(id));
-    actions.append(route);
-  }
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.className = "icon-button";
-  copy.textContent = "\u29C9 Copy path";
-  copy.title = "Copy repository-relative path";
-  copy.addEventListener("click", () => {
-    const text = node?.workspacePath ?? id;
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {
-      });
-    }
-    copy.textContent = "\u2713 Copied";
-    setTimeout(() => {
-      copy.textContent = "\u29C9 Copy path";
-    }, 1200);
-  });
-  actions.append(copy);
-  container.append(actions);
-  const cards = document.createElement("div");
-  cards.className = "stat-cards";
-  for (const metric of passport.metrics) {
-    const card = document.createElement("div");
-    card.className = "stat-card";
-    const value = document.createElement("div");
-    value.className = "stat-value";
-    value.textContent = String(metric.value);
-    const label = document.createElement("div");
-    label.className = "stat-label";
-    label.textContent = metric.label;
-    card.append(value, label);
-    cards.append(card);
-  }
-  container.append(cards);
-  if (model.system) {
-    if (model.systemUnit) {
-      appendOutsideLinks(container, model, id, node, handlers);
-      return;
-    }
-    const narrator = document.createElement("div");
-    narrator.className = "system-narrator";
-    appendNarratorBlock(narrator, handlers, { id: "narrate-group", label: "Name group" });
-    container.append(narrator);
-    return;
-  }
-  const tabs = document.createElement("div");
-  tabs.className = "inspector-tabs";
-  tabs.setAttribute("role", "tablist");
-  const panels = document.createElement("div");
-  panels.className = "inspector-panels";
-  const members = document.createElement("section");
-  members.dataset.role = "members";
-  const membersTitle = document.createElement("h3");
-  membersTitle.textContent = "Members";
-  members.append(membersTitle);
-  const membersBody = document.createElement("p");
-  membersBody.className = "unavailable";
-  membersBody.textContent = "Loading members\u2026";
-  members.append(membersBody);
-  const depsSection = listSection("Dependencies", id, passport.imports, handlers);
-  const dependentsSection = listSection("Dependents", id, passport.usedBy, handlers);
-  const functions = document.createElement("section");
-  functions.dataset.role = "functions";
-  const functionsTitle = document.createElement("h3");
-  functionsTitle.textContent = "Functions";
-  functions.append(functionsTitle);
-  const functionsBody = document.createElement("p");
-  functionsBody.className = "unavailable";
-  functionsBody.textContent = "Loading functions\u2026";
-  functions.append(functionsBody);
-  const impact = document.createElement("section");
-  impact.dataset.role = "impact";
-  const impactTitle = document.createElement("h3");
-  impactTitle.textContent = "Impact";
-  impact.append(impactTitle);
-  const impactBody = document.createElement("p");
-  impactBody.className = "unavailable";
-  impactBody.textContent = "Loading impact\u2026";
-  impact.append(impactBody);
-  const tabDefs = [
-    ["deps", `Dependencies (${passport.imports.length})`, depsSection],
-    ["dependents", `Dependents (${passport.usedBy.length})`, dependentsSection],
-    ["members", "Members", members],
-    ["functions", "Functions", functions],
-    ["impact", "Impact", impact]
-  ];
-  const base = `inspector-${inspectorSeq += 1}`;
-  const tabButtons = [];
-  const tabSections = [];
-  const selectTab = (index, { focus: focus2 = false } = {}) => {
-    tabButtons.forEach((button2, position) => {
-      const selected2 = position === index;
-      button2.setAttribute("aria-selected", selected2 ? "true" : "false");
-      button2.tabIndex = selected2 ? 0 : -1;
-    });
-    tabSections.forEach((section2, position) => {
-      section2.hidden = position !== index;
-    });
-    if (focus2) {
-      tabButtons[index].focus();
-    }
-  };
-  for (const [key, label, section2] of tabDefs) {
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = "inspector-tab";
-    tab.setAttribute("role", "tab");
-    tab.dataset.tab = key;
-    tab.textContent = label;
-    tab.id = `${base}-tab-${key}`;
-    tab.setAttribute("aria-controls", `${base}-panel-${key}`);
-    section2.id = `${base}-panel-${key}`;
-    section2.setAttribute("role", "tabpanel");
-    section2.setAttribute("aria-labelledby", tab.id);
-    section2.tabIndex = 0;
-    tab.addEventListener("click", () => selectTab(tabButtons.indexOf(tab)));
-    tab.addEventListener("keydown", (event) => {
-      const next = rovingIndex(tabButtons.indexOf(tab), tabButtons.length, event.key);
-      if (next === null) {
-        return;
-      }
-      event.preventDefault();
-      selectTab(next, { focus: true });
-    });
-    tabs.append(tab);
-    tabButtons.push(tab);
-    tabSections.push(section2);
-    panels.append(section2);
-  }
-  selectTab(0);
-  container.append(tabs, panels);
-  const changesWith = document.createElement("section");
-  changesWith.dataset.role = "changes-with";
-  const changesWithTitle = document.createElement("h3");
-  changesWithTitle.textContent = "Changes with";
-  changesWith.append(changesWithTitle);
-  const changesWithBody = document.createElement("p");
-  changesWithBody.className = "unavailable";
-  changesWithBody.textContent = "Loading co-change\u2026";
-  changesWith.append(changesWithBody);
-  container.append(changesWith);
-  const trace = document.createElement("p");
-  trace.className = "trace";
-  trace.dataset.role = "trace";
-  trace.textContent = "Use a row button to trace a directed path.";
-  container.append(trace);
-}
-function listSection(heading2, from, entries, handlers) {
-  const section2 = document.createElement("section");
-  const title = document.createElement("h3");
-  title.textContent = `${heading2} (${entries.length})`;
-  section2.append(title);
-  const list = document.createElement("ul");
-  for (const entry of entries.slice(0, 100)) {
-    const item = document.createElement("li");
-    item.dataset.delegateNode = entry.id;
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "link";
-    open.textContent = entry.id;
-    open.addEventListener("click", () => handlers.onSelect?.(entry.id));
-    item.append(open);
-    if (handlers.onTrace) {
-      const trace = document.createElement("button");
-      trace.type = "button";
-      trace.className = "trace-button";
-      trace.textContent = "trace";
-      trace.addEventListener("click", () => handlers.onTrace(from, entry.id));
-      item.append(trace);
-    }
-    if (entry.line) {
-      const evidence = document.createElement("span");
-      evidence.className = "evidence";
-      evidence.textContent = `L${entry.line} ${entry.specifier ?? ""}`.trim();
-      item.append(evidence);
-    }
-    list.append(item);
-  }
-  section2.append(list);
-  return section2;
-}
-function appendFact(list, term, value) {
-  const dt = document.createElement("dt");
-  dt.textContent = term;
-  const dd = document.createElement("dd");
-  dd.textContent = value;
-  list.append(dt, dd);
-}
-function renderChangesWith(container, result, handlers = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Changes with";
-  container.append(title);
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Co-change is unavailable: no Git history was read.";
-    container.append(note3);
-    return;
-  }
-  const partners = result.partners ?? [];
-  if (partners.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No recorded commits changed this file together with another in the window.";
-    container.append(note3);
-    return;
-  }
-  const list = document.createElement("ul");
-  list.className = "passport-list";
-  list.dataset.role = "changes-with-list";
-  for (const partner of partners) {
-    const item = document.createElement("li");
-    item.dataset.delegateNode = partner.file;
-    const open = document.createElement("button");
-    open.type = "button";
-    open.className = "link";
-    open.textContent = partner.file;
-    open.addEventListener("click", () => handlers.onSelect?.(partner.file));
-    item.append(open);
-    const badge = document.createElement("span");
-    badge.className = "evidence";
-    badge.hidden = !partner.hidden;
-    badge.textContent = "hidden coupling";
-    item.append(badge);
-    const summary = document.createElement("span");
-    summary.className = "evidence";
-    summary.textContent = `${partner.commitsShared} shared commit(s) \xB7 ratio ${partner.ratio}`;
-    item.append(summary);
-    const commits = document.createElement("ul");
-    commits.className = "cochange-commits";
-    for (const commit of partner.commits.slice(0, 5)) {
-      const line = document.createElement("li");
-      line.textContent = `${commit.hash.slice(0, 8)} \xB7 ${commit.date} \xB7 ${commit.subject}`;
-      commits.append(line);
-    }
-    if (partner.commits.length > 5) {
-      const more = document.createElement("li");
-      more.className = "unavailable";
-      more.textContent = `+${partner.commits.length - 5} more commit(s)`;
-      commits.append(more);
-    }
-    item.append(commits);
-    list.append(item);
-  }
-  container.append(list);
-}
-function renderMembers(container, result) {
-  container.replaceChildren();
-  const symbols = result?.symbols ?? [];
-  const title = document.createElement("h3");
-  title.textContent = `Members (${symbols.length})`;
-  container.append(title);
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Not recorded by the scan.";
-    container.append(note3);
-    return;
-  }
-  if (symbols.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No members declared.";
-    container.append(note3);
-    return;
-  }
-  const memberMap = result.memberMap;
-  const types = memberMap?.types ?? [];
-  if (types.length > 0) {
-    for (const type of types) {
-      container.append(renderMemberType(type));
-    }
-  } else {
-    const list = document.createElement("ul");
-    for (const symbol of symbols.slice(0, 200)) {
-      const item = document.createElement("li");
-      const owner = symbol.owner ? `${symbol.owner}.` : "";
-      const type = symbol.type ? `: ${symbol.type}` : "";
-      item.textContent = `${symbol.kind} \xB7 ${symbol.visibility} \xB7 ${owner}${symbol.name}${type}`;
-      list.append(item);
-    }
-    container.append(list);
-  }
-  container.append(renderDataFlow(memberMap?.dataFlow));
-}
-function renderFunctions(container, result, handlers = {}) {
-  container.replaceChildren();
-  const report = result?.functions;
-  const title = document.createElement("h3");
-  title.textContent = `Functions (${report?.functions?.length ?? 0})`;
-  container.append(title);
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Functions are not recorded for this file.";
-    container.append(note3);
-    return;
-  }
-  if (!report || report.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = report?.detail ?? "Functions are not recorded for this file.";
-    container.append(note3);
-    return;
-  }
-  if (report.functions.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No functions declared.";
-    container.append(note3);
-    return;
-  }
-  const summary = document.createElement("p");
-  summary.className = "function-summary";
-  summary.textContent = functionSummary(report);
-  container.append(summary);
-  if (result?.coverage) {
-    const coverageNote = document.createElement("p");
-    coverageNote.className = "function-coverage-basis";
-    coverageNote.textContent = `Coverage ${coverageCaption(result.coverage)}`;
-    container.append(coverageNote);
-  }
-  if (report.functions.length > FUNCTION_TABLE_VIRTUALIZE_AT) {
-    container.append(renderFunctionTableVirtual(report));
-  } else {
-    container.append(renderFunctionTable(report));
-  }
-  appendNarratorBlock(container, handlers, { id: "narrate-functions", label: "Narrate" });
-}
-var FUNCTION_TABLE_VIRTUALIZE_AT = 100;
-var FUNCTION_COLUMNS = [
-  { key: "name", label: "Function" },
-  { key: "entry", label: "Visibility / entry" },
-  { key: "lines", label: "Lines", numeric: true },
-  { key: "span", label: "Span" },
-  { key: "complexity", label: "Complexity", numeric: true },
-  { key: "nesting", label: "Nesting", numeric: true },
-  { key: "loops", label: "Loops", numeric: true },
-  { key: "calls", label: "Calls", numeric: true },
-  { key: "callers", label: "Callers" },
-  { key: "signals", label: "Signals", numeric: true },
-  { key: "coverage", label: "Coverage" }
-];
-function truncateMiddle(text, max = 30) {
-  if (text.length <= max) {
-    return text;
-  }
-  const keep = Math.max(1, Math.floor((max - 1) / 2));
-  return `${text.slice(0, keep)}\u2026${text.slice(text.length - keep)}`;
-}
-function functionSortValue(entry, key) {
-  switch (key) {
-    case "name":
-      return functionLabel(entry).toLowerCase();
-    case "entry":
-      return entry?.entry ? `${entry.entry.kind} ${entry.entry.evidence}`.toLowerCase() : String(entry?.visibility ?? "").toLowerCase();
-    case "lines":
-      return entry?.metrics?.lines ?? -1;
-    case "span":
-      return entry?.line ?? 0;
-    case "complexity":
-      return entry?.metrics?.decisionPoints ?? -1;
-    case "nesting":
-      return entry?.metrics?.maxNestingDepth ?? -1;
-    case "loops":
-      return entry?.metrics?.loops ?? -1;
-    case "calls":
-      return entry?.calls?.length ?? 0;
-    case "callers":
-      return entry?.callers?.length ?? 0;
-    case "signals":
-      return entry?.signals?.length ?? 0;
-    case "coverage":
-      return entry?.coverage?.lineCoverage ?? entry?.coverage?.hits ?? -1;
-    default:
-      return 0;
-  }
-}
-function compareFunctionEntries(a, b, key, dir) {
-  const first = functionSortValue(a, key);
-  const second = functionSortValue(b, key);
-  const order = typeof first === "string" || typeof second === "string" ? String(first).localeCompare(String(second)) : first - second;
-  if (order !== 0) {
-    return dir === "desc" ? -order : order;
-  }
-  return (b?.signals?.length ?? 0) - (a?.signals?.length ?? 0) || (b?.metrics?.decisionPoints ?? -1) - (a?.metrics?.decisionPoints ?? -1) || (a?.line ?? 0) - (b?.line ?? 0) || String(a?.name ?? "").localeCompare(String(b?.name ?? ""));
-}
-function functionDetailContent(entry, onJump) {
-  const detail = document.createElement("div");
-  detail.className = "function-detail-content";
-  const signature = document.createElement("code");
-  signature.className = "function-signature";
-  signature.textContent = functionSignature(entry);
-  signature.title = functionSignature(entry);
-  detail.append(signature);
-  const metrics = document.createElement("div");
-  metrics.className = "function-metrics";
-  metrics.textContent = functionMetrics(entry);
-  detail.append(metrics);
-  const calls = document.createElement("div");
-  calls.className = "function-calls";
-  calls.append(document.createTextNode("calls: "));
-  if ((entry?.calls ?? []).length === 0) {
-    calls.append(document.createTextNode(functionCalls(entry)));
-  } else {
-    for (const [index, call] of (entry.calls ?? []).entries()) {
-      if (index > 0) {
-        calls.append(document.createTextNode(", "));
-      }
-      const jump = document.createElement("button");
-      jump.type = "button";
-      jump.className = "link function-callsite";
-      jump.dataset.callee = call.name;
-      jump.dataset.line = String(call.line);
-      jump.title = `Show ${call.name} (line ${call.line})`;
-      jump.textContent = `${call.name} (L${call.line})`;
-      jump.addEventListener("click", () => onJump(call.name));
-      calls.append(jump);
-    }
-  }
-  detail.append(calls);
-  const callers = document.createElement("div");
-  callers.className = "function-callers";
-  callers.textContent = `called by: ${functionCallers(entry)}`;
-  detail.append(callers);
-  const signals = document.createElement("div");
-  signals.className = "function-signals";
-  signals.textContent = `signals: ${functionSignals(entry)}`;
-  detail.append(signals);
-  const coverage = document.createElement("div");
-  coverage.className = "function-coverage-detail";
-  coverage.textContent = `coverage: ${functionCoverage(entry)}`;
-  detail.append(coverage);
-  return detail;
-}
-function signalChips(entry) {
-  const signals = entry?.signals ?? [];
-  if (signals.length === 0) {
-    const none = document.createElement("span");
-    none.className = "function-none";
-    none.title = "no cost signals";
-    none.textContent = "\u2014";
-    return none;
-  }
-  const chips = document.createElement("span");
-  chips.className = "signal-chips";
-  for (const signal of signals) {
-    const chip = document.createElement("span");
-    chip.className = "signal-chip";
-    chip.title = `${signal.kind} (${signal.detail})`;
-    chip.textContent = signal.kind;
-    chips.append(chip);
-    chips.append(document.createTextNode(" "));
-  }
-  return chips;
-}
-function jumpToFunctionRow(root, name) {
-  const rows = [...root.querySelectorAll(".function-row")];
-  const target = rows.find((row) => row.dataset.function === name);
-  if (!target) {
-    return;
-  }
-  const toggle = target.querySelector("[data-expand]");
-  if (toggle?.getAttribute("aria-expanded") === "false") {
-    toggle.click();
-  }
-  const focusable = target.querySelector(".function-name");
-  focusable?.focus();
-  if (typeof target.scrollIntoView === "function") {
-    target.scrollIntoView({ block: "nearest" });
-  }
-}
-function wireFunctionRoving(tbody) {
-  const names = () => [...tbody.querySelectorAll(".function-name")];
-  tbody.addEventListener("keydown", (event) => {
-    const current2 = names().indexOf(document.activeElement);
-    if (current2 === -1) {
-      return;
-    }
-    const next = rovingIndex(current2, names().length, event.key);
-    if (next === null) {
-      return;
-    }
-    event.preventDefault();
-    names().forEach((button2, position) => {
-      button2.tabIndex = position === next ? 0 : -1;
-    });
-    names()[next]?.focus();
-  });
-}
-function functionTableHead(entries, sort, onSort) {
-  const thead = document.createElement("thead");
-  const row = document.createElement("tr");
-  for (const column of FUNCTION_COLUMNS) {
-    const cell = document.createElement("th");
-    cell.scope = "col";
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "function-sort";
-    button2.dataset.sort = column.key;
-    const active = sort.key === column.key;
-    button2.setAttribute("aria-label", `Sort by ${column.label}`);
-    button2.textContent = `${column.label}${active ? sort.dir === "desc" ? " \u25BC" : " \u25B2" : ""}`;
-    if (active) {
-      cell.setAttribute("aria-sort", sort.dir === "desc" ? "descending" : "ascending");
-    }
-    button2.addEventListener("click", () => onSort(column.key));
-    cell.append(button2);
-    row.append(cell);
-  }
-  thead.append(row);
-  return thead;
-}
-function functionTableRow(entry, onJump) {
-  const row = document.createElement("tr");
-  row.className = "function-row";
-  row.dataset.function = entry?.name ?? "";
-  const nameCell = document.createElement("td");
-  const name = document.createElement("button");
-  name.type = "button";
-  name.className = "function-name link";
-  name.dataset.expand = "true";
-  name.textContent = truncateMiddle(functionLabel(entry));
-  name.title = functionSignature(entry);
-  name.tabIndex = 0;
-  name.setAttribute("aria-expanded", "false");
-  nameCell.append(name);
-  row.append(nameCell);
-  const entryCell = document.createElement("td");
-  const badge = functionEntryBadge(entry);
-  entryCell.className = "function-entry-cell";
-  entryCell.textContent = badge || (entry?.visibility ?? "");
-  entryCell.title = badge || (entry?.visibility ?? "");
-  row.append(entryCell);
-  const linesCell = document.createElement("td");
-  linesCell.textContent = entry?.metrics ? String(entry.metrics.lines) : "\u2014";
-  linesCell.title = entry?.metrics ? `${entry.metrics.lines} lines` : "signature only; no body recorded";
-  row.append(linesCell);
-  const spanCell = document.createElement("td");
-  spanCell.textContent = entry?.metrics ? `L${entry.line}-${entry.metrics.endLine}` : "\u2014";
-  row.append(spanCell);
-  const complexityCell = document.createElement("td");
-  complexityCell.textContent = entry?.metrics ? String(entry.metrics.decisionPoints) : "\u2014";
-  row.append(complexityCell);
-  const nestingCell = document.createElement("td");
-  nestingCell.textContent = entry?.metrics ? String(entry.metrics.maxNestingDepth) : "\u2014";
-  row.append(nestingCell);
-  const loopsCell = document.createElement("td");
-  loopsCell.textContent = entry?.metrics ? String(entry.metrics.loops) : "\u2014";
-  row.append(loopsCell);
-  const callsCell = document.createElement("td");
-  if ((entry?.calls ?? []).length === 0) {
-    callsCell.textContent = "\u2014";
-    callsCell.title = functionCalls(entry);
-  } else {
-    const count = document.createElement("button");
-    count.type = "button";
-    count.className = "link function-count";
-    count.dataset.expand = "true";
-    count.textContent = String(entry.calls.length);
-    count.title = functionCalls(entry);
-    count.setAttribute("aria-label", `${entry.calls.length} same-file calls: ${functionCalls(entry)}`);
-    callsCell.append(count);
-  }
-  row.append(callsCell);
-  const callersCell = document.createElement("td");
-  if ((entry?.callers ?? []).length > 0) {
-    const count = document.createElement("button");
-    count.type = "button";
-    count.className = "link function-count";
-    count.dataset.expand = "true";
-    count.textContent = String(entry.callers.length);
-    count.title = functionCallers(entry);
-    count.setAttribute("aria-label", `${entry.callers.length} callers: ${functionCallers(entry)}`);
-    callersCell.append(count);
-  } else {
-    callersCell.textContent = badge || functionCallers(entry);
-    callersCell.title = functionCallers(entry);
-  }
-  row.append(callersCell);
-  const signalsCell = document.createElement("td");
-  signalsCell.append(signalChips(entry));
-  row.append(signalsCell);
-  const coverageCell = document.createElement("td");
-  coverageCell.className = "function-coverage";
-  coverageCell.textContent = functionCoverageLabel(entry);
-  coverageCell.title = functionCoverage(entry);
-  coverageCell.dataset.basis = entry?.coverage ? "measured" : "unavailable";
-  row.append(coverageCell);
-  const detailRow = document.createElement("tr");
-  detailRow.className = "function-detail";
-  detailRow.hidden = true;
-  const detailCell = document.createElement("td");
-  detailCell.colSpan = FUNCTION_COLUMNS.length;
-  detailCell.append(functionDetailContent(entry, (name2) => jumpToFunctionRow(row.closest("table, .function-table-virtual") ?? document, name2)));
-  detailRow.append(detailCell);
-  const toggle = () => {
-    const open = detailRow.hidden;
-    detailRow.hidden = !open;
-    for (const control of row.querySelectorAll("[data-expand]")) {
-      control.setAttribute("aria-expanded", open ? "true" : "false");
-    }
-  };
-  for (const control of row.querySelectorAll("[data-expand]")) {
-    control.addEventListener("click", toggle);
-  }
-  const fragment = document.createDocumentFragment();
-  fragment.append(row, detailRow);
-  return fragment;
-}
-function renderFunctionTable(report) {
-  const table = document.createElement("table");
-  table.className = "function-table";
-  let sort = { key: "signals", dir: "desc" };
-  const draw = () => {
-    for (const old of [...table.children]) {
-      old.remove();
-    }
-    table.append(functionTableHead(report.functions, sort, (key) => {
-      if (sort.key === key) {
-        sort.dir = sort.dir === "desc" ? "asc" : "desc";
-      } else {
-        sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
-      }
-      draw();
-    }));
-    const tbody = document.createElement("tbody");
-    const ordered = [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
-    for (const entry of ordered) {
-      tbody.append(functionTableRow(entry, (name) => jumpToFunctionRow(table, name)));
-    }
-    wireFunctionRoving(tbody);
-    tbody.querySelectorAll(".function-name").forEach((button2, position) => {
-      button2.tabIndex = position === 0 ? 0 : -1;
-    });
-    table.append(tbody);
-  };
-  draw();
-  return table;
-}
-function renderFunctionTableVirtual(report) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "function-table-virtual";
-  let sort = { key: "signals", dir: "desc" };
-  const header = document.createElement("div");
-  header.className = "function-virtual-head";
-  wrapper.append(header);
-  const list = createVirtualList({
-    rowHeight: 30,
-    overscan: 8,
-    className: "function-virtual-list",
-    renderRow: (entry) => {
-      const row = document.createElement("div");
-      row.className = "function-row function-virtual-row";
-      row.dataset.function = entry?.name ?? "";
-      row.setAttribute("role", "button");
-      row.tabIndex = -1;
-      const name = document.createElement("span");
-      name.className = "function-name";
-      name.textContent = truncateMiddle(functionLabel(entry));
-      name.title = functionSignature(entry);
-      row.append(name);
-      const badge = functionEntryBadge(entry);
-      const meta = document.createElement("span");
-      meta.className = "function-virtual-meta";
-      const signals = entry?.signals?.length ?? 0;
-      const complexity = entry?.metrics?.decisionPoints ?? "\u2014";
-      meta.textContent = `${badge || (entry?.visibility ?? "")} \xB7 complexity ${complexity} \xB7 ${signals} signal${signals === 1 ? "" : "s"} \xB7 coverage ${functionCoverageLabel(entry)}`;
-      row.append(meta);
-      return row;
-    }
-  });
-  wrapper.append(list.element);
-  const detail = document.createElement("div");
-  detail.className = "function-virtual-detail";
-  detail.textContent = "Select a function for its signature, metrics, and call sites.";
-  wrapper.append(detail);
-  const select = (entry) => {
-    detail.replaceChildren(functionDetailContent(entry, (name) => {
-      const ordered = orderedEntries();
-      const target = ordered.find((candidate) => candidate?.name === name);
-      if (target) {
-        select(target);
-      }
-    }));
-    for (const row of list.element.querySelectorAll(".function-row")) {
-      row.classList.toggle("selected", row.dataset.function === entry?.name);
-    }
-  };
-  const orderedEntries = () => [...report.functions ?? []].sort((a, b) => compareFunctionEntries(a, b, sort.key, sort.dir));
-  const draw = () => {
-    header.replaceChildren(
-      functionTableHead(report.functions, sort, (key) => {
-        if (sort.key === key) {
-          sort.dir = sort.dir === "desc" ? "asc" : "desc";
-        } else {
-          sort = { key, dir: key === "name" || key === "entry" ? "asc" : "desc" };
-        }
-        draw();
-      })
-    );
-    list.setItems(orderedEntries());
-    list.refresh();
-  };
-  list.element.addEventListener("click", (event) => {
-    const row = event.target.closest?.(".function-row");
-    const entry = orderedEntries().find((candidate) => candidate?.name === row?.dataset.function);
-    if (entry) {
-      select(entry);
-    }
-  });
-  list.element.addEventListener("keydown", (event) => {
-    const rows = [...list.element.querySelectorAll(".function-row")];
-    const current2 = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
-    const next = rovingIndex(Math.max(0, current2), rows.length, event.key);
-    if (next === null) {
-      return;
-    }
-    event.preventDefault();
-    const entry = orderedEntries()[next];
-    if (entry) {
-      select(entry);
-    }
-    rows[next]?.focus?.();
-  });
-  draw();
-  const first = orderedEntries()[0];
-  if (first) {
-    select(first);
-  }
-  return wrapper;
-}
-function appendOutsideLinks(container, model, id, node, handlers) {
-  const isFile = Boolean(node?.systemUnit) && !id.endsWith("#support");
-  const block = document.createElement("div");
-  block.className = "outside-links";
-  if (isFile && handlers.onShowOutside) {
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.id = "show-outside-links";
-    button2.className = handlers.outsideShown ? "outside-toggle active" : "outside-toggle";
-    button2.setAttribute("aria-pressed", String(Boolean(handlers.outsideShown)));
-    button2.textContent = handlers.outsideShown ? "Hide outside links" : "Show outside links";
-    button2.title = "Draw this file\u2019s links to other units (O)";
-    button2.addEventListener("click", () => handlers.onShowOutside());
-    block.append(button2);
-  }
-  const links = (model.outsideLinks ?? []).filter((link) => link.file === id);
-  for (const link of links) {
-    const badge = document.createElement("div");
-    badge.className = "outside-badge";
-    badge.dataset.unit = link.targetUnit;
-    const label = document.createElement("span");
-    label.textContent = `${link.count} file${link.count === 1 ? "" : "s"} in ${link.targetName}`;
-    badge.append(label);
-    badge.append(document.createTextNode(" \xB7 "));
-    const expand = document.createElement("button");
-    expand.type = "button";
-    expand.className = "link";
-    expand.textContent = "expand";
-    expand.addEventListener("click", () => handlers.onExpandUnit?.(link.targetUnit));
-    badge.append(expand);
-    block.append(badge);
-  }
-  if (isFile || links.length > 0) {
-    container.append(block);
-  }
-}
-function renderNarrativeReply(target, reply) {
-  if (reply?.available !== true) {
-    target.replaceChildren(narratorReplyLabel(reply));
-    return;
-  }
-  const nodes = [];
-  for (const block of narrativeBlocks(reply.text)) {
-    const inline = (runs) => runs.map((run) => {
-      if (!run.code && !run.strong) {
-        return document.createTextNode(run.text);
-      }
-      const element2 = document.createElement(run.code ? "code" : "strong");
-      element2.textContent = run.text;
-      return element2;
-    });
-    if (block.type === "p") {
-      const paragraph = document.createElement("p");
-      paragraph.append(...inline(block.runs));
-      nodes.push(paragraph);
-    } else {
-      const list = document.createElement(block.type);
-      for (const item of block.items) {
-        const entry = document.createElement("li");
-        entry.append(...inline(item));
-        list.append(entry);
-      }
-      nodes.push(list);
-    }
-  }
-  const attribution = document.createElement("p");
-  attribution.className = "narrator-attribution";
-  attribution.textContent = NARRATOR_ATTRIBUTION;
-  target.replaceChildren(...nodes, attribution);
-}
-function renderNarrationPanel(container, state2, handlers = {}) {
-  const heading2 = document.createElement("h3");
-  heading2.textContent = `Narrator \xB7 ${state2.label}`;
-  const reply = document.createElement("div");
-  reply.className = "narrator-reply";
-  reply.dataset.role = "narrative";
-  if (state2.phase === "loading") {
-    reply.textContent = "Asking the narrator\u2026";
-  } else if (state2.phase === "error") {
-    reply.textContent = `Narrator unavailable: ${state2.message}`;
-  } else {
-    renderNarrativeReply(reply, state2.reply);
-  }
-  const nodes = [heading2, reply];
-  if (state2.phase === "done" && state2.reply?.available !== true && handlers.onOpenNarratorSettings) {
-    const setup = document.createElement("button");
-    setup.type = "button";
-    setup.className = "narrator-setup";
-    setup.textContent = "Open narrator settings \u2192";
-    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
-    nodes.push(setup);
-  }
-  container.replaceChildren(...nodes);
-}
-function appendNarratorBlock(container, handlers, { id, label }) {
-  if (!handlers.onNarrate) {
-    return;
-  }
-  const block = document.createElement("div");
-  block.className = "narrator-block";
-  const note3 = document.createElement("p");
-  note3.className = "narrator-note";
-  note3.textContent = narratorStatusLabel(handlers.narratorStatus);
-  block.append(note3);
-  if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
-    const setup = document.createElement("button");
-    setup.type = "button";
-    setup.className = "narrator-setup";
-    setup.dataset.role = "narrator-setup";
-    setup.textContent = "Set up \u2192";
-    setup.title = "Open Settings at the Narrator section";
-    setup.addEventListener("click", () => handlers.onOpenNarratorSettings());
-    block.append(setup);
-  }
-  const button2 = document.createElement("button");
-  button2.type = "button";
-  button2.id = id;
-  button2.className = "narrator-button";
-  button2.textContent = label;
-  const disabledReason = narratorDisabledReason(handlers.narratorStatus);
-  if (disabledReason) {
-    button2.disabled = true;
-    button2.title = disabledReason;
-  }
-  block.append(button2);
-  const reply = document.createElement("div");
-  reply.className = "narrator-reply";
-  reply.dataset.role = "narrative";
-  block.append(reply);
-  button2.addEventListener("click", async () => {
-    button2.disabled = true;
-    reply.replaceChildren("Asking the narrator\u2026");
-    try {
-      renderNarrativeReply(reply, await handlers.onNarrate());
-    } catch (error) {
-      reply.replaceChildren(`Narrator unavailable: ${error.message}`);
-    } finally {
-      button2.disabled = false;
-    }
-  });
-  container.append(block);
-}
+// ui/strabo-panel-workspace.js
 function workspaceHeading(text, count) {
   const heading2 = document.createElement("h4");
   heading2.textContent = `${text} (${count})`;
@@ -6506,13 +5837,13 @@ function renderWorkspace(container, report, handlers = {}) {
   }
 }
 function workspaceButton(label, action, onClick, disabled = false) {
-  const button2 = document.createElement("button");
-  button2.type = "button";
-  button2.textContent = label;
-  button2.dataset.action = action;
-  button2.disabled = disabled;
-  button2.addEventListener("click", () => onClick?.());
-  return button2;
+  const button3 = document.createElement("button");
+  button3.type = "button";
+  button3.textContent = label;
+  button3.dataset.action = action;
+  button3.disabled = disabled;
+  button3.addEventListener("click", () => onClick?.());
+  return button3;
 }
 function workspaceLine(className, text) {
   const line = document.createElement("div");
@@ -6823,6 +6154,293 @@ function renderRepositoryPassport(container, report, handlers = {}) {
     container.append(close);
   }
 }
+
+// ui/view.js
+var Fragment = /* @__PURE__ */ Symbol("fragment");
+var HOST = /* @__PURE__ */ Symbol("host");
+var roots = /* @__PURE__ */ new WeakMap();
+function h(type, props, ...children) {
+  const { key = null, ...rest } = props ?? {};
+  return { type, props: rest, key, children: normalizeChildren(children) };
+}
+function host(key, create) {
+  return { type: HOST, key, create, props: {}, children: [] };
+}
+function mount(parent, vnode) {
+  const previous = roots.get(parent) ?? null;
+  const next = patch(parent, vnode, previous);
+  roots.set(parent, next);
+  return next;
+}
+function normalizeChildren(values) {
+  const out = [];
+  const visit = (value) => {
+    if (value === null || value === void 0 || value === false || value === true) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value === "string" || typeof value === "number") {
+      out.push({ type: "#text", text: String(value), props: {}, key: null, children: [] });
+      return;
+    }
+    if (typeof value === "object" && "type" in value) {
+      out.push(value);
+    }
+  };
+  values.forEach(visit);
+  return out;
+}
+function patch(parent, next, prev) {
+  if (next && next.type === Fragment) {
+    const prevChildren = prev?.type === Fragment ? prev.children : [];
+    if (prev && prev.type !== Fragment && prev.dom && prev.dom.parentNode === parent) {
+      parent.removeChild(prev.dom);
+    }
+    updateChildren(parent, prevChildren, next.children);
+    next.dom = parent;
+    return next;
+  }
+  if (prev?.type === Fragment) {
+    for (const child of prev.children) {
+      if (child.dom && child.dom.parentNode === parent) {
+        parent.removeChild(child.dom);
+      }
+    }
+    prev = null;
+  }
+  if (prev && next && prev.type === next.type && prev.key === next.key) {
+    updateDom(prev, next);
+    return next;
+  }
+  const dom = next ? createDom(next) : null;
+  if (next) {
+    next.dom = dom;
+  }
+  if (prev?.dom && prev.dom.parentNode === parent) {
+    if (dom) {
+      parent.replaceChild(dom, prev.dom);
+    } else {
+      parent.removeChild(prev.dom);
+    }
+  } else if (dom) {
+    parent.appendChild(dom);
+  }
+  return next;
+}
+function createDom(vnode) {
+  if (vnode.type === "#text") {
+    return document.createTextNode(vnode.text);
+  }
+  if (vnode.type === HOST) {
+    return vnode.create();
+  }
+  const dom = document.createElement(vnode.type);
+  for (const child of vnode.children) {
+    const childDom = createDom(child);
+    child.dom = childDom;
+    dom.appendChild(childDom);
+  }
+  patchProps(dom, vnode.props, {});
+  return dom;
+}
+function updateDom(prev, next) {
+  const dom = prev.dom;
+  next.dom = dom;
+  if (next.type === HOST) {
+    return;
+  }
+  if (next.type === "#text") {
+    if (dom.nodeValue !== next.text) {
+      dom.nodeValue = next.text;
+    }
+    return;
+  }
+  patchProps(dom, next.props, prev.props);
+  updateChildren(dom, prev.children, next.children);
+}
+function updateChildren(parent, prevChildren, nextChildren) {
+  const prevByKey = /* @__PURE__ */ new Map();
+  const prevUnkeyed = [];
+  for (const child of prevChildren) {
+    if (child.key !== null) {
+      prevByKey.set(child.key, child);
+    } else {
+      prevUnkeyed.push(child);
+    }
+  }
+  let unkeyedCursor = 0;
+  const next = [];
+  for (const child of nextChildren) {
+    let match = null;
+    if (child.key !== null) {
+      match = prevByKey.get(child.key) ?? null;
+    } else if (unkeyedCursor < prevUnkeyed.length) {
+      match = prevUnkeyed[unkeyedCursor];
+      unkeyedCursor += 1;
+    }
+    next.push(patchChild(parent, child, match));
+  }
+  const desired = [];
+  for (const child of next) {
+    if (child.dom && child.dom !== parent) {
+      desired.push(child.dom);
+    }
+  }
+  for (const node of [...parent.childNodes]) {
+    if (!desired.includes(node)) {
+      parent.removeChild(node);
+    }
+  }
+  for (let index = 0; index < desired.length; index += 1) {
+    const node = desired[index];
+    if (parent.childNodes[index] !== node) {
+      parent.insertBefore(node, parent.childNodes[index] ?? null);
+    }
+  }
+}
+function patchChild(parent, next, prev) {
+  if (prev && prev.type === next.type && prev.key === next.key && next.type !== Fragment) {
+    updateDom(prev, next);
+    return next;
+  }
+  const dom = createDom(next);
+  next.dom = dom;
+  return next;
+}
+function patchProps(dom, next = {}, prev = {}) {
+  const names = /* @__PURE__ */ new Set([...Object.keys(prev), ...Object.keys(next)]);
+  for (const name of names) {
+    if (prev[name] === next[name]) {
+      continue;
+    }
+    applyProp(dom, name, prev[name], next[name]);
+  }
+}
+function applyProp(dom, name, before, after) {
+  if (name === "className") {
+    dom.className = after ?? "";
+    return;
+  }
+  if (name === "style") {
+    applyStyle(dom, before, after);
+    return;
+  }
+  if (name === "dataset") {
+    applyDataset(dom, before, after);
+    return;
+  }
+  if (name === "value") {
+    const next = after ?? "";
+    if (dom.value !== next) {
+      dom.value = next;
+    }
+    return;
+  }
+  if (name === "checked" || name === "disabled" || name === "hidden") {
+    const next = Boolean(after);
+    if (dom[name] !== next) {
+      dom[name] = next;
+    }
+    return;
+  }
+  if (name.length > 2 && name.startsWith("on") && name[2] === name[2].toUpperCase()) {
+    applyEvent(dom, name.slice(2).toLowerCase(), after);
+    return;
+  }
+  setAttribute(dom, name, after);
+}
+function applyStyle(dom, before, after) {
+  const previous = before ?? {};
+  const next = after ?? {};
+  for (const key of Object.keys(previous)) {
+    if (!(key in next)) {
+      dom.style[key] = "";
+    }
+  }
+  for (const [key, value] of Object.entries(next)) {
+    dom.style[key] = value;
+  }
+}
+function applyDataset(dom, before, after) {
+  const previous = before ?? {};
+  const next = after ?? {};
+  for (const key of Object.keys(previous)) {
+    if (!(key in next)) {
+      delete dom.dataset[key];
+    }
+  }
+  for (const [key, value] of Object.entries(next)) {
+    dom.dataset[key] = String(value);
+  }
+}
+function applyEvent(dom, event, handler) {
+  const handlers = dom.__straboHandlers ?? (dom.__straboHandlers = /* @__PURE__ */ new Map());
+  const existing = handlers.get(event);
+  if (existing) {
+    dom.removeEventListener(event, existing);
+  }
+  if (typeof handler === "function") {
+    dom.addEventListener(event, handler);
+    handlers.set(event, handler);
+  } else {
+    handlers.delete(event);
+  }
+}
+function setAttribute(dom, name, value) {
+  if (value === null || value === void 0 || value === false) {
+    dom.removeAttribute(name);
+    return;
+  }
+  if (value === true) {
+    dom.setAttribute(name, "");
+    return;
+  }
+  dom.setAttribute(name, String(value));
+}
+
+// ui/strabo-panel-members.js
+function renderMembers(container, result) {
+  container.replaceChildren();
+  const symbols = result?.symbols ?? [];
+  const title = document.createElement("h3");
+  title.textContent = `Members (${symbols.length})`;
+  container.append(title);
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ?? "Not recorded by the scan.";
+    container.append(note3);
+    return;
+  }
+  if (symbols.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No members declared.";
+    container.append(note3);
+    return;
+  }
+  const memberMap = result.memberMap;
+  const types = memberMap?.types ?? [];
+  if (types.length > 0) {
+    for (const type of types) {
+      container.append(renderMemberType(type));
+    }
+  } else {
+    const list = document.createElement("ul");
+    for (const symbol of symbols.slice(0, 200)) {
+      const item = document.createElement("li");
+      const owner = symbol.owner ? `${symbol.owner}.` : "";
+      const type = symbol.type ? `: ${symbol.type}` : "";
+      item.textContent = `${symbol.kind} \xB7 ${symbol.visibility} \xB7 ${owner}${symbol.name}${type}`;
+      list.append(item);
+    }
+    container.append(list);
+  }
+  container.append(renderDataFlow(memberMap?.dataFlow));
+}
 function renderMemberType(type) {
   const section2 = document.createElement("section");
   section2.className = "member-type";
@@ -6874,12 +6492,6 @@ function renderMemberType(type) {
   }
   return section2;
 }
-function wiring(text) {
-  const span = document.createElement("span");
-  span.className = "wiring";
-  span.textContent = ` \xB7 ${text}`;
-  return span;
-}
 var DATA_FLOW_PANELS = [
   ["sources", "Sources / inputs"],
   ["resources", "Resources / hubs"],
@@ -6930,1219 +6542,6 @@ function renderDataFlow(dataFlow) {
   section2.append(caveat);
   return section2;
 }
-function renderDiagnostics(container, model, runtime = {}) {
-  const summary = summarizeDiagnostics(model);
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = `Diagnostics \xB7 ${summary.diagnostics}`;
-  container.append(title);
-  const runtimeLine = document.createElement("p");
-  runtimeLine.className = "diag-runtime";
-  runtimeLine.dataset.role = "runtime";
-  runtimeLine.textContent = `cache: ${summary.cache}${summary.stale ? " (stale)" : ""} \xB7 renderer: ${runtime.renderer ?? "unknown"} \xB7 ${runtime.shown ?? 0} shown`;
-  container.append(runtimeLine);
-  const counts = document.createElement("p");
-  counts.textContent = `excluded: ${summary.excluded} \xB7 ${Object.entries(summary.byKind).map(([kind, count]) => `${kind}: ${count}`).join(", ") || "none"}`;
-  container.append(counts);
-  const groups = /* @__PURE__ */ new Map();
-  for (const diagnostic of model.diagnostics ?? []) {
-    if (!groups.has(diagnostic.kind)) groups.set(diagnostic.kind, []);
-    groups.get(diagnostic.kind).push(diagnostic);
-  }
-  if (groups.size > 0) {
-    for (const [kind, items] of groups) {
-      const details = document.createElement("details");
-      details.className = "diag-group";
-      if (kind === [...groups.keys()][0]) details.open = true;
-      const summaryEl = document.createElement("summary");
-      summaryEl.textContent = `${kind} (${items.length})`;
-      details.append(summaryEl);
-      const list = document.createElement("ul");
-      for (const diagnostic of items.slice(0, 20)) {
-        const item = document.createElement("li");
-        item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-        item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-        list.append(item);
-      }
-      details.append(list);
-      container.append(details);
-    }
-  } else if (summary.samples.length > 0) {
-    const list = document.createElement("ul");
-    for (const diagnostic of summary.samples) {
-      const item = document.createElement("li");
-      item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-      item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-      list.append(item);
-    }
-    container.append(list);
-  }
-  return summary;
-}
-var LEGEND_SWATCHES = {
-  "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
-  "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
-  "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))"
-};
-function renderLegend(container, model) {
-  container.replaceChildren();
-  const guide = document.createElement("div");
-  guide.className = "legend-guide";
-  for (const text of readingLegend(model)) {
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const swatch = document.createElement("span");
-    swatch.className = "legend-swatch";
-    swatch.style.background = LEGEND_SWATCHES[text] ?? "var(--accent)";
-    if (text.startsWith("diamond")) {
-      swatch.style.transform = "rotate(45deg)";
-      swatch.style.borderRadius = "2px";
-    }
-    item.append(swatch);
-    item.append(document.createTextNode(text));
-    guide.append(item);
-  }
-  container.append(guide);
-  const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
-  for (const kind of kinds) {
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const glyph = document.createElement("span");
-    glyph.className = "legend-shape";
-    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : kind === "unit" ? "\u25A4" : kind === "shelf" ? "\u25A5" : "\u25A3";
-    item.append(glyph);
-    item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
-    container.append(item);
-  }
-}
-function renderShortcuts(container) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Keyboard shortcuts";
-  container.append(title);
-  const list = document.createElement("dl");
-  list.className = "shortcut-list";
-  for (const entry of shortcutSheet()) {
-    const term = document.createElement("dt");
-    const kbd = document.createElement("kbd");
-    kbd.textContent = entry.keys;
-    term.append(kbd);
-    const description = document.createElement("dd");
-    description.textContent = entry.action;
-    list.append(term, description);
-  }
-  container.append(list);
-}
-function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
-  const chip = (label, filter, className = "strip-chip") => h(
-    "button",
-    {
-      // The filter is the chip's stable identity, so a re-render reuses the same button.
-      key: filter || "modules",
-      type: "button",
-      className,
-      dataset: { filter },
-      "aria-pressed": activeFilter === filter ? "true" : "false",
-      onClick: () => onFilter(filter)
-    },
-    label
-  );
-  mount(
-    container,
-    h(
-      Fragment,
-      null,
-      chip(`tests ${counts.tests}`, ".test"),
-      chip(`modules ${counts.modules}`, ""),
-      ...counts.entries.slice(0, 12).map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, "strip-chip strip-dir"))
-    )
-  );
-}
-function renderBreadcrumb(container, state2, onNavigate) {
-  container.replaceChildren();
-  for (const crumb of breadcrumb(state2)) {
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "crumb";
-    button2.textContent = crumb.label;
-    if (crumb.prefix === (state2.prefix ?? "")) {
-      button2.disabled = true;
-    }
-    button2.addEventListener("click", () => onNavigate(crumb.prefix));
-    container.append(button2);
-  }
-}
-function renderFolderList(container, result, onNavigate) {
-  container.replaceChildren();
-  for (const directory of result.directories) {
-    const item = document.createElement("li");
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = directory.isRepository ? "folder folder-repository" : "folder";
-    button2.dataset.path = directory.path;
-    button2.textContent = directory.isRepository ? `${directory.name} \xB7 repository` : directory.name;
-    button2.addEventListener("click", () => onNavigate(directory.path));
-    item.append(button2);
-    container.append(item);
-  }
-  if (result.directories.length === 0) {
-    const empty = document.createElement("li");
-    empty.className = "folder-empty";
-    empty.textContent = "No subfolders";
-    container.append(empty);
-  }
-}
-function renderOverlayPanel(container, title, overlay, options = {}) {
-  if (!overlay || !overlay.summary) {
-    container.hidden = true;
-    container.replaceChildren();
-    container.className = "overlay-panel";
-    return;
-  }
-  container.hidden = false;
-  container.replaceChildren();
-  const kind = options.kind ?? "impact";
-  container.className = `overlay-panel overlay-kind-${kind}`;
-  const heading2 = document.createElement("h3");
-  const dot = document.createElement("span");
-  dot.className = "overlay-dot";
-  dot.setAttribute("aria-hidden", "true");
-  heading2.append(dot);
-  heading2.append(document.createTextNode(`${title} \xB7 ${overlay.summary}`));
-  heading2.className = "overlay-summary";
-  container.append(heading2);
-  if (options.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Dismiss overlay panel");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => options.onClose());
-    heading2.append(dismiss);
-  }
-  if (overlay.meta && (overlay.meta.testFiles !== void 0 || overlay.meta.unreached !== void 0)) {
-    const counts = document.createElement("p");
-    counts.className = "overlay-counts";
-    const parts = [];
-    if (overlay.meta.testFiles !== void 0) parts.push(`${overlay.meta.testFiles} test files`);
-    if (overlay.meta.reached !== void 0) parts.push(`${overlay.meta.reached} reached`);
-    if (overlay.meta.unreached !== void 0) parts.push(`${overlay.meta.unreached} unreached`);
-    counts.textContent = parts.join(" \xB7 ");
-    container.append(counts);
-  }
-  if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
-    const note3 = document.createElement("p");
-    note3.className = "overlay-empty";
-    note3.textContent = overlay.emptyNote;
-    container.append(note3);
-  }
-  if (Array.isArray(overlay.items) && overlay.items.length > 0) {
-    const needsSearch = overlay.items.length > 8;
-    const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
-    const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
-    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay.items.length;
-    let filter = "";
-    let changedOnly = false;
-    const rowFor = (item) => {
-      const entry = document.createElement("div");
-      entry.className = "overlay-list-row";
-      entry.setAttribute("role", "listitem");
-      if (affectedItems && affectedItems.has(item)) {
-        entry.classList.add("overlay-row-affected");
-      }
-      if (typeof item === "string") {
-        entry.dataset.delegateOverlayItem = item;
-      }
-      if (options.onSelect && typeof item === "string" && !item.includes("\u2194") && !item.includes(":")) {
-        const jump = document.createElement("button");
-        jump.type = "button";
-        jump.textContent = item;
-        jump.title = `Select ${item}`;
-        jump.addEventListener("click", () => options.onSelect(item.split(" \xB7 ")[0]));
-        entry.append(jump);
-      } else {
-        entry.textContent = item;
-      }
-      return entry;
-    };
-    const list = createVirtualList({
-      rowHeight: 20,
-      overscan: 6,
-      className: "overlay-list",
-      renderRow: rowFor
-    });
-    const matchingItems = () => {
-      let items = overlay.items;
-      if (changedOnly && changedItems) {
-        items = items.filter((item) => changedItems.has(item));
-      }
-      if (filter) {
-        items = items.filter((item) => String(item).toLowerCase().includes(filter));
-      }
-      return items;
-    };
-    const empty = document.createElement("p");
-    empty.className = "overlay-empty";
-    empty.hidden = true;
-    const renderList = () => {
-      const matching = matchingItems();
-      empty.textContent = changedOnly && !filter ? "No changed modules." : "No modules match this filter.";
-      empty.hidden = matching.length > 0;
-      list.setItems(matching);
-    };
-    const controls = document.createElement("div");
-    controls.className = "overlay-controls";
-    if (needsSearch) {
-      const search = document.createElement("input");
-      search.type = "search";
-      search.className = "overlay-filter";
-      search.placeholder = "Filter modules\u2026";
-      search.setAttribute("aria-label", "Filter overlay modules");
-      search.addEventListener("input", () => {
-        filter = search.value.trim().toLowerCase();
-        renderList();
-      });
-      controls.append(search);
-    }
-    if (showChangedOnly) {
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "overlay-toggle-changed";
-      toggle.setAttribute("aria-pressed", "false");
-      toggle.textContent = "Changed only";
-      toggle.title = "Hide the potentially affected dependents";
-      toggle.addEventListener("click", () => {
-        changedOnly = !changedOnly;
-        toggle.setAttribute("aria-pressed", String(changedOnly));
-        renderList();
-      });
-      controls.append(toggle);
-    }
-    if (controls.childElementCount > 0) {
-      container.append(controls);
-    }
-    container.append(list.element);
-    container.append(empty);
-    renderList();
-    list.refresh();
-  }
-  if (Array.isArray(options.actions) && options.actions.length > 0) {
-    const actions = document.createElement("div");
-    actions.className = "overlay-actions";
-    for (const action of options.actions) {
-      const actionButton = document.createElement("button");
-      actionButton.type = "button";
-      actionButton.className = "overlay-action";
-      actionButton.textContent = action.label;
-      if (action.title) {
-        actionButton.title = action.title;
-      }
-      if (action.disabled) {
-        actionButton.disabled = true;
-      }
-      actionButton.addEventListener("click", () => action.onClick?.());
-      actions.append(actionButton);
-    }
-    container.append(actions);
-  }
-}
-function renderEdgeEvidence(container, evidence, handlers = {}) {
-  if (!evidence) {
-    container.hidden = true;
-    container.replaceChildren();
-    delete container.dataset.delegateEdge;
-    return;
-  }
-  container.hidden = false;
-  container.replaceChildren();
-  container.dataset.delegateEdge = evidence.id;
-  const heading2 = document.createElement("h3");
-  heading2.className = "overlay-summary";
-  heading2.textContent = `Edge \xB7 ${evidence.kind}`;
-  container.append(heading2);
-  const route = document.createElement("p");
-  route.className = "edge-route";
-  route.append(edgeEndpoint(evidence.source, handlers.onSelect));
-  route.append(document.createTextNode(" \u2192 "));
-  route.append(edgeEndpoint(evidence.target, handlers.onSelect));
-  container.append(route);
-  const facts = document.createElement("dl");
-  facts.className = "passport-metrics";
-  appendFact(facts, "Specifier", evidence.specifier ?? "not recorded");
-  appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
-  appendFact(facts, "Resolution", evidence.resolutionLabel);
-  container.append(facts);
-  if (handlers.onViewSource) {
-    const source = document.createElement("button");
-    source.type = "button";
-    source.className = "source-open";
-    source.textContent = "View source";
-    source.addEventListener("click", () => handlers.onViewSource(evidence.source, evidence.line ?? null));
-    container.append(source);
-  }
-  if (handlers.onTrace) {
-    const trace = document.createElement("button");
-    trace.type = "button";
-    trace.className = "trace-button";
-    trace.textContent = "Trace path";
-    trace.addEventListener("click", () => handlers.onTrace(evidence.source, evidence.target));
-    container.append(trace);
-  }
-  if (handlers.onClear) {
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.className = "edge-clear";
-    clear.textContent = "Clear edge";
-    clear.addEventListener("click", () => handlers.onClear());
-    container.append(clear);
-  }
-}
-function edgeEndpoint(id, onSelect2) {
-  const button2 = document.createElement("button");
-  button2.type = "button";
-  button2.className = "link";
-  button2.textContent = id;
-  if (onSelect2) {
-    button2.addEventListener("click", () => onSelect2(id));
-  }
-  return button2;
-}
-function renderTimeline(container, result, onSelect2, options = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Timeline";
-  container.append(title);
-  if (options.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Close timeline");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => options.onClose());
-    title.append(dismiss);
-  }
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
-    container.append(note3);
-    return;
-  }
-  if (result.commits.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No commits recorded.";
-    container.append(note3);
-    return;
-  }
-  const list = document.createElement("ul");
-  for (const commit of result.commits.slice(0, 50)) {
-    const item = document.createElement("li");
-    if (options.selectedHash && commit.hash === options.selectedHash) {
-      item.classList.add("selected-commit");
-    }
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "commit";
-    button2.dataset.hash = commit.hash;
-    button2.textContent = `${commit.shortHash} \xB7 ${commit.subject}`;
-    button2.addEventListener("click", () => onSelect2(commit));
-    item.append(button2);
-    const meta = document.createElement("span");
-    meta.className = "evidence";
-    meta.textContent = `${commit.author} \xB7 ${commit.date.slice(0, 10)}`;
-    item.append(meta);
-    const badge = commitMetricBadge(options.metrics?.get(commit.hash) ?? null);
-    if (badge) {
-      const metric = document.createElement("span");
-      metric.className = `metric-delta ${badge.tone}`;
-      metric.dataset.role = "commit-metrics";
-      metric.textContent = badge.text;
-      metric.title = badge.title;
-      item.append(metric);
-    }
-    list.append(item);
-  }
-  container.append(list);
-}
-function ageInDays(iso, now = Date.now()) {
-  const time = Date.parse(iso ?? "");
-  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 864e5)) : null;
-}
-function formatAge(days) {
-  if (days === null || days === void 0) return "";
-  if (days < 1) return "today";
-  if (days < 14) return `${days}d`;
-  if (days < 60) return `${Math.floor(days / 7)}w`;
-  if (days < 730) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
-}
-var STALE_BRANCH_DAYS = 90;
-function branchTags(branch, now = Date.now()) {
-  const tags = [];
-  if (branch.isBase) tags.push({ text: "base", tone: "none" });
-  if (branch.current) tags.push({ text: "checked out", tone: "none" });
-  if (branch.kind === "remote") tags.push({ text: "remote only", tone: "none" });
-  if (branch.againstBase?.merged) tags.push({ text: "merged", tone: "better" });
-  if (branch.upstream?.gone) {
-    tags.push({ text: "upstream gone", tone: "worse" });
-  } else if (branch.upstream && (branch.upstream.ahead > 0 || branch.upstream.behind > 0)) {
-    const parts = [];
-    if (branch.upstream.ahead > 0) parts.push(`${branch.upstream.ahead} to push`);
-    if (branch.upstream.behind > 0) parts.push(`${branch.upstream.behind} to pull`);
-    tags.push({ text: parts.join(", "), tone: "worse" });
-  } else if (!branch.upstream && branch.kind === "local" && !branch.isBase) {
-    tags.push({ text: "no upstream", tone: "none" });
-  }
-  const age = ageInDays(branch.tip?.date, now);
-  if (age !== null && age >= STALE_BRANCH_DAYS) tags.push({ text: "stale", tone: "worse" });
-  return tags;
-}
-function branchActionButton(role, text, title, handler, busy) {
-  const button2 = document.createElement("button");
-  button2.type = "button";
-  button2.className = "branch-action";
-  button2.dataset.role = role;
-  button2.textContent = text;
-  button2.title = title;
-  button2.disabled = Boolean(busy);
-  button2.addEventListener("click", () => handler());
-  return button2;
-}
-function renderBranches(container, result, handlers = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Branches";
-  container.append(title);
-  if (handlers.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Close branches");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => handlers.onClose());
-    title.append(dismiss);
-  }
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "branches-unavailable";
-    note3.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
-    container.append(note3);
-    return;
-  }
-  const baseLine = document.createElement("p");
-  baseLine.className = "evidence branch-base";
-  baseLine.dataset.role = "branches-base";
-  if (result.base) {
-    const label = document.createElement("label");
-    label.textContent = "Compared with ";
-    const select = document.createElement("select");
-    select.dataset.role = "branches-base-select";
-    for (const name of /* @__PURE__ */ new Set([result.base.name, ...result.branches.map((branch) => branch.name)])) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = name;
-      option.selected = name === result.base.name;
-      select.append(option);
-    }
-    select.addEventListener("change", () => handlers.onBase?.(select.value));
-    label.append(select);
-    baseLine.append(label);
-    const why = result.base.source === "remote-default" ? " \xB7 the remote\u2019s default branch" : result.base.source === "current" ? " \xB7 checked out, no trunk found" : "";
-    baseLine.append(document.createTextNode(`${why} \xB7 as of the last fetch`));
-  } else {
-    baseLine.textContent = "No base branch found; divergence is not measured.";
-  }
-  container.append(baseLine);
-  const others = result.branches.filter((branch) => !branch.isBase);
-  const unmerged = others.filter((branch) => branch.againstBase && !branch.againstBase.merged).length;
-  const summary = document.createElement("p");
-  summary.className = "overlay-summary";
-  summary.dataset.role = "branches-summary";
-  summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
-  container.append(summary);
-  const actions = document.createElement("div");
-  actions.className = "branch-actions";
-  actions.dataset.role = "branch-actions";
-  if (handlers.onFetch) {
-    actions.append(branchActionButton("branch-fetch", "Fetch", "Update the remote-tracking refs", handlers.onFetch, handlers.busy));
-  }
-  if (handlers.onPull && result.current) {
-    actions.append(
-      branchActionButton("branch-pull", `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy)
-    );
-  }
-  if (actions.childElementCount > 0) {
-    if (handlers.busy) {
-      const running = document.createElement("span");
-      running.className = "evidence";
-      running.dataset.role = "branch-busy";
-      running.textContent = "Running\u2026";
-      actions.append(running);
-    }
-    container.append(actions);
-  }
-  const maxCount = Math.max(
-    1,
-    ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
-  );
-  const list = document.createElement("ul");
-  list.className = "branch-list";
-  list.dataset.role = "branches-list";
-  for (const branch of result.branches) {
-    const item = document.createElement("li");
-    item.className = "branch-row";
-    if (branch.current) item.classList.add("current-branch");
-    if (handlers.selected && handlers.selected === branch.name) item.classList.add("selected-branch");
-    const button2 = document.createElement("button");
-    button2.type = "button";
-    button2.className = "branch";
-    button2.dataset.branch = branch.name;
-    button2.textContent = branch.name;
-    if (branch.isBase) {
-      button2.disabled = true;
-      button2.title = "The base every other branch is compared with";
-    } else if (handlers.onSelect) {
-      button2.title = `Review ${branch.name} against ${result.base?.name ?? "the base"}`;
-      button2.addEventListener("click", () => handlers.onSelect(branch));
-    }
-    item.append(button2);
-    if (branch.againstBase) {
-      item.append(divergenceBar(branch.againstBase, maxCount));
-    }
-    const meta = document.createElement("span");
-    meta.className = "evidence branch-meta";
-    const age = formatAge(ageInDays(branch.tip?.date));
-    meta.textContent = `${branch.tip.shortHash} \xB7 ${branch.tip.author}${age ? ` \xB7 ${age}` : ""} \xB7 ${branch.tip.subject}`;
-    item.append(meta);
-    const tags = branchTags(branch);
-    if (tags.length > 0) {
-      const tagLine = document.createElement("span");
-      tagLine.className = "branch-tags";
-      tagLine.dataset.role = "branch-tags";
-      for (const tag of tags) {
-        const chip = document.createElement("span");
-        chip.className = `metric-delta ${tag.tone}`;
-        chip.textContent = tag.text;
-        tagLine.append(chip);
-      }
-      item.append(tagLine);
-    }
-    const behindCount = branch.upstream?.behind ?? 0;
-    if (handlers.onPullBranch && branch.kind === "local" && !branch.current && !branch.upstream?.gone && behindCount > 0) {
-      const pull = document.createElement("button");
-      pull.type = "button";
-      pull.className = "branch-action";
-      pull.dataset.role = "branch-pull-branch";
-      pull.dataset.branch = branch.name;
-      pull.textContent = `Pull \u2193${behindCount}`;
-      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? "its upstream"}`;
-      pull.disabled = Boolean(handlers.busy);
-      pull.addEventListener("click", () => handlers.onPullBranch(branch));
-      item.append(pull);
-    }
-    const pushCount = branch.upstream?.ahead ?? 0;
-    const publish = branch.kind === "local" && !branch.isBase && (!branch.upstream || branch.upstream.gone);
-    if (handlers.onPush && branch.kind === "local" && !branch.isBase && (pushCount > 0 || publish)) {
-      const push = document.createElement("button");
-      push.type = "button";
-      push.className = "branch-action";
-      push.dataset.role = "branch-push";
-      push.dataset.branch = branch.name;
-      push.textContent = pushCount > 0 ? `Push \u2191${pushCount}` : "Publish";
-      push.title = pushCount > 0 ? `Push ${branch.name} to ${branch.upstream?.name ?? "its remote"}` : `Publish ${branch.name} to the remote`;
-      push.disabled = Boolean(handlers.busy);
-      push.addEventListener("click", () => handlers.onPush(branch));
-      item.append(push);
-    }
-    list.append(item);
-  }
-  container.append(list);
-}
-function divergenceBar(counts, maxCount) {
-  const bar = document.createElement("span");
-  bar.className = "divergence";
-  bar.dataset.role = "branch-divergence";
-  bar.title = `${counts.behind} commit(s) behind the base \xB7 ${counts.ahead} ahead`;
-  const behind = document.createElement("span");
-  behind.className = "divergence-count";
-  behind.textContent = `\u2193${counts.behind}`;
-  const track = document.createElement("span");
-  track.className = "divergence-track";
-  const left = document.createElement("span");
-  left.className = "divergence-fill behind";
-  left.style.width = `${counts.behind / maxCount * 50}%`;
-  const right = document.createElement("span");
-  right.className = "divergence-fill ahead";
-  right.style.width = `${counts.ahead / maxCount * 50}%`;
-  track.append(left, right);
-  const ahead = document.createElement("span");
-  ahead.className = "divergence-count";
-  ahead.textContent = `\u2191${counts.ahead}`;
-  bar.append(behind, track, ahead);
-  return bar;
-}
-function renderBranchDivergence(container, branch, handlers = {}) {
-  const meta = document.createElement("p");
-  meta.className = "evidence";
-  meta.dataset.role = "review-branch";
-  meta.textContent = `${branch.ahead} commit(s) ahead of ${branch.base} \xB7 ${branch.behind} behind \xB7 merge base ${branch.mergeBase.slice(0, 7)}`;
-  container.append(meta);
-  const merge = document.createElement("p");
-  merge.dataset.role = "review-merge";
-  if (!branch.conflicts.available) {
-    merge.className = "unavailable";
-    merge.textContent = `Trial merge unavailable (needs Git 2.38+): ${branch.conflicts.detail}`;
-  } else if (branch.conflicts.clean) {
-    merge.className = "merge-verdict clean";
-    merge.textContent = branch.behind > 0 ? `Merges cleanly into ${branch.base}, which has moved ${branch.behind} commit(s) on.` : `Merges cleanly into ${branch.base}.`;
-  } else {
-    merge.className = "merge-verdict conflicted";
-    merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
-  }
-  container.append(merge);
-  const fileList = (role, heading2, entries, describe) => {
-    if (entries.length === 0) return;
-    const title = document.createElement("h4");
-    title.textContent = `${heading2} (${entries.length})`;
-    container.append(title);
-    const list = document.createElement("ul");
-    list.dataset.role = role;
-    for (const entry of entries.slice(0, 100)) {
-      const id = typeof entry === "string" ? entry : entry.id;
-      const item = document.createElement("li");
-      const button2 = document.createElement("button");
-      button2.type = "button";
-      button2.className = "link";
-      button2.dataset.path = id;
-      button2.textContent = id;
-      if (handlers.onSelect) button2.addEventListener("click", () => handlers.onSelect(id));
-      item.append(button2);
-      const detail = describe?.(entry);
-      if (detail) {
-        const span = document.createElement("span");
-        span.className = "evidence";
-        span.textContent = detail;
-        item.append(span);
-      }
-      list.append(item);
-    }
-    container.append(list);
-  };
-  const conflicted = new Set(branch.conflicts.available ? branch.conflicts.paths : []);
-  fileList("review-conflicts", "Conflicting files", [...conflicted]);
-  fileList(
-    "review-overlap",
-    "Also changed on the base",
-    branch.overlap.filter((file) => !conflicted.has(file)),
-    () => branch.conflicts.available ? "merges without conflict" : null
-  );
-  fileList(
-    "review-moved-underneath",
-    "Moved underneath the branch",
-    branch.movedUnderneath,
-    (entry) => `changed on the base \xB7 imported by ${entry.via}${entry.distance > 1 ? ` (distance ${entry.distance})` : ""}`
-  );
-  if (!branch.checkedOut) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-branch-graph";
-    note3.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
-    container.append(note3);
-  }
-}
-function renderReviewLoading(container, handlers = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Review";
-  container.append(title);
-  if (handlers.onBack) {
-    title.prepend(backButton(handlers, "Back to the previous review"));
-  }
-  if (handlers.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Close review");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => handlers.onClose());
-    title.append(dismiss);
-  }
-  const note3 = document.createElement("p");
-  note3.className = "evidence";
-  note3.dataset.role = "review-loading";
-  note3.textContent = "Reviewing changes\u2026";
-  container.append(note3);
-}
-function structuralDiffGroups(structural) {
-  if (!structural || structural.available === false) {
-    return [];
-  }
-  const diff = structural.diff ?? {};
-  return [
-    { key: "edges-added", label: "Dependency edges added", items: (diff.edgesAdded ?? []).map(structuralEdgeLabel) },
-    { key: "edges-removed", label: "Dependency edges removed", items: (diff.edgesRemoved ?? []).map(structuralEdgeLabel) },
-    { key: "cycles-introduced", label: "Cycles introduced", items: (diff.cyclesIntroduced ?? []).map(structuralCycleLabel) },
-    { key: "cycles-resolved", label: "Cycles resolved", items: (diff.cyclesResolved ?? []).map(structuralCycleLabel) },
-    { key: "tier-edges-added", label: "Wrong-way tier edges added", items: (diff.tierEdgesAdded ?? []).map(structuralTierEdgeLabel) },
-    { key: "entry-points-added", label: "Entry points added", items: [...diff.entryPointsAdded ?? []] },
-    { key: "newly-unreached", label: "Newly unreached", items: [...diff.newlyUnreached ?? []] }
-  ].filter((group) => group.items.length > 0);
-}
-function structuralEdgeLabel(edge) {
-  return `${edge.source} \u2192 ${edge.target} (${edge.kind})`;
-}
-function structuralCycleLabel(cycle) {
-  return (cycle.members ?? []).join(" \u2192 ");
-}
-function structuralTierEdgeLabel(edge) {
-  return `${edge.source} \u2192 ${edge.target} (${edge.kind}, ${edge.unit})`;
-}
-function renderStructuralDiff(container, structural) {
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Structure";
-  container.append(heading2);
-  if (!structural || structural.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-structure-unavailable";
-    note3.textContent = structural?.detail ? `Structure unavailable: ${structural.detail}` : "Structure unavailable: no base revision to compare.";
-    container.append(note3);
-    return;
-  }
-  const groups = structuralDiffGroups(structural);
-  if (groups.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-structure-empty";
-    note3.textContent = "No structural change between the base and HEAD.";
-    container.append(note3);
-    return;
-  }
-  for (const group of groups) {
-    const title = document.createElement("h5");
-    title.textContent = `${group.label} (${group.items.length})`;
-    container.append(title);
-    const list = document.createElement("ul");
-    list.dataset.role = `review-structure-${group.key}`;
-    for (const item of group.items) {
-      const entry = document.createElement("li");
-      entry.textContent = item;
-      list.append(entry);
-    }
-    container.append(list);
-  }
-}
-function renderReview(container, result, handlers = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = result?.kind === "commit" ? "Commit review" : result?.kind === "branch" ? `Branch review \xB7 ${result.ref}` : "Working tree review";
-  container.append(title);
-  if (handlers.onBack) {
-    title.prepend(backButton(handlers, "Back to the previous review"));
-  }
-  if (handlers.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Close review");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => handlers.onClose());
-    title.append(dismiss);
-  }
-  if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-unavailable";
-    note3.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
-    container.append(note3);
-    return;
-  }
-  if (result.commit) {
-    const meta = document.createElement("p");
-    meta.className = "evidence";
-    meta.dataset.role = "review-commit";
-    meta.textContent = `${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.date.slice(0, 10)} \xB7 ${result.commit.subject}`;
-    container.append(meta);
-  }
-  const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
-  const summary = document.createElement("p");
-  summary.className = "overlay-summary";
-  summary.dataset.role = "review-summary";
-  summary.textContent = `${totals.files} file(s) \xB7 +${totals.insertions} \u2212${totals.deletions}${totals.uncounted > 0 ? ` \xB7 ${totals.uncounted} uncounted` : ""}`;
-  container.append(summary);
-  const narrator = document.createElement("div");
-  narrator.className = "review-narrator";
-  appendNarratorBlock(narrator, handlers, { id: "narrate-change", label: "Narrate change" });
-  if (narrator.childElementCount > 0) {
-    container.append(narrator);
-  }
-  if (result.branch) {
-    renderBranchDivergence(container, result.branch, handlers);
-  }
-  if ((result.files ?? []).length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
-    container.append(note3);
-  }
-  for (const [group, files] of reviewGroups(result.files)) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
-    container.append(heading2);
-    const list = document.createElement("ul");
-    list.dataset.role = `review-group-${group}`;
-    for (const file of files) {
-      const item = document.createElement("li");
-      const button2 = document.createElement("button");
-      button2.type = "button";
-      button2.className = "link";
-      button2.dataset.path = file.path;
-      button2.textContent = file.path;
-      if (handlers.onSelect && file.inGraph) {
-        button2.addEventListener("click", () => handlers.onSelect(file.path));
-      } else {
-        button2.disabled = true;
-        button2.title = "Not a node in the scanned graph";
-      }
-      item.append(button2);
-      const status = document.createElement("span");
-      status.className = "review-status";
-      status.textContent = file.status;
-      item.append(status);
-      const counts = document.createElement("span");
-      counts.className = "evidence";
-      counts.textContent = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} \u2212${file.deletions}`;
-      item.append(counts);
-      if (handlers.onOpenDiff) {
-        const diff = document.createElement("button");
-        diff.type = "button";
-        diff.className = "link review-diff";
-        diff.dataset.path = file.path;
-        diff.textContent = "Diff";
-        diff.title = `Show the change to ${file.path}`;
-        diff.addEventListener("click", () => handlers.onOpenDiff(file.path, file));
-        item.append(diff);
-      }
-      list.append(item);
-    }
-    container.append(list);
-  }
-  if (result.structural !== void 0) {
-    renderStructuralDiff(container, result.structural);
-  }
-  renderChangeMetrics(container, result.metrics, handlers);
-  renderChangePassport(container, result.cohesion);
-  if (result.impactPassport) {
-    const impactSection = document.createElement("div");
-    impactSection.className = "impact-passport-section";
-    container.append(impactSection);
-    renderImpactPassport(impactSection, result.impactPassport, handlers);
-  }
-  const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
-  const impactHeading = document.createElement("h4");
-  impactHeading.textContent = `Potentially affected (${affected.length})`;
-  container.append(impactHeading);
-  if (affected.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-impact-empty";
-    note3.textContent = "Nothing depends on the changed files.";
-    container.append(note3);
-  } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "review-impact";
-    for (const entry of affected.slice(0, 100)) {
-      const item = document.createElement("li");
-      const button2 = document.createElement("button");
-      button2.type = "button";
-      button2.className = "link";
-      button2.textContent = entry.id;
-      if (handlers.onSelect) {
-        button2.addEventListener("click", () => handlers.onSelect(entry.id));
-      }
-      item.append(button2);
-      const distance = document.createElement("span");
-      distance.className = "evidence";
-      distance.textContent = `distance ${entry.distance}`;
-      item.append(distance);
-      list.append(item);
-    }
-    container.append(list);
-  }
-  if ((result.impact?.outsideGraph ?? []).length > 0) {
-    const outside = document.createElement("p");
-    outside.className = "unavailable";
-    outside.dataset.role = "review-outside";
-    outside.textContent = `${result.impact.outsideGraph.length} changed path(s) are outside the scanned graph.`;
-    container.append(outside);
-  }
-}
-function renderChangeMetrics(container, metrics, handlers = {}) {
-  if (!metrics || metrics.available === false) {
-    return;
-  }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Change metrics";
-  container.append(heading2);
-  const summary = document.createElement("p");
-  summary.className = "overlay-summary";
-  summary.dataset.role = "change-metrics-summary";
-  summary.textContent = changeMetricSummary(metrics.totals);
-  container.append(summary);
-  const files = orderMetricFiles(metrics.files);
-  if (files.length === 0) {
-    return;
-  }
-  const table = document.createElement("table");
-  table.className = "change-metrics";
-  table.dataset.role = "change-metrics";
-  const head = document.createElement("tr");
-  for (const [label, title] of [
-    ["File", ""],
-    ["Cx", "Complexity: net change in summed function decision points"],
-    ["Out", "Fan-out: resolved in-repository imports, before \u2192 after"],
-    ["In", "Fan-in change from importers inside this change set"],
-    ["Lines", "Line count, net"]
-  ]) {
-    const cell = document.createElement("th");
-    cell.textContent = label;
-    if (title) cell.title = title;
-    head.append(cell);
-  }
-  table.append(head);
-  for (const file of files) {
-    const row = document.createElement("tr");
-    const name = document.createElement("td");
-    const link = document.createElement("button");
-    link.type = "button";
-    link.className = "link";
-    link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
-    if (handlers.onSelect && file.status !== "deleted") {
-      link.addEventListener("click", () => handlers.onSelect(file.path));
-    } else {
-      link.disabled = true;
-    }
-    name.append(link);
-    if (file.note) name.title = file.note;
-    row.append(name);
-    const churn = file.complexityChange;
-    const complexity = churn ? metricDelta(0, churn.added - churn.removed) : metricDelta(null, null);
-    row.append(
-      metricCell(
-        complexity,
-        churn ? [
-          `${file.before?.complexity ?? "\u2014"} \u2192 ${file.after?.complexity ?? "\u2014"} (+${churn.added} \u2212${churn.removed})`,
-          ...file.functions.slice(0, 8).map((fn) => `${fn.owner ? `${fn.owner}.` : ""}${fn.name}: ${fn.before ?? "new"} \u2192 ${fn.after ?? "removed"}`)
-        ].join("\n") : file.note ?? "not measured"
-      )
-    );
-    row.append(
-      metricCell(
-        file.fanOut ? metricDelta(file.fanOut.before, file.fanOut.after) : metricDelta(null, null),
-        file.fanOut ? [
-          `${file.fanOut.before} \u2192 ${file.fanOut.after}`,
-          ...file.importsAdded.map((target) => `+ ${target}`),
-          ...file.importsRemoved.map((target) => `\u2212 ${target}`)
-        ].join("\n") : file.note ?? "imports not resolved"
-      )
-    );
-    row.append(metricCell(metricDelta(0, file.fanInDelta ?? 0), "Importers gained or lost within this change set"));
-    const lines = metricDelta(file.before?.lines ?? 0, file.after?.lines ?? 0);
-    row.append(metricCell({ ...lines, tone: lines.delta ? "flat" : lines.tone }, `${file.before?.lines ?? 0} \u2192 ${file.after?.lines ?? 0}`));
-    table.append(row);
-  }
-  container.append(table);
-  if (metrics.capped) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "Only the first files in the change set were measured.";
-    container.append(note3);
-  }
-}
-function metricCell(delta, title) {
-  const cell = document.createElement("td");
-  const value = document.createElement("span");
-  value.className = `metric-delta ${delta.tone}`;
-  value.textContent = delta.text;
-  cell.append(value);
-  if (title) cell.title = title;
-  return cell;
-}
-var REVIEW_GROUP_LABELS = {
-  commit: "Changed",
-  branch: "Changed on the branch",
-  staged: "Staged",
-  unstaged: "Unstaged",
-  untracked: "Untracked"
-};
-function renderChangePassport(container, passport) {
-  if (!passport || !Array.isArray(passport.files) || passport.files.length === 0) {
-    return;
-  }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Change passport";
-  container.append(heading2);
-  const caption = document.createElement("p");
-  caption.className = "unavailable";
-  caption.textContent = passport.baseline ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.` : "Cohesion from recorded member wiring; no baseline revision was available.";
-  container.append(caption);
-  const list = document.createElement("ul");
-  list.className = "change-passport";
-  list.dataset.role = "change-passport";
-  for (const change of passport.files) {
-    const item = document.createElement("li");
-    const path = document.createElement("span");
-    path.className = "passport-change-path";
-    path.textContent = change.previousPath ? `${change.previousPath} \u2192 ${change.path}` : change.path;
-    item.append(path);
-    const delta = cohesionDelta(change);
-    const value = document.createElement("span");
-    value.className = `health-delta ${delta.tone}`;
-    value.dataset.role = "cohesion-delta";
-    value.textContent = delta.text;
-    value.title = change.note ?? "";
-    item.append(value);
-    list.append(item);
-  }
-  container.append(list);
-  if (passport.capped) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "Only the first files in the change set were measured.";
-    container.append(note3);
-  }
-}
-function renderImpactPassport(container, set, handlers = {}) {
-  container.replaceChildren();
-  if (!set || !Array.isArray(set.files) || set.files.length === 0) {
-    container.append(unavailableNote("No impact passport was recorded."));
-    return;
-  }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = passportHeading(set.scope);
-  container.append(heading2);
-  const caption = document.createElement("p");
-  caption.className = "unavailable";
-  caption.textContent = set.baseline ? `Current graph; compared with ${set.baseline}.` : "Current graph; no baseline revision was available.";
-  container.append(caption);
-  if (set.scope === "file") {
-    container.append(impactCard(set.files[0], false));
-    return;
-  }
-  container.append(impactCard(set.totals, true));
-  const list = document.createElement("ul");
-  list.className = "impact-files";
-  list.dataset.role = "impact-files";
-  for (const file of set.files) {
-    list.append(impactFileRow(file, handlers));
-  }
-  container.append(list);
-  if (set.capped) {
-    container.append(unavailableNote("Only the first files in the change set were measured."));
-  }
-}
-function impactCard(card, totals) {
-  const wrapper = document.createElement("div");
-  wrapper.className = "impact-card";
-  wrapper.dataset.role = totals ? "impact-totals" : "impact-file-card";
-  const grid = document.createElement("div");
-  grid.className = "impact-grid";
-  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
-  for (const cell of cells) {
-    const item = document.createElement("div");
-    item.className = "impact-cell";
-    item.dataset.role = `impact-${cell.key}`;
-    const label = document.createElement("div");
-    label.className = "impact-cell-label";
-    label.textContent = cell.label;
-    const value = document.createElement("div");
-    value.className = `impact-cell-value ${cell.tone ?? "none"}`;
-    value.textContent = cell.value;
-    const detail = document.createElement("div");
-    detail.className = "impact-cell-detail";
-    detail.textContent = cell.detail;
-    item.append(label, value, detail);
-    grid.append(item);
-  }
-  wrapper.append(grid);
-  wrapper.append(
-    impactList(
-      "Risk signals",
-      (card?.signals ?? []).map((signal) => ({ text: signal.label, detail: signal.detail })),
-      "impact-signals"
-    )
-  );
-  wrapper.append(
-    impactList(
-      "Most complex functions",
-      (card?.mostComplex ?? []).map((fn) => ({
-        text: impactFunctionLabel(fn),
-        detail: `C${fn.complexity}${fn.delta ? ` (${fn.delta > 0 ? "+" : "\u2212"}C${Math.abs(fn.delta)})` : ""}`
-      })),
-      "impact-most-complex"
-    )
-  );
-  return wrapper;
-}
-function impactList(title, entries, role) {
-  const section2 = document.createElement("div");
-  section2.className = "impact-list";
-  const heading2 = document.createElement("h5");
-  heading2.textContent = title;
-  section2.append(heading2);
-  if (entries.length === 0) {
-    section2.append(unavailableNote("None recorded."));
-    section2.dataset.role = role;
-    return section2;
-  }
-  const list = document.createElement("ul");
-  list.dataset.role = role;
-  for (const entry of entries) {
-    const item = document.createElement("li");
-    const text = document.createElement("span");
-    text.textContent = entry.text;
-    item.append(text);
-    if (entry.detail) {
-      const detail = document.createElement("span");
-      detail.className = "evidence";
-      detail.textContent = entry.detail;
-      item.append(detail);
-    }
-    list.append(item);
-  }
-  section2.append(list);
-  return section2;
-}
-function impactFileRow(file, handlers) {
-  const item = document.createElement("li");
-  const link = document.createElement("button");
-  link.type = "button";
-  link.className = "link";
-  link.dataset.path = file.path;
-  link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
-  if (handlers.onSelect) {
-    link.addEventListener("click", () => handlers.onSelect(file.path));
-  } else {
-    link.disabled = true;
-  }
-  item.append(link);
-  const risk = document.createElement("span");
-  risk.className = `impact-risk-band ${file.risk ? riskTone(file.risk.band) : "none"}`;
-  risk.textContent = file.risk ? `${riskBandLabel(file.risk.band)} ${file.risk.score}` : "\u2014";
-  item.append(risk);
-  const cx = document.createElement("span");
-  cx.className = "evidence";
-  cx.textContent = `${complexityValue(file.complexity?.maxAfter)} \xB7 coherence ${file.coherence ? `${file.coherence.score}/100` : "\u2014"}`;
-  item.append(cx);
-  return item;
-}
 var MEMBER_ORDER_OPTIONS = [
   ["source", "Source order"],
   ["name", "Name"],
@@ -8153,169 +6552,6 @@ var ZOOM_LEVELS = [
   ["medium", "Medium"],
   ["detail", "Detail"]
 ];
-function unavailableNote(text) {
-  const note3 = document.createElement("p");
-  note3.className = "unavailable";
-  note3.textContent = text;
-  return note3;
-}
-function renderRisk(container, report, handlers = {}) {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Dependency risk";
-  container.append(title);
-  if (handlers.onClose) {
-    const dismiss = document.createElement("button");
-    dismiss.type = "button";
-    dismiss.className = "panel-dismiss";
-    dismiss.setAttribute("aria-label", "Close risk panel");
-    dismiss.textContent = "\xD7";
-    dismiss.addEventListener("click", () => handlers.onClose());
-    title.append(dismiss);
-  }
-  if (!report || report.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-unavailable";
-    note3.textContent = "Risk report unavailable.";
-    container.append(note3);
-    return;
-  }
-  const summary = document.createElement("p");
-  summary.className = "overlay-summary";
-  summary.dataset.role = "risk-summary";
-  summary.textContent = riskSummary(report);
-  container.append(summary);
-  const online = document.createElement("p");
-  online.className = report.online ? "evidence" : "unavailable";
-  online.dataset.role = "risk-mode";
-  online.textContent = report.online ? "Advisory and license data from OSV.dev and deps.dev." : "Online advisory and license lookup is off; showing inventory and imports only.";
-  container.append(online);
-  if (report.inventory.undeclared.length > 0) {
-    const undeclared = document.createElement("p");
-    undeclared.className = "unavailable";
-    undeclared.dataset.role = "risk-undeclared";
-    undeclared.textContent = `${report.inventory.undeclared.length} imported package(s) are not declared in any manifest: ${report.inventory.undeclared.slice(0, 8).join(", ")}`;
-    container.append(undeclared);
-  }
-  const advisories = orderAdvisories(report.advisories);
-  const heading2 = document.createElement("h4");
-  heading2.textContent = `Advisories (${advisories.length})`;
-  container.append(heading2);
-  if (advisories.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-advisories-empty";
-    note3.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
-    container.append(note3);
-  } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "risk-advisories";
-    for (const advisory of advisories) {
-      const item = document.createElement("li");
-      item.className = `risk-advisory severity-${advisory.severity}`;
-      item.dataset.role = "risk-advisory";
-      const line = document.createElement("div");
-      const severity = document.createElement("span");
-      severity.className = `risk-severity severity-${advisory.severity}`;
-      severity.textContent = advisory.severity;
-      line.append(severity);
-      const link = document.createElement("a");
-      link.className = "link";
-      link.href = advisory.url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.textContent = advisory.id;
-      line.append(link);
-      if (advisory.aliases.length > 0) {
-        const aliases = document.createElement("span");
-        aliases.className = "evidence";
-        aliases.textContent = advisory.aliases.join(", ");
-        line.append(aliases);
-      }
-      item.append(line);
-      const subject = document.createElement("p");
-      subject.className = "evidence";
-      subject.textContent = `${advisory.dependency.name}@${advisory.dependency.version ?? "unresolved"} \xB7 ${advisory.summary}`;
-      item.append(subject);
-      if (advisory.fixed.length > 0) {
-        const fixed = document.createElement("p");
-        fixed.className = "evidence";
-        fixed.textContent = `Fixed in: ${advisory.fixed.join(", ")}`;
-        item.append(fixed);
-      }
-      if (advisory.importedBy.length > 0) {
-        const files = document.createElement("p");
-        files.className = "evidence";
-        files.textContent = `Imported by: ${advisory.importedBy.join(", ")}`;
-        item.append(files);
-      } else {
-        const files = document.createElement("p");
-        files.className = "unavailable";
-        files.textContent = "No source file imports this package directly.";
-        item.append(files);
-      }
-      const impacted = advisory.impactedFiles.filter((entry) => entry.distance > 0);
-      if (impacted.length > 0) {
-        const list2 = document.createElement("ul");
-        list2.dataset.role = "risk-impact";
-        for (const entry of impacted.slice(0, 20)) {
-          const entryItem = document.createElement("li");
-          const button2 = document.createElement("button");
-          button2.type = "button";
-          button2.className = "link";
-          button2.textContent = entry.id;
-          if (handlers.onSelect) {
-            button2.addEventListener("click", () => handlers.onSelect(entry.id));
-          }
-          entryItem.append(button2);
-          const distance = document.createElement("span");
-          distance.className = "evidence";
-          distance.textContent = `distance ${entry.distance}`;
-          entryItem.append(distance);
-          list2.append(entryItem);
-        }
-        item.append(list2);
-      }
-      list.append(item);
-    }
-    container.append(list);
-  }
-  const flagged = report.licenses.filter((entry) => entry.denied || entry.risk !== "permissive");
-  const licenseHeading = document.createElement("h4");
-  licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
-  container.append(licenseHeading);
-  if (flagged.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-licenses-empty";
-    note3.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
-    container.append(note3);
-  } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "risk-licenses";
-    for (const entry of flagged.slice(0, 50)) {
-      const item = document.createElement("li");
-      const label = `${entry.dependency.name}@${entry.dependency.version ?? "unresolved"} \xB7 ${entry.licenses.join(" OR ") || "no license recorded"}`;
-      const span = document.createElement("span");
-      span.textContent = label;
-      item.append(span);
-      const risk = document.createElement("span");
-      risk.className = entry.denied ? "risk-severity severity-critical" : "evidence";
-      risk.textContent = entry.denied ? "denied" : entry.risk;
-      item.append(risk);
-      list.append(item);
-    }
-    container.append(list);
-  }
-  if (report.caveats.length > 0) {
-    const caveats = document.createElement("p");
-    caveats.className = "unavailable";
-    caveats.dataset.role = "risk-caveats";
-    caveats.textContent = report.caveats.join(" ");
-    container.append(caveats);
-  }
-}
 function narratorBlockKey(status) {
   if (!status || status.configured !== true) {
     return "off";
@@ -8649,9 +6885,6 @@ function clearTrace(section2) {
 }
 function staggerFor(clusterIndex) {
   return Math.min(Math.max(0, (clusterIndex ?? 1) - 1), 6);
-}
-function matches(name, needle) {
-  return !needle || name.toLowerCase().includes(needle);
 }
 function buildFieldCard(field2, clusterIndex, related) {
   const card = fieldCard(field2);
@@ -9045,6 +7278,1831 @@ function buildConstellation(memberMap, consumerIds) {
   section2.append(caption);
   return section2;
 }
+
+// ui/strabo-panel-branches.js
+function ageInDays(iso, now = Date.now()) {
+  const time = Date.parse(iso ?? "");
+  return Number.isFinite(time) ? Math.max(0, Math.floor((now - time) / 864e5)) : null;
+}
+function formatAge(days) {
+  if (days === null || days === void 0) return "";
+  if (days < 1) return "today";
+  if (days < 14) return `${days}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  if (days < 730) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+var STALE_BRANCH_DAYS = 90;
+function branchTags(branch, now = Date.now()) {
+  const tags = [];
+  if (branch.isBase) tags.push({ text: "base", tone: "none" });
+  if (branch.current) tags.push({ text: "checked out", tone: "none" });
+  if (branch.kind === "remote") tags.push({ text: "remote only", tone: "none" });
+  if (branch.againstBase?.merged) tags.push({ text: "merged", tone: "better" });
+  if (branch.upstream?.gone) {
+    tags.push({ text: "upstream gone", tone: "worse" });
+  } else if (branch.upstream && (branch.upstream.ahead > 0 || branch.upstream.behind > 0)) {
+    const parts = [];
+    if (branch.upstream.ahead > 0) parts.push(`${branch.upstream.ahead} to push`);
+    if (branch.upstream.behind > 0) parts.push(`${branch.upstream.behind} to pull`);
+    tags.push({ text: parts.join(", "), tone: "worse" });
+  } else if (!branch.upstream && branch.kind === "local" && !branch.isBase) {
+    tags.push({ text: "no upstream", tone: "none" });
+  }
+  const age = ageInDays(branch.tip?.date, now);
+  if (age !== null && age >= STALE_BRANCH_DAYS) tags.push({ text: "stale", tone: "worse" });
+  return tags;
+}
+function branchActionButton(role, text, title, handler, busy) {
+  const button3 = document.createElement("button");
+  button3.type = "button";
+  button3.className = "branch-action";
+  button3.dataset.role = role;
+  button3.textContent = text;
+  button3.title = title;
+  button3.disabled = Boolean(busy);
+  button3.addEventListener("click", () => handler());
+  return button3;
+}
+function renderBranches(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Branches";
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close branches");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "branches-unavailable";
+    note3.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
+    container.append(note3);
+    return;
+  }
+  const baseLine = document.createElement("p");
+  baseLine.className = "evidence branch-base";
+  baseLine.dataset.role = "branches-base";
+  if (result.base) {
+    const label = document.createElement("label");
+    label.textContent = "Compared with ";
+    const select = document.createElement("select");
+    select.dataset.role = "branches-base-select";
+    for (const name of /* @__PURE__ */ new Set([result.base.name, ...result.branches.map((branch) => branch.name)])) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      option.selected = name === result.base.name;
+      select.append(option);
+    }
+    select.addEventListener("change", () => handlers.onBase?.(select.value));
+    label.append(select);
+    baseLine.append(label);
+    const why = result.base.source === "remote-default" ? " \xB7 the remote\u2019s default branch" : result.base.source === "current" ? " \xB7 checked out, no trunk found" : "";
+    baseLine.append(document.createTextNode(`${why} \xB7 as of the last fetch`));
+  } else {
+    baseLine.textContent = "No base branch found; divergence is not measured.";
+  }
+  container.append(baseLine);
+  const others = result.branches.filter((branch) => !branch.isBase);
+  const unmerged = others.filter((branch) => branch.againstBase && !branch.againstBase.merged).length;
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "branches-summary";
+  summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
+  container.append(summary);
+  const actions = document.createElement("div");
+  actions.className = "branch-actions";
+  actions.dataset.role = "branch-actions";
+  if (handlers.onFetch) {
+    actions.append(branchActionButton("branch-fetch", "Fetch", "Update the remote-tracking refs", handlers.onFetch, handlers.busy));
+  }
+  if (handlers.onPull && result.current) {
+    actions.append(
+      branchActionButton("branch-pull", `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy)
+    );
+  }
+  if (actions.childElementCount > 0) {
+    if (handlers.busy) {
+      const running = document.createElement("span");
+      running.className = "evidence";
+      running.dataset.role = "branch-busy";
+      running.textContent = "Running\u2026";
+      actions.append(running);
+    }
+    container.append(actions);
+  }
+  const maxCount = Math.max(
+    1,
+    ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
+  );
+  const list = document.createElement("ul");
+  list.className = "branch-list";
+  list.dataset.role = "branches-list";
+  for (const branch of result.branches) {
+    const item = document.createElement("li");
+    item.className = "branch-row";
+    if (branch.current) item.classList.add("current-branch");
+    if (handlers.selected && handlers.selected === branch.name) item.classList.add("selected-branch");
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "branch";
+    button3.dataset.branch = branch.name;
+    button3.textContent = branch.name;
+    if (branch.isBase) {
+      button3.disabled = true;
+      button3.title = "The base every other branch is compared with";
+    } else if (handlers.onSelect) {
+      button3.title = `Review ${branch.name} against ${result.base?.name ?? "the base"}`;
+      button3.addEventListener("click", () => handlers.onSelect(branch));
+    }
+    item.append(button3);
+    if (branch.againstBase) {
+      item.append(divergenceBar(branch.againstBase, maxCount));
+    }
+    const meta = document.createElement("span");
+    meta.className = "evidence branch-meta";
+    const age = formatAge(ageInDays(branch.tip?.date));
+    meta.textContent = `${branch.tip.shortHash} \xB7 ${branch.tip.author}${age ? ` \xB7 ${age}` : ""} \xB7 ${branch.tip.subject}`;
+    item.append(meta);
+    const tags = branchTags(branch);
+    if (tags.length > 0) {
+      const tagLine = document.createElement("span");
+      tagLine.className = "branch-tags";
+      tagLine.dataset.role = "branch-tags";
+      for (const tag of tags) {
+        const chip = document.createElement("span");
+        chip.className = `metric-delta ${tag.tone}`;
+        chip.textContent = tag.text;
+        tagLine.append(chip);
+      }
+      item.append(tagLine);
+    }
+    const behindCount = branch.upstream?.behind ?? 0;
+    if (handlers.onPullBranch && branch.kind === "local" && !branch.current && !branch.upstream?.gone && behindCount > 0) {
+      const pull = document.createElement("button");
+      pull.type = "button";
+      pull.className = "branch-action";
+      pull.dataset.role = "branch-pull-branch";
+      pull.dataset.branch = branch.name;
+      pull.textContent = `Pull \u2193${behindCount}`;
+      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? "its upstream"}`;
+      pull.disabled = Boolean(handlers.busy);
+      pull.addEventListener("click", () => handlers.onPullBranch(branch));
+      item.append(pull);
+    }
+    const pushCount = branch.upstream?.ahead ?? 0;
+    const publish = branch.kind === "local" && !branch.isBase && (!branch.upstream || branch.upstream.gone);
+    if (handlers.onPush && branch.kind === "local" && !branch.isBase && (pushCount > 0 || publish)) {
+      const push = document.createElement("button");
+      push.type = "button";
+      push.className = "branch-action";
+      push.dataset.role = "branch-push";
+      push.dataset.branch = branch.name;
+      push.textContent = pushCount > 0 ? `Push \u2191${pushCount}` : "Publish";
+      push.title = pushCount > 0 ? `Push ${branch.name} to ${branch.upstream?.name ?? "its remote"}` : `Publish ${branch.name} to the remote`;
+      push.disabled = Boolean(handlers.busy);
+      push.addEventListener("click", () => handlers.onPush(branch));
+      item.append(push);
+    }
+    list.append(item);
+  }
+  container.append(list);
+}
+function divergenceBar(counts, maxCount) {
+  const bar = document.createElement("span");
+  bar.className = "divergence";
+  bar.dataset.role = "branch-divergence";
+  bar.title = `${counts.behind} commit(s) behind the base \xB7 ${counts.ahead} ahead`;
+  const behind = document.createElement("span");
+  behind.className = "divergence-count";
+  behind.textContent = `\u2193${counts.behind}`;
+  const track = document.createElement("span");
+  track.className = "divergence-track";
+  const left = document.createElement("span");
+  left.className = "divergence-fill behind";
+  left.style.width = `${counts.behind / maxCount * 50}%`;
+  const right = document.createElement("span");
+  right.className = "divergence-fill ahead";
+  right.style.width = `${counts.ahead / maxCount * 50}%`;
+  track.append(left, right);
+  const ahead = document.createElement("span");
+  ahead.className = "divergence-count";
+  ahead.textContent = `\u2191${counts.ahead}`;
+  bar.append(behind, track, ahead);
+  return bar;
+}
+function renderBranchDivergence(container, branch, handlers = {}) {
+  const meta = document.createElement("p");
+  meta.className = "evidence";
+  meta.dataset.role = "review-branch";
+  meta.textContent = `${branch.ahead} commit(s) ahead of ${branch.base} \xB7 ${branch.behind} behind \xB7 merge base ${branch.mergeBase.slice(0, 7)}`;
+  container.append(meta);
+  const merge = document.createElement("p");
+  merge.dataset.role = "review-merge";
+  if (!branch.conflicts.available) {
+    merge.className = "unavailable";
+    merge.textContent = `Trial merge unavailable (needs Git 2.38+): ${branch.conflicts.detail}`;
+  } else if (branch.conflicts.clean) {
+    merge.className = "merge-verdict clean";
+    merge.textContent = branch.behind > 0 ? `Merges cleanly into ${branch.base}, which has moved ${branch.behind} commit(s) on.` : `Merges cleanly into ${branch.base}.`;
+  } else {
+    merge.className = "merge-verdict conflicted";
+    merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
+  }
+  container.append(merge);
+  const fileList = (role, heading2, entries, describe) => {
+    if (entries.length === 0) return;
+    const title = document.createElement("h4");
+    title.textContent = `${heading2} (${entries.length})`;
+    container.append(title);
+    const list = document.createElement("ul");
+    list.dataset.role = role;
+    for (const entry of entries.slice(0, 100)) {
+      const id = typeof entry === "string" ? entry : entry.id;
+      const item = document.createElement("li");
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "link";
+      button3.dataset.path = id;
+      button3.textContent = id;
+      if (handlers.onSelect) button3.addEventListener("click", () => handlers.onSelect(id));
+      item.append(button3);
+      const detail = describe?.(entry);
+      if (detail) {
+        const span = document.createElement("span");
+        span.className = "evidence";
+        span.textContent = detail;
+        item.append(span);
+      }
+      list.append(item);
+    }
+    container.append(list);
+  };
+  const conflicted = new Set(branch.conflicts.available ? branch.conflicts.paths : []);
+  fileList("review-conflicts", "Conflicting files", [...conflicted]);
+  fileList(
+    "review-overlap",
+    "Also changed on the base",
+    branch.overlap.filter((file) => !conflicted.has(file)),
+    () => branch.conflicts.available ? "merges without conflict" : null
+  );
+  fileList(
+    "review-moved-underneath",
+    "Moved underneath the branch",
+    branch.movedUnderneath,
+    (entry) => `changed on the base \xB7 imported by ${entry.via}${entry.distance > 1 ? ` (distance ${entry.distance})` : ""}`
+  );
+  if (!branch.checkedOut) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-branch-graph";
+    note3.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
+    container.append(note3);
+  }
+}
+
+// ui/strabo-impact.js
+var BAND_LABELS = {
+  low: "LOW",
+  moderate: "MODERATE",
+  high: "HIGH",
+  critical: "CRITICAL"
+};
+function riskBandLabel(band) {
+  return BAND_LABELS[band] ?? String(band ?? "").toUpperCase();
+}
+function riskTone(band) {
+  if (band === "critical") return "critical";
+  if (band === "high") return "serious";
+  if (band === "moderate") return "warning";
+  return "good";
+}
+function complexityValue(value) {
+  return value === null || value === void 0 ? "\u2014" : `C${value}`;
+}
+function round2(value) {
+  return Math.round(value * 100) / 100;
+}
+function moveText(before, after, format = (value) => String(value)) {
+  if ((before === null || before === void 0) && (after === null || after === void 0)) {
+    return { tone: "none", text: "not measured" };
+  }
+  if (before === null || before === void 0) {
+    return { tone: "grown", text: `new \xB7 ${format(after)}` };
+  }
+  if (after === null || after === void 0) {
+    return { tone: "shed", text: `removed \xB7 ${format(before)}` };
+  }
+  const delta = round2(after - before);
+  if (delta === 0) return { tone: "flat", text: "unchanged" };
+  if (delta > 0) return { tone: "grown", text: `grown +${format(delta)}` };
+  return { tone: "shed", text: `shed \u2212${format(-delta)}` };
+}
+function riskCell(risk) {
+  if (!risk) {
+    return { key: "risk", label: "Risk", value: "\u2014", detail: "not measurable", tone: "none" };
+  }
+  return {
+    key: "risk",
+    label: "Risk",
+    value: `${riskBandLabel(risk.band)} ${risk.score}/100`,
+    detail: "current snapshot",
+    tone: riskTone(risk.band)
+  };
+}
+function filePassportCells(card) {
+  const complexity = card?.complexity ?? {};
+  const snapshot = card?.snapshot ?? {};
+  const cells = [riskCell(card?.risk)];
+  const maxMove = moveText(complexity.maxBefore, complexity.maxAfter, (value) => `C${value}`);
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(complexity.maxAfter ?? complexity.maxBefore),
+    detail: maxMove.text,
+    tone: maxMove.tone
+  });
+  const coherence = card?.coherence;
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: coherence ? `${coherence.score}/100` : "\u2014",
+    detail: coherence ? coherence.detail : card?.status === "added" ? "new file" : "no changed symbols",
+    tone: coherence ? coherence.score >= 67 ? "flat" : "grown" : "none"
+  });
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(snapshot.blastRadius ?? 0),
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Importers / imports",
+    value: `${snapshot.directImporters ?? 0} / ${snapshot.directImports ?? 0}`,
+    detail: "current graph",
+    tone: "none"
+  });
+  const averageMove = moveText(complexity.averageBefore, complexity.averageAfter, (value) => String(round2(value)));
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: complexity.averageAfter === null || complexity.averageAfter === void 0 ? "\u2014" : String(complexity.averageAfter),
+    detail: `${averageMove.text} \xB7 ${complexity.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${complexity.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: averageMove.tone
+  });
+  return cells;
+}
+function totalsPassportCells(totals) {
+  const cells = [riskCell(totals?.risk)];
+  cells.push({
+    key: "max-complexity",
+    label: "Max complexity",
+    value: complexityValue(totals?.maxComplexity),
+    detail: `${totals?.files ?? 0} file(s)`,
+    tone: "none"
+  });
+  cells.push({
+    key: "coherence",
+    label: "Change coherence",
+    value: totals?.coherence === null || totals?.coherence === void 0 ? "\u2014" : `${totals.coherence}/100`,
+    detail: `${totals?.changedSymbols ?? 0} changed symbol(s)`,
+    tone: totals?.coherence === null || totals?.coherence === void 0 ? "none" : "flat"
+  });
+  cells.push({
+    key: "blast",
+    label: "Blast radius",
+    value: String(totals?.blastRadius ?? 0),
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "imports",
+    label: "Importers / imports",
+    value: `${totals?.directImporters ?? 0} / ${totals?.directImports ?? 0}`,
+    detail: "current graph",
+    tone: "none"
+  });
+  cells.push({
+    key: "average-complexity",
+    label: "Average complexity",
+    value: totals?.averageComplexity === null || totals?.averageComplexity === void 0 ? "\u2014" : String(totals.averageComplexity),
+    detail: `${totals?.functionsUnchanged ?? 0} function(s) unchanged \xB7 ${totals?.classesUnchanged ?? 0} class(es) unchanged`,
+    tone: "none"
+  });
+  return cells;
+}
+function impactFunctionLabel(fn) {
+  return fn?.owner ? `${fn.owner}.${fn.name}` : String(fn?.name ?? "");
+}
+function passportHeading(scope) {
+  if (scope === "file") return "Change impact passport";
+  if (scope === "revision") return "Revision impact passport";
+  return "Change impact passport";
+}
+
+// ui/strabo-panel-risk.js
+function renderImpactPassport(container, set, handlers = {}) {
+  container.replaceChildren();
+  if (!set || !Array.isArray(set.files) || set.files.length === 0) {
+    container.append(unavailableNote("No impact passport was recorded."));
+    return;
+  }
+  const heading2 = document.createElement("h4");
+  heading2.textContent = passportHeading(set.scope);
+  container.append(heading2);
+  const caption = document.createElement("p");
+  caption.className = "unavailable";
+  caption.textContent = set.baseline ? `Current graph; compared with ${set.baseline}.` : "Current graph; no baseline revision was available.";
+  container.append(caption);
+  if (set.scope === "file") {
+    container.append(impactCard(set.files[0], false));
+    return;
+  }
+  container.append(impactCard(set.totals, true));
+  const list = document.createElement("ul");
+  list.className = "impact-files";
+  list.dataset.role = "impact-files";
+  for (const file of set.files) {
+    list.append(impactFileRow(file, handlers));
+  }
+  container.append(list);
+  if (set.capped) {
+    container.append(unavailableNote("Only the first files in the change set were measured."));
+  }
+}
+function impactCard(card, totals) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "impact-card";
+  wrapper.dataset.role = totals ? "impact-totals" : "impact-file-card";
+  const grid = document.createElement("div");
+  grid.className = "impact-grid";
+  const cells = totals ? totalsPassportCells(card) : filePassportCells(card);
+  for (const cell of cells) {
+    const item = document.createElement("div");
+    item.className = "impact-cell";
+    item.dataset.role = `impact-${cell.key}`;
+    const label = document.createElement("div");
+    label.className = "impact-cell-label";
+    label.textContent = cell.label;
+    const value = document.createElement("div");
+    value.className = `impact-cell-value ${cell.tone ?? "none"}`;
+    value.textContent = cell.value;
+    const detail = document.createElement("div");
+    detail.className = "impact-cell-detail";
+    detail.textContent = cell.detail;
+    item.append(label, value, detail);
+    grid.append(item);
+  }
+  wrapper.append(grid);
+  wrapper.append(
+    impactList(
+      "Risk signals",
+      (card?.signals ?? []).map((signal) => ({ text: signal.label, detail: signal.detail })),
+      "impact-signals"
+    )
+  );
+  wrapper.append(
+    impactList(
+      "Most complex functions",
+      (card?.mostComplex ?? []).map((fn) => ({
+        text: impactFunctionLabel(fn),
+        detail: `C${fn.complexity}${fn.delta ? ` (${fn.delta > 0 ? "+" : "\u2212"}C${Math.abs(fn.delta)})` : ""}`
+      })),
+      "impact-most-complex"
+    )
+  );
+  return wrapper;
+}
+function impactList(title, entries, role) {
+  const section2 = document.createElement("div");
+  section2.className = "impact-list";
+  const heading2 = document.createElement("h5");
+  heading2.textContent = title;
+  section2.append(heading2);
+  if (entries.length === 0) {
+    section2.append(unavailableNote("None recorded."));
+    section2.dataset.role = role;
+    return section2;
+  }
+  const list = document.createElement("ul");
+  list.dataset.role = role;
+  for (const entry of entries) {
+    const item = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = entry.text;
+    item.append(text);
+    if (entry.detail) {
+      const detail = document.createElement("span");
+      detail.className = "evidence";
+      detail.textContent = entry.detail;
+      item.append(detail);
+    }
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
+}
+function impactFileRow(file, handlers) {
+  const item = document.createElement("li");
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "link";
+  link.dataset.path = file.path;
+  link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
+  if (handlers.onSelect) {
+    link.addEventListener("click", () => handlers.onSelect(file.path));
+  } else {
+    link.disabled = true;
+  }
+  item.append(link);
+  const risk = document.createElement("span");
+  risk.className = `impact-risk-band ${file.risk ? riskTone(file.risk.band) : "none"}`;
+  risk.textContent = file.risk ? `${riskBandLabel(file.risk.band)} ${file.risk.score}` : "\u2014";
+  item.append(risk);
+  const cx = document.createElement("span");
+  cx.className = "evidence";
+  cx.textContent = `${complexityValue(file.complexity?.maxAfter)} \xB7 coherence ${file.coherence ? `${file.coherence.score}/100` : "\u2014"}`;
+  item.append(cx);
+  return item;
+}
+function renderRisk(container, report, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Dependency risk";
+  container.append(title);
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close risk panel");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  if (!report || report.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-unavailable";
+    note3.textContent = "Risk report unavailable.";
+    container.append(note3);
+    return;
+  }
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "risk-summary";
+  summary.textContent = riskSummary(report);
+  container.append(summary);
+  const online = document.createElement("p");
+  online.className = report.online ? "evidence" : "unavailable";
+  online.dataset.role = "risk-mode";
+  online.textContent = report.online ? "Advisory and license data from OSV.dev and deps.dev." : "Online advisory and license lookup is off; showing inventory and imports only.";
+  container.append(online);
+  if (report.inventory.undeclared.length > 0) {
+    const undeclared = document.createElement("p");
+    undeclared.className = "unavailable";
+    undeclared.dataset.role = "risk-undeclared";
+    undeclared.textContent = `${report.inventory.undeclared.length} imported package(s) are not declared in any manifest: ${report.inventory.undeclared.slice(0, 8).join(", ")}`;
+    container.append(undeclared);
+  }
+  const advisories = orderAdvisories(report.advisories);
+  const heading2 = document.createElement("h4");
+  heading2.textContent = `Advisories (${advisories.length})`;
+  container.append(heading2);
+  if (advisories.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-advisories-empty";
+    note3.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
+    container.append(note3);
+  } else {
+    const list = document.createElement("ul");
+    list.dataset.role = "risk-advisories";
+    for (const advisory of advisories) {
+      const item = document.createElement("li");
+      item.className = `risk-advisory severity-${advisory.severity}`;
+      item.dataset.role = "risk-advisory";
+      const line = document.createElement("div");
+      const severity = document.createElement("span");
+      severity.className = `risk-severity severity-${advisory.severity}`;
+      severity.textContent = advisory.severity;
+      line.append(severity);
+      const link = document.createElement("a");
+      link.className = "link";
+      link.href = advisory.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = advisory.id;
+      line.append(link);
+      if (advisory.aliases.length > 0) {
+        const aliases = document.createElement("span");
+        aliases.className = "evidence";
+        aliases.textContent = advisory.aliases.join(", ");
+        line.append(aliases);
+      }
+      item.append(line);
+      const subject = document.createElement("p");
+      subject.className = "evidence";
+      subject.textContent = `${advisory.dependency.name}@${advisory.dependency.version ?? "unresolved"} \xB7 ${advisory.summary}`;
+      item.append(subject);
+      if (advisory.fixed.length > 0) {
+        const fixed = document.createElement("p");
+        fixed.className = "evidence";
+        fixed.textContent = `Fixed in: ${advisory.fixed.join(", ")}`;
+        item.append(fixed);
+      }
+      if (advisory.importedBy.length > 0) {
+        const files = document.createElement("p");
+        files.className = "evidence";
+        files.textContent = `Imported by: ${advisory.importedBy.join(", ")}`;
+        item.append(files);
+      } else {
+        const files = document.createElement("p");
+        files.className = "unavailable";
+        files.textContent = "No source file imports this package directly.";
+        item.append(files);
+      }
+      const impacted = advisory.impactedFiles.filter((entry) => entry.distance > 0);
+      if (impacted.length > 0) {
+        const list2 = document.createElement("ul");
+        list2.dataset.role = "risk-impact";
+        for (const entry of impacted.slice(0, 20)) {
+          const entryItem = document.createElement("li");
+          const button3 = document.createElement("button");
+          button3.type = "button";
+          button3.className = "link";
+          button3.textContent = entry.id;
+          if (handlers.onSelect) {
+            button3.addEventListener("click", () => handlers.onSelect(entry.id));
+          }
+          entryItem.append(button3);
+          const distance = document.createElement("span");
+          distance.className = "evidence";
+          distance.textContent = `\xB7 distance ${entry.distance}`;
+          entryItem.append(distance);
+          list2.append(entryItem);
+        }
+        item.append(list2);
+      }
+      list.append(item);
+    }
+    container.append(list);
+  }
+  const flagged = report.licenses.filter((entry) => entry.denied || entry.risk !== "permissive");
+  const licenseHeading = document.createElement("h4");
+  licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
+  container.append(licenseHeading);
+  if (flagged.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "risk-licenses-empty";
+    note3.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
+    container.append(note3);
+  } else {
+    const list = document.createElement("ul");
+    list.dataset.role = "risk-licenses";
+    for (const entry of flagged.slice(0, 50)) {
+      const item = document.createElement("li");
+      const label = `${entry.dependency.name}@${entry.dependency.version ?? "unresolved"} \xB7 ${entry.licenses.join(" OR ") || "no license recorded"}`;
+      const span = document.createElement("span");
+      span.textContent = label;
+      item.append(span);
+      const risk = document.createElement("span");
+      risk.className = entry.denied ? "risk-severity severity-critical" : "evidence";
+      risk.textContent = entry.denied ? "denied" : entry.risk;
+      item.append(risk);
+      list.append(item);
+    }
+    container.append(list);
+  }
+  if (report.caveats.length > 0) {
+    const caveats = document.createElement("p");
+    caveats.className = "unavailable";
+    caveats.dataset.role = "risk-caveats";
+    caveats.textContent = report.caveats.join(" ");
+    container.append(caveats);
+  }
+}
+
+// ui/strabo-panel-review.js
+function renderReviewLoading(container, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Review";
+  container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the previous review"));
+  }
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close review");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  const note3 = document.createElement("p");
+  note3.className = "evidence";
+  note3.dataset.role = "review-loading";
+  note3.textContent = "Reviewing changes\u2026";
+  container.append(note3);
+}
+function structuralDiffGroups(structural) {
+  if (!structural || structural.available === false) {
+    return [];
+  }
+  const diff = structural.diff ?? {};
+  return [
+    { key: "edges-added", label: "Dependency edges added", items: (diff.edgesAdded ?? []).map(structuralEdgeLabel) },
+    { key: "edges-removed", label: "Dependency edges removed", items: (diff.edgesRemoved ?? []).map(structuralEdgeLabel) },
+    { key: "cycles-introduced", label: "Cycles introduced", items: (diff.cyclesIntroduced ?? []).map(structuralCycleLabel) },
+    { key: "cycles-resolved", label: "Cycles resolved", items: (diff.cyclesResolved ?? []).map(structuralCycleLabel) },
+    { key: "tier-edges-added", label: "Wrong-way tier edges added", items: (diff.tierEdgesAdded ?? []).map(structuralTierEdgeLabel) },
+    { key: "entry-points-added", label: "Entry points added", items: [...diff.entryPointsAdded ?? []] },
+    { key: "newly-unreached", label: "Newly unreached", items: [...diff.newlyUnreached ?? []] }
+  ].filter((group) => group.items.length > 0);
+}
+function structuralEdgeLabel(edge) {
+  return `${edge.source} \u2192 ${edge.target} (${edge.kind})`;
+}
+function structuralCycleLabel(cycle) {
+  return (cycle.members ?? []).join(" \u2192 ");
+}
+function structuralTierEdgeLabel(edge) {
+  return `${edge.source} \u2192 ${edge.target} (${edge.kind}, ${edge.unit})`;
+}
+function renderStructuralDiff(container, structural) {
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Structure";
+  container.append(heading2);
+  if (!structural || structural.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-structure-unavailable";
+    note3.textContent = structural?.detail ? `Structure unavailable: ${structural.detail}` : "Structure unavailable: no base revision to compare.";
+    container.append(note3);
+    return;
+  }
+  const groups = structuralDiffGroups(structural);
+  if (groups.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-structure-empty";
+    note3.textContent = "No structural change between the base and HEAD.";
+    container.append(note3);
+    return;
+  }
+  for (const group of groups) {
+    const title = document.createElement("h5");
+    title.textContent = `${group.label} (${group.items.length})`;
+    container.append(title);
+    const list = document.createElement("ul");
+    list.dataset.role = `review-structure-${group.key}`;
+    for (const item of group.items) {
+      const entry = document.createElement("li");
+      entry.textContent = item;
+      list.append(entry);
+    }
+    container.append(list);
+  }
+}
+function renderReview(container, result, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = result?.kind === "commit" ? "Commit review" : result?.kind === "branch" ? `Branch review \xB7 ${result.ref}` : "Working tree review";
+  container.append(title);
+  if (handlers.onBack) {
+    title.prepend(backButton(handlers, "Back to the previous review"));
+  }
+  if (handlers.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close review");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => handlers.onClose());
+    title.append(dismiss);
+  }
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-unavailable";
+    note3.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
+    container.append(note3);
+    return;
+  }
+  if (result.commit) {
+    const meta = document.createElement("p");
+    meta.className = "evidence";
+    meta.dataset.role = "review-commit";
+    meta.textContent = `${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.date.slice(0, 10)} \xB7 ${result.commit.subject}`;
+    container.append(meta);
+  }
+  const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "review-summary";
+  summary.textContent = `${totals.files} file(s) \xB7 +${totals.insertions} \u2212${totals.deletions}${totals.uncounted > 0 ? ` \xB7 ${totals.uncounted} uncounted` : ""}`;
+  container.append(summary);
+  const narrator = document.createElement("div");
+  narrator.className = "review-narrator";
+  appendNarratorBlock(narrator, handlers, { id: "narrate-change", label: "Narrate change" });
+  if (narrator.childElementCount > 0) {
+    container.append(narrator);
+  }
+  if (result.branch) {
+    renderBranchDivergence(container, result.branch, handlers);
+  }
+  if ((result.files ?? []).length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
+    container.append(note3);
+  }
+  for (const [group, files] of reviewGroups(result.files)) {
+    const heading2 = document.createElement("h4");
+    heading2.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
+    container.append(heading2);
+    const list = document.createElement("ul");
+    list.dataset.role = `review-group-${group}`;
+    for (const file of files) {
+      const item = document.createElement("li");
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "link";
+      button3.dataset.path = file.path;
+      button3.textContent = file.path;
+      if (handlers.onSelect && file.inGraph) {
+        button3.addEventListener("click", () => handlers.onSelect(file.path));
+      } else {
+        button3.disabled = true;
+        button3.title = "Not a node in the scanned graph";
+      }
+      item.append(button3);
+      const status = document.createElement("span");
+      status.className = "review-status";
+      status.textContent = file.status;
+      item.append(status);
+      const counts = document.createElement("span");
+      counts.className = "evidence";
+      counts.textContent = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} \u2212${file.deletions}`;
+      item.append(counts);
+      if (handlers.onOpenDiff) {
+        const diff = document.createElement("button");
+        diff.type = "button";
+        diff.className = "link review-diff";
+        diff.dataset.path = file.path;
+        diff.textContent = "Diff";
+        diff.title = `Show the change to ${file.path}`;
+        diff.addEventListener("click", () => handlers.onOpenDiff(file.path, file));
+        item.append(diff);
+      }
+      list.append(item);
+    }
+    container.append(list);
+  }
+  if (result.structural !== void 0) {
+    renderStructuralDiff(container, result.structural);
+  }
+  renderChangeMetrics(container, result.metrics, handlers);
+  renderChangePassport(container, result.cohesion);
+  if (result.impactPassport) {
+    const impactSection = document.createElement("div");
+    impactSection.className = "impact-passport-section";
+    container.append(impactSection);
+    renderImpactPassport(impactSection, result.impactPassport, handlers);
+  }
+  const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+  const impactHeading = document.createElement("h4");
+  impactHeading.textContent = `Potentially affected (${affected.length})`;
+  container.append(impactHeading);
+  if (affected.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "review-impact-empty";
+    note3.textContent = "Nothing depends on the changed files.";
+    container.append(note3);
+  } else {
+    const list = document.createElement("ul");
+    list.dataset.role = "review-impact";
+    for (const entry of affected.slice(0, 100)) {
+      const item = document.createElement("li");
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "link";
+      button3.textContent = entry.id;
+      if (handlers.onSelect) {
+        button3.addEventListener("click", () => handlers.onSelect(entry.id));
+      }
+      item.append(button3);
+      const distance = document.createElement("span");
+      distance.className = "evidence";
+      distance.textContent = `\xB7 distance ${entry.distance}`;
+      item.append(distance);
+      list.append(item);
+    }
+    container.append(list);
+  }
+  if ((result.impact?.outsideGraph ?? []).length > 0) {
+    const outside = document.createElement("p");
+    outside.className = "unavailable";
+    outside.dataset.role = "review-outside";
+    outside.textContent = `${result.impact.outsideGraph.length} changed path(s) are outside the scanned graph.`;
+    container.append(outside);
+  }
+}
+function renderChangeMetrics(container, metrics, handlers = {}) {
+  if (!metrics || metrics.available === false) {
+    return;
+  }
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Change metrics";
+  container.append(heading2);
+  const summary = document.createElement("p");
+  summary.className = "overlay-summary";
+  summary.dataset.role = "change-metrics-summary";
+  summary.textContent = changeMetricSummary(metrics.totals);
+  container.append(summary);
+  const files = orderMetricFiles(metrics.files);
+  if (files.length === 0) {
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "change-metrics";
+  table.dataset.role = "change-metrics";
+  const head = document.createElement("tr");
+  for (const [label, title] of [
+    ["File", ""],
+    ["Cx", "Complexity: net change in summed function decision points"],
+    ["Out", "Fan-out: resolved in-repository imports, before \u2192 after"],
+    ["In", "Fan-in change from importers inside this change set"],
+    ["Lines", "Line count, net"]
+  ]) {
+    const cell = document.createElement("th");
+    cell.textContent = label;
+    if (title) cell.title = title;
+    head.append(cell);
+  }
+  table.append(head);
+  for (const file of files) {
+    const row = document.createElement("tr");
+    const name = document.createElement("td");
+    const link = document.createElement("button");
+    link.type = "button";
+    link.className = "link";
+    link.textContent = file.previousPath ? `${file.previousPath} \u2192 ${file.path}` : file.path;
+    if (handlers.onSelect && file.status !== "deleted") {
+      link.addEventListener("click", () => handlers.onSelect(file.path));
+    } else {
+      link.disabled = true;
+    }
+    name.append(link);
+    if (file.note) name.title = file.note;
+    row.append(name);
+    const churn = file.complexityChange;
+    const complexity = churn ? metricDelta(0, churn.added - churn.removed) : metricDelta(null, null);
+    row.append(
+      metricCell(
+        complexity,
+        churn ? [
+          `${file.before?.complexity ?? "\u2014"} \u2192 ${file.after?.complexity ?? "\u2014"} (+${churn.added} \u2212${churn.removed})`,
+          ...file.functions.slice(0, 8).map((fn) => `${fn.owner ? `${fn.owner}.` : ""}${fn.name}: ${fn.before ?? "new"} \u2192 ${fn.after ?? "removed"}`)
+        ].join("\n") : file.note ?? "not measured"
+      )
+    );
+    row.append(
+      metricCell(
+        file.fanOut ? metricDelta(file.fanOut.before, file.fanOut.after) : metricDelta(null, null),
+        file.fanOut ? [
+          `${file.fanOut.before} \u2192 ${file.fanOut.after}`,
+          ...file.importsAdded.map((target) => `+ ${target}`),
+          ...file.importsRemoved.map((target) => `\u2212 ${target}`)
+        ].join("\n") : file.note ?? "imports not resolved"
+      )
+    );
+    row.append(metricCell(metricDelta(0, file.fanInDelta ?? 0), "Importers gained or lost within this change set"));
+    const lines = metricDelta(file.before?.lines ?? 0, file.after?.lines ?? 0);
+    row.append(metricCell({ ...lines, tone: lines.delta ? "flat" : lines.tone }, `${file.before?.lines ?? 0} \u2192 ${file.after?.lines ?? 0}`));
+    table.append(row);
+  }
+  container.append(table);
+  if (metrics.capped) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "Only the first files in the change set were measured.";
+    container.append(note3);
+  }
+}
+function metricCell(delta, title) {
+  const cell = document.createElement("td");
+  const value = document.createElement("span");
+  value.className = `metric-delta ${delta.tone}`;
+  value.textContent = delta.text;
+  cell.append(value);
+  if (title) cell.title = title;
+  return cell;
+}
+var REVIEW_GROUP_LABELS = {
+  commit: "Changed",
+  branch: "Changed on the branch",
+  staged: "Staged",
+  unstaged: "Unstaged",
+  untracked: "Untracked"
+};
+function renderChangePassport(container, passport) {
+  if (!passport || !Array.isArray(passport.files) || passport.files.length === 0) {
+    return;
+  }
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Change passport";
+  container.append(heading2);
+  const caption = document.createElement("p");
+  caption.className = "unavailable";
+  caption.textContent = passport.baseline ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.` : "Cohesion from recorded member wiring; no baseline revision was available.";
+  container.append(caption);
+  const list = document.createElement("ul");
+  list.className = "change-passport";
+  list.dataset.role = "change-passport";
+  for (const change of passport.files) {
+    const item = document.createElement("li");
+    const path = document.createElement("span");
+    path.className = "passport-change-path";
+    path.textContent = change.previousPath ? `${change.previousPath} \u2192 ${change.path}` : change.path;
+    item.append(path);
+    const delta = cohesionDelta(change);
+    const value = document.createElement("span");
+    value.className = `health-delta ${delta.tone}`;
+    value.dataset.role = "cohesion-delta";
+    value.textContent = delta.text;
+    value.title = change.note ?? "";
+    item.append(value);
+    list.append(item);
+  }
+  container.append(list);
+  if (passport.capped) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "Only the first files in the change set were measured.";
+    container.append(note3);
+  }
+}
+
+// ui/strabo-panel-overlay.js
+function renderOverlayPanel(container, title, overlay, options = {}) {
+  if (!overlay || !overlay.summary) {
+    container.hidden = true;
+    container.replaceChildren();
+    container.className = "overlay-panel";
+    return;
+  }
+  container.hidden = false;
+  container.replaceChildren();
+  const kind = options.kind ?? "impact";
+  container.className = `overlay-panel overlay-kind-${kind}`;
+  const heading2 = document.createElement("h3");
+  const dot = document.createElement("span");
+  dot.className = "overlay-dot";
+  dot.setAttribute("aria-hidden", "true");
+  heading2.append(dot);
+  heading2.append(document.createTextNode(`${title} \xB7 ${overlay.summary}`));
+  heading2.className = "overlay-summary";
+  container.append(heading2);
+  if (options.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss overlay panel");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => options.onClose());
+    heading2.append(dismiss);
+  }
+  if (overlay.meta && (overlay.meta.testFiles !== void 0 || overlay.meta.unreached !== void 0)) {
+    const counts = document.createElement("p");
+    counts.className = "overlay-counts";
+    const parts = [];
+    if (overlay.meta.testFiles !== void 0) parts.push(`${overlay.meta.testFiles} test files`);
+    if (overlay.meta.reached !== void 0) parts.push(`${overlay.meta.reached} reached`);
+    if (overlay.meta.unreached !== void 0) parts.push(`${overlay.meta.unreached} unreached`);
+    counts.textContent = parts.join(" \xB7 ");
+    container.append(counts);
+  }
+  if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
+    const note3 = document.createElement("p");
+    note3.className = "overlay-empty";
+    note3.textContent = overlay.emptyNote;
+    container.append(note3);
+  }
+  if (Array.isArray(overlay.items) && overlay.items.length > 0) {
+    const needsSearch = overlay.items.length > 8;
+    const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
+    const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
+    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay.items.length;
+    let filter = "";
+    let changedOnly = false;
+    const rowFor = (item) => {
+      const entry = document.createElement("div");
+      entry.className = "overlay-list-row";
+      entry.setAttribute("role", "listitem");
+      if (affectedItems && affectedItems.has(item)) {
+        entry.classList.add("overlay-row-affected");
+      }
+      if (typeof item === "string") {
+        entry.dataset.delegateOverlayItem = item;
+      }
+      if (options.onSelect && typeof item === "string" && !item.includes("\u2194") && !item.includes(":")) {
+        const jump = document.createElement("button");
+        jump.type = "button";
+        jump.textContent = item;
+        jump.title = `Select ${item}`;
+        jump.addEventListener("click", () => options.onSelect(item.split(" \xB7 ")[0]));
+        entry.append(jump);
+      } else {
+        entry.textContent = item;
+      }
+      return entry;
+    };
+    const list = createVirtualList({
+      rowHeight: 20,
+      overscan: 6,
+      className: "overlay-list",
+      renderRow: rowFor
+    });
+    const matchingItems = () => {
+      let items = overlay.items;
+      if (changedOnly && changedItems) {
+        items = items.filter((item) => changedItems.has(item));
+      }
+      if (filter) {
+        items = items.filter((item) => String(item).toLowerCase().includes(filter));
+      }
+      return items;
+    };
+    const empty = document.createElement("p");
+    empty.className = "overlay-empty";
+    empty.hidden = true;
+    const renderList = () => {
+      const matching = matchingItems();
+      empty.textContent = changedOnly && !filter ? "No changed modules." : "No modules match this filter.";
+      empty.hidden = matching.length > 0;
+      list.setItems(matching);
+    };
+    const controls = document.createElement("div");
+    controls.className = "overlay-controls";
+    if (needsSearch) {
+      const search = document.createElement("input");
+      search.type = "search";
+      search.className = "overlay-filter";
+      search.placeholder = "Filter modules\u2026";
+      search.setAttribute("aria-label", "Filter overlay modules");
+      search.addEventListener("input", () => {
+        filter = search.value.trim().toLowerCase();
+        renderList();
+      });
+      controls.append(search);
+    }
+    if (showChangedOnly) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "overlay-toggle-changed";
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.textContent = "Changed only";
+      toggle.title = "Hide the potentially affected dependents";
+      toggle.addEventListener("click", () => {
+        changedOnly = !changedOnly;
+        toggle.setAttribute("aria-pressed", String(changedOnly));
+        renderList();
+      });
+      controls.append(toggle);
+    }
+    if (controls.childElementCount > 0) {
+      container.append(controls);
+    }
+    container.append(list.element);
+    container.append(empty);
+    renderList();
+    list.refresh();
+  }
+  if (Array.isArray(options.actions) && options.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "overlay-actions";
+    for (const action of options.actions) {
+      const actionButton = document.createElement("button");
+      actionButton.type = "button";
+      actionButton.className = "overlay-action";
+      actionButton.textContent = action.label;
+      if (action.title) {
+        actionButton.title = action.title;
+      }
+      if (action.disabled) {
+        actionButton.disabled = true;
+      }
+      actionButton.addEventListener("click", () => action.onClick?.());
+      actions.append(actionButton);
+    }
+    container.append(actions);
+  }
+}
+function renderEdgeEvidence(container, evidence, handlers = {}) {
+  if (!evidence) {
+    container.hidden = true;
+    container.replaceChildren();
+    delete container.dataset.delegateEdge;
+    return;
+  }
+  container.hidden = false;
+  container.replaceChildren();
+  container.dataset.delegateEdge = evidence.id;
+  const heading2 = document.createElement("h3");
+  heading2.className = "overlay-summary";
+  heading2.textContent = `Edge \xB7 ${evidence.kind}`;
+  container.append(heading2);
+  const route = document.createElement("p");
+  route.className = "edge-route";
+  route.append(edgeEndpoint(evidence.source, handlers.onSelect));
+  route.append(document.createTextNode(" \u2192 "));
+  route.append(edgeEndpoint(evidence.target, handlers.onSelect));
+  container.append(route);
+  const facts = document.createElement("dl");
+  facts.className = "passport-metrics";
+  appendFact(facts, "Specifier", evidence.specifier ?? "not recorded");
+  appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
+  appendFact(facts, "Resolution", evidence.resolutionLabel);
+  container.append(facts);
+  if (handlers.onViewSource) {
+    const source = document.createElement("button");
+    source.type = "button";
+    source.className = "source-open";
+    source.textContent = "View source";
+    source.addEventListener("click", () => handlers.onViewSource(evidence.source, evidence.line ?? null));
+    container.append(source);
+  }
+  if (handlers.onTrace) {
+    const trace = document.createElement("button");
+    trace.type = "button";
+    trace.className = "trace-button";
+    trace.textContent = "Trace path";
+    trace.addEventListener("click", () => handlers.onTrace(evidence.source, evidence.target));
+    container.append(trace);
+  }
+  if (handlers.onClear) {
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "edge-clear";
+    clear.textContent = "Clear edge";
+    clear.addEventListener("click", () => handlers.onClear());
+    container.append(clear);
+  }
+}
+function edgeEndpoint(id, onSelect2) {
+  const button3 = document.createElement("button");
+  button3.type = "button";
+  button3.className = "link";
+  button3.textContent = id;
+  if (onSelect2) {
+    button3.addEventListener("click", () => onSelect2(id));
+  }
+  return button3;
+}
+function renderTimeline(container, result, onSelect2, options = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Timeline";
+  container.append(title);
+  if (options.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Close timeline");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => options.onClose());
+    title.append(dismiss);
+  }
+  if (!result || result.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
+    container.append(note3);
+    return;
+  }
+  if (result.commits.length === 0) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.textContent = "No commits recorded.";
+    container.append(note3);
+    return;
+  }
+  const list = document.createElement("ul");
+  for (const commit of result.commits.slice(0, 50)) {
+    const item = document.createElement("li");
+    if (options.selectedHash && commit.hash === options.selectedHash) {
+      item.classList.add("selected-commit");
+    }
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "commit";
+    button3.dataset.hash = commit.hash;
+    button3.textContent = `${commit.shortHash} \xB7 ${commit.subject}`;
+    button3.addEventListener("click", () => onSelect2(commit));
+    item.append(button3);
+    const meta = document.createElement("span");
+    meta.className = "evidence";
+    meta.textContent = `${commit.author} \xB7 ${commit.date.slice(0, 10)}`;
+    item.append(meta);
+    const badge = commitMetricBadge(options.metrics?.get(commit.hash) ?? null);
+    if (badge) {
+      const metric = document.createElement("span");
+      metric.className = `metric-delta ${badge.tone}`;
+      metric.dataset.role = "commit-metrics";
+      metric.textContent = badge.text;
+      metric.title = badge.title;
+      item.append(metric);
+    }
+    list.append(item);
+  }
+  container.append(list);
+}
+
+// ui/strabo-panel-chrome.js
+function renderDiagnostics(container, model, runtime = {}) {
+  const summary = summarizeDiagnostics(model);
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = `Diagnostics \xB7 ${summary.diagnostics}`;
+  container.append(title);
+  const runtimeLine = document.createElement("p");
+  runtimeLine.className = "diag-runtime";
+  runtimeLine.dataset.role = "runtime";
+  runtimeLine.textContent = `cache: ${summary.cache}${summary.stale ? " (stale)" : ""} \xB7 renderer: ${runtime.renderer ?? "unknown"} \xB7 ${runtime.shown ?? 0} shown`;
+  container.append(runtimeLine);
+  const counts = document.createElement("p");
+  counts.textContent = `excluded: ${summary.excluded} \xB7 ${Object.entries(summary.byKind).map(([kind, count]) => `${kind}: ${count}`).join(", ") || "none"}`;
+  container.append(counts);
+  const groups = /* @__PURE__ */ new Map();
+  for (const diagnostic of model.diagnostics ?? []) {
+    if (!groups.has(diagnostic.kind)) groups.set(diagnostic.kind, []);
+    groups.get(diagnostic.kind).push(diagnostic);
+  }
+  if (groups.size > 0) {
+    for (const [kind, items] of groups) {
+      const details = document.createElement("details");
+      details.className = "diag-group";
+      if (kind === [...groups.keys()][0]) details.open = true;
+      const summaryEl = document.createElement("summary");
+      summaryEl.textContent = `${kind} (${items.length})`;
+      details.append(summaryEl);
+      const list = document.createElement("ul");
+      for (const diagnostic of items.slice(0, 20)) {
+        const item = document.createElement("li");
+        item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
+        item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
+        list.append(item);
+      }
+      details.append(list);
+      container.append(details);
+    }
+  } else if (summary.samples.length > 0) {
+    const list = document.createElement("ul");
+    for (const diagnostic of summary.samples) {
+      const item = document.createElement("li");
+      item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
+      item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
+      list.append(item);
+    }
+    container.append(list);
+  }
+  return summary;
+}
+var LEGEND_SWATCHES = {
+  "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
+  "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
+  "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
+  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))"
+};
+function renderLegend(container, model) {
+  container.replaceChildren();
+  const guide = document.createElement("div");
+  guide.className = "legend-guide";
+  for (const text of readingLegend(model)) {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "legend-swatch";
+    swatch.style.background = LEGEND_SWATCHES[text] ?? "var(--accent)";
+    if (text.startsWith("diamond")) {
+      swatch.style.transform = "rotate(45deg)";
+      swatch.style.borderRadius = "2px";
+    }
+    item.append(swatch);
+    item.append(document.createTextNode(text));
+    guide.append(item);
+  }
+  container.append(guide);
+  const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
+  for (const kind of kinds) {
+    const item = document.createElement("span");
+    item.className = "legend-item";
+    const glyph = document.createElement("span");
+    glyph.className = "legend-shape";
+    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : kind === "unit" ? "\u25A4" : kind === "shelf" ? "\u25A5" : "\u25A3";
+    item.append(glyph);
+    item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
+    container.append(item);
+  }
+}
+function renderShortcuts(container) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Keyboard shortcuts";
+  container.append(title);
+  const list = document.createElement("dl");
+  list.className = "shortcut-list";
+  for (const entry of shortcutSheet()) {
+    const term = document.createElement("dt");
+    const kbd = document.createElement("kbd");
+    kbd.textContent = entry.keys;
+    term.append(kbd);
+    const description = document.createElement("dd");
+    description.textContent = entry.action;
+    list.append(term, description);
+  }
+  container.append(list);
+}
+function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
+  const chip = (label, filter, className = "strip-chip") => h(
+    "button",
+    {
+      // The filter is the chip's stable identity, so a re-render reuses the same button.
+      key: filter || "modules",
+      type: "button",
+      className,
+      dataset: { filter },
+      "aria-pressed": activeFilter === filter ? "true" : "false",
+      onClick: () => onFilter(filter)
+    },
+    label
+  );
+  mount(
+    container,
+    h(
+      Fragment,
+      null,
+      chip(`tests ${counts.tests}`, ".test"),
+      chip(`modules ${counts.modules}`, ""),
+      ...counts.entries.slice(0, 12).map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, "strip-chip strip-dir"))
+    )
+  );
+}
+function renderBreadcrumb(container, state2, onNavigate) {
+  container.replaceChildren();
+  for (const crumb of breadcrumb(state2)) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "crumb";
+    button3.textContent = crumb.label;
+    if (crumb.prefix === (state2.prefix ?? "")) {
+      button3.disabled = true;
+    }
+    button3.addEventListener("click", () => onNavigate(crumb.prefix));
+    container.append(button3);
+  }
+}
+function renderFolderList(container, result, onNavigate) {
+  container.replaceChildren();
+  for (const directory of result.directories) {
+    const item = document.createElement("li");
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = directory.isRepository ? "folder folder-repository" : "folder";
+    button3.dataset.path = directory.path;
+    button3.textContent = directory.isRepository ? `${directory.name} \xB7 repository` : directory.name;
+    button3.addEventListener("click", () => onNavigate(directory.path));
+    item.append(button3);
+    container.append(item);
+  }
+  if (result.directories.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "folder-empty";
+    empty.textContent = "No subfolders";
+    container.append(empty);
+  }
+}
+
+// ui/strabo-highlight.js
+var words = (list) => new Set(list.split(/\s+/).filter(Boolean));
+var C_LIKE_LITERALS = "true false null";
+var LANGUAGES = {
+  javascript: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'", "`"],
+    multilineQuotes: ["`"],
+    attribute: /^@[A-Za-z_$][\w$]*/,
+    keywords: words(`
+      as async await break case catch class const continue debugger declare default delete do
+      else enum export extends finally for from function get if implements import in instanceof
+      interface let namespace new of private protected public readonly return set static super
+      switch this throw try type typeof var void while with yield abstract satisfies keyof
+      infer is override accessor`),
+    literals: words(`${C_LIKE_LITERALS} undefined NaN Infinity`)
+  },
+  python: {
+    lineComments: ["#"],
+    blockComment: null,
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""', "'''"],
+    attribute: /^@[A-Za-z_][\w.]*/,
+    keywords: words(`
+      and as assert async await break class continue def del elif else except finally for from
+      global if import in is lambda nonlocal not or pass raise return try while with yield
+      match case self cls`),
+    literals: words("True False None")
+  },
+  rust: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"'],
+    // A quote is a char literal only when it closes at once; otherwise it is a lifetime.
+    charLiteral: /^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\])'/,
+    attribute: /^#!?\[[^\]]*\]/,
+    macroBang: true,
+    keywords: words(`
+      as async await break const continue crate dyn else enum extern fn for if impl in let loop
+      match mod move mut pub ref return self Self static struct super trait type union unsafe
+      use where while`),
+    literals: words("true false")
+  },
+  java: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    attribute: /^@[A-Za-z_$][\w$.]*/,
+    keywords: words(`
+      abstract assert break case catch class continue default do else enum extends final
+      finally for if implements import instanceof interface native new package private
+      protected public return static strictfp super switch synchronized this throw throws
+      transient try var void volatile while record sealed permits yield
+      boolean byte char double float int long short`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  kotlin: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    attribute: /^@[A-Za-z_][\w.]*/,
+    keywords: words(`
+      abstract annotation as break by catch class companion const constructor continue crossinline
+      data do else enum expect external final finally for fun get if import in infix init inline
+      inner interface internal is lateinit noinline object open operator out override package
+      private protected public reified return sealed set super suspend this throw try typealias
+      val value var vararg when where while`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  csharp: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    tripleQuotes: ['"""'],
+    keywords: words(`
+      abstract as async await base bool break byte case catch char checked class const continue
+      decimal default delegate do double else enum event explicit extern finally fixed float for
+      foreach get goto if implicit in init int interface internal is lock long namespace new
+      object operator out override params private protected public readonly record ref required
+      return sbyte sealed set short sizeof stackalloc static string struct switch this throw try
+      typeof uint ulong unchecked unsafe ushort using var virtual void volatile when while yield`),
+    literals: words(C_LIKE_LITERALS)
+  },
+  cpp: {
+    lineComments: ["//"],
+    blockComment: ["/*", "*/"],
+    quotes: ['"', "'"],
+    directive: /^\s*#\s*\w+/,
+    keywords: words(`
+      alignas alignof and asm auto bool break case catch char class concept const consteval
+      constexpr constinit const_cast continue co_await co_return co_yield decltype default delete
+      do double dynamic_cast else enum explicit export extern float for friend goto if inline int
+      long mutable namespace new noexcept not operator or override private protected public
+      register reinterpret_cast requires return short signed sizeof static static_assert
+      static_cast struct switch template this thread_local throw try typedef typeid typename
+      union unsigned using virtual void volatile while final`),
+    literals: words("true false nullptr NULL")
+  },
+  sql: {
+    lineComments: ["--"],
+    blockComment: ["/*", "*/"],
+    quotes: ["'", '"'],
+    caseInsensitive: true,
+    keywords: words(`
+      add all alter and as asc begin between by case cast check column commit constraint create
+      cross database default delete desc distinct drop else end exists foreign from full group
+      having if in index inner insert into is join key left like limit not offset on or order
+      outer primary references replace returning right rollback select set table then transaction
+      trigger union unique update using values view when where with without rowid autoincrement
+      pragma integer int text real blob numeric varchar char boolean date timestamp`),
+    literals: words("true false null")
+  }
+};
+var EXTENSION_LANGUAGE = {
+  ".ts": "javascript",
+  ".tsx": "javascript",
+  ".mts": "javascript",
+  ".cts": "javascript",
+  ".js": "javascript",
+  ".jsx": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
+  ".py": "python",
+  ".rs": "rust",
+  ".java": "java",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
+  ".cs": "csharp",
+  ".cpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".hpp": "cpp",
+  ".hh": "cpp",
+  ".hxx": "cpp",
+  ".h": "cpp",
+  ".c": "cpp",
+  ".sql": "sql"
+};
+function languageForFile(file) {
+  if (typeof file !== "string") return null;
+  const dot = file.lastIndexOf(".");
+  if (dot < 0 || file.lastIndexOf("/") > dot || file.lastIndexOf("\\") > dot) return null;
+  return EXTENSION_LANGUAGE[file.slice(dot).toLowerCase()] ?? null;
+}
+var NUMBER = /^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)[a-zA-Z]{0,3}/;
+var IDENTIFIER = /^[A-Za-z_$][\w$]*/;
+function findClose(text, from, closer, escapes) {
+  for (let index = from; index < text.length; index += 1) {
+    if (escapes && text[index] === "\\") {
+      index += 1;
+    } else if (text.startsWith(closer, index)) {
+      return index + closer.length;
+    }
+  }
+  return -1;
+}
+function tokenizeLine(line, language, state2 = null) {
+  const spec = LANGUAGES[language];
+  if (!spec) return { tokens: [{ text: line, type: null }], state: null };
+  const tokens = [];
+  let plain = "";
+  const flush = () => {
+    if (plain) tokens.push({ text: plain, type: null });
+    plain = "";
+  };
+  const emit = (text, type) => {
+    flush();
+    tokens.push({ text, type });
+  };
+  let position = 0;
+  let open = state2;
+  if (open) {
+    const end = findClose(line, 0, open.closer, open.kind === "string");
+    if (end < 0) return { tokens: [{ text: line, type: open.kind }], state: open };
+    emit(line.slice(0, end), open.kind);
+    position = end;
+    open = null;
+  }
+  if (spec.directive) {
+    const directive = spec.directive.exec(line.slice(position));
+    if (directive && position === 0) {
+      emit(directive[0], "meta");
+      position = directive[0].length;
+    }
+  }
+  while (position < line.length) {
+    const rest = line.slice(position);
+    const char = rest[0];
+    const lineComment = spec.lineComments.find((prefix) => rest.startsWith(prefix));
+    if (lineComment) {
+      emit(rest, "comment");
+      position = line.length;
+      break;
+    }
+    if (spec.blockComment && rest.startsWith(spec.blockComment[0])) {
+      const [opener, closer] = spec.blockComment;
+      const end = findClose(line, position + opener.length, closer, false);
+      if (end < 0) {
+        emit(rest, "comment");
+        open = { kind: "comment", closer };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "comment");
+      position = end;
+      continue;
+    }
+    const triple = spec.tripleQuotes?.find((quote) => rest.startsWith(quote));
+    if (triple) {
+      const end = findClose(line, position + triple.length, triple, true);
+      if (end < 0) {
+        emit(rest, "string");
+        open = { kind: "string", closer: triple };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "string");
+      position = end;
+      continue;
+    }
+    if (char === "'" && spec.charLiteral) {
+      const literal = spec.charLiteral.exec(rest);
+      if (literal) {
+        emit(literal[0], "string");
+        position += literal[0].length;
+      } else {
+        plain += char;
+        position += 1;
+      }
+      continue;
+    }
+    if (spec.quotes.includes(char)) {
+      const end = findClose(line, position + 1, char, true);
+      if (end < 0) {
+        emit(rest, "string");
+        if (spec.multilineQuotes?.includes(char)) open = { kind: "string", closer: char };
+        position = line.length;
+        break;
+      }
+      emit(line.slice(position, end), "string");
+      position = end;
+      continue;
+    }
+    if (spec.attribute && (char === "@" || char === "#")) {
+      const attribute = spec.attribute.exec(rest);
+      if (attribute) {
+        emit(attribute[0], "meta");
+        position += attribute[0].length;
+        continue;
+      }
+    }
+    if (/\d/.test(char)) {
+      const number = NUMBER.exec(rest);
+      if (number) {
+        emit(number[0], "number");
+        position += number[0].length;
+        continue;
+      }
+    }
+    const identifier = IDENTIFIER.exec(rest);
+    if (identifier) {
+      const word = identifier[0];
+      const lookup = spec.caseInsensitive ? word.toLowerCase() : word;
+      const after = rest.slice(word.length);
+      let type = null;
+      if (spec.keywords.has(lookup)) type = "keyword";
+      else if (spec.literals.has(lookup)) type = "literal";
+      else if (/^\s*\(/.test(after) || spec.macroBang && /^!\s*[([{]/.test(after)) type = "function";
+      else if (/^[A-Z]/.test(word) && /[a-z]/.test(word)) type = "type";
+      if (type === "function" && spec.macroBang && after.startsWith("!")) {
+        emit(word + "!", "function");
+        position += word.length + 1;
+        continue;
+      }
+      if (type) emit(word, type);
+      else plain += word;
+      position += word.length;
+      continue;
+    }
+    plain += char;
+    position += 1;
+  }
+  flush();
+  return { tokens, state: open };
+}
+function highlightLines(lines, language) {
+  if (!LANGUAGES[language]) return null;
+  let state2 = null;
+  return lines.map((line) => {
+    const result = tokenizeLine(line, language, state2);
+    state2 = result.state;
+    return result.tokens;
+  });
+}
+function highlightIsolated(lines, language) {
+  if (!LANGUAGES[language]) return null;
+  return lines.map((line) => tokenizeLine(line, language).tokens);
+}
+
+// ui/strabo-panel-source.js
 var SOURCE_LINE_CAP = 2e3;
 function renderSource(container, view2, handlers = {}) {
   container.replaceChildren();
@@ -9108,13 +9166,13 @@ function renderSource(container, view2, handlers = {}) {
   container.append(body);
 }
 function sourceModeButton(label, mode, handler) {
-  const button2 = document.createElement("button");
-  button2.type = "button";
-  button2.className = "source-mode";
-  button2.dataset.mode = mode;
-  button2.textContent = label;
-  button2.addEventListener("click", () => handler());
-  return button2;
+  const button3 = document.createElement("button");
+  button3.type = "button";
+  button3.className = "source-mode";
+  button3.dataset.mode = mode;
+  button3.textContent = label;
+  button3.addEventListener("click", () => handler());
+  return button3;
 }
 function sourceNote(text, className, role) {
   const note3 = document.createElement("p");
@@ -9192,13 +9250,6 @@ function renderDiffBody(body, data) {
   if (truncated) {
     body.append(sourceNote(`Showing the first ${SOURCE_LINE_CAP} lines of this change.`, "source-note"));
   }
-}
-function svgElement(name, attributes) {
-  const element2 = document.createElementNS("http://www.w3.org/2000/svg", name);
-  for (const [key, value] of Object.entries(attributes)) {
-    element2.setAttribute(key, value);
-  }
-  return element2;
 }
 
 // ui/strabo-tier-panel.js
@@ -9820,7 +9871,7 @@ function note2(text) {
   paragraph.textContent = text;
   return paragraph;
 }
-function button(text, onClick) {
+function button2(text, onClick) {
   const control = document.createElement("button");
   control.type = "button";
   control.textContent = text;
@@ -9890,7 +9941,7 @@ function narratorSection(handlers = {}) {
     modelList.append(option);
   }
   modelInput.setAttribute("list", modelList.id);
-  const fetchButton = button("Fetch models", () => {
+  const fetchButton = button2("Fetch models", () => {
     fetchButton.disabled = true;
     Promise.resolve(handlers.onFetchModels?.({ endpoint: endpointInput.value.trim(), model: modelInput.value.trim() })).then((result) => handlers.onNarratorState?.({ models: result?.models ?? [], modelsNote: narratorModelsLabel(result) })).catch((error) => handlers.onNarratorState?.({ modelsNote: error.message ?? "Could not list models." })).finally(() => {
       fetchButton.disabled = false;
@@ -9931,7 +9982,7 @@ function narratorSection(handlers = {}) {
       readOnly: Boolean(locked.apiKeyEnv)
     });
     envInput.id = "narrator-key-env";
-    const saveEnv = button("Use variable", () => handlers.onNarratorChange?.({ apiKeyEnv: envInput.value.trim() }));
+    const saveEnv = button2("Use variable", () => handlers.onNarratorChange?.({ apiKeyEnv: envInput.value.trim() }));
     saveEnv.id = "narrator-key-env-save";
     const envRow = document.createElement("div");
     envRow.className = "setting-row";
@@ -9944,7 +9995,7 @@ function narratorSection(handlers = {}) {
     keyInput.id = "narrator-key";
     keyInput.placeholder = "paste the key (write-only)";
     keyInput.autocomplete = "off";
-    const storeButton = button("Store key", () => {
+    const storeButton = button2("Store key", () => {
       if (!keyInput.value.trim()) {
         return;
       }
@@ -9957,7 +10008,7 @@ function narratorSection(handlers = {}) {
       });
     });
     storeButton.id = "narrator-key-store";
-    const clearButton = button("Remove stored key", () => handlers.onClearKey?.());
+    const clearButton = button2("Remove stored key", () => handlers.onClearKey?.());
     clearButton.id = "narrator-key-clear";
     const keyRow = document.createElement("div");
     keyRow.className = "setting-row";
@@ -9994,7 +10045,7 @@ function narratorSection(handlers = {}) {
   budgetInput.id = "narrator-budget";
   budgetInput.value = view2.requestBudget ?? "";
   budgetInput.readOnly = Boolean(locked.budget);
-  const budgetSave = button(
+  const budgetSave = button2(
     "Save budget",
     () => handlers.onNarratorChange?.({ requestBudget: Number.parseInt(budgetInput.value, 10) || null })
   );
@@ -10007,7 +10058,7 @@ function narratorSection(handlers = {}) {
   if (locked.budget) {
     group.append(lockedNote(locked.budget, "The request budget"));
   }
-  const testButton = button("Test connection", () => {
+  const testButton = button2("Test connection", () => {
     testButton.disabled = true;
     Promise.resolve(handlers.onTestConnection?.({ endpoint: endpointInput.value.trim(), model: modelInput.value.trim() })).then((result) => handlers.onNarratorState?.({ test: result })).catch((error) => handlers.onNarratorState?.({ test: { ok: false, reason: "provider-error", detail: error.message } })).finally(() => {
       testButton.disabled = false;
@@ -10016,7 +10067,7 @@ function narratorSection(handlers = {}) {
   testButton.id = "narrator-test";
   group.append(field("Connection", testButton));
   group.append(note2(narratorTestLabel(state2.test)));
-  const saveButton = button(
+  const saveButton = button2(
     "Save endpoint and model",
     () => handlers.onNarratorChange?.({
       ...locked.endpoint ? {} : { endpoint: endpointInput.value.trim() },
@@ -12711,14 +12762,14 @@ function reviewDelegateTarget(result) {
   }
   return { kind: "review", label, evidence };
 }
-function commitDelegateTarget(button2) {
-  const meta = button2.parentElement?.querySelector(".evidence")?.textContent ?? "";
+function commitDelegateTarget(button3) {
+  const meta = button3.parentElement?.querySelector(".evidence")?.textContent ?? "";
   return {
     kind: "commit",
-    id: button2.dataset.hash ?? button2.textContent,
-    label: button2.textContent.trim().slice(0, 120),
-    detail: meta ? `${button2.textContent.trim()} (${meta.trim()})` : button2.textContent.trim(),
-    evidence: meta ? [`commit: ${button2.textContent.trim()}`, `meta: ${meta.trim()}`] : []
+    id: button3.dataset.hash ?? button3.textContent,
+    label: button3.textContent.trim().slice(0, 120),
+    detail: meta ? `${button3.textContent.trim()} (${meta.trim()})` : button3.textContent.trim(),
+    evidence: meta ? [`commit: ${button3.textContent.trim()}`, `meta: ${meta.trim()}`] : []
   };
 }
 function memberDelegateTarget(card) {

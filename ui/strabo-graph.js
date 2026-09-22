@@ -60,14 +60,18 @@ export function passportFor(model, id) {
     return null;
   }
   const edges = model.edges ?? [];
-  const imports = edges
-    .filter((edge) => edge.source === id)
-    .map((edge) => ({ id: edge.target, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
-  const usedBy = edges
-    .filter((edge) => edge.target === id)
-    .map((edge) => ({ id: edge.source, line: edge.evidence?.line, specifier: edge.evidence?.specifier }));
+  // One row per file, not per recorded edge: a call edge sits beside its import, and a file
+  // may be imported on several lines. Counting edges would report references as importers,
+  // so a count could outrun the distinct-file blast radius it is meant to sit under. A
+  // `declare` edge (a barrel re-export) is left out, matching the server's use-edge metrics.
+  const imports = distinctByFile(
+    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge)),
+  );
+  const usedBy = distinctByFile(
+    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge)),
+  );
 
-  const metrics = [{ label: 'Direct importers', value: usedBy.length }];
+  const metrics = [{ label: 'Direct importers', value: usedBy.length, unit: 'files' }];
   if (typeof node.systemUnit === 'string' && !node.id.endsWith('#support')) {
     // L17: at L1 the blast radius reports the in-unit count first, the outside count apart.
     metrics.push(
@@ -75,11 +79,11 @@ export function passportFor(model, id) {
       { label: 'Blast radius outside', value: node.outsideDependents ?? 0 },
     );
   } else {
-    metrics.push({ label: 'Blast radius', value: node.transitiveDependents ?? 0 });
+    metrics.push({ label: 'Blast radius', value: node.transitiveDependents ?? 0, unit: 'files' });
   }
   metrics.push(
-    { label: 'Direct imports', value: imports.length },
-    { label: 'Depends on (all)', value: node.transitiveDependencies ?? 0 },
+    { label: 'Direct imports', value: imports.length, unit: 'files' },
+    { label: 'Depends on (all)', value: node.transitiveDependencies ?? 0, unit: 'files' },
   );
   if (typeof node.lines === 'number') {
     metrics.push({ label: 'Lines', value: node.lines });
@@ -118,6 +122,33 @@ export function passportFor(model, id) {
     imports,
     usedBy,
   };
+}
+
+/** One dependency row: the neighbour file plus the edge's recorded evidence. */
+function edgeEntry(id, edge) {
+  return {
+    id,
+    line: edge.evidence?.line,
+    specifier: edge.evidence?.specifier,
+    role: edge.role,
+  };
+}
+
+/**
+ * Collapse dependency rows to one per file, over use edges only.
+ *
+ * `declare` edges (a barrel re-export) describe the module tree rather than a dependency,
+ * so they are left out to keep the rows and the counts on the same footing as blast radius.
+ */
+function distinctByFile(entries) {
+  const byFile = new Map();
+  for (const entry of entries) {
+    if (entry.role === 'declare' || byFile.has(entry.id)) {
+      continue;
+    }
+    byFile.set(entry.id, entry);
+  }
+  return [...byFile.values()];
 }
 
 /**
@@ -222,6 +253,7 @@ export function shortcutSheet() {
     { keys: 'O', action: 'Show the selected file’s links to other units' },
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
+    { keys: 'L', action: 'Show a file name under every file' },
     { keys: 'C', action: 'Show recorded function calls instead of imports' },
     { keys: 'H', action: 'Show co-change coupling (commits that changed files together)' },
     { keys: 'S', action: 'View the selected file’s source' },

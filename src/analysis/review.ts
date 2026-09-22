@@ -7,6 +7,7 @@ import type { Graph } from '../types.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
+import { classifyExclusion } from '../scan/exclusions.ts';
 
 const run = promisify(execFile);
 
@@ -132,17 +133,19 @@ export async function reviewWorkingTree(root: string, graph: Graph): Promise<Rev
       graph,
       'unstaged',
     );
-    const untrackedFiles = parseNullList(untracked).map((file): ReviewFile => {
-      const lines = countLines(path.join(root, file));
-      return {
-        path: file,
-        status: 'untracked',
-        group: 'untracked',
-        insertions: lines,
-        deletions: lines === null ? null : 0,
-        inGraph: graph.nodes.some((node) => node.id === file),
-      };
-    });
+    const untrackedFiles = parseNullList(untracked)
+      .filter((file) => classifyExclusion(file)?.reason !== 'generated')
+      .map((file): ReviewFile => {
+        const lines = countLines(path.join(root, file));
+        return {
+          path: file,
+          status: 'untracked',
+          group: 'untracked',
+          insertions: lines,
+          deletions: lines === null ? null : 0,
+          inGraph: graph.nodes.some((node) => node.id === file),
+        };
+      });
 
     const files = [...staged, ...unstaged, ...untrackedFiles];
     return {
@@ -293,6 +296,9 @@ export function mergeChanges(
 ): ReviewFile[] {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   return changes
+    // Generated output (a built bundle, its source map, minified files) is out of scope:
+    // it mirrors authored source, so reviewing it inflates every change set.
+    .filter((change) => classifyExclusion(change.path)?.reason !== 'generated')
     .map((change): ReviewFile => {
       const stat = counts.get(change.path) ?? { insertions: null, deletions: null };
       return {

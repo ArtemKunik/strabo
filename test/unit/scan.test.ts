@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { scanRepository } from '../../src/index.ts';
+import { classifyExclusion } from '../../src/scan/exclusions.ts';
 import { countLines } from '../../src/scan/scan.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -104,4 +105,18 @@ test('scanRepository excludes generated and vendored directories', async () => {
       (exclusion) => exclusion.reason === 'generated' && exclusion.path.startsWith('node_modules/'),
     ),
   );
+});
+
+test('a built bundle and its source map are classified generated', () => {
+  assert.deepEqual(classifyExclusion('public/strabo.bundle.js'), {
+    path: 'public/strabo.bundle.js',
+    reason: 'generated',
+    detail: '.bundle.js',
+  });
+  assert.deepEqual(classifyExclusion('public/strabo.bundle.js.map'), {
+    path: 'public/strabo.bundle.js.map',
+    reason: 'generated',
+    detail: '.bundle.js.map',
+  });
+  assert.equal(classifyExclusion('src/index.ts'), null);
 });

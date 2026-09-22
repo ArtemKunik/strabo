@@ -30,11 +30,13 @@ export function buildAdjacency(graph: Graph, options: { includeDeclare?: boolean
     forward.get(edge.source)?.push(edge.target);
     backward.get(edge.target)?.push(edge.source);
   }
-  for (const list of forward.values()) {
-    list.sort();
-  }
-  for (const list of backward.values()) {
-    list.sort();
+  // Adjacency is the set of neighbours, not the edge list: a recorded call sits beside its
+  // import, and a target may be imported on several lines. Keeping parallel edges would make
+  // an edge count (`.length`) read as a file count, so collapse each list to unique ids.
+  for (const map of [forward, backward]) {
+    for (const [id, list] of map) {
+      map.set(id, [...new Set(list)].sort());
+    }
   }
   return { forward, backward };
 }
