@@ -166,6 +166,18 @@ console.log('consumer verification passed');
   const report = execSync(`node "${straboBin}" report . --base ${baseHash} --format md`, { cwd: fixture }).toString();
   check(/Cycles introduced/.test(report), 'report names the introduced cycle');
   check(report.includes('src/a.ts') && report.includes('src/b.ts'), 'report names the cycle members');
+
+  // The whole-repository report, from the installed tarball. Analyses are skipped so the
+  // check stays fast; a skipped section is named, never shown as empty.
+  const summary = execSync(
+    `node "${straboBin}" summary . --no-change --no-smells --no-hotspots --no-ownership`,
+    { cwd: fixture },
+  ).toString();
+  check(/## Pain points \(/.test(summary), 'summary report has a pain points section');
+  check(/### critical \(/.test(summary), 'summary ranks the cycle critical');
+  check(/Break the cycle/.test(summary), 'summary suggests breaking the cycle');
+  check(summary.includes('src/a.ts') && summary.includes('src/b.ts'), 'summary names the cycle members');
+  check(/## Suggestions \(/.test(summary), 'summary has a suggestions section');
 } catch (error) {
   failures.push(error instanceof Error ? error.message : String(error));
   console.error(error);

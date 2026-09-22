@@ -447,10 +447,31 @@ button.primary {
   min-height: 0;
 }
 
+/* Both screens occupy the same grid cell so toggling `hidden` swaps them in place
+   instead of stacking a second row underneath. */
+.screen {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+
 .graph-wrap {
   position: relative;
-  min-height: 0;
   background-color: var(--bg-1);
+}
+
+.terminal-screen {
+  position: relative;
+  background-color: var(--bg-1);
+  padding: 8px;
+}
+
+.terminal-container {
+  position: absolute;
+  inset: 8px;
+}
+
+.terminal-container .xterm {
+  height: 100%;
 }
 
 /*
@@ -2665,6 +2686,27 @@ table.change-metrics td:first-child .link {
   padding: 2px 7px;
   font-size: 11px;
   color: var(--ink-3);
+}
+
+.screen-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.screen-tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.screen-tab[aria-selected="true"] {
+  color: var(--ink-1);
+  border-bottom-color: var(--accent);
 }
 
 .inspector-tabs {

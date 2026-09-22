@@ -514,6 +514,13 @@ export async function extractKotlinSymbols(
 
     const typeNames = new Set<string>();
 
+    const addField = (field: CodeSymbol): void => {
+      symbols.push(field);
+      const ownerFields = fieldsByOwner.get(field.owner) ?? new Set<string>();
+      fieldsByOwner.set(field.owner, ownerFields);
+      ownerFields.add(field.name);
+    };
+
     const visit = (node: Node, owner: string): void => {
       if (
         node.type === 'class_declaration' ||
@@ -525,6 +532,18 @@ export async function extractKotlinSymbols(
           typeNames.add(name);
         }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
+        // A primary-constructor `val`/`var` parameter is a property of the class, so it is a
+        // member and its references inside methods are wired like any body property.
+        const constructor = node.namedChildren.find((child) => child.type === 'primary_constructor');
+        for (const parameter of constructor?.namedChildren ?? []) {
+          if (parameter.type !== 'class_parameter') {
+            continue;
+          }
+          const property = constructorPropertyOf(parameter, nextOwner);
+          if (property) {
+            addField(property);
+          }
+        }
         for (const child of node.namedChildren) {
           visit(child, nextOwner);
         }
@@ -540,10 +559,7 @@ export async function extractKotlinSymbols(
       if (node.type === 'property_declaration') {
         const field = fieldOf(node, owner);
         if (field) {
-          symbols.push(field);
-          const ownerFields = fieldsByOwner.get(owner) ?? new Set<string>();
-          fieldsByOwner.set(owner, ownerFields);
-          ownerFields.add(field.name);
+          addField(field);
           return;
         }
       }
@@ -745,6 +761,34 @@ function fieldOf(node: Node, owner: string): CodeSymbol | null {
   }
   const binding = node.namedChildren.find((child) => child.type === 'binding_pattern_kind')?.text;
   const type = declaration?.namedChildren
+    .find((child) => child.type === 'user_type')
+    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  return {
+    name,
+    kind: 'field',
+    visibility: visibilityOf(node),
+    owner,
+    type,
+    mutable: binding === 'var',
+    line: node.startPosition.row + 1,
+  };
+}
+
+/**
+ * A primary-constructor parameter is a property only when it is bound with `val` or `var`;
+ * a bare parameter is a constructor argument and is not a member. Data classes declare their
+ * fields this way, so omitting them would hide every field from the member map and data flow.
+ */
+function constructorPropertyOf(node: Node, owner: string): CodeSymbol | null {
+  const binding = node.namedChildren.find((child) => child.type === 'binding_pattern_kind')?.text;
+  if (binding !== 'val' && binding !== 'var') {
+    return null;
+  }
+  const name = node.namedChildren.find((child) => child.type === 'simple_identifier')?.text;
+  if (!name) {
+    return null;
+  }
+  const type = node.namedChildren
     .find((child) => child.type === 'user_type')
     ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
   return {

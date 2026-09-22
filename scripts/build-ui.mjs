@@ -41,6 +41,10 @@ await build({
 
 fs.copyFileSync(path.join(sourceDir, 'styles.css'), path.join(outDir, 'styles.css'));
 fs.copyFileSync(path.join(sourceDir, 'index.html'), path.join(outDir, 'index.html'));
+fs.copyFileSync(
+  path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'),
+  path.join(outDir, 'xterm.css'),
+);
 
 for (const name of BUNDLED_MODULES) {
   fs.rmSync(path.join(outDir, name), { force: true });

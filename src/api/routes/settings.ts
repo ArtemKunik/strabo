@@ -55,6 +55,8 @@ export interface StraboSettings {
   riskOnline: boolean;
   /** Whether `PUT` may widen the scan ceiling; startup-only, never set by a request. */
   allowCeilingWidening: boolean;
+  /** Whether the process can relaunch itself (`POST /settings/restart`); false when embedded. */
+  restartAvailable: boolean;
   /** SPDX ids the license policy denies, or null for the built-in policy. */
   riskDeniedLicenses: string[] | null;
   /** The narrator setup, merged with the environment winning. */
@@ -119,6 +121,7 @@ function settingsView(
     configPath: config.configPath ?? null,
     riskOnline: Boolean(config.risk?.online),
     allowCeilingWidening: Boolean(config.allowCeilingWidening),
+    restartAvailable: typeof config.restart === 'function',
     riskDeniedLicenses: config.risk?.deniedLicenses ?? null,
     narrator: narratorView(config, store, keyStore, env),
   };
@@ -224,6 +227,10 @@ function cleanStringOrNull(value: unknown): string | null | undefined {
  * environment are rejected when the body tries to change them. Changing the endpoint host
  * clears the stored key and the persisted env-var binding, so the key must be confirmed
  * again for the new host. Writes are accepted only from the page's own origin.
+ *
+ * `POST /settings/restart` asks the host to relaunch the process. It is accepted only from
+ * the page's own origin and only when the host wired `config.restart`; otherwise it answers
+ * 501. See {@link StraboConfig.restart}.
  */
 export function createSettingsRouter(
   config: StraboConfig,
@@ -435,6 +442,30 @@ export function createSettingsRouter(
     } catch (error) {
       sendError(response, error);
     }
+  });
+
+  /**
+   * Relaunch the standalone server. Same-origin only, and only when the host wired a restart
+   * capability (`config.restart`); an embedded host answers 501 rather than pretending. The
+   * acknowledgement is sent first and the relaunch runs once the response is flushed, so the
+   * caller can poll for the server to come back instead of seeing a dropped connection.
+   */
+  router.post('/settings/restart', (request, response) => {
+    if (!isSameOriginRequest(request)) {
+      response.status(403).json({ error: 'restart is accepted only from the Strabo page.' });
+      return;
+    }
+    const restart = config.restart;
+    if (typeof restart !== 'function') {
+      response.status(501).json({ error: 'This host does not support restarting the server.' });
+      return;
+    }
+    response.json({ restarting: true });
+    response.on('finish', () => {
+      void Promise.resolve()
+        .then(() => restart())
+        .catch((error: unknown) => config.serverLog?.('restart failed', error));
+    });
   });
 
   return router;

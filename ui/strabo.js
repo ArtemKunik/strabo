@@ -70,6 +70,7 @@ import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, 
 import { crossRepoNodeIds } from './strabo-workspace.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
+import { initTerminalScreen } from './strabo-terminal.js';
 
 /** Incremented on every scan; async completions check their captured generation. */
 let scanGeneration = 0;
@@ -130,7 +131,7 @@ const store = createStore({
     stepIndex: 0,
     dim: false,
   },
-  ui: { node: null, memberOpen: false },
+  ui: { node: null, memberOpen: false, screen: 'graph' },
 });
 const state = store.get().view;
 const memberUI = store.get().member;
@@ -386,6 +387,11 @@ const elements = {
   passportPanel: document.getElementById('passport-panel'),
   routePanel: document.getElementById('route-panel'),
   sourcePanel: document.getElementById('source-panel'),
+  screenTabGraph: document.getElementById('screen-tab-graph'),
+  screenTabTerminal: document.getElementById('screen-tab-terminal'),
+  graphScreen: document.getElementById('graph-screen'),
+  terminalScreen: document.getElementById('terminal-screen'),
+  terminalContainer: document.getElementById('terminal-container'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -1741,6 +1747,7 @@ function renderSettingsView() {
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
+    onRestart: () => restartServer(),
     onNarratorChange: async (patch) => {
       await saveServerSettings({ narrator: patch }, 'Narrator updated.');
       // The server can change more than the patch asked for: a new endpoint host clears the
@@ -1830,6 +1837,47 @@ async function putServerSettings(patch) {
   }
   serverSettings = body;
   return body;
+}
+
+/**
+ * Ask the server to relaunch itself, then wait for it to come back and reload the page.
+ *
+ * The acknowledgement only means the process accepted the request: the old server stops
+ * right after answering, so the page polls `/health` until a server answers again rather
+ * than trusting the reply. A server that never returns is reported instead of leaving the
+ * panel spinning.
+ */
+async function restartServer() {
+  const response = await fetch(`${API_PATH}/settings/restart`, { method: 'POST' });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not restart the server (${response.status}).`);
+  }
+  await waitForServerRestart();
+}
+
+/** Poll `/health` until the relaunched server answers, then reload; give up after ~30s. */
+async function waitForServerRestart() {
+  settingsStatus = 'Restarting…';
+  settingsStatusError = false;
+  renderSettingsView();
+  // The old process is still finishing its reply; give it a moment to go down first.
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      const response = await fetch(`${API_PATH}/health`, { cache: 'no-store' });
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+    } catch {
+      // Still down; keep waiting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  settingsStatus = 'The server did not come back; restart it from the terminal.';
+  settingsStatusError = true;
+  renderSettingsView();
 }
 
 /** Open the settings window and load the current server values. */
@@ -1974,6 +2022,7 @@ async function showPassport() {
     renderRepositoryPassport(elements.passportPanel, report, {
       onSelect: (id) => selectNode(id),
       onOpenRoute: () => showRoute(),
+      onExportReport: (format) => exportRepositoryReport(format),
       onClose: closePassport,
     });
   } catch (error) {
@@ -1989,6 +2038,57 @@ async function showPassport() {
 function closePassport() {
   elements.passportPanel.hidden = true;
   refreshDock();
+}
+
+/**
+ * Download the repository report from `/analysis/report`.
+ *
+ * The server renders Markdown, JSON, or self-contained HTML from the same document the
+ * passport shows, so the download cannot disagree with the panel. HTML is the printable
+ * form, so it is opened in a tab: the browser shows its own loading indicator while the
+ * analyses run, and the operator prints it to PDF from there. Markdown and JSON download.
+ *
+ * The report can take a while on a large repository, so the status line says it is working
+ * rather than leaving the click looking inert.
+ */
+async function exportRepositoryReport(format) {
+  const query = new URLSearchParams({ format });
+  if (state.repository) {
+    query.set('repository', state.repository);
+  }
+  const endpoint = `${API_PATH}/analysis/report?${query.toString()}`;
+
+  if (format === 'html') {
+    window.open(endpoint, '_blank', 'noopener');
+    elements.status.textContent = 'Opening the printable report in a new tab…';
+    return;
+  }
+
+  const extension = format === 'json' ? 'json' : 'md';
+  elements.status.textContent = 'Generating the report…';
+  try {
+    const response = await fetch(endpoint);
+    if (!response.ok) {
+      elements.status.textContent =
+        response.status === 404
+          ? 'Report export failed: this server was started before the report route existed — restart it.'
+          : `Report export failed: ${response.status} ${response.statusText}`;
+      return;
+    }
+    const text = await response.text();
+    const safeName = String(state.repository ?? 'repository').replace(/[\\/]/g, '-');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `strabo-report-${safeName}.${extension}`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    elements.status.textContent = `Report exported as ${extension.toUpperCase()}.`;
+  } catch (error) {
+    elements.status.textContent = `Report export failed: ${error.message}`;
+  }
 }
 
 /**
@@ -3458,6 +3558,27 @@ function withSelection(resolved, selection) {
 view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);
+
+/**
+ * The Terminal screen. Created once at bootstrap — like the graph, it lives for the whole
+ * page session, so switching tabs only shows/hides it rather than tearing it down.
+ */
+const terminalScreen = initTerminalScreen(elements.terminalContainer);
+
+function setScreen(screen) {
+  store.set('ui', { screen });
+  const showTerminal = screen === 'terminal';
+  elements.graphScreen.hidden = showTerminal;
+  elements.terminalScreen.hidden = !showTerminal;
+  elements.screenTabGraph.setAttribute('aria-selected', String(!showTerminal));
+  elements.screenTabTerminal.setAttribute('aria-selected', String(showTerminal));
+  if (showTerminal) {
+    terminalScreen.activate();
+  }
+}
+
+elements.screenTabGraph.addEventListener('click', () => setScreen('graph'));
+elements.screenTabTerminal.addEventListener('click', () => setScreen('terminal'));
 
 /**
  * Turn every auxiliary panel into a floating window. The panels keep their ids and

@@ -71,6 +71,7 @@ test('GET /settings reports the start root, ceiling, and risk switch', async () 
     configPath: string | null;
     riskOnline: boolean;
     allowCeilingWidening: boolean;
+    restartAvailable: boolean;
   };
 
   assert.equal(settings.workspaceRoot, path.join(fixtures, 'block-repo'));
@@ -79,6 +80,48 @@ test('GET /settings reports the start root, ceiling, and risk switch', async () 
   assert.equal(settings.configPath, null);
   assert.equal(settings.riskOnline, false);
   assert.equal(settings.allowCeilingWidening, false);
+  // An embedded host owns its own process, so restart is not offered by default.
+  assert.equal(settings.restartAvailable, false);
+});
+
+test('POST /settings/restart refuses when the host wired no restart capability', async () => {
+  const base = await mount(makeConfig());
+  const response = await fetch(`${base}/api/strabo/settings/restart`, { method: 'POST' });
+  assert.equal(response.status, 501);
+});
+
+test('POST /settings/restart relaunches only after the reply is flushed', async () => {
+  let restarts = 0;
+  const config: StraboConfig = { ...makeConfig(), restart: () => { restarts += 1; } };
+  const base = await mount(config);
+
+  const settings = (await (await fetch(`${base}/api/strabo/settings`)).json()) as {
+    restartAvailable: boolean;
+  };
+  assert.equal(settings.restartAvailable, true);
+
+  const accepted = await fetch(`${base}/api/strabo/settings/restart`, { method: 'POST' });
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), { restarting: true });
+
+  // The relaunch is scheduled on the response's `finish`, which lands just after the body.
+  for (let attempt = 0; attempt < 100 && restarts === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(restarts, 1);
+});
+
+test('POST /settings/restart is refused from another origin', async () => {
+  let restarts = 0;
+  const config: StraboConfig = { ...makeConfig(), restart: () => { restarts += 1; } };
+  const base = await mount(config);
+
+  const response = await fetch(`${base}/api/strabo/settings/restart`, {
+    method: 'POST',
+    headers: { origin: 'http://evil.example' },
+  });
+  assert.equal(response.status, 403);
+  assert.equal(restarts, 0);
 });
 
 test('PUT /settings refuses to widen the ceiling without the opt-in and changes nothing', async () => {

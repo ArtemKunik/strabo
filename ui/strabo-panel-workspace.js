@@ -651,6 +651,32 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
     container.append(route);
   }
 
+  if (handlers.onExportReport) {
+    const bar = document.createElement('p');
+    bar.className = 'passport-export';
+    const select = document.createElement('select');
+    select.id = 'report-format';
+    select.title = 'Report format';
+    for (const [value, text] of [
+      ['md', 'Markdown'],
+      ['json', 'JSON'],
+      ['html', 'HTML (print to PDF)'],
+    ]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      select.append(option);
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = 'export-report';
+    button.textContent = 'Export report';
+    button.title = 'Download the repository report: pain points, pending change set, and suggestions';
+    button.addEventListener('click', () => handlers.onExportReport(select.value));
+    bar.append(select, button);
+    container.append(bar);
+  }
+
   if (handlers.onClose) {
     const close = document.createElement('button');
     close.type = 'button';

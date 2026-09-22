@@ -506,7 +506,8 @@ function commitSection(prefs, handlers) {
  * `onSaveCeiling(valueOrNull)` and `onToggleRisk(boolean)`
  * return promises and may reject with an `Error` whose message is shown inline. The
  * controller re-renders afterwards, so this function does not keep its own copy of the
- * server values.
+ * server values. `onRestart()` asks the host to relaunch the process; it is offered only
+ * when `server.restartAvailable` is true.
  */
 export function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
@@ -619,6 +620,28 @@ export function renderSettings(container, handlers = {}) {
     remote.append(
       note('Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.'),
     );
+
+    // Relaunch the process. Only the standalone server can do this, so the button is absent
+    // when an embedded host owns the process rather than offered and then refused.
+    if (server.restartAvailable) {
+      const restartButton = button('Restart Strabo', () => {
+        restartButton.disabled = true;
+        Promise.resolve(handlers.onRestart?.())
+          .then(() => report('Restarting… the page reloads when the server is back.', false))
+          .catch((error) => report(error.message ?? 'Could not restart the server.', true))
+          .finally(() => {
+            restartButton.disabled = false;
+          });
+      });
+      restartButton.id = 'setting-restart';
+      restartButton.title = 'Relaunch the server process with the same arguments';
+      remote.append(field('Server process', restartButton));
+      remote.append(
+        note(
+          'Stops this server process and starts a new one with the same arguments, so a code change takes effect. The page reloads once it is back.',
+        ),
+      );
+    }
   }
   container.append(remote);
 

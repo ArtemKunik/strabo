@@ -77,7 +77,16 @@ export function isSameOriginRequest(request: Request): boolean {
  * there is nothing to verify, and curl-style callers are already network-capable.
  */
 export function isAllowedHost(request: Request, configuredHost?: string): boolean {
-  const raw = request.get('host')?.toLowerCase().trim();
+  return isAllowedHostHeader(request.get('host'), configuredHost);
+}
+
+/**
+ * The header-only core of {@link isAllowedHost}, usable outside Express — a WebSocket
+ * upgrade arrives as a raw `http.IncomingMessage`, not a `Request`, so it reads
+ * `req.headers.host` itself and passes the value in here.
+ */
+export function isAllowedHostHeader(rawHost: string | undefined, configuredHost?: string): boolean {
+  const raw = rawHost?.toLowerCase().trim();
   if (!raw) {
     return true;
   }
@@ -98,6 +107,27 @@ export function isAllowedHost(request: Request, configuredHost?: string): boolea
     return isIpLiteral(hostname);
   }
   return false;
+}
+
+/**
+ * Whether an `Origin` header (when present) names the same host as `Host`. Mirrors
+ * {@link isSameOriginRequest}'s Origin check for non-Express callers such as a WebSocket
+ * upgrade, where the browser sends `Origin` on the handshake but does not enforce
+ * same-origin itself the way it does for `fetch`.
+ */
+export function isSameOriginHeader(rawHost: string | undefined, rawOrigin: string | undefined): boolean {
+  const host = rawHost?.toLowerCase();
+  if (!host) {
+    return true;
+  }
+  if (!rawOrigin) {
+    return true;
+  }
+  try {
+    return new URL(rawOrigin).host.toLowerCase() === host;
+  } catch {
+    return false;
+  }
 }
 
 /** Split the port off a Host header value, tolerating bracketed IPv6. */

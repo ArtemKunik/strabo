@@ -301,6 +301,21 @@ export type {
   PassportEntryPoint,
   PassportCycle,
 } from './analysis/passport.ts';
+export { buildRepositoryReport, DEFAULT_REPORT_LIMITS, SEVERITY_ORDER } from './report/repository-report.ts';
+export type {
+  PainPoint,
+  PainPointKind,
+  RepositoryChangeSection,
+  RepositoryReportDocument,
+  RepositoryReportInputs,
+  ReportEvidence,
+  ReportLimits,
+  ReportRevision,
+  Severity,
+  Suggestion,
+} from './report/repository-report.ts';
+export { suggestionFor } from './report/suggestions.ts';
+export { renderReportMarkdown } from './report/render-markdown.ts';
 export { applyPersistedSettings, createSettingsRouter, resolveScanCeiling } from './api/routes/settings.ts';
 export type { StraboSettings, NarratorSettingsView, SettingsRouterOptions } from './api/routes/settings.ts';
 

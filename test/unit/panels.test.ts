@@ -929,6 +929,33 @@ test('renderRepositoryPassport shows graph fingerprint and scan time (T6)', () =
   assert.equal(line!.classList.contains('is-stale'), true);
 });
 
+test('renderRepositoryPassport offers an export control that passes the chosen format', () => {
+  const target = container();
+  const formats: string[] = [];
+  renderRepositoryPassport(
+    target,
+    {
+      repository: 'acme',
+      size: { files: 3, edges: 2, directories: 1, tests: 0, diagnostics: 0, excluded: 0 },
+      languages: [],
+      entryPoints: [],
+      topDirectories: [],
+      topFiles: [],
+      cycles: { total: 0, largest: [] },
+      untested: { total: 0, files: [] },
+    },
+    { onExportReport: (format: string) => formats.push(format) },
+  );
+
+  const select = target.querySelector('#report-format') as HTMLSelectElement | null;
+  const button = target.querySelector('#export-report') as HTMLButtonElement | null;
+  assert.ok(select, 'the export format picker is rendered');
+  assert.ok(button, 'the export button is rendered');
+  select!.value = 'html';
+  button!.click();
+  assert.deepEqual(formats, ['html']);
+});
+
 test('renderImpactPassport shows provenance and labels an approximation (T6/R4)', () => {
   const target = container();
   renderImpactPassport(

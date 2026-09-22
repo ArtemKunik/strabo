@@ -8,12 +8,21 @@
       rel="icon"
       href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230c1016'/%3E%3Cpath%20d='M16%205%2027%2016%2016%2027%205%2016Z'%20fill='none'%20stroke='%234c9aff'%20stroke-width='2.5'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='3'%20fill='%234c9aff'/%3E%3C/svg%3E"
     />
+    <link rel="stylesheet" href="/xterm.css" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="toolbar">
       <div class="tb-group tb-brand-group">
         <h1 class="brand"><span class="brand-mark" aria-hidden="true">◈</span> Strabo</h1>
+      </div>
+      <div class="tb-group tb-screen-group screen-tabs" role="tablist" aria-label="Screen">
+        <button id="screen-tab-graph" type="button" class="screen-tab" role="tab" aria-selected="true" aria-controls="graph-screen">
+          Graph
+        </button>
+        <button id="screen-tab-terminal" type="button" class="screen-tab" role="tab" aria-selected="false" aria-controls="terminal-screen">
+          Terminal
+        </button>
       </div>
       <div class="tb-group tb-repo-group" role="group" aria-label="Repository">
         <label class="control">
@@ -116,7 +125,7 @@
     </header>
 
     <main class="workspace">
-      <div class="graph-wrap">
+      <div id="graph-screen" class="graph-wrap screen">
         <div id="graph" class="graph" aria-label="Dependency map"></div>
         <div id="graph-empty" class="graph-empty" hidden>
           <p class="graph-empty-title">No nodes match</p>
@@ -253,6 +262,9 @@
           <button id="zoom-fit" type="button" aria-label="Fit to view">⤢</button>
         </div>
       </div>
+      <section id="terminal-screen" class="terminal-screen screen" aria-label="Terminal" hidden>
+        <div id="terminal-container" class="terminal-container"></div>
+      </section>
       <div id="float-layer" class="float-layer">
         <div id="overlay-panel" class="overlay-panel" hidden></div>
         <div id="edge-panel" class="overlay-panel edge-panel" hidden></div>

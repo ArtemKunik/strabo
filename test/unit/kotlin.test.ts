@@ -178,6 +178,39 @@ test('extractKotlinSymbols records field reads and writes inside function bodies
   );
 });
 
+test('extractKotlinSymbols records primary-constructor properties as fields', async () => {
+  const source = [
+    'package com.acme.app',
+    '',
+    'data class Summary(',
+    '    val total: Double,',
+    '    var note: String = "",',
+    '    ignored: Int,',
+    ') {',
+    '    fun ratio(part: Double): Double = if (total > 0.0) part / total else 0.0',
+    '}',
+  ].join('\n');
+
+  const { symbols, accesses = [] } = await extractKotlinSymbols('Summary.kt', source);
+
+  const fields = symbols.filter((symbol) => symbol.kind === 'field');
+  assert.deepEqual(
+    fields.map((field) => [field.name, field.owner, field.type ?? '', field.mutable ?? false]),
+    [
+      ['total', 'Summary', 'Double', false],
+      ['note', 'Summary', 'String', true],
+    ],
+  );
+  assert.equal(
+    symbols.some((symbol) => symbol.name === 'ignored'),
+    false,
+    'a bare constructor parameter is not a property',
+  );
+
+  const ratio = accesses.filter((entry) => entry.method === 'ratio');
+  assert.ok(ratio.some((entry) => entry.field === 'total' && entry.mode === 'read'));
+});
+
 test('extractKotlinSymbols records body metrics and leaves a declaration without them', async () => {
   const source = [
     'class A {',

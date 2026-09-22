@@ -2,10 +2,12 @@ import { pathToFileURL } from 'node:url';
 
 import { runCheckCommand } from './cli/check.ts';
 import { runExportCommand } from './cli/export.ts';
-import { runReportCommand } from './cli/report.ts';
+import { runReportCommand, runSummaryCommand } from './cli/report.ts';
 import { configFromEnv, readEnv } from './config.ts';
 import { startMcpServer } from './mcp/server.ts';
 import { createStraboServer } from './server.ts';
+import { createRestart } from './server-restart.ts';
+import { attachTerminal } from './terminal/ws.ts';
 
 const USAGE = `strabo — map a repository's files, dependencies, and change impact
 
@@ -15,6 +17,8 @@ Usage:
   strabo export [path] --format=<fmt> write a portable graph (json, dot, mermaid, svg)
   strabo check [path] [rules]         run headless checks for CI
   strabo report [path] --base <ref>   report a change against a base revision
+  strabo report [path]                report the whole repository
+  strabo summary [path]               the repository report, always repository-scoped
   strabo mcp                          serve the recorded analysis over MCP (stdio)
 
 Export options:
@@ -24,8 +28,11 @@ Export options:
   --include-declare               draw declare edges (dashed), off by default
 
 Report options:
-  --base=<ref>                    the revision to compare HEAD against (required)
-  --format=md|json                markdown for a PR description, or the same document (default md)
+  --base=<ref>                    compare HEAD against this revision (change report)
+  --format=md|json|html|pdf       repository report format (default md; pdf needs --out)
+  --out=<file>                    write the report to a file instead of stdout
+  --no-change                     omit the pending change set
+  --no-smells / --no-hotspots / --no-ownership   skip an analysis (named as not computed)
   --fail-on <rules>               fail only for these rules (cycle, tier, …)
 
 Check rules (only the ones named can fail the build):
@@ -51,6 +58,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return runCheckCommand(rest);
     case 'report':
       return runReportCommand(rest);
+    case 'summary':
+      return runSummaryCommand(rest);
     case 'mcp':
       return runMcp(rest);
     case 'serve':
@@ -75,8 +84,7 @@ function startServer(argv: readonly string[]): number {
   const env = readEnv(process.env, argv);
   const config = configFromEnv(process.env, argv);
   const app = createStraboServer(config);
-
-  app.listen(env.port, env.host, () => {
+  const httpServer = app.listen(env.port, env.host, () => {
     config.serverLog?.(`serving ${env.root} on http://${env.host}:${env.port}`);
     config.serverLog?.(`scan ceiling: ${env.scanCeiling}`);
     if (env.host === '0.0.0.0' || env.host === '::') {
@@ -85,6 +93,10 @@ function startServer(argv: readonly string[]): number {
       );
     }
   });
+  // The standalone server owns its process, so Settings can relaunch it. An embedded host
+  // never sets this, and `POST /settings/restart` then answers 501.
+  config.restart = createRestart(httpServer);
+  attachTerminal(httpServer, config);
   return 0;
 }
 

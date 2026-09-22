@@ -81,6 +81,50 @@ Environment: `STRABO_AUTO_REBUILD=0` stops the server from rebuilding a stale gr
 background when a request observes `HEAD` moving; the map is then rebuilt only on
 **Refresh**.
 
+## Repository report
+
+`strabo report [path]` writes a whole-repository report; `strabo summary [path]` is the same
+report under a name that says so. It is a composition of the analyses the map already runs —
+the Repository passport, cycles, quality smells, function hotspots, test reach, ownership,
+dependency risk, and scan diagnostics — ranked into one **pain points** list. Each pain point
+carries a fixed severity (never a repository percentile) and the recorded `inputs` behind it,
+so two runs sort the same way and the report diffs cleanly.
+
+```sh
+node bin/strabo.js report --format=md                    # Markdown (default)
+node bin/strabo.js report --format=json --out=report.json
+node bin/strabo.js report --format=html --out=report.html
+node bin/strabo.js report --format=pdf  --out=report.pdf
+node bin/strabo.js report --base=main --format=md        # the change report (Phase 26)
+```
+
+The document has five parts:
+
+- **Overview** — languages and size, entry points, top-level directories, and the most
+  depended-upon files by fan-in.
+- **Pain points** — cycles, tier leaks, smells, hotspots, untested reach, bus factor,
+  advisories and denied licences, parse failures, and a stale graph, ranked by severity.
+- **Pending change set** — the working tree's staged, unstaged, and untracked files with the
+  same reverse-reachability impact the Review panel shows.
+- **Suggestions** — one deterministic action per pain point, citing the recorded evidence.
+  There is no model prose: a suggestion with no pain point behind it is never emitted, so the
+  section is available with nothing configured and never speculates. (A narrator layer over
+  the same facts is a later, opt-in follow-up.)
+- **Evidence** — the counts, and a named list of any section the caller did not compute, so a
+  missing analysis is visible rather than shown as empty.
+
+A section with nothing recorded says so ("no recorded pain point crossed a threshold"). The
+same document is on the HTTP surface at `GET /analysis/report?format=md|json|html`, which the
+Repository passport's **Export report** action downloads, so the browser and the CLI cannot
+disagree.
+
+PDF is a render of the self-contained HTML through a detected headless Chromium: a local
+`playwright` install first, otherwise a system Edge/Chrome. Neither is a shipped dependency,
+so when no renderer is found the report writes the `.html` beside the requested file and says
+why — a missing renderer is named, not a silent empty file. `--no-change`, `--no-smells`,
+`--no-hotspots`, and `--no-ownership` skip an analysis; a skipped section is named as not
+computed. `--format` and `--out` use the `--flag=value` form.
+
 ## Getting started
 
 Requires Node 22+ and npm.

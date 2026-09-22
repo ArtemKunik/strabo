@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import { promisify } from 'node:util';
 
 import { computeCoverage } from '../analysis/coverage.ts';
@@ -14,6 +15,10 @@ import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { collectFindings, parseFailOnRules, type CheckRule } from '../check/check.ts';
 import { readEnv } from '../config.ts';
+import { collectRepositoryReport } from '../report/collect.ts';
+import { renderReportHtml } from '../report/render-html.ts';
+import { renderReportMarkdown } from '../report/render-markdown.ts';
+import { renderReportPdf } from '../report/render-pdf.ts';
 import { computeFreshness, revisionFromFingerprint } from '../status.ts';
 import { collectFailOnValues } from './check.ts';
 
@@ -69,6 +74,101 @@ export async function runReportCommand(
   argv: readonly string[],
   io: ReportIo = {},
 ): Promise<number> {
+  return flagValue(argv, 'base') ? runChangeReport(argv, io) : runRepositoryReport(argv, io);
+}
+
+/** `strabo summary` is the repository report, always repository-scoped. */
+export async function runSummaryCommand(
+  argv: readonly string[],
+  io: ReportIo = {},
+): Promise<number> {
+  return runRepositoryReport(argv, io);
+}
+
+const REPORT_FORMATS = ['md', 'json', 'html', 'pdf'] as const;
+
+/**
+ * The whole-repository report: the recorded analyses composed into one document and rendered
+ * as Markdown, JSON, self-contained HTML, or a PDF printed from that HTML. Every section is
+ * evidence from the scan; a section that was not computed is named, never shown as empty.
+ */
+async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promise<number> {
+  const write = io.write ?? ((text: string) => void process.stdout.write(text));
+  const env = readEnv(process.env, argv);
+  const format = flagValue(argv, 'format') ?? 'md';
+  if (!(REPORT_FORMATS as readonly string[]).includes(format)) {
+    write(`strabo report: unsupported --format "${format}" (expected ${REPORT_FORMATS.join(', ')}).\n`);
+    return 1;
+  }
+  const out = flagValue(argv, 'out');
+  if (format === 'pdf' && !out) {
+    write('strabo report: --format=pdf requires --out <file.pdf>.\n');
+    return 1;
+  }
+
+  const repository = resolveRepositoryRoot({
+    workspaceRoot: env.root,
+    scanCeiling: env.scanCeiling,
+    requested: flagValue(argv, 'repository'),
+  });
+  const cached = await getCachedGraph(repository.root);
+  const freshness = await computeFreshness(repository.root, cached.fingerprint, cached.report.scannedAt);
+
+  const document = await collectRepositoryReport({
+    repository: repository.name,
+    root: repository.root,
+    graph: cached.report.graph,
+    extensionCounts: cached.report.extensionCounts,
+    revision: {
+      head: revisionFromFingerprint(cached.fingerprint),
+      fingerprint: cached.fingerprint,
+      scannedAt: cached.report.scannedAt,
+      stale: freshness.stale,
+    },
+    change: !hasFlag(argv, 'change'),
+    smells: !hasFlag(argv, 'smells'),
+    hotspots: !hasFlag(argv, 'hotspots'),
+    ownership: !hasFlag(argv, 'ownership'),
+  });
+
+  if (format === 'json') {
+    return emit(`${JSON.stringify(document, null, 2)}\n`, out, write);
+  }
+  if (format === 'md') {
+    return emit(renderReportMarkdown(document), out, write);
+  }
+
+  const html = renderReportHtml(document);
+  if (format === 'html') {
+    return emit(html, out, write);
+  }
+
+  const result = await renderReportPdf(html, out as string);
+  if (result.ok) {
+    write(`wrote ${out}\n`);
+    return 0;
+  }
+  const fallback = `${out}.html`;
+  fs.writeFileSync(fallback, html, 'utf8');
+  write(`pdf unavailable (${result.reason}); wrote ${fallback} — open it and print to PDF.\n`);
+  return 0;
+}
+
+function emit(text: string, out: string | undefined, write: (text: string) => void): number {
+  if (out) {
+    fs.writeFileSync(out, text, 'utf8');
+    write(`wrote ${out}\n`);
+  } else {
+    write(text);
+  }
+  return 0;
+}
+
+function hasFlag(argv: readonly string[], name: string): boolean {
+  return argv.includes(`--no-${name}`) || argv.includes(`--${name}=false`);
+}
+
+async function runChangeReport(argv: readonly string[], io: ReportIo): Promise<number> {
   const write = io.write ?? ((text: string) => void process.stdout.write(text));
   const env = readEnv(process.env, argv);
   const base = flagValue(argv, 'base');

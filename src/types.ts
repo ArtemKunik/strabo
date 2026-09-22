@@ -927,6 +927,15 @@ export interface StraboConfig {
    * evidence is sent, and the API key is read from the environment, never the config.
    */
   narrator?: NarratorConfig;
+  /**
+   * Relaunch the server process on demand (`POST /settings/restart`).
+   *
+   * The standalone CLI wires this to a real process relaunch. An embedded host owns its own
+   * process and leaves it unset, so the route reports `restartAvailable: false` and refuses
+   * the request rather than pretending to restart. The route calls it only after the response
+   * is flushed, so the operator sees the acknowledgement before the process goes away.
+   */
+  restart?: () => void | Promise<void>;
   serverLog?: (message: string, error?: unknown) => void;
 }
 

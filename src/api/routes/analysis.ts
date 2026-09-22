@@ -37,6 +37,10 @@ import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/qua
 import { buildCoChangeEdges } from '../../analysis/co-change.ts';
 import { collectHistory } from '../../analysis/history.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
+import { collectRepositoryReport } from '../../report/collect.ts';
+import { renderReportHtml } from '../../report/render-html.ts';
+import { renderReportMarkdown } from '../../report/render-markdown.ts';
+import { parseDeniedLicenses } from '../../risk/licenses.ts';
 import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph, type CachedGraph } from '../../cache/graph-cache.ts';
@@ -237,6 +241,47 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         ),
         provenance: await graphProvenance(repository.root, cached),
       });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The whole-repository report: the recorded analyses composed into one document, as JSON
+   * (default), Markdown, or self-contained HTML. The same document the CLI emits, so the two
+   * surfaces cannot disagree. `change=0` omits the pending change set.
+   */
+  router.get('/analysis/report', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const provenance = await graphProvenance(repository.root, cached);
+      const includeChange = request.query.change === undefined ? true : parseBoolean(request.query.change);
+      const denied = parseDeniedLicenses(config.risk?.deniedLicenses?.join(','));
+      const document = await collectRepositoryReport({
+        repository: repository.name,
+        root: repository.root,
+        graph: cached.report.graph,
+        extensionCounts: cached.report.extensionCounts,
+        revision: {
+          head: provenance.revision,
+          fingerprint: provenance.fingerprint,
+          scannedAt: provenance.scannedAt,
+          stale: provenance.stale,
+        },
+        change: includeChange,
+        risk: { online: config.risk?.online === true, deniedLicenses: denied },
+      });
+      const format = typeof request.query.format === 'string' ? request.query.format : 'json';
+      if (format === 'md') {
+        response.type('text/markdown').send(renderReportMarkdown(document));
+        return;
+      }
+      if (format === 'html') {
+        response.type('text/html').send(renderReportHtml(document));
+        return;
+      }
+      response.json(document);
     } catch (error) {
       sendError(response, error);
     }

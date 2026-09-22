@@ -38,6 +38,7 @@ record is reported as `unavailable`, never invented.
 | 25 | Change coupling | Done |
 | 26 | Headless report and structural diff | Landed (X1-X4 done) |
 | 27 | Measured coverage | Landed (V1-V4 done) |
+| 28 | Repository report | Landed (Z1-Z4 done) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1612,6 +1613,41 @@ measured coverage, Strabo uses it. Landed.
 
 Acceptance: a fixture with an `lcov.info` where a file is imported by a test but has zero
 covered lines shows reachable yet measured 0%.
+
+## Phase 28 - Repository report
+
+The whole-repository sibling of the Phase 26 change report: one document that reads the same
+graph the canvas draws, so the browser and the report cannot disagree. It is a composition
+layer over analyses that already exist, not a new analysis engine — its only job is to
+gather, rank, and render what the scan already recorded. Landed.
+
+- **Z1 - One pure builder, dumb renderers.** *Done.* `buildRepositoryReport`
+  (`src/report/repository-report.ts`) assembles `RepositoryReportDocument` from the cached
+  graph and the recorded analyses with no I/O of its own, and `renderReportMarkdown` /
+  `renderReportHtml` are pure functions over that document, so JSON, Markdown, and HTML are
+  three views of one contract (the `graph-export.ts` envelope pattern).
+- **Z2 - Pain points: one list, one fixed severity.** *Done.* Cycles, tier leaks, quality
+  smells, function hotspots, untested reach, bus factor, dependency advisory/licence, parse
+  failures, and a stale graph are projected to a single ranked `PainPoint[]` with a stable id,
+  a fixed per-kind severity (never a repository percentile), and the raw `inputs` kept on the
+  item (`src/report/repository-report.ts`). Ordering is severity then path, so two runs diff
+  to nothing.
+- **Z3 - Deterministic suggestions.** *Done.* A flat rule table maps each pain-point kind to
+  a short, actionable suggestion that cites the recorded evidence
+  (`src/report/suggestions.ts`); a suggestion with no pain point behind it is never emitted.
+  The opt-in narrator layer over the same facts is a later follow-up, so suggestions are
+  available with no endpoint configured and never speculate.
+- **Z4 - Export and surfaces.** *Done.* `strabo report [--base]` gains an optional base
+  (no base = repository report, base = the Phase 26 change report) and `--format md|json|html|pdf`
+  with `--out`; `strabo summary` is a thin alias that is always repository-scoped. PDF is a
+  render of the self-contained HTML through a detected headless Chromium (`playwright`, else a
+  system `msedge`/`chrome`), and a missing renderer names the reason and still writes the HTML
+  rather than failing. `GET /analysis/report?format=` serves the same document, and the
+  Repository passport panel gains an **Export report** action.
+
+Acceptance: on a fixture with a recorded cycle and an untested reach, the Markdown report
+names both under **Pain points**, each carries a suggestion, and the JSON document re-renders
+to the same Markdown.
 
 ## Reading route (landed)
 
