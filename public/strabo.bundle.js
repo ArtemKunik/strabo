@@ -1471,12 +1471,12 @@ function orderMetricFiles(files) {
 function totalMembers(memberMap, key) {
   return (memberMap?.types ?? []).reduce((sum, type) => sum + (type[key] ?? []).length, 0);
 }
-function memberMapSteps(memberMap, context = {}) {
+function memberMapSteps(memberMap, context2 = {}) {
   const primary = (memberMap?.types ?? [])[0] ?? null;
   const fields = totalMembers(memberMap, "fields");
   const methods = totalMembers(memberMap, "methods");
   const flow = memberMap?.dataFlow;
-  const consumers = context.consumers ?? null;
+  const consumers = context2.consumers ?? null;
   const wiring2 = flow?.available === false ? "No field-to-behavior wiring was recorded in the scan." : `${(flow?.transforms ?? []).length} transform(s) read and write state across ${(flow?.resources ?? []).length} shared field(s).`;
   return [
     {
@@ -1997,8 +1997,8 @@ function graphTheme() {
 }
 
 // ui/strabo-labels.js
-var LABEL_DEVICE_PX = 11;
-var HUB_LABEL_DEVICE_PX = 12;
+var LABEL_DEVICE_PX = 10;
+var HUB_LABEL_DEVICE_PX = 11;
 function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
   const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   return devicePx / safeZoom;
@@ -2055,7 +2055,7 @@ function applyLabelBudget(cy, force = false) {
     });
   });
 }
-var LABEL_BOX_HEIGHT = 15;
+var LABEL_BOX_HEIGHT = 14;
 var LABEL_NODE_GAP = 4;
 var LABEL_GLYPH_PX = 0.6;
 function chooseLabels(nodes, zoom) {
@@ -3578,10 +3578,10 @@ function ensurePromptDialog() {
   if (promptDialog) {
     return promptDialog;
   }
-  const dialog = document.createElement("dialog");
-  dialog.id = "prompt-dialog";
-  dialog.className = "dialog prompt-dialog";
-  dialog.setAttribute("aria-label", "Review the task before sending it to an agent");
+  const dialog2 = document.createElement("dialog");
+  dialog2.id = "prompt-dialog";
+  dialog2.className = "dialog prompt-dialog";
+  dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
   const header = document.createElement("header");
   header.className = "dialog-header";
   const heading2 = document.createElement("strong");
@@ -3591,7 +3591,7 @@ function ensurePromptDialog() {
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
-  close.addEventListener("click", () => dialog.close());
+  close.addEventListener("click", () => dialog2.close());
   header.append(heading2, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
@@ -3616,37 +3616,37 @@ function ensurePromptDialog() {
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => dialog.close());
+  cancel.addEventListener("click", () => dialog2.close());
   const send = document.createElement("button");
   send.type = "button";
   send.className = "primary prompt-dialog-send";
   send.addEventListener("click", () => {
     const reviewed = text.value;
     settlePromptReview(reviewed);
-    dialog.close();
+    dialog2.close();
   });
   actions.append(cancel, send);
   footer.append(copy, actions);
-  dialog.append(header, target, text, footer);
-  dialog.addEventListener("close", () => settlePromptReview(null));
-  document.body.append(dialog);
-  promptDialog = dialog;
-  return dialog;
+  dialog2.append(header, target, text, footer);
+  dialog2.addEventListener("close", () => settlePromptReview(null));
+  document.body.append(dialog2);
+  promptDialog = dialog2;
+  return dialog2;
 }
 function showPromptReview({ agent, title, prompt }) {
-  const dialog = ensurePromptDialog();
+  const dialog2 = ensurePromptDialog();
   settlePromptReview(null);
   const agentName = AGENT_LABELS[agent] ?? agent;
-  dialog.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
-  dialog.querySelector(".prompt-dialog-target").textContent = title;
-  const text = dialog.querySelector(".prompt-dialog-text");
+  dialog2.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
+  dialog2.querySelector(".prompt-dialog-target").textContent = title;
+  const text = dialog2.querySelector(".prompt-dialog-text");
   text.value = prompt;
-  dialog.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
+  dialog2.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
   const pending = new Promise((resolve) => {
     promptDialogResolve = resolve;
   });
-  if (!dialog.open) {
-    dialog.showModal();
+  if (!dialog2.open) {
+    dialog2.showModal();
   }
   text.focus();
   text.setSelectionRange(text.value.length, text.value.length);
@@ -4527,18 +4527,18 @@ function fileStem(file) {
 function recordedList(items) {
   return Array.isArray(items) && items.length > 0 ? items.join(", ") : "none recorded";
 }
-function buildMemberNarratorEvidence(memberMap, context = {}) {
+function buildMemberNarratorEvidence(memberMap, context2 = {}) {
   const types = memberMap?.types ?? [];
   if (types.length === 0) {
     return "No type is recorded for this file.";
   }
-  const file = context.file ?? memberMap?.file;
+  const file = context2.file ?? memberMap?.file;
   const moduleName = file ? fileStem(file) : null;
   const lines = [];
   if (file) {
     lines.push(`File: ${file}`);
   }
-  for (const [label, ids] of [["imports", context.imports], ["used-by", context.usedBy]]) {
+  for (const [label, ids] of [["imports", context2.imports], ["used-by", context2.usedBy]]) {
     if (Array.isArray(ids)) {
       const distinct = [...new Set(ids)];
       lines.push(`Recorded ${label} (${distinct.length}): ${recordedList(distinct.slice(0, 12))}`);
@@ -4577,7 +4577,7 @@ function buildMemberNarratorEvidence(memberMap, context = {}) {
     lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
     lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
   }
-  const inventory = context.functions ? buildNarratorEvidence({ functions: context.functions }) : "";
+  const inventory = context2.functions ? buildNarratorEvidence({ functions: context2.functions }) : "";
   if (inventory && !inventory.startsWith("No function inventory")) {
     lines.push("", "Function metrics, signals, and same-file calls:", inventory);
   }
@@ -7140,9 +7140,8 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     note3.className = "overlay-empty";
     note3.textContent = overlay.emptyNote;
     container.append(note3);
-    return;
   }
-  if (overlay.items.length > 0) {
+  if (Array.isArray(overlay.items) && overlay.items.length > 0) {
     const needsSearch = overlay.items.length > 8;
     const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
     const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
@@ -7231,6 +7230,25 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     container.append(empty);
     renderList();
     list.refresh();
+  }
+  if (Array.isArray(options.actions) && options.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "overlay-actions";
+    for (const action of options.actions) {
+      const actionButton = document.createElement("button");
+      actionButton.type = "button";
+      actionButton.className = "overlay-action";
+      actionButton.textContent = action.label;
+      if (action.title) {
+        actionButton.title = action.title;
+      }
+      if (action.disabled) {
+        actionButton.disabled = true;
+      }
+      actionButton.addEventListener("click", () => action.onClick?.());
+      actions.append(actionButton);
+    }
+    container.append(actions);
   }
 }
 function renderEdgeEvidence(container, evidence, handlers = {}) {
@@ -9499,12 +9517,189 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
   }
 }
 
+// ui/strabo-commit.js
+async function requestCommitMessage(repository) {
+  const response = await fetch(`${API_PATH}/narrator/commit-message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(repository ? { repository } : {})
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not generate a message (${response.status}).`);
+  }
+  return body;
+}
+async function commitWorkingTree(repository, message, { push = true } = {}) {
+  const response = await fetch(`${API_PATH}/analysis/commit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, push, ...repository ? { repository } : {} })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Commit failed (${response.status}).`);
+  }
+  return body;
+}
+var dialog = null;
+var context = null;
+function ensureDialog() {
+  if (dialog) {
+    return dialog;
+  }
+  const element2 = document.createElement("dialog");
+  element2.id = "commit-dialog";
+  element2.className = "dialog prompt-dialog commit-dialog";
+  element2.setAttribute("aria-label", "Review the commit message before committing");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading2 = document.createElement("strong");
+  heading2.className = "commit-dialog-title";
+  heading2.textContent = "Commit changes";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => element2.close());
+  header.append(heading2, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const status = document.createElement("p");
+  status.className = "dialog-note commit-status";
+  status.setAttribute("role", "status");
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text commit-message";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Commit message");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const generate = document.createElement("button");
+  generate.type = "button";
+  generate.className = "commit-generate";
+  generate.textContent = "Generate again";
+  generate.addEventListener("click", () => void generateMessage());
+  const pushLabel = document.createElement("label");
+  pushLabel.className = "commit-push";
+  const pushToggle = document.createElement("input");
+  pushToggle.type = "checkbox";
+  pushToggle.checked = true;
+  pushToggle.className = "commit-push-toggle";
+  pushLabel.append(pushToggle, document.createTextNode("Push after commit"));
+  const left = document.createElement("span");
+  left.className = "commit-footer-left";
+  left.append(generate, pushLabel);
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => element2.close());
+  const confirm = document.createElement("button");
+  confirm.type = "button";
+  confirm.className = "primary commit-confirm";
+  confirm.textContent = "Commit & push";
+  confirm.addEventListener("click", () => void submit());
+  actions.append(cancel, confirm);
+  footer.append(left, actions);
+  element2.append(header, target, status, text, footer);
+  document.body.append(element2);
+  dialog = element2;
+  return element2;
+}
+async function generateMessage() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm = dialog.querySelector(".commit-confirm");
+  generate.disabled = true;
+  confirm.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  try {
+    const result = await requestCommitMessage(context.repository);
+    if (result?.available && typeof result.message === "string" && result.message.trim() !== "") {
+      text.value = result.message.trim();
+      const model = result.model ?? "the narrator";
+      status.textContent = `Generated by ${model}${result.cached ? " (cached)" : ""}. Review and edit before committing.`;
+    } else {
+      status.textContent = `Narrator unavailable (${result?.detail ?? result?.reason ?? "not configured"}). Write a message, or set the narrator up in Settings.`;
+      if (!text.value.trim()) {
+        text.value = "";
+      }
+    }
+  } catch (error) {
+    status.textContent = error.message ?? "Could not generate a message.";
+    status.classList.add("is-error");
+  } finally {
+    generate.disabled = false;
+    confirm.disabled = false;
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+  }
+}
+async function submit() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm = dialog.querySelector(".commit-confirm");
+  const push = dialog.querySelector(".commit-push-toggle")?.checked !== false;
+  const message = text.value.trim();
+  if (message === "") {
+    status.classList.add("is-error");
+    status.textContent = "A commit message is required.";
+    text.focus();
+    return;
+  }
+  generate.disabled = true;
+  confirm.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = push ? "Committing and pushing\u2026" : "Committing\u2026";
+  try {
+    const result = await commitWorkingTree(context.repository, message, { push });
+    if (!result?.available) {
+      status.classList.add("is-error");
+      status.textContent = result?.detail ?? "The commit did not run.";
+      return;
+    }
+    showToast(result.message);
+    dialog.close();
+    context.onCommitted?.(result);
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message ?? "The commit did not run.";
+  } finally {
+    generate.disabled = false;
+    confirm.disabled = false;
+  }
+}
+function openCommitDialog({ repository, onCommitted } = {}) {
+  const element2 = ensureDialog();
+  context = { repository: repository ?? null, onCommitted };
+  element2.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
+  element2.querySelector(".commit-message").value = "";
+  const status = element2.querySelector(".commit-status");
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  if (!element2.open) {
+    element2.showModal();
+  }
+  void generateMessage();
+}
+
 // ui/strabo-settings.js
 var SETTINGS_KEY = "strabo.settings.v1";
 var THEMES = ["system", "dark", "light"];
 var DETAIL_MODES = ["block", "file"];
 function defaultSettings() {
-  return { theme: "system", defaultDetail: "block", labels: true, reduceMotion: false };
+  return { theme: "system", defaultDetail: "block", labels: true, reduceMotion: false, commitEnabled: false };
 }
 function sanitize(parsed, defaults) {
   const settings = { ...defaults };
@@ -9515,6 +9710,7 @@ function sanitize(parsed, defaults) {
   if (DETAIL_MODES.includes(parsed.defaultDetail)) settings.defaultDetail = parsed.defaultDetail;
   if (typeof parsed.labels === "boolean") settings.labels = parsed.labels;
   if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
+  if (typeof parsed.commitEnabled === "boolean") settings.commitEnabled = parsed.commitEnabled;
   return settings;
 }
 function readSettings(storage = globalThis.localStorage) {
@@ -9865,6 +10061,18 @@ function renderingSection() {
   );
   return group;
 }
+function commitSection(prefs, handlers) {
+  const group = section("Commit");
+  group.append(
+    field("Narrator commit", checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.("commitEnabled", value)))
+  );
+  group.append(
+    note2(
+      "Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default."
+    )
+  );
+  return group;
+}
 function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
   container.replaceChildren();
@@ -9895,6 +10103,7 @@ function renderSettings(container, handlers = {}) {
   );
   container.append(local);
   container.append(renderingSection());
+  container.append(commitSection(prefs, handlers));
   const remote = section("Server");
   if (!server) {
     remote.append(note2("Loading server settings\u2026"));
@@ -11356,6 +11565,9 @@ function renderSettingsView() {
       writeSettings(clientPrefs);
       applyClientPrefs();
       renderSettingsView();
+      if (key === "commitEnabled" && state.overlay === "impact") {
+        applyOverlay();
+      }
     },
     onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
@@ -11738,10 +11950,22 @@ async function applyOverlay(generation) {
   }
   const overlay = overlayFor(kind, data);
   view.overlay(overlay.classes);
+  const actions = [];
+  if (kind === "impact" && clientPrefs.commitEnabled) {
+    actions.push({
+      label: "Commit\u2026",
+      title: "Generate a commit message with the narrator, then commit and push",
+      onClick: () => openCommitDialog({
+        repository: state.repository,
+        onCommitted: () => applyOverlay()
+      })
+    });
+  }
   renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
     kind,
     onClose: clearOverlay,
-    onSelect: (id) => selectNode(id)
+    onSelect: (id) => selectNode(id),
+    ...actions.length > 0 ? { actions } : {}
   });
   refreshDock();
 }
@@ -12713,12 +12937,12 @@ function withSelection(resolved, selection) {
   if (resolved) {
     return { ...resolved, selection };
   }
-  const context = fallbackDelegateTarget();
+  const context2 = fallbackDelegateTarget();
   const excerpt = selection.replace(/\s+/g, " ");
   return {
     kind: "selection",
     label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
-    evidence: context.evidence,
+    evidence: context2.evidence,
     selection
   };
 }

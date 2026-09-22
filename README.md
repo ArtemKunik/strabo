@@ -274,6 +274,20 @@ the working tree, the first parent for a commit — and re-extracted for the rev
 file whose language has no extractor, is new, or was deleted names the missing side rather
 than showing a fabricated score.
 
+## Commit (narrator, opt-in)
+
+With **Settings → Commit → Narrator commit** on, the **Change impact** panel — whose list is
+the working tree's own changes — gains a **Commit…** action. It asks
+`POST /narrator/commit-message` for a message written from the recorded changes: every
+changed file with its status and line counts, plus the reverse-dependency impact. The evidence
+is built server-side from the scan, never sent by the browser, so a caller cannot steer what is
+described. The message appears in a dialog to read and edit before anything runs; confirming
+commits the whole working tree (`git add -A`) with that message and pushes the current branch,
+and **Push after commit** can be turned off. The message reaches Git as an argument, never a
+shell, and the push is never forced, so a diverged branch is reported after the commit is made
+rather than overwritten. The preference is browser-local and off by default; the narrator must
+be configured to generate a message, and one can be typed by hand when it is not.
+
 ## Source viewer
 
 The **Source** window (`S`, or **View source** in the Module Passport and the Edge panel)

@@ -63,6 +63,7 @@ import {
   buildReviewNarrationEvidence,
   narratorMenuState,
 } from './strabo-narrator.js';
+import { openCommitDialog } from './strabo-commit.js';
 import { applyAppearance, readSettings, renderSettings, watchSystemPreferences, writeSettings } from './strabo-settings.js';
 import { crossRepoNodeIds } from './strabo-workspace.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
@@ -1699,6 +1700,10 @@ function renderSettingsView() {
       writeSettings(clientPrefs);
       applyClientPrefs();
       renderSettingsView();
+      // The commit action is drawn by the impact overlay, so re-render it when it toggles.
+      if (key === 'commitEnabled' && state.overlay === 'impact') {
+        applyOverlay();
+      }
     },
     onSaveCeiling: (value) =>
       saveServerSettings({ scanCeiling: value }, value ? 'Scan ceiling updated.' : 'Scan ceiling reset.'),
@@ -2166,10 +2171,25 @@ async function applyOverlay(generation) {
   }
   const overlay = overlayFor(kind, data);
   view.overlay(overlay.classes);
+  // The Change impact list is the working tree's own changes, so it is where the opt-in
+  // commit action lives. It generates a message with the narrator, then commits and pushes.
+  const actions = [];
+  if (kind === 'impact' && clientPrefs.commitEnabled) {
+    actions.push({
+      label: 'Commit…',
+      title: 'Generate a commit message with the narrator, then commit and push',
+      onClick: () =>
+        openCommitDialog({
+          repository: state.repository,
+          onCommitted: () => applyOverlay(),
+        }),
+    });
+  }
   renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
     kind,
     onClose: clearOverlay,
     onSelect: (id) => selectNode(id),
+    ...(actions.length > 0 ? { actions } : {}),
   });
   refreshDock();
 }

@@ -81,6 +81,19 @@ test('buildNarratorPrompt sends source only when the operator opts in', () => {
   assert.ok(withSource.user.includes('const x = 1;'));
 });
 
+test('buildNarratorPrompt uses a commit-message system prompt for that kind', () => {
+  const request = {
+    instruction: 'Write the commit message for the recorded changes.',
+    evidence: 'modified src/a.ts · +3 −1',
+    kind: 'commit-message' as const,
+  };
+  const prompt = buildNarratorPrompt(request, false);
+  assert.match(prompt.system, /Git commit message/i);
+  assert.doesNotMatch(prompt.system, /side panel/);
+  assert.match(prompt.user, /Write the commit message/);
+  assert.match(prompt.user, /<evidence>/);
+});
+
 test('createNarratorClient is inert without configuration', async () => {
   const client = createNarratorClient({ root: '/repo' });
   assert.deepEqual(client.status(), { configured: false, reason: 'not-configured' });

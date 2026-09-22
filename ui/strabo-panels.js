@@ -2211,10 +2211,9 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     note.className = 'overlay-empty';
     note.textContent = overlay.emptyNote;
     container.append(note);
-    return;
   }
 
-  if (overlay.items.length > 0) {
+  if (Array.isArray(overlay.items) && overlay.items.length > 0) {
     const needsSearch = overlay.items.length > 8;
     const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
     const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
@@ -2315,6 +2314,27 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     container.append(empty);
     renderList();
     list.refresh();
+  }
+
+  // Buttons an overlay contributes, e.g. committing the working tree the impact list shows.
+  if (Array.isArray(options.actions) && options.actions.length > 0) {
+    const actions = document.createElement('div');
+    actions.className = 'overlay-actions';
+    for (const action of options.actions) {
+      const actionButton = document.createElement('button');
+      actionButton.type = 'button';
+      actionButton.className = 'overlay-action';
+      actionButton.textContent = action.label;
+      if (action.title) {
+        actionButton.title = action.title;
+      }
+      if (action.disabled) {
+        actionButton.disabled = true;
+      }
+      actionButton.addEventListener('click', () => action.onClick?.());
+      actions.append(actionButton);
+    }
+    container.append(actions);
   }
 }
 

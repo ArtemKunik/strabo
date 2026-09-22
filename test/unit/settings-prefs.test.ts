@@ -46,18 +46,31 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
     defaultDetail: 'file',
     labels: false,
     reduceMotion: false,
+    commitEnabled: false,
   });
 });
 
 test('writeSettings round-trips a sanitized preference set', () => {
   const storage = fakeStorage();
-  writeSettings({ theme: 'light', defaultDetail: 'file', labels: false, reduceMotion: true }, storage);
+  writeSettings(
+    { theme: 'light', defaultDetail: 'file', labels: false, reduceMotion: true, commitEnabled: true },
+    storage,
+  );
   assert.deepEqual(readSettings(storage), {
     theme: 'light',
     defaultDetail: 'file',
     labels: false,
     reduceMotion: true,
+    commitEnabled: true,
   });
+});
+
+test('the commit action is off by default and only a boolean turns it on', () => {
+  assert.equal(defaultSettings().commitEnabled, false);
+  const storage = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ commitEnabled: 'yes' }) });
+  assert.equal(readSettings(storage).commitEnabled, false);
+  const on = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ commitEnabled: true }) });
+  assert.equal(readSettings(on).commitEnabled, true);
 });
 
 test('resolveTheme follows the OS only for the system setting', () => {

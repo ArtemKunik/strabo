@@ -2222,6 +2222,31 @@ button.primary {
   border-color: var(--accent);
 }
 
+/* Buttons an overlay contributes, e.g. the opt-in Commit action on Change impact. */
+.overlay-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.overlay-action {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  font: inherit;
+  color: var(--ink-1);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.overlay-action:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* Affected dependents carry a bar as well as a tone, so the signal is not hue alone (R6). */
 .overlay-list-row.overlay-row-affected {
   padding-left: 6px;
@@ -2899,6 +2924,34 @@ table.change-metrics td:first-child .link {
 .dialog-footer-actions {
   display: flex;
   gap: 8px;
+}
+
+/* ------------------------------------------------------ Narrator commit dialog */
+.commit-dialog .commit-message {
+  height: 26vh;
+  min-height: 140px;
+}
+
+.commit-dialog .commit-status {
+  min-height: 16px;
+}
+
+.commit-dialog .commit-status.is-error {
+  color: var(--status-critical);
+}
+
+.commit-footer-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.commit-push {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 /* ---------------------------------------------------------------- Member map */

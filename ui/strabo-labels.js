@@ -10,11 +10,11 @@
  * A node label holds one device size at every zoom.
  *
  * The stylesheet returns the model-unit font that renders at the target device size, and a
- * zoom change re-evaluates it. Kept at 11px: the size the UI type scale already uses for
+ * zoom change re-evaluates it. Kept at 10px: the size the UI type scale already uses for
  * secondary text.
  */
-export const LABEL_DEVICE_PX = 11;
-export const HUB_LABEL_DEVICE_PX = 12;
+export const LABEL_DEVICE_PX = 10;
+export const HUB_LABEL_DEVICE_PX = 11;
 
 /** Model-unit font that renders at `devicePx` at the given zoom. */
 export function labelFontSize(zoom, devicePx = LABEL_DEVICE_PX) {
@@ -120,7 +120,7 @@ export function applyLabelBudget(cy, force = false) {
 }
 
 /** Rendered label height, and the gap between a node and its label (matches the stylesheet). */
-const LABEL_BOX_HEIGHT = 15;
+const LABEL_BOX_HEIGHT = 14;
 const LABEL_NODE_GAP = 4;
 /** Advance width per glyph at the label's device size (the label face is proportional). */
 const LABEL_GLYPH_PX = 0.6;
