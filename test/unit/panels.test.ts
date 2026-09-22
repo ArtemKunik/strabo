@@ -967,6 +967,35 @@ test('initFloatingToolbar adds a drag grip and a resize edge', () => {
   assert.ok(target.querySelector('.tb-resize'), 'the resize edge is appended');
 });
 
+test('initFloatingToolbar docks a remembered bar into the bottom bar', () => {
+  const target = container();
+  target.innerHTML = '<button type="button">A</button>';
+  const bar = container();
+  bar.innerHTML = '<div class="bottom-meta"></div>';
+  const previous = (globalThis as { localStorage?: unknown }).localStorage;
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: () => JSON.stringify({ docked: true, width: 300 }),
+    setItem() {},
+  };
+  try {
+    const handle = initFloatingToolbar(target, { dock: bar });
+
+    assert.ok(handle, 'the toolbar controller is returned');
+    assert.equal(target.classList.contains('is-docked'), true, 'the bar is docked');
+    assert.equal(target.parentElement, bar, 'the bar joins the bottom bar');
+    assert.equal(bar.firstElementChild, target, 'the bar sits before the status meta');
+    assert.equal(target.style.width, '', 'a docked bar drops its floating width');
+    assert.equal(target.classList.contains('opens-up'), true, 'the menu opens upward');
+
+    handle.undock();
+    assert.equal(target.classList.contains('is-docked'), false, 'the bar floats again');
+    assert.equal(target.parentElement, document.body, 'the bar returns to its float parent');
+    assert.equal(target.style.width, '300px', 'the floating width is restored');
+  } finally {
+    (globalThis as { localStorage?: unknown }).localStorage = previous;
+  }
+});
+
 test('renderImpactPassport shows provenance and labels an approximation (T6/R4)', () => {
   const target = container();
   renderImpactPassport(

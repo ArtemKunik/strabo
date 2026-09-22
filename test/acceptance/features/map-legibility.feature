@@ -23,6 +23,13 @@ Feature: Map legibility
     And I clear the selection
     Then the inspector is hidden
 
+  @toolbar-dock
+  Scenario: The canvas toolbar docks into the bottom bar and floats back out
+    When I drag the canvas toolbar onto the bottom bar
+    Then the canvas toolbar is docked in the bottom bar
+    When I drag the canvas toolbar grip up off the bottom bar
+    Then the canvas toolbar floats on the canvas again
+
   @boundaries
   Scenario: Boundaries toggles the detail level
     When I toggle boundaries

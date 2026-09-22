@@ -4229,6 +4229,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
 var STORAGE_KEY2 = "strabo.float.toolbar.v1";
 var MIN_WIDTH2 = 200;
 var GAP2 = 8;
+var DOCK_REACH = 28;
 function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
   const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
   const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
@@ -4255,7 +4256,9 @@ function initFloatingToolbar(element2, options = {}) {
   if (!element2) return null;
   const storageKey = options.storageKey ?? STORAGE_KEY2;
   const minWidth = options.minWidth ?? MIN_WIDTH2;
-  const container = element2.offsetParent ?? element2.parentElement ?? document.body;
+  const dock = options.dock ?? null;
+  const dockReach = options.dockReach ?? DOCK_REACH;
+  const floatParent = element2.parentElement ?? document.body;
   const saved = readStore2(storageKey);
   const grip = document.createElement("span");
   grip.className = "tb-grip";
@@ -4269,12 +4272,17 @@ function initFloatingToolbar(element2, options = {}) {
   resize.title = "Drag to resize";
   element2.append(resize);
   let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
+  const isDocked = () => element2.classList.contains("is-docked");
   const applyWidth = () => {
+    if (isDocked()) {
+      element2.style.width = "";
+      return;
+    }
     if (width) element2.style.width = `${width}px`;
   };
   const containerSize = () => ({
-    boundWidth: container.clientWidth || container.getBoundingClientRect().width,
-    boundHeight: container.clientHeight || container.getBoundingClientRect().height
+    boundWidth: floatParent.clientWidth || floatParent.getBoundingClientRect().width,
+    boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height
   });
   const place = (left, top) => {
     const rect = element2.getBoundingClientRect();
@@ -4292,42 +4300,86 @@ function initFloatingToolbar(element2, options = {}) {
     updateMenuDirection();
   };
   const updateMenuDirection = () => {
+    if (isDocked()) {
+      element2.classList.add("opens-up");
+      return;
+    }
     const rect = element2.getBoundingClientRect();
-    const containerTop = container.getBoundingClientRect().top;
-    const center = rect.top - containerTop + rect.height / 2;
+    const parentRect = floatParent.getBoundingClientRect();
+    const center = rect.top - parentRect.top + rect.height / 2;
     const { boundHeight } = containerSize();
     element2.classList.toggle("opens-up", center > boundHeight / 2);
   };
-  if (Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+  function persist() {
+    const left = parseFloat(element2.style.left);
+    const top = parseFloat(element2.style.top);
+    writeStore2(storageKey, {
+      docked: isDocked(),
+      left: Number.isFinite(left) ? left : null,
+      top: Number.isFinite(top) ? top : null,
+      width: width ?? null
+    });
+  }
+  function dockElement() {
+    if (!dock || isDocked()) return;
+    element2.classList.add("is-docked");
+    element2.style.left = "";
+    element2.style.top = "";
+    element2.style.bottom = "";
+    element2.style.right = "";
+    const meta = dock.querySelector(".bottom-meta");
+    if (meta) dock.insertBefore(element2, meta);
+    else dock.append(element2);
+    applyWidth();
+    updateMenuDirection();
+    persist();
+  }
+  function undockElement() {
+    if (!isDocked()) return;
+    element2.classList.remove("is-docked");
+    floatParent.append(element2);
+    applyWidth();
+  }
+  if (saved.docked && dock) {
+    dockElement();
+  } else if (Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
     place(saved.left, saved.top);
   } else {
     updateMenuDirection();
   }
   applyWidth();
-  const persist = () => {
-    writeStore2(storageKey, {
-      left: parseFloat(element2.style.left),
-      top: parseFloat(element2.style.top),
-      width: parseFloat(element2.style.width) || null
-    });
-  };
   grip.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     const rect = element2.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-    const startLeft = rect.left - containerRect.left;
-    const startTop = rect.top - containerRect.top;
-    const startX = event.clientX;
-    const startY = event.clientY;
+    const grabOffsetX = event.clientX - rect.left;
+    const grabOffsetY = event.clientY - rect.top;
+    let overDock = false;
     grip.setPointerCapture(event.pointerId);
+    const dockHit = (clientX, clientY) => {
+      if (!dock) return false;
+      const bounds = dock.getBoundingClientRect();
+      return clientY >= bounds.top - dockReach && clientX >= bounds.left && clientX <= bounds.right;
+    };
     const move = (moveEvent) => {
-      place(startLeft + (moveEvent.clientX - startX), startTop + (moveEvent.clientY - startY));
+      if (isDocked()) {
+        if (moveEvent.clientY >= dock.getBoundingClientRect().top) return;
+        undockElement();
+      }
+      const parentRect = floatParent.getBoundingClientRect();
+      place(
+        moveEvent.clientX - parentRect.left - grabOffsetX,
+        moveEvent.clientY - parentRect.top - grabOffsetY
+      );
+      overDock = dockHit(moveEvent.clientX, moveEvent.clientY);
+      dock?.classList.toggle("is-dock-target", overDock);
     };
     const end = () => {
       grip.removeEventListener("pointermove", move);
       grip.removeEventListener("pointerup", end);
       grip.removeEventListener("pointercancel", end);
-      persist();
+      dock?.classList.remove("is-dock-target");
+      if (overDock) dockElement();
+      else persist();
     };
     grip.addEventListener("pointermove", move);
     grip.addEventListener("pointerup", end);
@@ -4336,7 +4388,7 @@ function initFloatingToolbar(element2, options = {}) {
     event.stopPropagation();
   });
   resize.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || isDocked()) return;
     const startX = event.clientX;
     const startWidth = element2.getBoundingClientRect().width;
     const { boundWidth } = containerSize();
@@ -4360,13 +4412,14 @@ function initFloatingToolbar(element2, options = {}) {
     event.stopPropagation();
   });
   window.addEventListener("resize", () => {
+    if (isDocked()) return;
     if (Number.isFinite(parseFloat(element2.style.left))) {
       place(parseFloat(element2.style.left), parseFloat(element2.style.top));
     } else {
       updateMenuDirection();
     }
   });
-  return { element: element2, grip, resize };
+  return { element: element2, grip, resize, dock, isDocked, undock: undockElement };
 }
 
 // ui/strabo-freshness.js
@@ -22946,6 +22999,9 @@ function setScreen(screen) {
   const showTerminal = screen === "terminal";
   elements.graphScreen.hidden = showTerminal;
   elements.terminalScreen.hidden = !showTerminal;
+  if (elements.graphToolbar?.classList.contains("is-docked")) {
+    elements.graphToolbar.hidden = showTerminal;
+  }
   elements.screenTabGraph.setAttribute("aria-selected", String(!showTerminal));
   elements.screenTabTerminal.setAttribute("aria-selected", String(showTerminal));
   if (showTerminal) {
@@ -23198,7 +23254,7 @@ var floatingWindows = initFloatingWindows({
     }
   ]
 });
-initFloatingToolbar(elements.graphToolbar);
+initFloatingToolbar(elements.graphToolbar, { dock: document.getElementById("bottom-bar") });
 function refreshDock() {
   try {
     floatingWindows?.refresh?.();

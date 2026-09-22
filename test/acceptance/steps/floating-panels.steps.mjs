@@ -162,3 +162,52 @@ Then('the zoom controls sit above the dock', async function () {
     'the zoom controls should sit above the dock, not under its chips',
   );
 });
+
+/** Where the canvas toolbar currently lives: docked in the footer or floating on the canvas. */
+async function toolbarState(page) {
+  return page.evaluate(() => {
+    const toolbar = document.querySelector('.graph-toolbar');
+    return {
+      docked: Boolean(toolbar?.classList.contains('is-docked')),
+      parent: toolbar?.parentElement?.id ?? null,
+    };
+  });
+}
+
+When('I drag the canvas toolbar onto the bottom bar', async function () {
+  const grip = this.page.locator('.graph-toolbar .tb-grip');
+  const box = await grip.boundingBox();
+  assert.ok(box, 'the toolbar grip should be present');
+  const bar = await this.page.locator('#bottom-bar').boundingBox();
+  assert.ok(bar, 'the bottom bar should be present');
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await this.page.mouse.move(startX, startY);
+  await this.page.mouse.down();
+  await this.page.mouse.move(startX, bar.y + bar.height / 2, { steps: 8 });
+  await this.page.mouse.up();
+});
+
+When('I drag the canvas toolbar grip up off the bottom bar', async function () {
+  const grip = this.page.locator('.graph-toolbar .tb-grip');
+  const box = await grip.boundingBox();
+  assert.ok(box, 'the toolbar grip should be present');
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  await this.page.mouse.move(startX, startY);
+  await this.page.mouse.down();
+  await this.page.mouse.move(startX + 40, startY - 220, { steps: 8 });
+  await this.page.mouse.up();
+});
+
+Then('the canvas toolbar is docked in the bottom bar', async function () {
+  const state = await toolbarState(this.page);
+  assert.equal(state.docked, true, 'the toolbar should be docked');
+  assert.equal(state.parent, 'bottom-bar', 'the toolbar should live in the bottom bar');
+});
+
+Then('the canvas toolbar floats on the canvas again', async function () {
+  const state = await toolbarState(this.page);
+  assert.equal(state.docked, false, 'the toolbar should not be docked');
+  assert.equal(state.parent, 'graph-screen', 'the toolbar should return to the graph screen');
+});

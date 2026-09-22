@@ -657,6 +657,34 @@ button.primary {
   bottom: calc(100% + 6px);
 }
 
+/* Docked: dragged down onto the bottom bar, the toolbar joins the footer row beside the
+   panel dock instead of floating over the canvas. */
+.graph-toolbar.is-docked {
+  position: relative;
+  bottom: auto;
+  left: auto;
+  flex: 0 1 auto;
+  max-width: min(560px, 62vw);
+  z-index: auto;
+}
+
+/* The footer is outside the graph screen, so a docked bar needs to be hidden explicitly
+   when the Terminal tab is active. */
+.graph-toolbar.is-docked[hidden] {
+  display: none;
+}
+
+/* The resize edge only means something while the bar floats. */
+.graph-toolbar.is-docked .tb-resize {
+  display: none;
+}
+
+/* Highlight the bottom bar while a dragged toolbar hovers over it, so the drop is visible. */
+.bottom-bar.is-dock-target {
+  border-top-color: var(--accent);
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
 .tb-divider {
   width: 1px;
   align-self: stretch;

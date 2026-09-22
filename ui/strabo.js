@@ -3572,6 +3572,11 @@ function setScreen(screen) {
   const showTerminal = screen === 'terminal';
   elements.graphScreen.hidden = showTerminal;
   elements.terminalScreen.hidden = !showTerminal;
+  // A docked toolbar lives in the footer, outside the graph screen, so it does not hide with
+  // the canvas. Mirror the screen state onto it while it is docked.
+  if (elements.graphToolbar?.classList.contains('is-docked')) {
+    elements.graphToolbar.hidden = showTerminal;
+  }
   elements.screenTabGraph.setAttribute('aria-selected', String(!showTerminal));
   elements.screenTabTerminal.setAttribute('aria-selected', String(showTerminal));
   if (showTerminal) {
@@ -3830,8 +3835,9 @@ const floatingWindows = initFloatingWindows({
 });
 
 // The canvas action toolbar floats: drag its grip to move it, its edge to resize, and the
-// placement is remembered. It opens bottom-left, clear of the top chrome.
-initFloatingToolbar(elements.graphToolbar);
+// placement is remembered. It opens bottom-left, clear of the top chrome, and drags down
+// onto the bottom bar to dock there.
+initFloatingToolbar(elements.graphToolbar, { dock: document.getElementById('bottom-bar') });
 
 function refreshDock() {
   try {
