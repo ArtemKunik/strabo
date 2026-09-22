@@ -1,8 +1,8 @@
 # Strabo design
 
 Internals, contracts, and the designed-but-unbuilt surface. Shipped behaviour and how to
-run Strabo live in [README.md](../README.md); the phased plan for what is still being built
-lives in [ROADMAP.md](./ROADMAP.md).
+run Strabo live in [USAGE.md](./USAGE.md) and [FEATURES.md](./FEATURES.md); the phased plan
+for what is still being built lives in [ROADMAP.md](./ROADMAP.md).
 
 > **Guiding principle: evidence over speculation.**
 > The map draws only edges it can resolve inside the repository. Anything uncertain is
