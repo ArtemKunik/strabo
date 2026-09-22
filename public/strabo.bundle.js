@@ -1343,10 +1343,16 @@ function impactOverlay(data) {
   }
   const changed = (data?.changed ?? []).length;
   const affected = (data?.affected ?? []).filter((entry) => entry.distance > 0).length;
+  const listed = (data?.affected ?? []).slice(0, 50);
+  const itemFor = (entry) => `${entry.id} \xB7 distance ${entry.distance}`;
   return {
     classes,
     summary: `${changed} changed \xB7 ${affected} affected`,
-    items: (data?.affected ?? []).slice(0, 50).map((entry) => `${entry.id} \xB7 distance ${entry.distance}`)
+    items: listed.map(itemFor),
+    // The panel can hide the dependents: `changed` is the file itself (distance 0),
+    // `affected` the dependents it can reach (distance > 0), which read as the negative side.
+    changedItems: new Set(listed.filter((entry) => entry.distance === 0).map(itemFor)),
+    affectedItems: new Set(listed.filter((entry) => entry.distance > 0).map(itemFor))
   };
 }
 function cyclesOverlay(groups) {
@@ -1400,9 +1406,10 @@ function architectureOverlay(report) {
   return {
     classes: /* @__PURE__ */ new Map(),
     summary: `score ${report?.score ?? "n/a"}/100`,
-    items: axes.map(
-      (axis) => axis.value === null ? `${axis.label}: unavailable (${axis.detail})` : `${axis.label}: ${axis.value}/100 (${axis.detail})`
-    )
+    items: axes.map((axis) => {
+      const basis = axis.basis ? ` [${axis.basis}]` : "";
+      return axis.value === null ? `${axis.label}${basis}: unavailable (${axis.detail})` : `${axis.label}${basis}: ${axis.value}/100 (${axis.detail})`;
+    })
   };
 }
 function metricDelta(before, after, { moreIsWorse = true } = {}) {
@@ -7137,11 +7144,18 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
   }
   if (overlay.items.length > 0) {
     const needsSearch = overlay.items.length > 8;
+    const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
+    const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
+    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay.items.length;
     let filter = "";
+    let changedOnly = false;
     const rowFor = (item) => {
       const entry = document.createElement("div");
       entry.className = "overlay-list-row";
       entry.setAttribute("role", "listitem");
+      if (affectedItems && affectedItems.has(item)) {
+        entry.classList.add("overlay-row-affected");
+      }
       if (typeof item === "string") {
         entry.dataset.delegateOverlayItem = item;
       }
@@ -7163,16 +7177,27 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
       className: "overlay-list",
       renderRow: rowFor
     });
-    const matchingItems = () => filter ? overlay.items.filter((item) => String(item).toLowerCase().includes(filter)) : overlay.items;
+    const matchingItems = () => {
+      let items = overlay.items;
+      if (changedOnly && changedItems) {
+        items = items.filter((item) => changedItems.has(item));
+      }
+      if (filter) {
+        items = items.filter((item) => String(item).toLowerCase().includes(filter));
+      }
+      return items;
+    };
     const empty = document.createElement("p");
     empty.className = "overlay-empty";
-    empty.textContent = "No modules match this filter.";
     empty.hidden = true;
     const renderList = () => {
       const matching = matchingItems();
+      empty.textContent = changedOnly && !filter ? "No changed modules." : "No modules match this filter.";
       empty.hidden = matching.length > 0;
       list.setItems(matching);
     };
+    const controls = document.createElement("div");
+    controls.className = "overlay-controls";
     if (needsSearch) {
       const search = document.createElement("input");
       search.type = "search";
@@ -7183,7 +7208,24 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
         filter = search.value.trim().toLowerCase();
         renderList();
       });
-      container.append(search);
+      controls.append(search);
+    }
+    if (showChangedOnly) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "overlay-toggle-changed";
+      toggle.setAttribute("aria-pressed", "false");
+      toggle.textContent = "Changed only";
+      toggle.title = "Hide the potentially affected dependents";
+      toggle.addEventListener("click", () => {
+        changedOnly = !changedOnly;
+        toggle.setAttribute("aria-pressed", String(changedOnly));
+        renderList();
+      });
+      controls.append(toggle);
+    }
+    if (controls.childElementCount > 0) {
+      container.append(controls);
     }
     container.append(list.element);
     container.append(empty);

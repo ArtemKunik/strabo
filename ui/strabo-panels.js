@@ -2216,12 +2216,19 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
 
   if (overlay.items.length > 0) {
     const needsSearch = overlay.items.length > 8;
+    const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
+    const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
+    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay.items.length;
     let filter = '';
+    let changedOnly = false;
 
     const rowFor = (item) => {
       const entry = document.createElement('div');
       entry.className = 'overlay-list-row';
       entry.setAttribute('role', 'listitem');
+      if (affectedItems && affectedItems.has(item)) {
+        entry.classList.add('overlay-row-affected');
+      }
       if (typeof item === 'string') {
         entry.dataset.delegateOverlayItem = item;
       }
@@ -2246,22 +2253,32 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
       renderRow: rowFor,
     });
 
-    const matchingItems = () => (
-      filter
-        ? overlay.items.filter((item) => String(item).toLowerCase().includes(filter))
-        : overlay.items
-    );
+    const matchingItems = () => {
+      let items = overlay.items;
+      if (changedOnly && changedItems) {
+        items = items.filter((item) => changedItems.has(item));
+      }
+      if (filter) {
+        items = items.filter((item) => String(item).toLowerCase().includes(filter));
+      }
+      return items;
+    };
 
     const empty = document.createElement('p');
     empty.className = 'overlay-empty';
-    empty.textContent = 'No modules match this filter.';
     empty.hidden = true;
 
     const renderList = () => {
       const matching = matchingItems();
+      empty.textContent = changedOnly && !filter
+        ? 'No changed modules.'
+        : 'No modules match this filter.';
       empty.hidden = matching.length > 0;
       list.setItems(matching);
     };
+
+    const controls = document.createElement('div');
+    controls.className = 'overlay-controls';
 
     if (needsSearch) {
       const search = document.createElement('input');
@@ -2273,7 +2290,26 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
         filter = search.value.trim().toLowerCase();
         renderList();
       });
-      container.append(search);
+      controls.append(search);
+    }
+
+    if (showChangedOnly) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'overlay-toggle-changed';
+      toggle.setAttribute('aria-pressed', 'false');
+      toggle.textContent = 'Changed only';
+      toggle.title = 'Hide the potentially affected dependents';
+      toggle.addEventListener('click', () => {
+        changedOnly = !changedOnly;
+        toggle.setAttribute('aria-pressed', String(changedOnly));
+        renderList();
+      });
+      controls.append(toggle);
+    }
+
+    if (controls.childElementCount > 0) {
+      container.append(controls);
     }
     container.append(list.element);
     container.append(empty);

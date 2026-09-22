@@ -1033,6 +1033,28 @@ button.primary {
   margin: 4px 0 6px;
 }
 
+.function-coverage-basis {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.function-coverage {
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.function-coverage[data-basis='measured'] {
+  color: var(--ink-2);
+}
+
+.function-coverage-detail {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .function-table {
   width: 100%;
   border-collapse: collapse;
@@ -2170,6 +2192,40 @@ button.primary {
   padding: 4px 8px;
   font: inherit;
   background: var(--bg-1);
+}
+
+.overlay-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.overlay-controls .overlay-filter {
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+
+.overlay-toggle-changed {
+  flex: none;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--ink-1);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.overlay-toggle-changed[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Affected dependents carry a bar as well as a tone, so the signal is not hue alone (R6). */
+.overlay-list-row.overlay-row-affected {
+  padding-left: 6px;
+  border-left: 2px solid var(--status-warning);
 }
 
 .overlay-dot {

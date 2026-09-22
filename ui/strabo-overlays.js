@@ -279,12 +279,16 @@ function impactOverlay(data) {
   }
   const changed = (data?.changed ?? []).length;
   const affected = (data?.affected ?? []).filter((entry) => entry.distance > 0).length;
+  const listed = (data?.affected ?? []).slice(0, 50);
+  const itemFor = (entry) => `${entry.id} · distance ${entry.distance}`;
   return {
     classes,
     summary: `${changed} changed · ${affected} affected`,
-    items: (data?.affected ?? [])
-      .slice(0, 50)
-      .map((entry) => `${entry.id} · distance ${entry.distance}`),
+    items: listed.map(itemFor),
+    // The panel can hide the dependents: `changed` is the file itself (distance 0),
+    // `affected` the dependents it can reach (distance > 0), which read as the negative side.
+    changedItems: new Set(listed.filter((entry) => entry.distance === 0).map(itemFor)),
+    affectedItems: new Set(listed.filter((entry) => entry.distance > 0).map(itemFor)),
   };
 }
 

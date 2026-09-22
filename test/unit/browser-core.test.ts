@@ -246,6 +246,8 @@ test('overlayFor maps change impact onto changed and affected nodes', () => {
   assert.equal(overlay.classes.get('b.ts'), 'ov-affected');
   assert.equal(overlay.classes.get('a.ts'), 'ov-affected');
   assert.equal(overlay.summary, '1 changed · 2 affected');
+  assert.deepEqual([...overlay.changedItems], ['c.ts · distance 0']);
+  assert.deepEqual([...overlay.affectedItems], ['b.ts · distance 1', 'a.ts · distance 2']);
 });
 
 test('overlayFor maps cycles and test reach onto their node classes', () => {

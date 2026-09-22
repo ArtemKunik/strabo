@@ -133,6 +133,31 @@ test('renderOverlayPanel filters the list and reports an empty match', () => {
   assert.equal(target.querySelector('.overlay-empty').hidden, false);
 });
 
+test('renderOverlayPanel focuses changed rows and marks affected dependents', () => {
+  const target = container();
+  const items = ['c.ts · distance 0', 'b.ts · distance 1', 'a.ts · distance 2'];
+  renderOverlayPanel(
+    target,
+    'Change impact',
+    {
+      summary: '1 changed · 2 affected',
+      items,
+      changedItems: new Set(['c.ts · distance 0']),
+      affectedItems: new Set(['b.ts · distance 1', 'a.ts · distance 2']),
+    },
+    { kind: 'impact' }
+  );
+
+  assert.equal(target.querySelectorAll('.overlay-row-affected').length, 2);
+
+  const toggle = target.querySelector('.overlay-toggle-changed');
+  assert.ok(toggle, 'a changed-only toggle is offered when dependents can be hidden');
+  toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+
+  const rows = [...target.querySelectorAll('.overlay-list-row')];
+  assert.deepEqual(rows.map((row) => row.dataset.delegateOverlayItem), ['c.ts · distance 0']);
+});
+
 test('renderOverlayPanel shows the empty note when it has no items', () => {
   const target = container();
   renderOverlayPanel(target, 'Impact', { summary: 'nothing', items: [], emptyNote: 'No files changed.' }, {});
