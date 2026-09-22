@@ -699,6 +699,9 @@ npm run test:pack     # release readiness: pack, install in a clean consumer, ru
 
 The unit suite runs entirely in Node. The DOM panels are covered through jsdom
 (`test/unit/panels.test.ts`), so a panel's model-to-tree transform is asserted without a browser.
+The panels live in `ui/strabo-panel-*.js` (one module per topic, with shared DOM primitives in
+`ui/strabo-panel-kit.js`) and are re-exported by `ui/strabo-panels.js`, the stable entry point the
+tests and `ui/strabo.js` import.
 
 `npm run test:pack` builds the real tarball, asserts the published file set (dist, public,
 all four grammar assets, bin, README; no src/test/node_modules), installs it into a fresh

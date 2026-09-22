@@ -22,7 +22,7 @@ record is reported as `unavailable`, never invented.
 | 7 | Repository picker | Done (remembered repositories, reopens the last one) |
 | 11 | Multi-repo workspace | Done (backend: declared list, package flows, contracts, drift, service flows, per-fingerprint cache; A10: read-only Workspace panel; A11: HTTP/service-call flows) |
 | 12 | Frontend foundation | done (`ui/` esbuild bundle, keyed `ui/view.js`, observable `ui/store.js` with deep links, member map ported off
-    `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests) |
+    `replaceChildren`, shared focus ring + roving keyboard navigation, virtualized long lists + incremental graph render + jsdom panel tests, panel god-module split into `ui/strabo-panel-*.js` behind a barrel) |
 | 13 | Visual design | M0-M6 done (zoom clamp + compensated labels, rail placement + dock flash, directory islands + edge contrast, chrome consolidation, type/controls/copy, first run; M1 colour budget R1-R9 and M1a one-source-of-truth R10-R14) |
 | 14 | Function inventory and complexity | Done (A1-A7: body metrics, intra-file calls, Functions tab, deterministic signals incl. linear scan/sort in loops, Hotspots overlay; F1-F4 done: free-function calls, entry detection with entry-aware captions, intra-file scope caption, sortable Functions table) |
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution; Member-map Narrate from the recorded members and data flow); follow-ups N1-N5 done (in-app narrator setup) |
@@ -198,7 +198,7 @@ scan recorded is drawn; nothing is inferred from names or proximity.
 
 Slices: **A10 (done)** the read-only workspace UI. `ui/strabo-workspace.js` turns the
 recorded `WorkspaceReport` into pure rows (`workspaceSummary`, `repositoryRows`, `flowRows`,
-`contractRows`, `driftRows`); `renderWorkspace` (`ui/strabo-panels.js`) renders repositories,
+`contractRows`, `driftRows`); `renderWorkspace` (`ui/strabo-panel-workspace.js`) renders repositories,
 cross-repo flows, contracts, and drift in a floating panel, saying so when a section has
 nothing recorded rather than showing it empty. The panel is registered in the dock
 (`ui/strabo.js`, `ui/index.html`) and opened from `window.straboTest.workspace()`. Route-level
@@ -289,6 +289,16 @@ keeps the identity but adds a build step and a small view/state layer.
   than only through the browser. Unit coverage is `test/unit/virtual.test.ts`, `test/unit/graph-diff.test.ts`,
   and `test/unit/panels.test.ts`.
 
+- **M6 - Panel module split (done).** The 4667-line `ui/strabo-panels.js` — the single
+  module that had grown to hold every panel — is split by topic into `ui/strabo-panel-*.js`:
+  a shared `kit` of DOM primitives (`button`, `backButton`, `unavailableNote`, `wiring`,
+  `appendFact`, `matches`, `svgElement`), plus inspector, functions, narrative, workspace,
+  members, review, branches, risk, overlay, chrome, and source modules. `ui/strabo-panels.js`
+  stays as a barrel that re-exports exactly the previous 33-name public surface, so
+  `ui/strabo.js` and the six jsdom suites import it unchanged. Declarations moved verbatim
+  (no behaviour change); `npm run build:ui` regenerates `public/strabo.bundle.js`, and
+  `test/unit/*panel*.test.ts` plus `test/unit/panels.test.ts` cover the result.
+
 ## Phase 13 - Visual design
 
 A UI/UX pass over the browser app, from a review of the running product against this
@@ -366,7 +376,7 @@ defect in the running app, not a preference.
   - **R7 — The accent is reserved for interaction.** `--accent` `#4c9aff` marks selection,
     focus, links and hubs, and nothing else. No status, series or fill may use it.
   - **R8 — Bounded categorical is capped at three plus "other".** The member-map clusters
-    (`.cluster-1..7`, assigned `(cluster.index % 7) + 1` in `ui/strabo-panels.js`) are the
+    (`.cluster-1..7`, assigned `(cluster.index % 7) + 1` in `ui/strabo-panel-members.js`) are the
     only genuine categorical set. Cluster cards sit adjacent, so the set is scored all-pairs;
     three hues clear every gate on this surface — `--series-1: #3987e5` (5.08:1),
     `--series-2: #d95926` (4.76:1), `--series-3: #199e70` (5.42:1), worst CVD ΔE 9.4, worst
@@ -593,7 +603,7 @@ instead of "no callers". Shared helper `src/scan/languages/entry.ts`
 `test/unit/function-entries.test.ts`. **F3 (done)** the public/intra-file caption:
 a public function with no callers in the file says *no callers in this file (cross-file
 not resolved)*, since callers resolve within the file only. **F4 (done)** the Functions
-tab as a sortable table (`renderFunctionTable` in `ui/strabo-panels.js`, pure helpers in
+tab as a sortable table (`renderFunctionTable` in `ui/strabo-panel-functions.js`, pure helpers in
 `ui/strabo-functions.js`): one row per function with columns for name, visibility or
 entry badge, lines, span, complexity, nesting, loops, calls (count), callers (count or
 entry badge), and signals (chips); names truncate in the middle with the full signature
@@ -669,7 +679,7 @@ presets; `src/state/settings-store.ts` persists the narrator fields under the en
 owner-only permissions; `src/api/routes/narrator.ts` adds `GET /narrator/models`,
 `POST /narrator/test`, `POST /narrator/key`, and `DELETE /narrator/key`; and the Settings →
 Narrator section, the single *Narrator is off · Set up →* call to action, and the disabled
-Narrate / Name group live in `ui/strabo-settings.js` and `ui/strabo-panels.js`. Anthropic
+Narrate / Name group live in `ui/strabo-settings.js` and `ui/strabo-panel-narrative.js`. Anthropic
 needs no adapter: its OpenAI-compatible endpoint (`https://api.anthropic.com/v1/`) fits the
 existing `messages` body, so N5 resolved without a native Messages-API client.
 
@@ -1031,7 +1041,7 @@ coverage is the `mod declarations are declare edges` case in `test/unit/rust.tes
 
 **Q8 (done).** The pending-change risk summary and the tests to run. `CohesionChange` gains `testsToRun` (the test files whose forward closure reaches the changed file, from `computeTestReachByFile`), `untestedDependents` (direct dependents no test reaches), and `risk` — `linesTouched × touchedComplexity × definiteImpact × untestedShare`, each input kept — from `computeChangeRisk`. Unit coverage is `test/unit/change-passport.test.ts`. The per-module `scores` (`complexity`, `churn`, `hotspot`, `blastRadius`, `testReach`, `risk`) also ride the scorecard; the `@composites` scenario in `module-quality.feature` covers them.
 
-**Q9 (done).** The Change impact passport card. `src/analysis/impact-passport.ts` composes one file's card from already-recorded facts: a bounded 0-100 **risk** (a weighted product of the normalised max complexity, blast radius, signal count, and untested-dependent share, with every input kept and a `LOW`/`MODERATE`/`HIGH`/`CRITICAL` band), **max and average complexity** with their before → after moves and the unchanged function/class counts, **change coherence** (the largest connected component of the changed symbols over their count, from the recorded intra-file calls), the current-graph **blast radius** and **importers / imports**, the ranked **risk signals**, and the **most complex functions** with their moves. `functionFacts` derives a side's facts once, `buildFileImpactPassport` is pure, and `rollUpImpactPassports` unions blast radius, importers, and imports over the drawn graph for the change set or revision. `CohesionChange.impactPassport` carries the per-file card, `GET /analysis/review` carries the roll-up, and `GET /analysis/impact-passport?file=` serves the Module Passport's new **Impact** tab (compared against HEAD, so a dirty file shows its growth). The shared git content reader is `src/analysis/git-content.ts`. Unit coverage is `test/unit/impact-passport.test.ts`, the route case in `test/unit/server.test.ts`, and the `renderImpactPassport` cases in `test/unit/panels.test.ts`; the card is rendered by `ui/strabo-impact.js` / `ui/strabo-panels.js`.
+**Q9 (done).** The Change impact passport card. `src/analysis/impact-passport.ts` composes one file's card from already-recorded facts: a bounded 0-100 **risk** (a weighted product of the normalised max complexity, blast radius, signal count, and untested-dependent share, with every input kept and a `LOW`/`MODERATE`/`HIGH`/`CRITICAL` band), **max and average complexity** with their before → after moves and the unchanged function/class counts, **change coherence** (the largest connected component of the changed symbols over their count, from the recorded intra-file calls), the current-graph **blast radius** and **importers / imports**, the ranked **risk signals**, and the **most complex functions** with their moves. `functionFacts` derives a side's facts once, `buildFileImpactPassport` is pure, and `rollUpImpactPassports` unions blast radius, importers, and imports over the drawn graph for the change set or revision. `CohesionChange.impactPassport` carries the per-file card, `GET /analysis/review` carries the roll-up, and `GET /analysis/impact-passport?file=` serves the Module Passport's new **Impact** tab (compared against HEAD, so a dirty file shows its growth). The shared git content reader is `src/analysis/git-content.ts`. Unit coverage is `test/unit/impact-passport.test.ts`, the route case in `test/unit/server.test.ts`, and the `renderImpactPassport` cases in `test/unit/panels.test.ts`; the card is rendered by `ui/strabo-impact.js` / `ui/strabo-panel-risk.js`.
 
 **Smells** are rules over those measures. Each shows the inputs that tripped it and is a
 signal, not a verdict: god module (size, members and importers high, cohesion low), hub
