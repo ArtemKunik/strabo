@@ -778,7 +778,7 @@ function candidateReportPaths(
  * is made relative; one outside is kept literally so the caller can report it rather than
  * silently dropping it. Nothing is resolved against a filename that is not in the report.
  */
-function mapReportPath(root: string, rawPath: string): string {
+export function mapReportPath(root: string, rawPath: string): string {
   const normalised = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');
   if (!path.isAbsolute(normalised)) {
     return normalised;

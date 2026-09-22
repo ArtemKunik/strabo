@@ -123,3 +123,71 @@ export function functionSignals(entry) {
   }
   return signals.map((signal) => `${signal.kind} (${signal.detail})`).join('; ');
 }
+
+/** A compact report age: minutes, hours, or days. */
+export function coverageAge(ageMs) {
+  const minutes = Math.floor(Number(ageMs) / 60000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/**
+ * The short measured-coverage label for a figure: `measured 0%`, `measured (executed)`, or
+ * `unavailable` when the report does not name the function. Never 0% for an unrecorded one.
+ */
+export function coverageLabel(coverage) {
+  if (!coverage) {
+    return 'unavailable';
+  }
+  if (coverage.lineCoverage !== null && coverage.lineCoverage !== undefined) {
+    return `measured ${Math.round(coverage.lineCoverage)}%`;
+  }
+  if (coverage.hits !== null && coverage.hits !== undefined) {
+    return coverage.hits > 0 ? 'measured (executed)' : 'measured 0%';
+  }
+  return 'measured';
+}
+
+/** The measured-coverage label for a function entry, or `unavailable`. */
+export function functionCoverageLabel(entry) {
+  return coverageLabel(entry?.coverage);
+}
+
+/** The full measured-coverage caption for a function, stating when it is unavailable. */
+export function functionCoverage(entry) {
+  const coverage = entry?.coverage;
+  if (!coverage) {
+    return 'coverage unavailable (the report does not name this function)';
+  }
+  const parts = [];
+  if (coverage.lineCoverage !== null && coverage.lineCoverage !== undefined) {
+    parts.push(`measured ${coverage.lineCoverage}% (${coverage.linesHit}/${coverage.linesFound} lines)`);
+  } else {
+    parts.push('measured: the report records no per-function line counts');
+  }
+  if (coverage.hits !== null && coverage.hits !== undefined) {
+    parts.push(`executed ${coverage.hits}×`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The file-level coverage caption: which method the figure is, the percent when recorded,
+ * and the report's age and staleness. `reachable` is the static fallback, never measured.
+ */
+export function coverageCaption(coverage) {
+  if (!coverage) {
+    return '';
+  }
+  const basis = coverage.basis === 'measured' ? 'measured' : 'reachable';
+  const value =
+    coverage.value === null || coverage.value === undefined ? 'unavailable' : `${Math.round(coverage.value)}%`;
+  const age =
+    coverage.reportAgeMs === null || coverage.reportAgeMs === undefined
+      ? ''
+      : ` · report ${coverageAge(coverage.reportAgeMs)} old`;
+  const stale = coverage.stale === true ? ' · stale' : '';
+  return `${basis}: ${value}${age}${stale}`;
+}

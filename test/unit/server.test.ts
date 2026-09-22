@@ -202,6 +202,37 @@ test('the functions endpoint ranks hotspots across the repository', async () => 
   assert.ok(Array.isArray(body.hotspots));
 });
 
+test('the coverage endpoint reports measured and reachable with the report age', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const repository = `repository=${encodeURIComponent(path.join(fixtures, 'coverage-repo'))}`;
+
+  const body = (await (await fetch(`${base}/api/strabo/analysis/coverage?${repository}`)).json()) as {
+    measured: {
+      available: boolean;
+      basis: string;
+      reportPath: string | null;
+      reportAgeMs: number | null;
+      outOfGraph: string[];
+      files: Array<{ file: string; inGraph: boolean; lineCoverage: number | null }>;
+    };
+    reachable: { basis: string; reached: string[] };
+  };
+
+  assert.equal(body.measured.available, true);
+  assert.equal(body.measured.basis, 'measured');
+  assert.equal(body.measured.reportPath, 'coverage/lcov.info');
+  assert.equal(typeof body.measured.reportAgeMs, 'number');
+  assert.deepEqual(body.measured.outOfGraph, ['vendor/generated.ts']);
+  // The acceptance case through the API: imported by a test, measured 0%.
+  assert.ok(body.reachable.reached.includes('src/zero.ts'));
+  assert.equal(
+    body.measured.files.find((entry) => entry.file === 'src/zero.ts')?.lineCoverage,
+    0,
+  );
+});
+
 test('the repository store seeds the configured root and remembers a selection', async () => {
   const file = path.join(os.tmpdir(), `strabo-router-store-${process.pid}-${Date.now()}.json`);
   const store = createRepositoryStore({ file });

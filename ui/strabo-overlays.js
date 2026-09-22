@@ -7,6 +7,8 @@
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
 
+import { coverageAge, coverageLabel } from './strabo-functions.js';
+
 /**
  * Map a review analysis result onto node classes and a panel summary.
  *
@@ -238,13 +240,31 @@ function hotspotsOverlay(report) {
   const skippedNote = skipped > 0 ? ` · ${skipped} skipped` : '';
   return {
     classes,
-    summary: `${hotspots.length} hotspot(s) · ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}`,
+    summary:
+      `${hotspots.length} hotspot(s) · ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}` +
+      coverageSummary(report?.coverage),
     items: hotspots.map((spot) => {
       const where = spot.owner ? `${spot.owner}.${spot.name}` : spot.name;
       const kinds = (spot.signals ?? []).map((signal) => signal.kind).join(', ');
-      return `${spot.file} · ${where} (L${spot.line}) · ${kinds}`;
+      return `${spot.file} · ${where} (L${spot.line}) · ${kinds} · coverage ${coverageLabel(spot.coverage)}`;
     }),
   };
+}
+
+/** The measured-coverage provenance for a hotspots summary, or that it is unavailable. */
+function coverageSummary(coverage) {
+  if (!coverage) {
+    return '';
+  }
+  if (!coverage.available) {
+    return ` · coverage unavailable (${coverage.reason ?? 'no report'})`;
+  }
+  const age =
+    coverage.reportAgeMs === null || coverage.reportAgeMs === undefined
+      ? ''
+      : ` (report ${coverageAge(coverage.reportAgeMs)} old)`;
+  const stale = coverage.stale?.length ? `, ${coverage.stale.length} stale` : '';
+  return ` · coverage measured${age}${stale}`;
 }
 
 function impactOverlay(data) {
@@ -322,11 +342,13 @@ function architectureOverlay(report) {
   return {
     classes: new Map(),
     summary: `score ${report?.score ?? 'n/a'}/100`,
-    items: axes.map((axis) =>
-      axis.value === null
-        ? `${axis.label}: unavailable (${axis.detail})`
-        : `${axis.label}: ${axis.value}/100 (${axis.detail})`,
-    ),
+    items: axes.map((axis) => {
+      // A coverage figure says whether it is measured or the static reach.
+      const basis = axis.basis ? ` [${axis.basis}]` : '';
+      return axis.value === null
+        ? `${axis.label}${basis}: unavailable (${axis.detail})`
+        : `${axis.label}${basis}: ${axis.value}/100 (${axis.detail})`;
+    }),
   };
 }
 

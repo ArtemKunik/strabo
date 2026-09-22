@@ -250,6 +250,54 @@ view.onIslandLayout((offsets) => {
 });
 
 /**
+ * A rolling frame-time readout for the Diagnostics panel.
+ *
+ * Rendering is CPU-bound — the renderer walks every element in JS before the GPU sees
+ * anything — so the useful numbers are the frame interval and the renderer's own redraw
+ * count, not GPU utilisation. Sampled only while Diagnostics is open, since an idle rAF loop
+ * is itself work. The renderer's `redraws` counter is the honest "did the map actually
+ * repaint" signal behind the viewport fast paths.
+ */
+const frameSampler = createFrameSampler(window);
+let runtimeBase = '';
+let runtimeTimer = 0;
+
+function runtimeSuffix() {
+  const { fps, ms } = frameSampler.stats();
+  const redraws = view.cy?.renderer?.()?.redraws ?? 0;
+  const drawn = view.cy?.elements().length ?? 0;
+  const fpsText = fps === null ? 'fps: sampling…' : `${Math.round(fps)} fps`;
+  const msText = ms === null ? '' : ` / ${ms.toFixed(1)} ms`;
+  return `${fpsText}${msText} · ${redraws} redraws · ${drawn} elements`;
+}
+
+function refreshRuntimeReadout() {
+  if (!elements.diagnostics || elements.diagnostics.hidden || !runtimeBase) {
+    return;
+  }
+  const line = elements.diagnostics.querySelector('[data-role="runtime"]');
+  if (line) {
+    line.textContent = `${runtimeBase} · ${runtimeSuffix()}`;
+  }
+}
+
+function startRuntimeReadout() {
+  frameSampler.start();
+  if (!runtimeTimer) {
+    runtimeTimer = setInterval(refreshRuntimeReadout, 500);
+  }
+  refreshRuntimeReadout();
+}
+
+function stopRuntimeReadout() {
+  frameSampler.stop();
+  if (runtimeTimer) {
+    clearInterval(runtimeTimer);
+    runtimeTimer = 0;
+  }
+}
+
+/**
  * Client preferences, read once and re-applied on every change. `applyAppearance` sets the
  * theme and reduce-motion attributes before the first render; the canvas reads their
  * colours, so it is restyled here too.
@@ -477,6 +525,10 @@ async function scan({ refresh = false } = {}) {
       renderer: rendererName(),
       shown: view.cy.nodes().length,
     });
+    // Keep the per-graph half of the runtime line, so the live perf fields can be appended
+    // without losing the cache/renderer/shown facts the panel just wrote.
+    runtimeBase = elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? '';
+    refreshRuntimeReadout();
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === 'system') {
@@ -2675,6 +2727,8 @@ elements.diagnosticsToggle.addEventListener('click', () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
   elements.diagnosticsToggle.setAttribute('aria-expanded', String(hidden));
+  if (hidden) startRuntimeReadout();
+  else stopRuntimeReadout();
 });
 elements.browse.addEventListener('click', openFolderDialog);
 document.getElementById('graph')?.addEventListener('pointerdown', dismissHint, { capture: true });
@@ -3486,9 +3540,13 @@ const floatingWindows = initFloatingWindows({
       dockLabel: 'Diagnostics',
       width: 420,
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
+      onOpen: () => {
+        startRuntimeReadout();
+      },
       onClose: () => {
         elements.diagnostics.hidden = true;
         elements.diagnosticsToggle.setAttribute('aria-expanded', 'false');
+        stopRuntimeReadout();
       },
     },
     {

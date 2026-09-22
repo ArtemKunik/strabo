@@ -18,6 +18,7 @@ import {
   normalizeIslandOffsets,
   projectIsland,
   shiftIslandOffset,
+  uniformIslandShift,
 } from '../../ui/strabo-islands.js';
 
 /** A file-mode view model: two directories, positions as the layout packs them. */
@@ -114,6 +115,41 @@ test('projectIsland applies the Cytoscape transform', () => {
     { pan: { x: 5, y: 7 }, zoom: 2 },
   );
   assert.deepEqual(box, { x: 25, y: 47, width: 200, height: 100 });
+});
+
+test('uniformIslandShift reports the translation of a pure pan', () => {
+  const islands = [
+    { directory: 'src', label: 'src', count: 2, x: 0, y: 0, width: 100, height: 80 },
+    { directory: 'ui', label: 'ui', count: 1, x: 200, y: 0, width: 60, height: 60 },
+  ];
+  const at = (pan: { x: number; y: number }) =>
+    islands.map((island) => projectIsland(island, { pan, zoom: 1 }));
+  const previous = at({ x: 0, y: 0 }).map((box, index) => ({ ...box, ...islands[index] }));
+  const next = at({ x: 12, y: -7 });
+
+  assert.deepEqual(uniformIslandShift(previous, islands, next), { dx: 12, dy: -7 });
+});
+
+test('uniformIslandShift declines a zoom or a changed plate', () => {
+  const islands = [{ directory: 'src', label: 'src', count: 2, x: 0, y: 0, width: 100, height: 80 }];
+  const previous = islands.map((island) => ({
+    ...projectIsland(island, { pan: { x: 0, y: 0 }, zoom: 1 }),
+    ...island,
+  }));
+
+  const zoomed = islands.map((island) => projectIsland(island, { pan: { x: 0, y: 0 }, zoom: 2 }));
+  assert.equal(uniformIslandShift(previous, islands, zoomed), null);
+
+  // A relabelled or resized plate is a geometry change, not a pan.
+  const renamed = [{ ...islands[0], label: 'src/analysis' }];
+  const same = islands.map((island) => projectIsland(island, { pan: { x: 4, y: 0 }, zoom: 1 }));
+  assert.equal(uniformIslandShift(previous, renamed, same), null);
+});
+
+test('uniformIslandShift declines a set of a different length', () => {
+  const previous = [{ x: 0, y: 0, width: 10, height: 10, directory: 'a', label: 'a', count: 1 }];
+  assert.equal(uniformIslandShift(previous, [], []), null);
+  assert.equal(uniformIslandShift([], [], []), null);
 });
 
 test('islandLabelFits drops the name when the plate has no room for it', () => {

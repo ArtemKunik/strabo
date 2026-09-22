@@ -2,8 +2,10 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
+import { computeCoverage } from '../../analysis/coverage.ts';
 import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
+import { computeMeasuredCoverage, measuredFileFigure } from '../../analysis/measured-coverage.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
@@ -47,16 +49,29 @@ export function createSymbolsRouter(config: StraboConfig): Router {
       }
 
       const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
+      const graph = (await getCachedGraph(repository.root)).report.graph;
       // A language that splits a type across files needs the headers this one includes;
       // they come from the recorded edges, never from a search.
       const related = extractor.usesRelatedSources
-        ? collectRelatedSources(
-            repository.root,
-            (await getCachedGraph(repository.root)).report.graph,
-            file,
-          )
+        ? collectRelatedSources(repository.root, graph, file)
         : undefined;
       const result = await extractor.extract(file, content, related ? { related } : undefined);
+      // Measured coverage is read for this one file only, so the staleness `git log` is a
+      // single bounded call. A function the report does not name keeps no coverage mark.
+      const measured = await computeMeasuredCoverage(repository.root, graph, {
+        reportPaths: config.coverageReports,
+        ceiling: config.scanCeiling ?? config.workspaceRoot,
+        files: [file],
+      });
+      const measuredEntry = measured.files.find((entry) => entry.inGraph && entry.file === file);
+      // Measured when a report names the file; otherwise the static reach, labelled as such.
+      const reach = computeCoverage(graph);
+      const reachable =
+        reach.testFiles.length === 0
+          ? { value: null, detail: 'no test files identified' }
+          : reach.reached.includes(file) || reach.testFiles.includes(file)
+            ? { value: 100, detail: `reachable from ${reach.testFiles.length} test file(s)` }
+            : { value: 0, detail: 'no path from a test' };
       response.json({
         file,
         language: extractor.language,
@@ -64,7 +79,16 @@ export function createSymbolsRouter(config: StraboConfig): Router {
         symbols: result.symbols,
         diagnostics: result.diagnostics,
         memberMap: buildMemberMap(file, result.symbols, result.accesses ?? []),
-        functions: buildFunctions(file, result.symbols, result.calls ?? []),
+        coverage:
+          measuredFileFigure(measured, file) ?? {
+            basis: 'reachable',
+            value: reachable.value,
+            detail: reachable.detail,
+            reportModified: measured.reportModified,
+            reportAgeMs: measured.reportAgeMs,
+            stale: null,
+          },
+        functions: buildFunctions(file, result.symbols, result.calls ?? [], measuredEntry?.functions ?? []),
       });
     } catch (error) {
       sendError(response, error);

@@ -1033,6 +1033,28 @@ button.primary {
   margin: 4px 0 6px;
 }
 
+.function-coverage-basis {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.function-coverage {
+  color: var(--ink-3);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.function-coverage[data-basis='measured'] {
+  color: var(--ink-2);
+}
+
+.function-coverage-detail {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .function-table {
   width: 100%;
   border-collapse: collapse;

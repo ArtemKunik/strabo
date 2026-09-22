@@ -311,8 +311,8 @@ test('overlayFor maps function hotspots onto their files with their signals', ()
   assert.deepEqual([...overlay.classes.entries()], [['src/scan.ts', 'ov-hotspot']]);
   assert.equal(overlay.summary, '2 hotspot(s) · 12 file(s) scanned · 2 skipped');
   assert.deepEqual(overlay.items, [
-    'src/scan.ts · scan.walk (L4) · nested-loops, long-function',
-    'src/scan.ts · scan.other (L90) · recursion',
+    'src/scan.ts · scan.walk (L4) · nested-loops, long-function · coverage unavailable',
+    'src/scan.ts · scan.other (L90) · recursion · coverage unavailable',
   ]);
 });
 

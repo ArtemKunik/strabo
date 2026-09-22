@@ -311,7 +311,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         extractor?.tracksAccess === false
           ? `not measured: ${extractor.language} members have no methods that read or write them`
           : undefined;
-      response.json(computeFileHealth(cached.report.graph, file, symbols, accesses, cohesionUnavailable));
+      const measured = await measuredCoverage(repository, cached.report.graph, [file]);
+      response.json(
+        computeFileHealth(cached.report.graph, file, symbols, accesses, cohesionUnavailable, measured),
+      );
     } catch (error) {
       sendError(response, error);
     }
@@ -337,6 +340,13 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         .sort();
       const selected = candidates.slice(0, scannedCeiling);
 
+      // The measured report is read once for the files being examined, and the staleness
+      // read is bounded to those files; a function the report does not name stays unavailable.
+      const measured = await measuredCoverage(repository, cached.report.graph, selected);
+      const coverageByFile = new Map(
+        measured.files.filter((entry) => entry.inGraph).map((entry) => [entry.file, entry]),
+      );
+
       const reports: FunctionsReport[] = [];
       let skipped = candidates.length - selected.length;
       for (const file of selected) {
@@ -348,19 +358,21 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         try {
           const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
           const result = await extractor.extract(file, content);
-          reports.push(buildFunctions(file, result.symbols, result.calls ?? []));
+          const entry = coverageByFile.get(file);
+          reports.push(buildFunctions(file, result.symbols, result.calls ?? [], entry?.functions ?? []));
         } catch {
           skipped += 1;
         }
       }
 
-      response.json(
-        rankHotspots(reports, {
+      response.json({
+        ...rankHotspots(reports, {
           limit,
           filesScanned: selected.length,
           filesSkipped: skipped,
         }),
-      );
+        coverage: coverageProvenance(measured),
+      });
     } catch (error) {
       sendError(response, error);
     }

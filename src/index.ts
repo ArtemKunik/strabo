@@ -181,6 +181,7 @@ export {
   coverageProvenance,
   clearMeasuredCoverageCache,
   formatAge,
+  mapReportPath,
   percent,
   DEFAULT_COVERAGE_REPORT_PATHS,
 } from './analysis/measured-coverage.ts';

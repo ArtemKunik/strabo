@@ -41,8 +41,11 @@ import {
   summarizeDiagnostics,
 } from './strabo-core.js';
 import {
+  coverageCaption,
   functionCallers,
   functionCalls,
+  functionCoverage,
+  functionCoverageLabel,
   functionEntryBadge,
   functionLabel,
   functionMetrics,
@@ -558,6 +561,13 @@ export function renderFunctions(container, result, handlers = {}) {
   summary.textContent = functionSummary(report);
   container.append(summary);
 
+  if (result?.coverage) {
+    const coverageNote = document.createElement('p');
+    coverageNote.className = 'function-coverage-basis';
+    coverageNote.textContent = `Coverage ${coverageCaption(result.coverage)}`;
+    container.append(coverageNote);
+  }
+
   if (report.functions.length > FUNCTION_TABLE_VIRTUALIZE_AT) {
     container.append(renderFunctionTableVirtual(report));
   } else {
@@ -592,6 +602,7 @@ const FUNCTION_COLUMNS = [
   { key: 'calls', label: 'Calls', numeric: true },
   { key: 'callers', label: 'Callers' },
   { key: 'signals', label: 'Signals', numeric: true },
+  { key: 'coverage', label: 'Coverage' },
 ];
 
 /** Truncate a long name in the middle so both the owner and the tail stay visible. */
@@ -627,6 +638,8 @@ function functionSortValue(entry, key) {
       return entry?.callers?.length ?? 0;
     case 'signals':
       return entry?.signals?.length ?? 0;
+    case 'coverage':
+      return entry?.coverage?.lineCoverage ?? entry?.coverage?.hits ?? -1;
     default:
       return 0;
   }
@@ -699,6 +712,11 @@ function functionDetailContent(entry, onJump) {
   signals.className = 'function-signals';
   signals.textContent = `signals: ${functionSignals(entry)}`;
   detail.append(signals);
+
+  const coverage = document.createElement('div');
+  coverage.className = 'function-coverage-detail';
+  coverage.textContent = `coverage: ${functionCoverage(entry)}`;
+  detail.append(coverage);
 
   return detail;
 }
@@ -871,6 +889,13 @@ function functionTableRow(entry, onJump) {
   signalsCell.append(signalChips(entry));
   row.append(signalsCell);
 
+  const coverageCell = document.createElement('td');
+  coverageCell.className = 'function-coverage';
+  coverageCell.textContent = functionCoverageLabel(entry);
+  coverageCell.title = functionCoverage(entry);
+  coverageCell.dataset.basis = entry?.coverage ? 'measured' : 'unavailable';
+  row.append(coverageCell);
+
   const detailRow = document.createElement('tr');
   detailRow.className = 'function-detail';
   detailRow.hidden = true;
@@ -966,7 +991,8 @@ function renderFunctionTableVirtual(report) {
       const complexity = entry?.metrics?.decisionPoints ?? '—';
       meta.textContent =
         `${badge || (entry?.visibility ?? '')} · complexity ${complexity}` +
-        ` · ${signals} signal${signals === 1 ? '' : 's'}`;
+        ` · ${signals} signal${signals === 1 ? '' : 's'}` +
+        ` · coverage ${functionCoverageLabel(entry)}`;
       row.append(meta);
       return row;
     },

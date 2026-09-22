@@ -1029,6 +1029,137 @@ function parentName(parent) {
   return String(parent).split(/[\\/]/).filter(Boolean).pop() ?? parent;
 }
 
+// ui/strabo-functions.js
+function functionLabel(entry) {
+  return entry?.owner ? `${entry.owner}.${entry.name}` : entry?.name ?? "";
+}
+function functionSignature(entry) {
+  if (!entry) return "";
+  const visibility = entry.visibility ? `${entry.visibility} ` : "";
+  const parameters = entry.parameters ?? 0;
+  const plural = parameters === 1 ? "" : "s";
+  const returns = entry.type ? `: ${entry.type}` : "";
+  return `${visibility}${entry.name}(${parameters} param${plural})${returns}`;
+}
+function functionMetrics(entry) {
+  const metrics = entry?.metrics;
+  if (!metrics) {
+    return "signature only; no body recorded";
+  }
+  const parts = [
+    `L${entry.line}-${metrics.endLine}`,
+    `${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`,
+    `complexity ${metrics.decisionPoints}`,
+    `nesting ${metrics.maxNestingDepth}`,
+    `loops ${metrics.loops}`
+  ];
+  if (metrics.recursive) {
+    parts.push("recursive");
+  }
+  return parts.join(" \xB7 ");
+}
+function functionEntryBadge(entry) {
+  const mark = entry?.entry;
+  if (!mark) {
+    return "";
+  }
+  return `entry: ${mark.kind} (${mark.evidence})`;
+}
+function isPublicVisibility(visibility) {
+  const value = String(visibility ?? "").toLowerCase();
+  return value === "public" || value === "crate" || value.startsWith("pub") || value === "export";
+}
+function functionSummary(report) {
+  const functions = report?.functions ?? [];
+  let totalComplexity = 0;
+  let maxComplexity = 0;
+  let maxNesting = 0;
+  let signalCount = 0;
+  for (const entry of functions) {
+    totalComplexity += entry?.metrics?.decisionPoints ?? 0;
+    maxComplexity = Math.max(maxComplexity, entry?.metrics?.decisionPoints ?? 0);
+    maxNesting = Math.max(maxNesting, entry?.metrics?.maxNestingDepth ?? 0);
+    signalCount += entry?.signals?.length ?? 0;
+  }
+  return `${functions.length} function${functions.length === 1 ? "" : "s"} \xB7 total complexity ${totalComplexity} \xB7 max complexity ${maxComplexity} \xB7 max nesting ${maxNesting} \xB7 ${signalCount} signal${signalCount === 1 ? "" : "s"}`;
+}
+function functionCalls(entry) {
+  const calls = entry?.calls ?? [];
+  if (calls.length === 0) {
+    return "no same-file calls recorded";
+  }
+  return calls.map((call) => `${call.name} (L${call.line})`).join(", ");
+}
+function functionCallers(entry) {
+  const callers = entry?.callers ?? [];
+  const badge = functionEntryBadge(entry);
+  if (callers.length > 0) {
+    return badge ? `${callers.join(", ")} \xB7 ${badge}` : callers.join(", ");
+  }
+  if (badge) {
+    return badge;
+  }
+  if (isPublicVisibility(entry?.visibility)) {
+    return "no callers in this file (cross-file not resolved)";
+  }
+  return "no callers recorded in this file";
+}
+function functionSignals(entry) {
+  const signals = entry?.signals ?? [];
+  if (signals.length === 0) {
+    return "no cost signals";
+  }
+  return signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ");
+}
+function coverageAge(ageMs) {
+  const minutes = Math.floor(Number(ageMs) / 6e4);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+function coverageLabel(coverage) {
+  if (!coverage) {
+    return "unavailable";
+  }
+  if (coverage.lineCoverage !== null && coverage.lineCoverage !== void 0) {
+    return `measured ${Math.round(coverage.lineCoverage)}%`;
+  }
+  if (coverage.hits !== null && coverage.hits !== void 0) {
+    return coverage.hits > 0 ? "measured (executed)" : "measured 0%";
+  }
+  return "measured";
+}
+function functionCoverageLabel(entry) {
+  return coverageLabel(entry?.coverage);
+}
+function functionCoverage(entry) {
+  const coverage = entry?.coverage;
+  if (!coverage) {
+    return "coverage unavailable (the report does not name this function)";
+  }
+  const parts = [];
+  if (coverage.lineCoverage !== null && coverage.lineCoverage !== void 0) {
+    parts.push(`measured ${coverage.lineCoverage}% (${coverage.linesHit}/${coverage.linesFound} lines)`);
+  } else {
+    parts.push("measured: the report records no per-function line counts");
+  }
+  if (coverage.hits !== null && coverage.hits !== void 0) {
+    parts.push(`executed ${coverage.hits}\xD7`);
+  }
+  return parts.join(" \xB7 ");
+}
+function coverageCaption(coverage) {
+  if (!coverage) {
+    return "";
+  }
+  const basis = coverage.basis === "measured" ? "measured" : "reachable";
+  const value = coverage.value === null || coverage.value === void 0 ? "unavailable" : `${Math.round(coverage.value)}%`;
+  const age = coverage.reportAgeMs === null || coverage.reportAgeMs === void 0 ? "" : ` \xB7 report ${coverageAge(coverage.reportAgeMs)} old`;
+  const stale = coverage.stale === true ? " \xB7 stale" : "";
+  return `${basis}: ${value}${age}${stale}`;
+}
+
 // ui/strabo-overlays.js
 function reviewOverlay(data) {
   if (!data || data.available === false) {
@@ -1181,13 +1312,24 @@ function hotspotsOverlay(report) {
   const skippedNote = skipped > 0 ? ` \xB7 ${skipped} skipped` : "";
   return {
     classes,
-    summary: `${hotspots.length} hotspot(s) \xB7 ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}`,
+    summary: `${hotspots.length} hotspot(s) \xB7 ${report?.filesScanned ?? 0} file(s) scanned${skippedNote}` + coverageSummary(report?.coverage),
     items: hotspots.map((spot) => {
       const where = spot.owner ? `${spot.owner}.${spot.name}` : spot.name;
       const kinds = (spot.signals ?? []).map((signal) => signal.kind).join(", ");
-      return `${spot.file} \xB7 ${where} (L${spot.line}) \xB7 ${kinds}`;
+      return `${spot.file} \xB7 ${where} (L${spot.line}) \xB7 ${kinds} \xB7 coverage ${coverageLabel(spot.coverage)}`;
     })
   };
+}
+function coverageSummary(coverage) {
+  if (!coverage) {
+    return "";
+  }
+  if (!coverage.available) {
+    return ` \xB7 coverage unavailable (${coverage.reason ?? "no report"})`;
+  }
+  const age = coverage.reportAgeMs === null || coverage.reportAgeMs === void 0 ? "" : ` (report ${coverageAge(coverage.reportAgeMs)} old)`;
+  const stale = coverage.stale?.length ? `, ${coverage.stale.length} stale` : "";
+  return ` \xB7 coverage measured${age}${stale}`;
 }
 function impactOverlay(data) {
   const classes = /* @__PURE__ */ new Map();
@@ -2583,6 +2725,47 @@ function edgeLodHidden(weight, zoom, edgeCount) {
   const value = Number.isFinite(weight) ? weight : 1;
   return value < EDGE_LOD_MIN_WEIGHT;
 }
+function averageFrameTimes(samplesMs) {
+  const samples = samplesMs ?? [];
+  const frames = samples.length - 1;
+  if (frames < 1) {
+    return { frames: Math.max(0, frames), fps: null, ms: null };
+  }
+  const span = samples[samples.length - 1] - samples[0];
+  const ms = span / frames;
+  return { frames, fps: ms > 0 ? 1e3 / ms : null, ms: ms > 0 ? ms : null };
+}
+function createFrameSampler(win = globalThis.window, capacity = 60) {
+  const samples = [];
+  let handle = 0;
+  function tick(now) {
+    samples.push(now);
+    if (samples.length > capacity) {
+      samples.shift();
+    }
+    handle = win.requestAnimationFrame(tick);
+  }
+  return {
+    start() {
+      if (!handle) {
+        handle = win.requestAnimationFrame(tick);
+      }
+    },
+    stop() {
+      if (handle) {
+        win.cancelAnimationFrame(handle);
+        handle = 0;
+      }
+      samples.length = 0;
+    },
+    active() {
+      return handle !== 0;
+    },
+    stats() {
+      return averageFrameTimes(samples);
+    }
+  };
+}
 
 // ui/strabo-lenses.js
 function dimOutside(cy, ids) {
@@ -3098,6 +3281,7 @@ function createView(container) {
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {
       islandVisible = filterNodes2(cy, ids);
+      rebuildNodeGrid();
       repaintIslands();
       applyLabelBudget(cy, true);
     },
@@ -3930,89 +4114,6 @@ function createFreshnessBadge(element2, options = {}) {
     }
   });
   return { refresh, render, status: () => last };
-}
-
-// ui/strabo-functions.js
-function functionLabel(entry) {
-  return entry?.owner ? `${entry.owner}.${entry.name}` : entry?.name ?? "";
-}
-function functionSignature(entry) {
-  if (!entry) return "";
-  const visibility = entry.visibility ? `${entry.visibility} ` : "";
-  const parameters = entry.parameters ?? 0;
-  const plural = parameters === 1 ? "" : "s";
-  const returns = entry.type ? `: ${entry.type}` : "";
-  return `${visibility}${entry.name}(${parameters} param${plural})${returns}`;
-}
-function functionMetrics(entry) {
-  const metrics = entry?.metrics;
-  if (!metrics) {
-    return "signature only; no body recorded";
-  }
-  const parts = [
-    `L${entry.line}-${metrics.endLine}`,
-    `${metrics.lines} line${metrics.lines === 1 ? "" : "s"}`,
-    `complexity ${metrics.decisionPoints}`,
-    `nesting ${metrics.maxNestingDepth}`,
-    `loops ${metrics.loops}`
-  ];
-  if (metrics.recursive) {
-    parts.push("recursive");
-  }
-  return parts.join(" \xB7 ");
-}
-function functionEntryBadge(entry) {
-  const mark = entry?.entry;
-  if (!mark) {
-    return "";
-  }
-  return `entry: ${mark.kind} (${mark.evidence})`;
-}
-function isPublicVisibility(visibility) {
-  const value = String(visibility ?? "").toLowerCase();
-  return value === "public" || value === "crate" || value.startsWith("pub") || value === "export";
-}
-function functionSummary(report) {
-  const functions = report?.functions ?? [];
-  let totalComplexity = 0;
-  let maxComplexity = 0;
-  let maxNesting = 0;
-  let signalCount = 0;
-  for (const entry of functions) {
-    totalComplexity += entry?.metrics?.decisionPoints ?? 0;
-    maxComplexity = Math.max(maxComplexity, entry?.metrics?.decisionPoints ?? 0);
-    maxNesting = Math.max(maxNesting, entry?.metrics?.maxNestingDepth ?? 0);
-    signalCount += entry?.signals?.length ?? 0;
-  }
-  return `${functions.length} function${functions.length === 1 ? "" : "s"} \xB7 total complexity ${totalComplexity} \xB7 max complexity ${maxComplexity} \xB7 max nesting ${maxNesting} \xB7 ${signalCount} signal${signalCount === 1 ? "" : "s"}`;
-}
-function functionCalls(entry) {
-  const calls = entry?.calls ?? [];
-  if (calls.length === 0) {
-    return "no same-file calls recorded";
-  }
-  return calls.map((call) => `${call.name} (L${call.line})`).join(", ");
-}
-function functionCallers(entry) {
-  const callers = entry?.callers ?? [];
-  const badge = functionEntryBadge(entry);
-  if (callers.length > 0) {
-    return badge ? `${callers.join(", ")} \xB7 ${badge}` : callers.join(", ");
-  }
-  if (badge) {
-    return badge;
-  }
-  if (isPublicVisibility(entry?.visibility)) {
-    return "no callers in this file (cross-file not resolved)";
-  }
-  return "no callers recorded in this file";
-}
-function functionSignals(entry) {
-  const signals = entry?.signals ?? [];
-  if (signals.length === 0) {
-    return "no cost signals";
-  }
-  return signals.map((signal) => `${signal.kind} (${signal.detail})`).join("; ");
 }
 
 // ui/strabo-highlight.js
@@ -5669,6 +5770,12 @@ function renderFunctions(container, result, handlers = {}) {
   summary.className = "function-summary";
   summary.textContent = functionSummary(report);
   container.append(summary);
+  if (result?.coverage) {
+    const coverageNote = document.createElement("p");
+    coverageNote.className = "function-coverage-basis";
+    coverageNote.textContent = `Coverage ${coverageCaption(result.coverage)}`;
+    container.append(coverageNote);
+  }
   if (report.functions.length > FUNCTION_TABLE_VIRTUALIZE_AT) {
     container.append(renderFunctionTableVirtual(report));
   } else {
@@ -5687,7 +5794,8 @@ var FUNCTION_COLUMNS = [
   { key: "loops", label: "Loops", numeric: true },
   { key: "calls", label: "Calls", numeric: true },
   { key: "callers", label: "Callers" },
-  { key: "signals", label: "Signals", numeric: true }
+  { key: "signals", label: "Signals", numeric: true },
+  { key: "coverage", label: "Coverage" }
 ];
 function truncateMiddle(text, max = 30) {
   if (text.length <= max) {
@@ -5718,6 +5826,8 @@ function functionSortValue(entry, key) {
       return entry?.callers?.length ?? 0;
     case "signals":
       return entry?.signals?.length ?? 0;
+    case "coverage":
+      return entry?.coverage?.lineCoverage ?? entry?.coverage?.hits ?? -1;
     default:
       return 0;
   }
@@ -5773,6 +5883,10 @@ function functionDetailContent(entry, onJump) {
   signals.className = "function-signals";
   signals.textContent = `signals: ${functionSignals(entry)}`;
   detail.append(signals);
+  const coverage = document.createElement("div");
+  coverage.className = "function-coverage-detail";
+  coverage.textContent = `coverage: ${functionCoverage(entry)}`;
+  detail.append(coverage);
   return detail;
 }
 function signalChips(entry) {
@@ -5923,6 +6037,12 @@ function functionTableRow(entry, onJump) {
   const signalsCell = document.createElement("td");
   signalsCell.append(signalChips(entry));
   row.append(signalsCell);
+  const coverageCell = document.createElement("td");
+  coverageCell.className = "function-coverage";
+  coverageCell.textContent = functionCoverageLabel(entry);
+  coverageCell.title = functionCoverage(entry);
+  coverageCell.dataset.basis = entry?.coverage ? "measured" : "unavailable";
+  row.append(coverageCell);
   const detailRow = document.createElement("tr");
   detailRow.className = "function-detail";
   detailRow.hidden = true;
@@ -6001,7 +6121,7 @@ function renderFunctionTableVirtual(report) {
       meta.className = "function-virtual-meta";
       const signals = entry?.signals?.length ?? 0;
       const complexity = entry?.metrics?.decisionPoints ?? "\u2014";
-      meta.textContent = `${badge || (entry?.visibility ?? "")} \xB7 complexity ${complexity} \xB7 ${signals} signal${signals === 1 ? "" : "s"}`;
+      meta.textContent = `${badge || (entry?.visibility ?? "")} \xB7 complexity ${complexity} \xB7 ${signals} signal${signals === 1 ? "" : "s"} \xB7 coverage ${functionCoverageLabel(entry)}`;
       row.append(meta);
       return row;
     }
@@ -10031,6 +10151,40 @@ var view = createView(document.getElementById("graph"));
 view.onIslandLayout((offsets) => {
   writeIslandLayout(state.repository, offsets);
 });
+var frameSampler = createFrameSampler(window);
+var runtimeBase = "";
+var runtimeTimer = 0;
+function runtimeSuffix() {
+  const { fps, ms } = frameSampler.stats();
+  const redraws = view.cy?.renderer?.()?.redraws ?? 0;
+  const drawn = view.cy?.elements().length ?? 0;
+  const fpsText = fps === null ? "fps: sampling\u2026" : `${Math.round(fps)} fps`;
+  const msText = ms === null ? "" : ` / ${ms.toFixed(1)} ms`;
+  return `${fpsText}${msText} \xB7 ${redraws} redraws \xB7 ${drawn} elements`;
+}
+function refreshRuntimeReadout() {
+  if (!elements.diagnostics || elements.diagnostics.hidden || !runtimeBase) {
+    return;
+  }
+  const line = elements.diagnostics.querySelector('[data-role="runtime"]');
+  if (line) {
+    line.textContent = `${runtimeBase} \xB7 ${runtimeSuffix()}`;
+  }
+}
+function startRuntimeReadout() {
+  frameSampler.start();
+  if (!runtimeTimer) {
+    runtimeTimer = setInterval(refreshRuntimeReadout, 500);
+  }
+  refreshRuntimeReadout();
+}
+function stopRuntimeReadout() {
+  frameSampler.stop();
+  if (runtimeTimer) {
+    clearInterval(runtimeTimer);
+    runtimeTimer = 0;
+  }
+}
 var clientPrefs = readSettings();
 function applyClientPrefs() {
   applyAppearance(clientPrefs);
@@ -10217,6 +10371,8 @@ async function scan({ refresh = false } = {}) {
       renderer: rendererName(),
       shown: view.cy.nodes().length
     });
+    runtimeBase = elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? "";
+    refreshRuntimeReadout();
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === "system") {
@@ -11987,6 +12143,8 @@ elements.diagnosticsToggle.addEventListener("click", () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
   elements.diagnosticsToggle.setAttribute("aria-expanded", String(hidden));
+  if (hidden) startRuntimeReadout();
+  else stopRuntimeReadout();
 });
 elements.browse.addEventListener("click", openFolderDialog);
 document.getElementById("graph")?.addEventListener("pointerdown", dismissHint, { capture: true });
@@ -12676,9 +12834,13 @@ var floatingWindows = initFloatingWindows({
       dockLabel: "Diagnostics",
       width: 420,
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
+      onOpen: () => {
+        startRuntimeReadout();
+      },
       onClose: () => {
         elements.diagnostics.hidden = true;
         elements.diagnosticsToggle.setAttribute("aria-expanded", "false");
+        stopRuntimeReadout();
       }
     },
     {
