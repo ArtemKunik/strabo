@@ -56,6 +56,7 @@ See [Install and run](#install-and-run) to start the server.
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories, settings, and check baselines are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_AUTO_REBUILD`| `0`/`false`/`off` stops the server from rebuilding a stale graph in the background when a request observes `HEAD` moving. On by default. |
+| `STRABO_TERMINAL_DAEMON` | `1`/`true` (or `--terminal-daemon`) runs terminal sessions in a detached `strabo-termd` daemon so they survive a server restart. Off by default. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
 | `STRABO_RISK`        | `1` or `online` enables CVE/license lookup via OSV.dev and deps.dev. Off by default. |
 | `STRABO_RISK_DENY`   | Comma-separated SPDX ids the license policy denies. Defaults to strong copyleft. |
@@ -156,7 +157,11 @@ matches.
 
 The **Terminal** tab (beside **Graph**) runs shell and agent sessions in the app; the
 [multi-session terminal](./FEATURES.md#terminal-multi-session) feature detail lives in
-FEATURES.md. These global shortcuts are ignored while typing in a field:
+FEATURES.md. Sessions normally live in the server process and end when it restarts; set
+`STRABO_TERMINAL_DAEMON=1` (or `--terminal-daemon`) to run them in the detached `strabo-termd`
+daemon instead, so they survive a restart and are reconnected to on the way back up. When the
+daemon cannot start the server falls back to the in-process registry. These global shortcuts
+are ignored while typing in a field:
 
 | Shortcut | Action |
 | -------- | ------ |
