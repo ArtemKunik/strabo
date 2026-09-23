@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
 import { computeCoverage } from '../analysis/coverage.ts';
+import { collectDrift } from '../analysis/drift.ts';
 import { buildFunctions, type FunctionsReport } from '../analysis/functions.ts';
 import { rankHotspots } from '../analysis/hotspots.ts';
 import { computeOwnership, getFileAuthorHistory } from '../analysis/ownership.ts';
@@ -37,6 +38,8 @@ export interface CollectRepositoryReportOptions {
   hotspots?: boolean;
   /** Compute ownership and bus factor (reads Git authorship). Defaults to true. */
   ownership?: boolean;
+  /** Compute architecture drift over recent revisions (revision graphs). Defaults to true. */
+  drift?: boolean;
   /** Dependency-risk config; omitted means the risk section is not computed. */
   risk?: RiskOptions;
   generatedAt?: string;
@@ -68,6 +71,9 @@ export async function collectRepositoryReport(
 
   const change = options.change === false ? undefined : await collectWorkingTreeChange(root, graph);
 
+  const drift =
+    options.drift === false ? undefined : await collectDrift(root, options.repository, { limit: 10 });
+
   return buildRepositoryReport({
     repository: options.repository,
     root,
@@ -79,6 +85,7 @@ export async function collectRepositoryReport(
     ...(ownership ? { ownership } : {}),
     ...(risk ? { risk } : {}),
     ...(change ? { change } : {}),
+    ...(drift ? { drift } : {}),
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.limits ? { limits: options.limits } : {}),
   });

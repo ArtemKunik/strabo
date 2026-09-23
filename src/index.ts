@@ -291,6 +291,25 @@ export type {
   HistorySummary,
   SkippedCommit,
 } from './analysis/history.ts';
+export { globToRegExp, matchesGlob } from './analysis/glob.ts';
+export { computeScopeFence } from './analysis/scope-fence.ts';
+export type { ScopeFence, ScopeFenceEntry, ScopeFenceInput } from './analysis/scope-fence.ts';
+export { computePublicApiDiff } from './analysis/public-api-diff.ts';
+export type { PublicApiDiffFile, PublicApiDiffReport } from './analysis/public-api-diff.ts';
+export { computeClones, normaliseTokens } from './analysis/clones.ts';
+export type { CloneCluster, CloneMember, CloneOptions, CloneReport } from './analysis/clones.ts';
+export { computeStringEdges } from './analysis/string-edges.ts';
+export type {
+  StringEdge,
+  StringEdgeDiagnostic,
+  StringEdgeKind,
+  StringEdgeReport,
+  StringEdgeSite,
+} from './analysis/string-edges.ts';
+export { checkDeclaredRules, readDeclaredRules, DECLARED_RULES_FILE } from './analysis/rules.ts';
+export type { DeclaredRule, RuleAllow, RuleViolation, RulesReport } from './analysis/rules.ts';
+export { collectDrift, computeDriftMeasures, DRIFT_MEASURES } from './analysis/drift.ts';
+export type { DriftMeasure, DriftOptions, DriftPoint, DriftReport, DriftSeries } from './analysis/drift.ts';
 export { computeRepositoryPassport } from './analysis/passport.ts';
 export type {
   RepositoryPassport,

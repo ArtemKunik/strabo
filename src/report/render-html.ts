@@ -22,6 +22,7 @@ export function renderReportHtml(document: RepositoryReportDocument): string {
   body.push(overviewSection(document));
   body.push(painPointSection(document.painPoints));
   body.push(changeSection(document.change));
+  body.push(driftSection(document.drift));
   body.push(suggestionSection(document));
   body.push(evidenceSection(document));
 
@@ -155,6 +156,38 @@ function changeSection(change: RepositoryChangeSection | null): string {
   for (const warning of change.warnings) {
     parts.push(`<p class="warning">warning: ${escapeHtml(warning)}</p>`);
   }
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+function driftSection(drift: RepositoryReportDocument['drift']): string {
+  const parts: string[] = ['<section>', '<h2>Architecture drift</h2>'];
+  if (!drift) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  if (!drift.available) {
+    parts.push(`<p class="muted">Unavailable: ${escapeHtml(drift.reason ?? 'no drift series')}</p>`);
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  if (drift.points.length === 0) {
+    parts.push('<p class="muted">No revision was measured.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  const newest = drift.points[0]?.revision.slice(0, 7) ?? '?';
+  const oldest = drift.points[drift.points.length - 1]?.revision.slice(0, 7) ?? '?';
+  parts.push(`<p class="meta">${drift.points.length} revision(s), newest first · <code>${escapeHtml(newest)}</code> … <code>${escapeHtml(oldest)}</code></p>`);
+  parts.push('<ul>');
+  for (const series of drift.series) {
+    const values = series.points
+      .map((point) => (point.value === null ? '—' : String(point.value)))
+      .join(' → ');
+    parts.push(`<li>${escapeHtml(series.label)}: ${escapeHtml(values)}</li>`);
+  }
+  parts.push('</ul>');
   parts.push('</section>');
   return parts.join('\n');
 }

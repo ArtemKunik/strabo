@@ -49,7 +49,7 @@ node bin/strabo.js report --format=pdf  --out=report.pdf
 node bin/strabo.js report --base=main --format=md        # the change report (Phase 26)
 ```
 
-The document has five parts:
+The document has six parts:
 
 - **Overview** — languages and size, entry points, top-level directories, and the most
   depended-upon files by fan-in.
@@ -57,6 +57,10 @@ The document has five parts:
   advisories and denied licences, parse failures, and a stale graph, ranked by severity.
 - **Pending change set** — the working tree's staged, unstaged, and untracked files with the
   same reverse-reachability impact the Review panel shows.
+- **Architecture drift** — one line per structural measure (cycles, largest cycle, modules,
+  largest module, dependency edges, largest blast radius) across the ten most recent
+  revisions, each point naming its revision. A measure the revision cache cannot supply is a
+  gap (`—`), never a zero. Skip it with `--no-drift`.
 - **Suggestions** — one deterministic action per pain point, citing the recorded evidence.
   There is no model prose: a suggestion with no pain point behind it is never emitted, so the
   section is available with nothing configured and never speculates. (A narrator layer over
@@ -73,5 +77,29 @@ PDF is a render of the self-contained HTML through a detected headless Chromium:
 `playwright` install first, otherwise a system Edge/Chrome. Neither is a shipped dependency,
 so when no renderer is found the report writes the `.html` beside the requested file and says
 why — a missing renderer is named, not a silent empty file. `--no-change`, `--no-smells`,
-`--no-hotspots`, and `--no-ownership` skip an analysis; a skipped section is named as not
-computed. `--format` and `--out` use the `--flag=value` form.
+`--no-hotspots`, `--no-ownership`, and `--no-drift` skip an analysis; a skipped section is
+named as not computed. `--format` and `--out` use the `--flag=value` form.
+
+## Change report: scope fence and public API
+
+`strabo report --base <ref>` is the change report. Two Phase 29 sections answer "did an agent
+stay in its lane, and is this a breaking change?" with facts:
+
+```sh
+# scope fence: list changes outside a declared zone, and inside changes imported from outside
+node bin/strabo.js report --base=main --expect='src/auth/**' --format=md
+
+# the public API diff and the drift section are always computed for a change report
+node bin/strabo.js report --base=main --format=json
+```
+
+- **Scope fence** (`--expect`, repeatable or comma-separated globs) lists every changed path
+  outside the zone, plus every changed path inside it whose recorded importers lie outside it.
+  It is a filter over the review, pure evidence: a path matches a glob or it does not.
+- **Public API** lists exported and `pub` symbols added, removed, or re-signed between the two
+  revisions, per language, and names the recorded consumers of a removed or changed symbol.
+
+Declared-architecture rules (`strabo.rules.yml`, or the `rules:` key of `strabo.groups.yml`)
+turn operator intent into a check failure: a rule id is passed straight to `--fail-on`, e.g.
+`strabo check --fail-on=domain-no-infra` fails on an edge the rule forbids and names the rule,
+the edge, and its evidence line.

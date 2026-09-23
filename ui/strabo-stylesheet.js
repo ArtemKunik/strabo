@@ -87,6 +87,9 @@ export function stylesheet() {
     // Hidden coupling is a co-change pair with no import path: the status serious ring marks
     // the endpoints, and the distinct edge below carries the relationship (K3).
     { selector: 'node.ov-hidden-coupling', style: { 'border-width': 3, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
+    // A declared-rule violation is a serious signal, so it rides the reserved status scale:
+    // a heavy solid ring in the serious hue, distinct from the changed and cycle rings.
+    { selector: 'node.ov-declared-rule', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.cycle, 'background-opacity': 1 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },

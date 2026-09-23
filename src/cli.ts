@@ -31,9 +31,10 @@ Report options:
   --base=<ref>                    compare HEAD against this revision (change report)
   --format=md|json|html|pdf       repository report format (default md; pdf needs --out)
   --out=<file>                    write the report to a file instead of stdout
+  --expect=<globs>                scope fence: comma-separated globs the change should stay in
   --no-change                     omit the pending change set
-  --no-smells / --no-hotspots / --no-ownership   skip an analysis (named as not computed)
-  --fail-on <rules>               fail only for these rules (cycle, tier, …)
+  --no-smells / --no-hotspots / --no-ownership / --no-drift   skip an analysis (named as not computed)
+  --fail-on <rules>               fail only for these rules (cycle, tier, … or a strabo.rules id)
 
 Check rules (only the ones named can fail the build):
   --fail-on-cycles

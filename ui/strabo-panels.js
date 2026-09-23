@@ -36,6 +36,7 @@ export {
 export {
   renderReview,
   renderReviewLoading,
+  scopeFenceGroups,
   structuralDiffGroups,
   structuralEdgeLabel,
   structuralCycleLabel,

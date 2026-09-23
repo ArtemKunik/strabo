@@ -2,8 +2,11 @@ import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import { promisify } from 'node:util';
 
+import { buildAdjacency } from '../analysis/analysis.ts';
 import { computeCoverage } from '../analysis/coverage.ts';
 import { impactFromPaths } from '../analysis/impact.ts';
+import { computeScopeFence, type ScopeFence } from '../analysis/scope-fence.ts';
+import { computePublicApiDiff, type PublicApiDiffReport } from '../analysis/public-api-diff.ts';
 import { parseNameStatus } from '../analysis/review.ts';
 import type { ReviewStatus } from '../analysis/review-types.ts';
 import {
@@ -67,6 +70,10 @@ export interface ReportDocument {
   untestedReach: string[];
   hotspotsTouched: ReportHotspot[];
   structural: StructuralDiffResult;
+  /** Present only when `--expect` declared a zone (Phase 29 E1). */
+  scopeFence?: ScopeFence;
+  /** Exported-symbol diff between the two revisions (Phase 29 E2). */
+  publicApiDiff?: PublicApiDiffReport;
   warnings: string[];
 }
 
@@ -129,6 +136,7 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
     smells: !hasFlag(argv, 'smells'),
     hotspots: !hasFlag(argv, 'hotspots'),
     ownership: !hasFlag(argv, 'ownership'),
+    drift: !hasFlag(argv, 'drift'),
   });
 
   if (format === 'json') {
@@ -213,6 +221,22 @@ async function runChangeReport(argv: readonly string[], io: ReportIo): Promise<n
     .filter((id) => !reached.has(id) && !tests.has(id))
     .sort();
 
+  const expected = expectGlobs(flagValue(argv, 'expect'));
+  const scopeFence =
+    expected.length > 0
+      ? computeScopeFence({
+          changed: changedFiles.map((change) => ({
+            path: change.path,
+            ...(change.previousPath ? { previousPath: change.previousPath } : {}),
+          })),
+          expected,
+          importers: buildAdjacency(graph).backward,
+        })
+      : undefined;
+  const publicApiDiff = structural.available
+    ? await computePublicApiDiff(repository.root, base, { head: 'HEAD', graph })
+    : undefined;
+
   const findings = await collectFindings(repository.root, repository.name, graph, true);
   const hotspotsTouched = changedPaths
     .map((file) => ({
@@ -242,6 +266,8 @@ async function runChangeReport(argv: readonly string[], io: ReportIo): Promise<n
     untestedReach,
     hotspotsTouched,
     structural,
+    ...(scopeFence ? { scopeFence } : {}),
+    ...(publicApiDiff ? { publicApiDiff } : {}),
     warnings,
   };
 
@@ -327,6 +353,18 @@ export function renderMarkdown(document: ReportDocument): string {
   renderStructure(lines, document.structural);
   lines.push('');
 
+  if (document.scopeFence) {
+    lines.push('## Scope fence');
+    renderScopeFence(lines, document.scopeFence);
+    lines.push('');
+  }
+
+  if (document.publicApiDiff) {
+    lines.push('## Public API');
+    renderPublicApi(lines, document.publicApiDiff);
+    lines.push('');
+  }
+
   lines.push(`## Untested reach (${document.untestedReach.length})`);
   if (document.untestedReach.length === 0) {
     lines.push('- every reached file is covered by a test');
@@ -375,6 +413,62 @@ function renderStructure(lines: string[], structural: StructuralDiffResult): voi
   section(lines, `Newly unreached (${diff.newlyUnreached.length})`, diff.newlyUnreached.map((file) => `\`${file}\``));
 }
 
+function renderScopeFence(lines: string[], fence: ScopeFence): void {
+  if (!fence.available) {
+    lines.push(`- unavailable: ${fence.reason ?? 'no expected zone declared'}`);
+    return;
+  }
+  lines.push(
+    `Expected ${fence.expected.map((glob) => `\`${glob}\``).join(', ')} · ${fence.inside}/${fence.total} changed path(s) inside the zone`,
+  );
+  lines.push('');
+  lines.push(`### Outside the zone (${fence.outside.length})`);
+  if (fence.outside.length === 0) {
+    lines.push('- every change is inside the declared zone');
+  }
+  for (const entry of fence.outside) {
+    const rename = entry.previousPath ? ` (from \`${entry.previousPath}\`)` : '';
+    const importers =
+      entry.importers.length > 0
+        ? ` — importers: ${entry.importers.map((file) => `\`${file}\``).join(', ')}`
+        : '';
+    lines.push(`- \`${entry.path}\`${rename}${importers}`);
+  }
+  lines.push('');
+  lines.push(`### Inside with outside importers (${fence.crossing.length})`);
+  if (fence.crossing.length === 0) {
+    lines.push('- no inside change is imported from outside the zone');
+  }
+  for (const entry of fence.crossing) {
+    lines.push(`- \`${entry.path}\` — imported by ${entry.importers.map((file) => `\`${file}\``).join(', ')}`);
+  }
+}
+
+function renderPublicApi(lines: string[], diff: PublicApiDiffReport): void {
+  if (!diff.available) {
+    lines.push(`- unavailable: ${diff.reason ?? 'no public API diff'}`);
+    return;
+  }
+  lines.push(
+    `${diff.files.length} file(s) with a public-surface change · ${diff.totals.breaking} breaking`,
+  );
+  if (diff.files.length === 0) {
+    lines.push('- no exported symbol was added, removed, or re-signed');
+    return;
+  }
+  const name = (owner: string, symbol: string) => (owner ? `${owner}.${symbol}` : symbol);
+  for (const file of diff.files) {
+    lines.push('');
+    lines.push(`### \`${file.path}\` (${file.language})`);
+    for (const symbol of file.added) lines.push(`- added \`${name(symbol.owner, symbol.name)}\``);
+    for (const symbol of file.removed) lines.push(`- removed \`${name(symbol.owner, symbol.name)}\``);
+    for (const symbol of file.changed) lines.push(`- re-signed \`${name(symbol.owner, symbol.name)}\``);
+    if (file.consumers.length > 0) {
+      lines.push(`- recorded consumers: ${file.consumers.map((path) => `\`${path}\``).join(', ')}`);
+    }
+  }
+}
+
 function section(lines: string[], heading: string, items: readonly string[]): void {
   if (items.length === 0) {
     return;
@@ -412,6 +506,17 @@ async function git(root: string, args: string[]): Promise<string> {
 function firstLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split('\n')[0] ?? message;
+}
+
+/** A comma-separated `--expect` value, as a list of non-empty globs. */
+function expectGlobs(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+  return value
+    .split(',')
+    .map((glob) => glob.trim())
+    .filter((glob) => glob !== '');
 }
 
 function flagValue(argv: readonly string[], name: string): string | undefined {

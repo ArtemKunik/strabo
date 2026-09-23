@@ -38,7 +38,9 @@ const {
   renderReview,
   renderShortcuts,
   renderSource,
+  renderTimeline,
   renderWorkspace,
+  scopeFenceGroups,
   structuralCycleLabel,
   structuralDiffGroups,
   structuralEdgeLabel,
@@ -537,6 +539,102 @@ test('renderReview names an unavailable structure instead of an empty diff', () 
     target.querySelector('[data-role="review-structure-unavailable"]').textContent,
     /Unknown revision/,
   );
+});
+
+test('scopeFenceGroups groups outside and crossing files with rename and importer text', () => {
+  const groups = scopeFenceGroups({
+    available: true,
+    outside: [
+      { path: 'src/other.ts', importers: ['src/a.ts', 'src/b.ts'] },
+      { path: 'src/moved.ts', previousPath: 'src/old.ts', importers: [] },
+    ],
+    crossing: [{ path: 'src/in.ts', importers: ['src/out.ts'] }],
+  });
+
+  assert.deepEqual(groups.map((group) => group.key), ['outside', 'crossing']);
+  assert.equal(groups[0].items[0], '`src/other.ts` — importers: src/a.ts, src/b.ts');
+  assert.equal(groups[0].items[1], '`src/moved.ts` (from `src/old.ts`)');
+  assert.equal(groups[1].items[0], '`src/in.ts` — imported by src/out.ts');
+
+  // An empty group is omitted, so only the zone that has entries is labelled.
+  const outsideOnly = scopeFenceGroups({ available: true, outside: [{ path: 'a.ts', importers: [] }], crossing: [] });
+  assert.deepEqual(outsideOnly.map((group) => group.key), ['outside']);
+
+  // An unavailable fence names its reason; without one it contributes nothing.
+  assert.deepEqual(scopeFenceGroups({ available: false, reason: 'no expected zone declared' }), [
+    { key: 'reason', label: 'Scope fence', items: ['no expected zone declared'] },
+  ]);
+  assert.deepEqual(scopeFenceGroups({ available: false }), []);
+  assert.deepEqual(scopeFenceGroups(null), []);
+});
+
+test('renderReview renders the Scope fence section from the review document', () => {
+  const target = container();
+  renderReview(
+    target,
+    {
+      available: true,
+      kind: 'commit',
+      commit: { shortHash: 'abc1234', author: 'a', date: '2026-01-01T00:00:00Z', subject: 'Change' },
+      files: [],
+      totals: { files: 0, insertions: 0, deletions: 0, uncounted: 0 },
+      impact: { affected: [], outsideGraph: [] },
+      scopeFence: {
+        available: true,
+        expected: ['src/**'],
+        inside: 0,
+        total: 1,
+        outside: [{ path: 'docs/readme.md', importers: ['src/a.ts'] }],
+        crossing: [],
+      },
+    },
+    {},
+  );
+
+  assert.equal(
+    target.querySelector('[data-role="review-scope-fence-outside"] li').textContent,
+    '`docs/readme.md` — importers: src/a.ts',
+  );
+});
+
+test('renderTimeline draws an architecture-drift chart with its legend', () => {
+  const target = container();
+  renderTimeline(
+    target,
+    { available: true, commits: [] },
+    () => {},
+    {
+      drift: {
+        available: true,
+        points: [
+          { revision: 'b', short: 'b', date: null, subject: null, measures: [] },
+          { revision: 'a', short: 'a', date: null, subject: null, measures: [] },
+        ],
+        series: [
+          { key: 'cycles', label: 'Cycles', points: [{ revision: 'b', value: 1 }, { revision: 'a', value: 0 }] },
+        ],
+      },
+    },
+  );
+
+  assert.ok(target.querySelector('[data-role="drift-chart"]'), 'the drift chart is drawn');
+  assert.match(target.querySelector('[data-role="drift-legend"]').textContent, /Cycles: 1 → 0/);
+});
+
+test('renderTimeline names an unavailable drift and renders nothing without one', () => {
+  const unavailable = container();
+  renderTimeline(unavailable, { available: true, commits: [] }, () => {}, {
+    drift: { available: false, reason: 'not-a-git-repository' },
+  });
+  assert.match(
+    unavailable.querySelector('[data-role="drift-unavailable"]').textContent,
+    /Architecture drift unavailable: not-a-git-repository/,
+  );
+
+  const none = container();
+  renderTimeline(none, { available: true, commits: [] }, () => {}, {});
+  assert.equal(none.querySelector('[data-role="drift-chart"]'), null);
+  assert.equal(none.querySelector('[data-role="drift-unavailable"]'), null);
 });
 
 test('renderReview sends the change set to the narrator and renders the reply', async () => {
@@ -1328,6 +1426,37 @@ test('overlayFor routes the hidden-coupling kind to its overlay (K3)', () => {
   const result = overlayFor('hidden-coupling', coChangeReport);
   assert.equal(result.edges.length, 1);
   assert.equal(result.classes.size, 2);
+});
+
+test('overlayFor routes declared rules to their overlay and classes the source file', () => {
+  const report = {
+    available: true,
+    rules: [{ id: 'no-ui-to-data', from: 'src/ui/**', to: 'src/data/**', allow: 'never' }],
+    unused: [],
+    violations: [
+      {
+        rule: 'no-ui-to-data',
+        from: 'src/ui/**',
+        to: 'src/data/**',
+        edge: { source: 'src/ui/a.ts', target: 'src/data/b.ts', kind: 'import', line: 3, specifier: './b' },
+        detail: 'src/ui/a.ts → src/data/b.ts (import) violates no-ui-to-data',
+      },
+    ],
+    checkedEdges: 1,
+  };
+
+  const result = overlayFor('declared-rules', report);
+  assert.equal(result.classes.get('src/ui/a.ts'), 'ov-declared-rule');
+  assert.equal(result.items.length, 1);
+  assert.match(result.summary, /1 rule\(s\) · 1 violation\(s\)/);
+  assert.equal(result.items[0].id, 'src/ui/a.ts');
+  assert.equal(result.items[0].label, 'src/ui/a.ts → src/data/b.ts');
+  assert.equal(result.items[0].detail, 'no-ui-to-data: import');
+
+  const unavailable = overlayFor('declared-rules', { available: false, reason: 'no declared rules' });
+  assert.equal(unavailable.classes.size, 0);
+  assert.equal(unavailable.items.length, 0);
+  assert.equal(unavailable.summary, '');
 });
 
 test('buildHiddenCouplingElements draws only hidden pairs and marks them distinctly (K3)', () => {

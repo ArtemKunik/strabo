@@ -2,10 +2,10 @@ import path from 'node:path';
 
 import {
   buildBaseline,
+  parseDeclaredRuleIds,
   parseFailOnRules,
   runCheck,
   type CheckOptions,
-  type CheckRule,
 } from '../check/check.ts';
 import { defaultBaselinePath, readBaseline, writeBaseline } from '../check/baseline.ts';
 import { readEnv } from '../config.ts';
@@ -20,7 +20,7 @@ export async function runCheckCommand(
 ): Promise<number> {
   const write = io.write ?? ((text: string) => void process.stdout.write(text));
   const env = readEnv(process.env, argv);
-  const rules: CheckRule[] = [];
+  const rules: string[] = [];
   if (hasFlag(argv, 'fail-on-cycles')) {
     rules.push('cycles');
   }
@@ -36,6 +36,11 @@ export async function runCheckCommand(
   for (const rule of parseFailOnRules(collectFailOnValues(argv))) {
     if (!rules.includes(rule)) {
       rules.push(rule);
+    }
+  }
+  for (const id of parseDeclaredRuleIds(collectFailOnValues(argv))) {
+    if (!rules.includes(id)) {
+      rules.push(id);
     }
   }
 

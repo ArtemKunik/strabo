@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import fs from 'node:fs';
 
-import { findDirectedPath } from '../../analysis/analysis.ts';
+import { buildAdjacency, findDirectedPath } from '../../analysis/analysis.ts';
 import { computeCoverage } from '../../analysis/coverage.ts';
 import { computeChangePassport } from '../../analysis/change-passport.ts';
 import {
@@ -36,6 +36,12 @@ import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
 import { buildCoChangeEdges } from '../../analysis/co-change.ts';
 import { collectHistory } from '../../analysis/history.ts';
+import { computeScopeFence } from '../../analysis/scope-fence.ts';
+import { computePublicApiDiff } from '../../analysis/public-api-diff.ts';
+import { computeClones } from '../../analysis/clones.ts';
+import { computeStringEdges } from '../../analysis/string-edges.ts';
+import { checkDeclaredRules, readDeclaredRules } from '../../analysis/rules.ts';
+import { collectDrift } from '../../analysis/drift.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { collectRepositoryReport } from '../../report/collect.ts';
 import { renderReportHtml } from '../../report/render-html.ts';
@@ -656,7 +662,19 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         ),
         provenance,
       };
-      response.json({ ...review, cohesion, metrics, impactPassport, provenance });
+      const expected = expectValues(request.query.expect);
+      const scopeFence =
+        expected.length > 0
+          ? computeScopeFence({
+              changed: review.files.map((file) => ({
+                path: file.path,
+                ...(file.previousPath ? { previousPath: file.previousPath } : {}),
+              })),
+              expected,
+              importers: buildAdjacency(cached.report.graph).backward,
+            })
+          : undefined;
+      response.json({ ...review, cohesion, metrics, impactPassport, provenance, ...(scopeFence ? { scopeFence } : {}) });
     } catch (error) {
       sendError(response, error);
     }
@@ -783,7 +801,122 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     }
   });
 
+  /**
+   * Scope fence (Phase 29 E1): the changed paths outside a declared zone, plus the changed
+   * paths inside it whose importers lie outside. A filter over the review, not new analysis.
+   */
+  router.get('/analysis/scope-fence', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const expected = expectValues(request.query.expect);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      const review = base
+        ? await reviewCommit(repository.root, cached.report.graph, base)
+        : await reviewWorkingTree(repository.root, cached.report.graph);
+      if (!review.available) {
+        response.json(review);
+        return;
+      }
+      const { backward } = buildAdjacency(cached.report.graph);
+      response.json(
+        computeScopeFence({
+          changed: review.files.map((file) => ({
+            path: file.path,
+            ...(file.previousPath ? { previousPath: file.previousPath } : {}),
+          })),
+          expected,
+          importers: backward,
+        }),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Public API diff (Phase 29 E2): exported and pub symbols added, removed, or re-signed
+   * between two revisions, per extractor language, with the recorded consumers of each.
+   */
+  router.get('/analysis/public-api-diff', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      if (!base) {
+        response.status(400).json({ error: 'base query parameter is required.' });
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      const head = typeof request.query.head === 'string' && request.query.head ? request.query.head : null;
+      response.json(await computePublicApiDiff(repository.root, base, { head, graph: cached.report.graph }));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** Function clones (Phase 29 E3): equal normalised function bodies grouped into clusters. */
+  router.get('/analysis/clones', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json(
+        await computeClones(repository.root, cached.report.graph, {
+          minTokens: parsePositiveInt(request.query.minTokens, 500),
+          maxFiles: parsePositiveInt(request.query.maxFiles, 4000),
+        }),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** String-typed edges (Phase 30 H1-H3): environment variables, HTTP routes, feature flags. */
+  router.get('/analysis/string-edges', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json(await computeStringEdges(repository.root, cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** Declared architecture (Phase 30 H4): the operator's rules and the observed violations. */
+  router.get('/analysis/rules', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const rules = readDeclaredRules(repository.root);
+      const stringEdges = rules.length > 0 ? await computeStringEdges(repository.root, cached.report.graph) : null;
+      response.json(checkDeclaredRules(rules, cached.report.graph, { stringEdges }));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** Architecture drift (Phase 31 O2): one structural measure per cached revision. */
+  router.get('/analysis/drift', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' && request.query.base ? request.query.base : null;
+      response.json(
+        await collectDrift(repository.root, repository.name, {
+          limit: parsePositiveInt(request.query.limit, 100),
+          base,
+        }),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   return router;
+}
+
+/** A repeated or comma-separated query value, as a list of non-empty globs. */
+function expectValues(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  return raw.map((entry) => String(entry).trim()).filter((entry) => entry !== '');
 }
 
 /** A 0-1 ratio query parameter, or undefined so the builder's default stands. */

@@ -1,3 +1,4 @@
+import type { DriftReport } from '../analysis/drift.ts';
 import type { RepositoryPassport } from '../analysis/passport.ts';
 import type { StructuralDiffResult } from '../analysis/structural-diff.ts';
 import type { ReviewStatus } from '../analysis/review-types.ts';
@@ -29,6 +30,8 @@ export interface RepositoryReportDocument {
   overview: RepositoryPassport;
   painPoints: PainPoint[];
   change: RepositoryChangeSection | null;
+  /** Architecture drift over recent revisions (Phase 31 O3); null when not computed. */
+  drift: DriftReport | null;
   suggestions: Suggestion[];
   evidence: ReportEvidence;
 }
@@ -148,6 +151,8 @@ export interface RepositoryReportInputs {
   /** Precomputed by the caller (opt-in online lookup); absent means not computed. */
   risk?: RiskReport;
   change?: RepositoryChangeSection;
+  /** Precomputed by the caller (revision graphs); absent means the drift section was not computed. */
+  drift?: DriftReport;
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }

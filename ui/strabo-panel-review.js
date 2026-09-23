@@ -98,6 +98,64 @@ export function structuralTierEdgeLabel(edge) {
 
 
 /**
+ * The Scope fence section's rows: whether a change set stayed inside the zone it declared,
+ * and where it crossed out of it. Pure, so the browser and the headless report agree.
+ */
+export function scopeFenceGroups(scopeFence) {
+  if (!scopeFence || scopeFence.available === false) {
+    return scopeFence?.reason
+      ? [{ key: 'reason', label: 'Scope fence', items: [scopeFence.reason] }]
+      : [];
+  }
+  return [
+    { key: 'outside', label: 'Outside the declared zone', items: (scopeFence.outside ?? []).map(scopeFenceOutsideLabel) },
+    { key: 'crossing', label: 'Inside with outside importers', items: (scopeFence.crossing ?? []).map(scopeFenceCrossingLabel) },
+  ].filter((group) => group.items.length > 0);
+}
+
+
+/** One file outside the declared zone, with its rename and the importers that reach it. */
+function scopeFenceOutsideLabel(entry) {
+  const rename = entry.previousPath ? ` (from \`${entry.previousPath}\`)` : '';
+  const importers = (entry.importers ?? []).length > 0 ? ` — importers: ${entry.importers.join(', ')}` : '';
+  return `\`${entry.path}\`${rename}${importers}`;
+}
+
+
+/** One in-zone file an outside importer still reaches. */
+function scopeFenceCrossingLabel(entry) {
+  return `\`${entry.path}\` — imported by ${(entry.importers ?? []).join(', ')}`;
+}
+
+
+/**
+ * The Scope fence section of the Review panel: where a change left the zone it declared.
+ * A fence with no declared zone names the reason rather than rendering as a pass.
+ */
+function renderScopeFence(container, scopeFence) {
+  if (scopeFence === undefined) {
+    return;
+  }
+  const section = document.createElement('section');
+  section.dataset.role = 'review-scope-fence';
+  const heading = document.createElement('h3');
+  heading.textContent = 'Scope fence';
+  section.append(heading);
+  for (const group of scopeFenceGroups(scopeFence)) {
+    const list = document.createElement('ul');
+    list.dataset.role = `review-scope-fence-${group.key}`;
+    for (const item of group.items) {
+      const entry = document.createElement('li');
+      entry.textContent = item;
+      list.append(entry);
+    }
+    section.append(list);
+  }
+  container.append(section);
+}
+
+
+/**
  * The Structure section of the Review panel: what the change did to the architecture,
  * from the same document `strabo report` prints. An unreadable base says so rather than
  * rendering an empty diff as if nothing had changed.
@@ -286,6 +344,8 @@ export function renderReview(container, result, handlers = {}) {
   if (result.structural !== undefined) {
     renderStructuralDiff(container, result.structural);
   }
+
+  renderScopeFence(container, result.scopeFence);
 
   renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);

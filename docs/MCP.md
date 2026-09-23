@@ -71,7 +71,14 @@ Canonical names and aliases share one implementation, so they cannot drift.
 | `strabo_review` | `get_change_risk` | the pending working-tree change set and its rolled-up risk |
 | `strabo_path` | `get_dependency_path` | the shortest recorded path between two files, each hop with evidence |
 
-Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_dead_code`.
+Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_dead_code`,
+`get_scope_fence` (changed paths outside a declared zone, plus inside changes imported from
+outside), `get_public_api_diff` (exported symbols added, removed, or re-signed between two
+revisions, with their recorded consumers), `get_clones` (functions whose normalised bodies
+hash the same), `get_string_edges` (environment variables, HTTP routes, and feature flags,
+with dynamic keys reported as not resolved), `strabo_rules` (the declared architecture rules
+and the edges that violate them), and `get_drift` (one structural-measure series per recent
+revision, a gap rather than a zero where the cache has no measure).
 
 File-level tools carry the recorded edge, not only the target path: each edge is the graph's
 own record with `evidence.line` (the 1-based import line) and `evidence.specifier` (the

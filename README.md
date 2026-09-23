@@ -54,6 +54,15 @@ in [docs/USAGE.md](docs/USAGE.md).
   See [docs/FEATURES.md](docs/FEATURES.md#repository-passport).
 - **Git review** — pending and per-commit review with statuses, line counts, and
   reverse-reachability impact. See [docs/FEATURES.md](docs/FEATURES.md#git-review).
+- **Reviewing an agent's change** — a scope fence (`--expect`) that lists changes outside a
+  declared zone and inside changes imported from outside, a public API diff between two
+  revisions, and clone clusters from normalised function bodies.
+  See [docs/CLI.md](docs/CLI.md#change-report-scope-fence-and-public-api).
+- **Hidden connections and declared architecture** — environment variables, HTTP routes
+  declared and called, and feature flags as edges, plus `strabo.rules` intent that
+  `strabo check --fail-on` enforces.
+- **Architecture drift** — one structural measure per cached revision, drawn as a timeline.
+  See [docs/ROADMAP.md](docs/ROADMAP.md).
 - **Source viewer** — read one file or a unified diff inline, at HEAD or a past revision.
   See [docs/FEATURES.md](docs/FEATURES.md#source-viewer).
 - **Change impact passport** — a bounded risk score, complexity move, coherence, blast

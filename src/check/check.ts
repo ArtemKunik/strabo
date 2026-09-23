@@ -1,6 +1,8 @@
 import { computeCycles } from '../analysis/cycles.ts';
 import { computeArchitectureHealth } from '../analysis/health.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../analysis/quality.ts';
+import { checkDeclaredRules, readDeclaredRules } from '../analysis/rules.ts';
+import { computeStringEdges } from '../analysis/string-edges.ts';
 import { buildTierReport } from '../analysis/tiers.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
@@ -53,8 +55,28 @@ export function parseFailOnRules(values: readonly string[]): CheckRule[] {
   return CHECK_RULES.filter((rule) => named.has(rule));
 }
 
+/**
+ * The `--fail-on` tokens that are not built-in aliases: declared-architecture rule ids from
+ * `strabo.rules.yml` (Phase 30 H4). Unknown ids are carried through and simply match nothing,
+ * so only a rule the operator actually named can fail the build.
+ */
+export function parseDeclaredRuleIds(values: readonly string[]): string[] {
+  const known = new Set(Object.keys(FAIL_ON_ALIASES));
+  const ids: string[] = [];
+  for (const value of values) {
+    for (const token of value.split(',')) {
+      const trimmed = token.trim();
+      if (trimmed && !known.has(trimmed.toLowerCase()) && !ids.includes(trimmed)) {
+        ids.push(trimmed);
+      }
+    }
+  }
+  return ids;
+}
+
 export interface CheckFinding {
-  rule: CheckRule;
+  /** A built-in `CheckRule`, or a declared-rule id (Phase 30 H4). */
+  rule: string;
   key: string;
   node: string;
   detail: string;
@@ -70,7 +92,7 @@ export interface CheckOptions {
   workspaceRoot: string;
   scanCeiling?: string;
   requested?: string;
-  rules?: readonly CheckRule[];
+  rules?: readonly string[];
   baseline?: CheckBaseline | null;
   healthRegressionPct?: number;
   now?: () => Date;
@@ -82,7 +104,7 @@ export interface CheckResult {
   revision: string | null;
   fingerprint: string | null;
   generatedAt: string;
-  rules: CheckRule[];
+  rules: string[];
   findings: CheckFinding[];
   baselined: string[];
   warnings: CheckWarning[];
@@ -138,6 +160,28 @@ export async function collectFindings(
           inputs: { rule: smell.rule, ...smell.inputs },
         });
       }
+    }
+  }
+
+  // Declared architecture (Phase 30 H4): a rule id from strabo.rules.yml becomes a finding,
+  // so `strabo check --fail-on <rule-id>` fails on the edges the operator forbade.
+  const declaredRules = readDeclaredRules(root);
+  if (declaredRules.length > 0) {
+    const stringEdges = await computeStringEdges(root, graph);
+    const report = checkDeclaredRules(declaredRules, graph, { stringEdges });
+    for (const violation of report.violations) {
+      findings.push({
+        rule: violation.rule,
+        key: `rule:${violation.rule}:${violation.edge.source}->${violation.edge.target}:${violation.edge.line}`,
+        node: `${violation.edge.source} -> ${violation.edge.target}`,
+        detail: violation.detail,
+        inputs: {
+          rule: violation.rule,
+          kind: violation.edge.kind,
+          line: violation.edge.line,
+          specifier: violation.edge.specifier,
+        },
+      });
     }
   }
 

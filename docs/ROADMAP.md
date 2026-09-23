@@ -39,6 +39,9 @@ record is reported as `unavailable`, never invented.
 | 26 | Headless report and structural diff | Landed (X1-X4 done) |
 | 27 | Measured coverage | Landed (V1-V4 done) |
 | 28 | Repository report | Landed (Z1-Z4 done) |
+| 29 | Reviewing an agent's change | Landed (E1-E3: module, route, CLI, MCP, UI; acceptance scenarios pending) |
+| 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; acceptance scenarios pending) |
+| 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1648,6 +1651,169 @@ gather, rank, and render what the scan already recorded. Landed.
 Acceptance: on a fixture with a recorded cycle and an untested reach, the Markdown report
 names both under **Pain points**, each carries a suggestion, and the JSON document re-renders
 to the same Markdown.
+
+## Phase 29 - Reviewing an agent's change
+
+An agent edits a repository and the reviewer asks one question: what changed, and did it stay
+in the lane it was given? Three facts answer it without a model judgement. All three read
+recorded evidence and build on the revision graphs (Phase 23) and the function and symbol
+extraction already in the tree.
+
+- **E1 - Scope fence.** A task declares its expected zone —
+  `strabo report --base <ref> --expect 'src/auth/**'` (repeatable), or
+  `GET /analysis/review?base=<ref>&expect=src/auth/**`. The review then lists two things and
+  nothing else: every changed path **outside** the zone, and every changed path **inside** the
+  zone whose importers lie outside it (an interface change with external consumers). It is the
+  cheapest "the agent wandered off" signal and it is pure evidence — a path either matches a
+  glob or it does not. The zone is a filter over the review the scan already produces, so it
+  adds no analysis; a change set with no zone named reports nothing new.
+- **E2 - Public API diff between two refs.** Exported and `pub` symbols added, removed, or
+  re-signed between two revisions, per extractor language, as one repository-level report.
+  This is Phase 17 Q4's `computePublicSurfaceDiff` lifted from a single file's change passport
+  to a whole change set: both sides' symbols come from the revision graphs (Phase 23 R1), so
+  there is no second scan and no working tree. Each entry names the symbol, the file, and the
+  before/after signature, and the report states whether any consumer the scan recorded still
+  names a removed or re-signed symbol. That answers "is this a breaking change?" with a fact
+  rather than a score; a symbol the extractor did not read stays `unavailable`, never guessed.
+- **E3 - Clones by normalised AST.** Agents copy instead of reuse, and so do people. Hash each
+  function's normalised AST — identifiers and literals replaced by positional placeholders,
+  formatting and comments dropped, so two copies with renamed variables hash the same — and
+  group equal hashes into clone clusters. The report names each cluster, its member functions
+  with file and line, and the exact token count the copies share, as evidence, not as
+  model-judged "similarity". Only functions the extractor read take part; a language without an
+  extractor contributes nothing and says so. Clone clusters join Function hotspots and the
+  report's Pain points as another signal.
+
+Slices: **E1** the `--expect` zone on `strabo report` / `strabo check` and the review route,
+with the outside-zone and crossing-importer lists. **E2** repository-level public API diff
+between two refs over the revision graphs, per extractor language. **E3** normalised-AST
+function hashing and clone clusters. Acceptance: a fixture commit that edits a file outside the
+declared zone and re-signs an exported function another file imports is reported with the
+outside path, the re-signed symbol, and the recorded consumer; two functions differing only in
+identifier names are reported as one clone cluster.
+
+Known limits, named rather than hidden: the scope fence is lexical (globs over paths), so a
+change that belongs in the zone but lands elsewhere is a finding, not a verdict; the public API
+diff reads only the languages with a symbol extractor; clone hashing finds syntactic copies,
+not semantic equivalence.
+
+**Landed.** `src/analysis/glob.ts` (`globToRegExp`, `matchesGlob`), `src/analysis/scope-fence.ts`
+(`computeScopeFence`, pure), `src/analysis/public-api-diff.ts` (`computePublicApiDiff`, reusing
+the now-exported `computePublicSurfaceDiff`), and `src/analysis/clones.ts` (`computeClones`,
+`normaliseTokens` — lexical normalisation, honestly named). Served at
+`GET /analysis/scope-fence`, `GET /analysis/public-api-diff`, and `GET /analysis/clones`; the
+review response carries `scopeFence` when `?expect=` is present; `strabo report --base` carries
+`scopeFence` (with `--expect`) and `publicApiDiff`, rendered as **Scope fence** and **Public
+API** sections; MCP gains `get_scope_fence`, `get_public_api_diff`, and `get_clones`. The
+Review panel gains a Scope fence section (`scopeFenceGroups`). Unit coverage is
+`test/unit/scope-fence.test.ts`, `test/unit/clones.test.ts`, and `test/unit/phase-29-31.test.ts`.
+A browser acceptance scenario is still pending.
+
+## Phase 30 - String-typed edges and declared architecture
+
+An import graph sees module boundaries and misses the connections that actually break
+unfamiliar systems: a shared environment variable, an HTTP route declared in one place and
+called in another, a feature flag read behind a string. The same literal-edge approach that
+already draws SQL table edges (Phase 16 end-to-end trace, Phase 20) fits all of them. On top of
+that, a rules file lets an operator state the architecture they intend, and turns a violation
+into a `check` failure and an MCP fact.
+
+- **H1 - Environment variables.** `process.env.X`, `os.environ["X"]`,
+  `Environment.GetEnvironmentVariable("X")`, `std::env::var("X")`, `System.getenv("X")` and the
+  equivalent literal forms become edges between the file that reads a key and the file that
+  declares it (`.env`, `.env.*`, docker-compose, k8s manifests, CI workflows, `*.properties`,
+  `*.yaml`). A key read with no declaration is a finding with its evidence line; a declaration
+  with no reader is listed, not judged. A dynamic key (`process.env[name]`) records nothing and
+  goes to diagnostics as not resolved.
+- **H2 - HTTP routes declared and called.** The recorded service endpoints and outbound calls
+  (Phase 11 `src/workspace/services.ts`) already join across repositories; inside one
+  repository they become a declared ↔ called edge between the route declaration and each
+  literal call site, with the endpoint label. A call whose path is interpolated records no
+  readable path (Phase 11's existing rule) and stays a diagnostic.
+- **H3 - Feature flags.** A flag read behind a literal (`isEnabled("new-checkout")`,
+  `flags.get('x')`, `@FeatureFlag("x")`) joins the file that reads it to the file that declares
+  it (a flag config, an enum, a constants module). Literals only; a computed key is
+  `unavailable`.
+- **H4 - Declared architecture (`strabo.rules`).** An operator states intent in a file beside
+  `strabo.groups.yml`: `{ rules: [{ id, from, to, allow: "import"|"never"|"string" }] }`, e.g.
+  *domain never imports infra*. Observed edges (import edges and the string-typed edges above)
+  are checked against it; a violation is a finding that names the rule, the edge, and its
+  evidence line, and it is a `strabo check --fail-on=<rule-id>` failure (Phase 26 X3,
+  interoperability I4). A rule that matches nothing is reported as unused rather than silently
+  passing. Through MCP (Phase 24), a `strabo_rules` tool returns the declared rules so an agent
+  can read the intent before it breaks it, within the same read-only boundary.
+- **H5 - The map lens.** Declared rules draw as a boundary overlay: an edge that crosses a
+  `never` rule is highlighted with the rule id, off by default, so the tier direction check
+  (Phase 16 L12) and the declared rules share one visual language.
+
+Slices: **H1** env-variable edges and declarations. **H2** intra-repository HTTP declared ↔
+called edges. **H3** feature-flag edges. **H4** `strabo.rules`, its check rules, and the MCP
+surface. **H5** the rules overlay. Acceptance: a fixture where `domain/` reads `infra/`'s
+environment variable and imports it fails `strabo check --fail-on domain-no-infra` with the
+rule, the edge, and the line, and passes once the import is removed; a dynamic env key is
+listed as not resolved, never as an edge.
+
+Known limits, named rather than hidden: every string-typed edge is lexical and literal-only, so
+a key assembled at runtime, a route built from a variable, and a flag name computed from an
+enum are diagnostics, not edges; a declaration format the extractor does not read is named as a
+gap; a declared rule is operator intent, not a proven property of the running system.
+
+**Landed.** `src/analysis/string-edges.ts` (`computeStringEdges`, reusing the service-call and
+endpoint extractors for routes; dynamic env keys become `not resolved` diagnostics) and
+`src/analysis/rules.ts` (`readDeclaredRules` from `strabo.rules.yml`, `strabo.rules`, or the
+`rules:` key of `strabo.groups.yml`; `checkDeclaredRules`). Served at
+`GET /analysis/string-edges` and `GET /analysis/rules`; MCP gains `get_string_edges` and
+`strabo_rules`. `strabo check` accepts a declared rule id straight through `--fail-on=<id>`
+(`parseDeclaredRuleIds` widens the rule channel), and the map gains a **Declared rules** overlay
+(files on the forbidden side). Unit coverage is `test/unit/string-edges.test.ts`,
+`test/unit/rules.test.ts`, and `test/unit/phase-29-31.test.ts`. H5 is the node-class half of
+the lens; drawing the crossing edge itself is a follow-up, and a browser acceptance scenario is
+still pending.
+
+## Phase 31 - Architecture drift over time
+
+Once graphs are cached per commit (Phase 23 R1), a repository's structure has a history, and a
+single line on a chart is more honest than any composite score. This phase turns the cached
+revision graphs into a timeline of structural measures and draws the drift.
+
+- **O1 - One measure per revision.** For each cached revision, record the structural facts the
+  graph already yields: cycle count and the largest strongly connected component, module count
+  and the largest module by files, tier-violation count (Phase 16 L12), the share of hidden
+  coupling (Phase 25 K3), the largest blast radius, and the public-surface size (Phase 29 E2).
+  Each is a count or a share from recorded edges, never a composite score, and each names the
+  revision it was measured at.
+- **O2 - The timeline endpoint and chart.** `GET /analysis/drift[?base=&limit=]` returns the
+  series; the Timeline panel draws one line per measure, so a reviewer sees when cycles grew or
+  a tier boundary broke, not just the current number. A measure that needs a rescan the cache
+  does not have is `unavailable` for that revision, and the line says so rather than
+  interpolating.
+- **O3 - Drift in the report.** `strabo report` (Phase 26 / 28) gains a **Drift** section naming
+  the measures that moved most over the window and the commit each moved at, with the same
+  evidence-first rule: a fact not recorded for a revision is a gap, never a zero.
+- **O4 - The published drift artifact.** Because the series is deterministic, a static chart for
+  a small set of known repositories is generated by the published-demo build (interoperability
+  I8) and stamped with its revision and build date, so the drift claim is checkable rather than
+  asserted. This is a docs and communication slice, so it stays last.
+
+Slices: **O1** the per-revision structural measures from the cached graphs. **O2**
+`GET /analysis/drift` and the Timeline chart. **O3** the report's Drift section. **O4** the
+published drift artifact. Acceptance: a fixture history where a cycle is introduced at commit N
+and resolved at commit M shows cycle count 0 → 1 → 0 across the timeline, each point naming its
+revision.
+
+Known limits, named rather than hidden: the timeline is only as dense as the cached revision
+graphs, so a commit no review visited is not measured; hidden-coupling share needs the bounded
+history window (Phase 17 Q5), so it is `unavailable` before the window and near its start;
+measures are per revision and are never smoothed.
+
+**Landed (O1-O3).** `src/analysis/drift.ts` (`computeDriftMeasures` over a graph, `collectDrift`
+over the cached revision graphs; hidden-coupling share and tier violations are always `null`
+with the reason named, since the cache carries neither). Served at `GET /analysis/drift`, MCP
+gains `get_drift`, the repository report gains a **Drift** section (Markdown and HTML) fed by
+`collectDrift` and skipped with `--no-drift`, and the Timeline panel draws a drift chart (SVG,
+bounded categorical strokes per R8) above the commit list. Unit coverage is
+`test/unit/drift.test.ts` and `test/unit/phase-29-31.test.ts`. O4 (the published static drift
+artifact) is not started.
 
 ## Reading route (landed)
 

@@ -439,6 +439,20 @@ The **Run presets** menu lists commands derived from the repository's own manife
 the manifest that declared it. Presets are computed server-side per repository, so the menu
 names what the checkout actually supports rather than a fixed list.
 
+### Session persistence (opt-in daemon)
+
+By default the PTYs live in the server process, so a restart takes the sessions with it.
+With **`STRABO_TERMINAL_DAEMON=1`** (or `--terminal-daemon`) they instead run in
+**`strabo-termd`**, a detached background process that owns the PTYs; the server talks to it
+over a per-workspace Unix socket (a named pipe on Windows) under the OS temp directory, and
+the socket's directory holds a token file that gates access (mode `0600` on POSIX). Because
+the daemon outlives the server, sessions survive a restart — including `POST /settings/restart`
+— and the server reconnects to them when it comes back. Output replay resumes from the
+client's cursor, so only what was missed is sent rather than a fresh shell. The daemon is off
+by default: an embedded host, or a machine without the native `node-pty` build, should not
+spawn a background process. When the daemon cannot be reached the server falls back to the
+in-process registry, so the terminal still works rather than failing.
+
 ### Agent sessions
 
 Delegating from the map, the review panel, or a diagnostic now opens an **agent session in the

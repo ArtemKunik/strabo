@@ -296,7 +296,7 @@ function computeTieredImpact(
   };
 }
 
-function computePublicSurfaceDiff(
+export function computePublicSurfaceDiff(
   extractor: SymbolExtractor,
   beforeExtraction: SymbolExtraction | null,
   afterExtraction: SymbolExtraction | null,

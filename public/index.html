@@ -87,6 +87,7 @@
             <option value="ownership">Ownership</option>
             <option value="smells">Smells</option>
             <option value="hidden-coupling">Hidden coupling</option>
+            <option value="declared-rules">Declared rules</option>
             <option value="architecture">Architecture health</option>
             <option value="hotspots">Function hotspots</option>
           </select>
@@ -263,7 +264,11 @@
         </div>
       </div>
       <section id="terminal-screen" class="terminal-screen screen" aria-label="Terminal" hidden>
-        <div id="terminal-container" class="terminal-container"></div>
+        <div id="terminal-container" class="terminal-container">
+          <div id="terminal-toolbar" class="terminal-toolbar" role="toolbar" aria-label="Terminal actions"></div>
+          <div id="terminal-tabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions"></div>
+          <div id="terminal-panes" class="terminal-panes"></div>
+        </div>
       </section>
       <div id="float-layer" class="float-layer">
         <div id="overlay-panel" class="overlay-panel" hidden></div>

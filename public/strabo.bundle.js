@@ -1327,9 +1327,34 @@ function overlayFor(kind, data) {
       return smellsOverlay(data);
     case "hidden-coupling":
       return hiddenCouplingOverlay(data);
+    case "declared-rules":
+      return declaredRulesOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
+}
+function declaredRulesOverlay(report) {
+  if (!report || report.available === false) {
+    return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
+  }
+  const rules = report.rules ?? [];
+  if (rules.length === 0) {
+    return { classes: /* @__PURE__ */ new Map(), summary: "No rules are declared.", items: [] };
+  }
+  const violations = report.violations ?? [];
+  const classes = /* @__PURE__ */ new Map();
+  for (const violation of violations) {
+    classes.set(violation.edge.source, "ov-declared-rule");
+  }
+  return {
+    classes,
+    summary: `${rules.length} rule(s) \xB7 ${violations.length} violation(s)`,
+    items: violations.map((violation) => ({
+      id: violation.edge.source,
+      label: `${violation.edge.source} \u2192 ${violation.edge.target}`,
+      detail: `${violation.rule}: ${violation.edge.kind}`
+    }))
+  };
 }
 function hiddenCouplingOverlay(report) {
   if (!report || report.unavailable === true) {
@@ -2294,6 +2319,9 @@ function stylesheet() {
     // Hidden coupling is a co-change pair with no import path: the status serious ring marks
     // the endpoints, and the distinct edge below carries the relationship (K3).
     { selector: "node.ov-hidden-coupling", style: { "border-width": 3, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
+    // A declared-rule violation is a serious signal, so it rides the reserved status scale:
+    // a heavy solid ring in the serious hue, distinct from the changed and cycle rings.
+    { selector: "node.ov-declared-rule", style: { "border-width": 3, "border-style": "solid", "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -2672,7 +2700,7 @@ function createUnitCardLayer(container, cy, onOpen) {
 }
 
 // ui/strabo-graph-classes.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling", "ov-declared-rule"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
   ...TIER_ORDER.map((tier) => `tier-${tier}`),
@@ -3578,6 +3606,10 @@ var menuElement = null;
 var toastStack = null;
 var promptDialog = null;
 var promptDialogResolve = null;
+var sessionOpener = null;
+function setDelegateSessionOpener(opener) {
+  sessionOpener = typeof opener === "function" ? opener : null;
+}
 var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
 function ensureMenu() {
   if (!menuElement) {
@@ -3808,15 +3840,18 @@ function showPromptReview({ agent, title, prompt }) {
   text.setSelectionRange(text.value.length, text.value.length);
   return pending;
 }
-async function launchAgent(agent, { repository, target, prompt, title }) {
+async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
   const response = await fetch(`${API_PATH}/delegate`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent, repository, target, prompt, title })
+    body: JSON.stringify({ agent, repository, target, prompt, title, ...dryRun ? { dryRun: true } : {} })
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(body.error ?? `Delegate failed (${response.status})`);
+  }
+  if (body.sessionId && sessionOpener) {
+    sessionOpener(body.sessionId, body);
   }
   return body;
 }
@@ -4237,6 +4272,11 @@ function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeigh
     left: Math.min(Math.max(left, 0), maxLeft),
     top: Math.min(Math.max(top, 0), maxTop)
   };
+}
+function clampMenuLeft(anchorRight, menuWidth, viewportWidth, margin = 4) {
+  const wanted = anchorRight - menuWidth;
+  const maxLeft = Math.max(margin, viewportWidth - margin - menuWidth);
+  return Math.min(Math.max(wanted, margin), maxLeft);
 }
 function readStore2(key) {
   try {
@@ -8562,6 +8602,44 @@ function structuralCycleLabel(cycle) {
 function structuralTierEdgeLabel(edge) {
   return `${edge.source} \u2192 ${edge.target} (${edge.kind}, ${edge.unit})`;
 }
+function scopeFenceGroups(scopeFence) {
+  if (!scopeFence || scopeFence.available === false) {
+    return scopeFence?.reason ? [{ key: "reason", label: "Scope fence", items: [scopeFence.reason] }] : [];
+  }
+  return [
+    { key: "outside", label: "Outside the declared zone", items: (scopeFence.outside ?? []).map(scopeFenceOutsideLabel) },
+    { key: "crossing", label: "Inside with outside importers", items: (scopeFence.crossing ?? []).map(scopeFenceCrossingLabel) }
+  ].filter((group) => group.items.length > 0);
+}
+function scopeFenceOutsideLabel(entry) {
+  const rename = entry.previousPath ? ` (from \`${entry.previousPath}\`)` : "";
+  const importers = (entry.importers ?? []).length > 0 ? ` \u2014 importers: ${entry.importers.join(", ")}` : "";
+  return `\`${entry.path}\`${rename}${importers}`;
+}
+function scopeFenceCrossingLabel(entry) {
+  return `\`${entry.path}\` \u2014 imported by ${(entry.importers ?? []).join(", ")}`;
+}
+function renderScopeFence(container, scopeFence) {
+  if (scopeFence === void 0) {
+    return;
+  }
+  const section2 = document.createElement("section");
+  section2.dataset.role = "review-scope-fence";
+  const heading2 = document.createElement("h3");
+  heading2.textContent = "Scope fence";
+  section2.append(heading2);
+  for (const group of scopeFenceGroups(scopeFence)) {
+    const list = document.createElement("ul");
+    list.dataset.role = `review-scope-fence-${group.key}`;
+    for (const item of group.items) {
+      const entry = document.createElement("li");
+      entry.textContent = item;
+      list.append(entry);
+    }
+    section2.append(list);
+  }
+  container.append(section2);
+}
 function renderStructuralDiff(container, structural) {
   const heading2 = document.createElement("h4");
   heading2.textContent = "Structure";
@@ -8703,6 +8781,7 @@ function renderReview(container, result, handlers = {}) {
   if (result.structural !== void 0) {
     renderStructuralDiff(container, result.structural);
   }
+  renderScopeFence(container, result.scopeFence);
   renderChangeMetrics(container, result.metrics, handlers);
   renderChangePassport(container, result.cohesion);
   if (result.impactPassport) {
@@ -8941,8 +9020,8 @@ function changeRiskBlock(change) {
 }
 
 // ui/strabo-panel-overlay.js
-function renderOverlayPanel(container, title, overlay, options = {}) {
-  if (!overlay || !overlay.summary) {
+function renderOverlayPanel(container, title, overlay2, options = {}) {
+  if (!overlay2 || !overlay2.summary) {
     container.hidden = true;
     container.replaceChildren();
     container.className = "overlay-panel";
@@ -8957,7 +9036,7 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
   dot.className = "overlay-dot";
   dot.setAttribute("aria-hidden", "true");
   heading2.append(dot);
-  heading2.append(document.createTextNode(`${title} \xB7 ${overlay.summary}`));
+  heading2.append(document.createTextNode(`${title} \xB7 ${overlay2.summary}`));
   heading2.className = "overlay-summary";
   container.append(heading2);
   if (options.onClose) {
@@ -8969,29 +9048,30 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
     dismiss.addEventListener("click", () => options.onClose());
     heading2.append(dismiss);
   }
-  if (overlay.meta && (overlay.meta.testFiles !== void 0 || overlay.meta.unreached !== void 0)) {
+  if (overlay2.meta && (overlay2.meta.testFiles !== void 0 || overlay2.meta.unreached !== void 0)) {
     const counts = document.createElement("p");
     counts.className = "overlay-counts";
     const parts = [];
-    if (overlay.meta.testFiles !== void 0) parts.push(`${overlay.meta.testFiles} test files`);
-    if (overlay.meta.reached !== void 0) parts.push(`${overlay.meta.reached} reached`);
-    if (overlay.meta.unreached !== void 0) parts.push(`${overlay.meta.unreached} unreached`);
+    if (overlay2.meta.testFiles !== void 0) parts.push(`${overlay2.meta.testFiles} test files`);
+    if (overlay2.meta.reached !== void 0) parts.push(`${overlay2.meta.reached} reached`);
+    if (overlay2.meta.unreached !== void 0) parts.push(`${overlay2.meta.unreached} unreached`);
     counts.textContent = parts.join(" \xB7 ");
     container.append(counts);
   }
-  if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
+  if ((!overlay2.items || overlay2.items.length === 0) && overlay2.emptyNote) {
     const note3 = document.createElement("p");
     note3.className = "overlay-empty";
-    note3.textContent = overlay.emptyNote;
+    note3.textContent = overlay2.emptyNote;
     container.append(note3);
   }
-  if (Array.isArray(overlay.items) && overlay.items.length > 0) {
-    const needsSearch = overlay.items.length > 8;
-    const changedItems = overlay.changedItems instanceof Set ? overlay.changedItems : null;
-    const affectedItems = overlay.affectedItems instanceof Set ? overlay.affectedItems : null;
-    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay.items.length;
+  if (Array.isArray(overlay2.items) && overlay2.items.length > 0) {
+    const needsSearch = overlay2.items.length > 8;
+    const changedItems = overlay2.changedItems instanceof Set ? overlay2.changedItems : null;
+    const affectedItems = overlay2.affectedItems instanceof Set ? overlay2.affectedItems : null;
+    const showChangedOnly = changedItems !== null && changedItems.size > 0 && changedItems.size < overlay2.items.length;
     let filter = "";
     let changedOnly = false;
+    const itemText = (item) => typeof item === "string" ? item : String(item?.label ?? item?.id ?? "");
     const rowFor = (item) => {
       const entry = document.createElement("div");
       entry.className = "overlay-list-row";
@@ -9001,6 +9081,27 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
       }
       if (typeof item === "string") {
         entry.dataset.delegateOverlayItem = item;
+      }
+      if (item !== null && typeof item === "object") {
+        const id = item.id ?? itemText(item);
+        entry.dataset.delegateOverlayItem = id;
+        if (options.onSelect && id) {
+          const jump = document.createElement("button");
+          jump.type = "button";
+          jump.textContent = item.label ?? id;
+          jump.title = item.detail ? `Select ${id} \u2014 ${item.detail}` : `Select ${id}`;
+          jump.addEventListener("click", () => options.onSelect(id));
+          entry.append(jump);
+        } else {
+          entry.textContent = item.label ?? id;
+        }
+        if (item.detail) {
+          const detail = document.createElement("span");
+          detail.className = "evidence";
+          detail.textContent = ` \xB7 ${item.detail}`;
+          entry.append(detail);
+        }
+        return entry;
       }
       if (options.onSelect && typeof item === "string" && !item.includes("\u2194") && !item.includes(":")) {
         const jump = document.createElement("button");
@@ -9021,12 +9122,12 @@ function renderOverlayPanel(container, title, overlay, options = {}) {
       renderRow: rowFor
     });
     const matchingItems = () => {
-      let items = overlay.items;
+      let items = overlay2.items;
       if (changedOnly && changedItems) {
         items = items.filter((item) => changedItems.has(item));
       }
       if (filter) {
-        items = items.filter((item) => String(item).toLowerCase().includes(filter));
+        items = items.filter((item) => itemText(item).toLowerCase().includes(filter));
       }
       return items;
     };
@@ -9172,6 +9273,83 @@ function edgeEndpoint(id, onSelect2) {
   }
   return button3;
 }
+function driftSeriesClass(index) {
+  return `drift-series-${index < 3 ? index + 1 : "other"}`;
+}
+function renderDriftChart(container, drift) {
+  if (!drift) {
+    return;
+  }
+  if (drift.available === false) {
+    const note3 = document.createElement("p");
+    note3.className = "unavailable";
+    note3.dataset.role = "drift-unavailable";
+    note3.textContent = `Architecture drift unavailable: ${drift.reason ?? "not recorded"}`;
+    container.append(note3);
+    return;
+  }
+  const points = drift.points ?? [];
+  const series = drift.series ?? [];
+  if (points.length === 0 || series.length === 0) {
+    return;
+  }
+  const width = 320;
+  const height = 120;
+  const padding = 8;
+  const svg = svgElement("svg", {
+    class: "drift-chart",
+    "data-role": "drift-chart",
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "none"
+  });
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "120");
+  series.forEach((entry, index) => {
+    const values = (entry.points ?? []).map((point) => point.value);
+    const defined = values.filter((value) => value !== null && value !== void 0);
+    const min = defined.length > 0 ? Math.min(...defined) : 0;
+    const max = defined.length > 0 ? Math.max(...defined) : 0;
+    const span = max - min;
+    const xFor = (i) => values.length <= 1 ? width / 2 : padding + i * (width - padding * 2) / (values.length - 1);
+    const yFor = (value) => span === 0 ? height / 2 : height - padding - (value - min) / span * (height - padding * 2);
+    let segment = [];
+    const flush = () => {
+      if (segment.length === 0) return;
+      svg.append(
+        svgElement("polyline", {
+          class: driftSeriesClass(index),
+          points: segment.join(" "),
+          fill: "none",
+          "stroke-width": "2",
+          "vector-effect": "non-scaling-stroke"
+        })
+      );
+      segment = [];
+    };
+    values.forEach((value, i) => {
+      if (value === null || value === void 0) {
+        flush();
+        return;
+      }
+      segment.push(`${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`);
+    });
+    flush();
+  });
+  container.append(svg);
+  const legend = document.createElement("div");
+  legend.className = "drift-legend";
+  legend.dataset.role = "drift-legend";
+  for (const entry of series) {
+    const item = document.createElement("span");
+    item.className = "drift-legend-item";
+    const values = (entry.points ?? []).map(
+      (point) => point.value === null || point.value === void 0 ? "\u2014" : String(point.value)
+    );
+    item.textContent = `${entry.label}: ${values.join(" \u2192 ")}`;
+    legend.append(item);
+  }
+  container.append(legend);
+}
 function renderTimeline(container, result, onSelect2, options = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -9186,6 +9364,7 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     dismiss.addEventListener("click", () => options.onClose());
     title.append(dismiss);
   }
+  renderDriftChart(container, options.drift);
   if (!result || result.available === false) {
     const note3 = document.createElement("p");
     note3.className = "unavailable";
@@ -10422,8 +10601,41 @@ function openCommitDialog({ repository, onCommitted } = {}) {
 
 // ui/strabo-settings.js
 var SETTINGS_KEY = "strabo.settings.v1";
-var THEMES = ["system", "dark", "light"];
+var THEMES = [
+  "system",
+  "dark",
+  "light",
+  "nord",
+  "dracula",
+  "solarized-dark",
+  "solarized-light",
+  "gruvbox-dark",
+  "gruvbox-light",
+  "monokai"
+];
 var DETAIL_MODES = ["block", "file"];
+var THEME_OPTIONS = [
+  ["system", "System"],
+  {
+    label: "Neutral",
+    options: [
+      ["dark", "Dark"],
+      ["light", "Light"]
+    ]
+  },
+  {
+    label: "Colour",
+    options: [
+      ["nord", "Nord"],
+      ["dracula", "Dracula"],
+      ["solarized-dark", "Solarized Dark"],
+      ["solarized-light", "Solarized Light"],
+      ["gruvbox-dark", "Gruvbox Dark"],
+      ["gruvbox-light", "Gruvbox Light"],
+      ["monokai", "Monokai"]
+    ]
+  }
+];
 function defaultSettings() {
   return {
     theme: "system",
@@ -10464,8 +10676,8 @@ function writeSettings(settings, storage = globalThis.localStorage) {
   }
 }
 function resolveTheme(theme, prefersLight = false) {
-  if (theme === "light" || theme === "dark") return theme;
-  return prefersLight ? "light" : "dark";
+  if (theme === "system" || !THEMES.includes(theme)) return prefersLight ? "light" : "dark";
+  return theme;
 }
 function effectiveReduceMotion(settings, prefersReducedMotion = false) {
   return Boolean(settings?.reduceMotion) || Boolean(prefersReducedMotion);
@@ -10521,13 +10733,25 @@ function textInput(value, { placeholder = "", readOnly = false } = {}) {
   input.spellcheck = false;
   return input;
 }
+function optionElement(value, text) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = text;
+  return option;
+}
 function selectInput(value, options, onChange) {
   const select = document.createElement("select");
-  for (const [optionValue, text] of options) {
-    const option = document.createElement("option");
-    option.value = optionValue;
-    option.textContent = text;
-    select.append(option);
+  for (const entry of options) {
+    if (Array.isArray(entry)) {
+      select.append(optionElement(entry[0], entry[1]));
+    } else {
+      const group = document.createElement("optgroup");
+      group.label = entry.label;
+      for (const [optionValue, text] of entry.options) {
+        group.append(optionElement(optionValue, text));
+      }
+      select.append(group);
+    }
   }
   select.value = value;
   select.addEventListener("change", () => onChange(select.value));
@@ -10817,11 +11041,7 @@ function renderSettings(container, handlers = {}) {
   local.append(
     field(
       "Theme",
-      selectInput(
-        prefs.theme,
-        [["system", "System"], ["dark", "Dark"], ["light", "Light"]],
-        (value) => handlers.onPref?.("theme", value)
-      )
+      selectInput(prefs.theme, THEME_OPTIONS, (value) => handlers.onPref?.("theme", value))
     ),
     field("Reduce motion", checkboxInput(prefs.reduceMotion, (value) => handlers.onPref?.("reduceMotion", value))),
     field(
@@ -20145,79 +20365,1682 @@ var o = class {
   }
 };
 
-// ui/strabo-terminal.js
+// ui/terminal-multiplexer.js
 var RECONNECT_MIN_DELAY_MS = 500;
 var RECONNECT_MAX_DELAY_MS = 8e3;
-function initTerminalScreen(container) {
-  const background = getComputedStyle(document.documentElement).getPropertyValue("--bg-1").trim();
-  const term = new Dl({
-    convertEol: true,
-    cursorBlink: true,
-    fontSize: 13,
-    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-    theme: background ? { background } : void 0
-  });
-  const fitAddon = new o();
-  term.loadAddon(fitAddon);
-  term.open(container);
+function nextReconnectDelay(previous, { min = RECONNECT_MIN_DELAY_MS, max = RECONNECT_MAX_DELAY_MS } = {}) {
+  if (!Number.isFinite(previous) || previous <= 0) {
+    return min;
+  }
+  return Math.min(previous * 2, max);
+}
+function acceptOutput(lastSeq, seq) {
+  return Number.isFinite(seq) && seq > (Number.isFinite(lastSeq) ? lastSeq : 0);
+}
+function backlogDelta(lastSeq, slice) {
+  if (!slice || typeof slice.data !== "string") {
+    return null;
+  }
+  const from = Number.isFinite(slice.fromSeq) ? slice.fromSeq : 0;
+  const to = Number.isFinite(slice.seq) ? slice.seq : 0;
+  const cursor = Number.isFinite(lastSeq) ? lastSeq : 0;
+  if (to <= cursor) {
+    return null;
+  }
+  return { data: slice.data, seq: to, reset: from < cursor };
+}
+function asRecord(value) {
+  return typeof value === "object" && value !== null ? value : null;
+}
+function asString(value) {
+  return typeof value === "string" ? value : null;
+}
+function asNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function parseServerMessage(raw) {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const message = asRecord(parsed);
+  if (!message) {
+    return null;
+  }
+  switch (message.type) {
+    case "sessions":
+      return Array.isArray(message.sessions) ? { type: "sessions", sessions: message.sessions } : null;
+    case "created": {
+      const session = asRecord(message.session);
+      return session ? { type: "created", session } : null;
+    }
+    case "closed": {
+      const id = asString(message.id);
+      const code = asNumber(message.code);
+      return id === null || code === null ? null : { type: "closed", id, code };
+    }
+    case "output": {
+      const id = asString(message.id);
+      const seq = asNumber(message.seq);
+      const data = asString(message.data);
+      return id === null || seq === null || data === null ? null : { type: "output", id, seq, data };
+    }
+    case "backlog": {
+      const id = asString(message.id);
+      const fromSeq = asNumber(message.fromSeq);
+      const seq = asNumber(message.seq);
+      const data = asString(message.data);
+      return id === null || fromSeq === null || seq === null || data === null ? null : { type: "backlog", id, fromSeq, seq, data };
+    }
+    case "title": {
+      const id = asString(message.id);
+      const title = asString(message.title);
+      return id === null || title === null ? null : { type: "title", id, title };
+    }
+    case "error":
+      return typeof message.message === "string" ? { type: "error", message: message.message, id: asString(message.id) ?? void 0 } : null;
+    default:
+      return null;
+  }
+}
+function encodeClientMessage(message) {
+  return JSON.stringify(message);
+}
+function defaultUrl() {
+  const protocol = globalThis.location?.protocol === "https:" ? "wss:" : "ws:";
+  const host2 = globalThis.location?.host ?? "localhost";
+  return `${protocol}//${host2}/api/strabo/terminal`;
+}
+function createTerminalMultiplexer({ url, onEvent, socketFactory } = {}) {
+  const listeners = /* @__PURE__ */ new Set();
+  if (typeof onEvent === "function") {
+    listeners.add(onEvent);
+  }
+  const makeSocket = socketFactory ?? ((target) => new WebSocket(target));
+  const endpoint = url ?? defaultUrl();
+  const lastSeq = /* @__PURE__ */ new Map();
+  const metas = /* @__PURE__ */ new Map();
+  const attached = /* @__PURE__ */ new Set();
+  const pendingCreates = [];
   let socket = null;
-  let reconnectDelay = RECONNECT_MIN_DELAY_MS;
   let reconnectTimer = null;
-  let closedByPage = false;
-  term.onData((data) => {
-    sendMessage({ type: "input", data });
-  });
-  function sendMessage(message) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message));
+  let reconnectDelay = RECONNECT_MIN_DELAY_MS;
+  let disposed = false;
+  function emit(event) {
+    for (const listener of [...listeners]) {
+      try {
+        listener(event);
+      } catch {
+      }
     }
   }
-  function sendResize() {
-    if (term.cols > 0 && term.rows > 0) {
-      sendMessage({ type: "resize", cols: term.cols, rows: term.rows });
+  function send(message) {
+    if (socket && socket.readyState === 1) {
+      socket.send(encodeClientMessage(message));
     }
   }
-  function connect() {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(`${protocol}//${location.host}/api/strabo/terminal`);
-    socket.addEventListener("open", () => {
-      reconnectDelay = RECONNECT_MIN_DELAY_MS;
-      sendResize();
-    });
-    socket.addEventListener("message", (event) => {
-      term.write(event.data);
-    });
-    socket.addEventListener("close", () => {
-      if (closedByPage) {
+  function attachFrame(id) {
+    const cursor = lastSeq.get(id) ?? 0;
+    send({ type: "attach", id, fromSeq: cursor });
+  }
+  function resolveCreate(session) {
+    const resolve = pendingCreates.shift();
+    resolve?.(session);
+  }
+  function handleMessage(raw) {
+    const message = parseServerMessage(raw);
+    if (!message) {
+      return;
+    }
+    switch (message.type) {
+      case "sessions": {
+        const ids = /* @__PURE__ */ new Set();
+        for (const session of message.sessions) {
+          if (session && typeof session.id === "string") {
+            metas.set(session.id, session);
+            ids.add(session.id);
+          }
+        }
+        for (const id of [...metas.keys()]) {
+          if (!ids.has(id)) {
+            metas.delete(id);
+          }
+        }
+        emit({ type: "sessions", sessions: [...metas.values()] });
         return;
       }
-      reconnectTimer = setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_DELAY_MS);
+      case "created":
+        metas.set(message.session.id, message.session);
+        emit({ type: "created", session: message.session });
+        resolveCreate(message.session);
+        return;
+      case "closed": {
+        const meta = metas.get(message.id);
+        if (meta) {
+          metas.set(message.id, { ...meta, status: "exited", exitCode: message.code });
+        }
+        emit({ type: "closed", id: message.id, code: message.code });
+        return;
+      }
+      case "output": {
+        if (acceptOutput(lastSeq.get(message.id) ?? 0, message.seq)) {
+          lastSeq.set(message.id, message.seq);
+          emit({ type: "output", id: message.id, data: message.data });
+        }
+        return;
+      }
+      case "backlog": {
+        const delta = backlogDelta(lastSeq.get(message.id) ?? 0, message);
+        if (delta) {
+          lastSeq.set(message.id, delta.seq);
+          emit({ type: "output", id: message.id, data: delta.data, replay: true, reset: delta.reset });
+        }
+        return;
+      }
+      case "title": {
+        const meta = metas.get(message.id);
+        if (meta) {
+          metas.set(message.id, { ...meta, title: message.title });
+        }
+        emit({ type: "title", id: message.id, title: message.title });
+        return;
+      }
+      case "error":
+        emit({ type: "error", message: message.message, id: message.id });
+        return;
+      default:
+        return;
+    }
+  }
+  function scheduleReconnect() {
+    if (disposed) {
+      return;
+    }
+    reconnectTimer = setTimeout(connect, reconnectDelay);
+    reconnectDelay = nextReconnectDelay(reconnectDelay);
+  }
+  function connect() {
+    if (disposed) {
+      return;
+    }
+    socket = makeSocket(endpoint);
+    socket.addEventListener("open", () => {
+      if (disposed) {
+        return;
+      }
+      reconnectDelay = RECONNECT_MIN_DELAY_MS;
+      emit({ type: "open" });
+      send({ type: "hello" });
+      send({ type: "list" });
+      for (const id of attached) {
+        attachFrame(id);
+      }
+    });
+    socket.addEventListener("message", (event) => handleMessage(event.data));
+    socket.addEventListener("close", () => {
+      socket = null;
+      emit({ type: "close" });
+      if (!disposed) {
+        scheduleReconnect();
+      }
     });
     socket.addEventListener("error", () => {
-      socket.close();
+      socket?.close();
     });
   }
   connect();
-  window.addEventListener("beforeunload", () => {
-    closedByPage = true;
-    clearTimeout(reconnectTimer);
-    socket?.close();
-  });
-  window.addEventListener("resize", () => {
-    if (container.offsetParent !== null) {
-      fitAddon.fit();
-      sendResize();
-    }
-  });
   return {
-    /** Call each time the Terminal screen becomes visible: `fit()` needs a laid-out container. */
-    activate() {
-      fitAddon.fit();
-      sendResize();
-      term.focus();
+    attach(id) {
+      if (typeof id !== "string" || id === "") {
+        return;
+      }
+      attached.add(id);
+      attachFrame(id);
+    },
+    detach(id) {
+      attached.delete(id);
+      send({ type: "detach", id });
+    },
+    sendInput(id, data) {
+      if (typeof data === "string" && data !== "") {
+        send({ type: "input", id, data });
+      }
+    },
+    resize(id, cols, rows) {
+      if (cols > 0 && rows > 0) {
+        send({ type: "resize", id, cols, rows });
+      }
+    },
+    create(options = {}) {
+      return new Promise((resolve) => {
+        pendingCreates.push(resolve);
+        send({ type: "create", options });
+        setTimeout(() => {
+          const index = pendingCreates.indexOf(resolve);
+          if (index !== -1) {
+            pendingCreates.splice(index, 1);
+            resolve(null);
+          }
+        }, 15e3);
+      });
+    },
+    rename(id, title) {
+      send({ type: "rename", id, title });
+    },
+    kill(id) {
+      attached.delete(id);
+      send({ type: "kill", id });
+    },
+    list() {
+      send({ type: "list" });
+    },
+    /** The last known metas, keyed by id. */
+    getMeta(id) {
+      return metas.get(id) ?? null;
+    },
+    snapshot() {
+      return [...metas.values()];
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    dispose() {
+      disposed = true;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      for (const resolve of pendingCreates.splice(0)) {
+        resolve(null);
+      }
+      listeners.clear();
+      try {
+        socket?.close();
+      } catch {
+      }
+      socket = null;
     }
   };
+}
+
+// ui/strabo-terminal-split.js
+var MIN_RATIO = 0.05;
+var MAX_RATIO = 0.95;
+var DEFAULT_RATIO = 0.5;
+function normalizeDirection(direction) {
+  return direction === "column" || direction === "vertical" ? "column" : "row";
+}
+function createLayout(paneId = "pane-1") {
+  return { type: "leaf", paneId };
+}
+function mapTree(node, fn2) {
+  if (!node) {
+    return node;
+  }
+  const mapped = fn2(node);
+  if (mapped.type !== "split") {
+    return mapped;
+  }
+  return { ...mapped, a: mapTree(mapped.a, fn2), b: mapTree(mapped.b, fn2) };
+}
+function replaceLeaf(node, paneId, build) {
+  if (!node) {
+    return { node: null, found: false };
+  }
+  if (node.type === "leaf") {
+    return node.paneId === paneId ? { node: build(node), found: true } : { node, found: false };
+  }
+  const a = replaceLeaf(node.a, paneId, build);
+  const b2 = replaceLeaf(node.b, paneId, build);
+  if (!a.found && !b2.found) {
+    return { node, found: false };
+  }
+  return { node: { ...node, a: a.node, b: b2.node }, found: true };
+}
+function panes(root) {
+  const out = [];
+  const walk = (node) => {
+    if (!node) {
+      return;
+    }
+    if (node.type === "leaf") {
+      out.push(node);
+      return;
+    }
+    walk(node.a);
+    walk(node.b);
+  };
+  walk(root);
+  return out;
+}
+function findPane(root, paneId) {
+  return panes(root).find((leaf) => leaf.paneId === paneId) ?? null;
+}
+function paneForSession(root, sessionId) {
+  return panes(root).find((leaf) => leaf.sessionId === sessionId) ?? null;
+}
+function splitPane(root, paneId, direction, newPaneId) {
+  const result = replaceLeaf(root, paneId, (leaf) => ({
+    type: "split",
+    id: `split-${newPaneId}`,
+    direction: normalizeDirection(direction),
+    ratio: DEFAULT_RATIO,
+    a: leaf,
+    b: { type: "leaf", paneId: newPaneId, sessionId: null }
+  }));
+  return result.found ? result.node : null;
+}
+function setPaneSession(root, paneId, sessionId) {
+  const result = replaceLeaf(root, paneId, (leaf) => ({ ...leaf, sessionId: sessionId ?? null }));
+  return result.found ? result.node : root;
+}
+function detachSession(root, sessionId) {
+  return mapTree(
+    root,
+    (node) => node.type === "leaf" && node.sessionId === sessionId ? { ...node, sessionId: null } : node
+  );
+}
+function setRatio(root, splitId, ratio) {
+  const value = Number(ratio);
+  const clamped = Number.isFinite(value) ? Math.min(Math.max(value, MIN_RATIO), MAX_RATIO) : DEFAULT_RATIO;
+  return mapTree(root, (node) => node.type === "split" && node.id === splitId ? { ...node, ratio: clamped } : node);
+}
+function sanitizeLayout(value, fallbackPaneId = "pane-1") {
+  const seen = /* @__PURE__ */ new Set();
+  const parse = (node) => {
+    if (!node || typeof node !== "object") {
+      return null;
+    }
+    if (node.type === "leaf") {
+      const paneId = typeof node.paneId === "string" && node.paneId ? node.paneId : null;
+      if (!paneId || seen.has(paneId)) {
+        return null;
+      }
+      seen.add(paneId);
+      return {
+        type: "leaf",
+        paneId,
+        sessionId: typeof node.sessionId === "string" ? node.sessionId : null
+      };
+    }
+    if (node.type === "split") {
+      const a = parse(node.a);
+      const b2 = parse(node.b);
+      if (!a || !b2) {
+        return null;
+      }
+      const ratio = Number.isFinite(node.ratio) ? Math.min(Math.max(node.ratio, MIN_RATIO), MAX_RATIO) : DEFAULT_RATIO;
+      const id = typeof node.id === "string" && node.id ? node.id : `split-${a.type === "leaf" ? a.paneId : "b"}`;
+      return { type: "split", id, direction: normalizeDirection(node.direction), ratio, a, b: b2 };
+    }
+    return null;
+  };
+  return parse(value) ?? createLayout(fallbackPaneId);
+}
+
+// ui/strabo-terminal-tabs.js
+var KIND_LABELS = {
+  shell: "Shell",
+  agent: "Agent",
+  task: "Task",
+  watch: "Watch"
+};
+function sessionTabLabel(meta) {
+  const title = typeof meta?.title === "string" ? meta.title.trim() : "";
+  if (title) {
+    return title;
+  }
+  return KIND_LABELS[meta?.kind] ?? "Session";
+}
+function tabBadge(meta) {
+  if (meta?.status === "exited") {
+    const code = meta.exitCode;
+    if (typeof code === "number" && code !== 0) {
+      return { className: "is-exited is-error", label: `exited ${code}` };
+    }
+    return { className: "is-exited", label: "exited" };
+  }
+  if (meta?.kind === "watch") {
+    return { className: "is-watch", label: "watching" };
+  }
+  return { className: "is-running", label: "running" };
+}
+function orderSessions(sessions, order) {
+  const byId = new Map((sessions ?? []).map((session) => [session.id, session]));
+  const out = [];
+  for (const id of order ?? []) {
+    const session = byId.get(id);
+    if (session) {
+      out.push(session);
+      byId.delete(id);
+    }
+  }
+  for (const session of sessions ?? []) {
+    if (byId.has(session.id)) {
+      out.push(session);
+      byId.delete(session.id);
+    }
+  }
+  return out;
+}
+function moveInOrder(order, fromId, toId) {
+  const list = [...order ?? []];
+  const from = list.indexOf(fromId);
+  const to = list.indexOf(toId);
+  if (from === -1 || to === -1 || from === to) {
+    return list;
+  }
+  list.splice(from, 1);
+  const target = list.indexOf(toId);
+  list.splice(target, 0, fromId);
+  return list;
+}
+function cycleSessionId(order, activeId, delta) {
+  const list = order ?? [];
+  if (list.length === 0) {
+    return null;
+  }
+  const index = list.indexOf(activeId);
+  const base = index === -1 ? 0 : index;
+  const next = ((base + delta) % list.length + list.length) % list.length;
+  return list[next] ?? null;
+}
+function digitSessionId(order, key) {
+  const index = Number(key);
+  if (!Number.isInteger(index) || index < 1 || index > 9) {
+    return null;
+  }
+  return (order ?? [])[index - 1] ?? null;
+}
+function tabButton(session, active, handlers) {
+  const button3 = document.createElement("div");
+  button3.className = "terminal-tab";
+  button3.dataset.sessionId = session.id;
+  button3.setAttribute("role", "tab");
+  button3.setAttribute("aria-selected", String(active));
+  button3.tabIndex = active ? 0 : -1;
+  button3.draggable = true;
+  if (active) {
+    button3.classList.add("is-active");
+  }
+  const badge = tabBadge(session);
+  const dot = document.createElement("span");
+  dot.className = `terminal-tab-badge ${badge.className}`;
+  dot.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.className = "terminal-tab-label";
+  label.textContent = sessionTabLabel(session);
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "terminal-tab-close";
+  close.setAttribute("aria-label", `Close ${sessionTabLabel(session)}`);
+  close.title = "Close session";
+  close.textContent = "\xD7";
+  close.addEventListener("click", (event) => {
+    event.stopPropagation();
+    handlers.onClose?.(session.id);
+  });
+  button3.append(dot, label, close);
+  button3.addEventListener("click", () => handlers.onSelect?.(session.id));
+  button3.addEventListener("dragstart", (event) => {
+    event.dataTransfer?.setData("text/plain", session.id);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+    }
+  });
+  button3.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "move";
+    }
+  });
+  button3.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const fromId = event.dataTransfer?.getData("text/plain");
+    if (fromId && fromId !== session.id) {
+      handlers.onReorder?.(fromId, session.id);
+    }
+  });
+  return button3;
+}
+function renderTabs(container, sessions, activeId, handlers = {}) {
+  if (!container) {
+    return;
+  }
+  const buttons = (sessions ?? []).map((session) => tabButton(session, session.id === activeId, handlers));
+  container.replaceChildren(...buttons);
+  container.onkeydown = (event) => {
+    const items = [...container.querySelectorAll(".terminal-tab")];
+    const index = items.indexOf(document.activeElement);
+    if (event.key === "Enter" || event.key === " ") {
+      const id = document.activeElement?.dataset?.sessionId;
+      if (id) {
+        event.preventDefault();
+        handlers.onSelect?.(id);
+      }
+      return;
+    }
+    if (event.key === "Delete" || event.key === "Backspace") {
+      const id = document.activeElement?.dataset?.sessionId;
+      if (id) {
+        event.preventDefault();
+        handlers.onClose?.(id);
+      }
+      return;
+    }
+    const next = rovingIndex(index, items.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    items.forEach((item, position) => {
+      item.tabIndex = position === next ? 0 : -1;
+    });
+    const target = items[next];
+    target?.focus();
+    if (target?.dataset?.sessionId) {
+      handlers.onSelect?.(target.dataset.sessionId);
+    }
+  };
+}
+
+// ui/strabo-terminal-switcher.js
+function sessionSearchText(meta) {
+  const origin = meta?.origin ?? {};
+  return [
+    meta?.title,
+    meta?.kind,
+    KIND_LABELS[meta?.kind],
+    meta?.repo,
+    origin.node,
+    origin.commit,
+    origin.review,
+    meta?.id
+  ].filter((part) => typeof part === "string" && part !== "").join(" ");
+}
+function fuzzyScore(text, query) {
+  const haystack = String(text ?? "").toLowerCase();
+  const needle = String(query ?? "").toLowerCase().trim();
+  if (needle === "") {
+    return 0;
+  }
+  let score = 0;
+  let cursor = 0;
+  for (const character of needle) {
+    const found = haystack.indexOf(character, cursor);
+    if (found === -1) {
+      return -1;
+    }
+    score += found === cursor ? 2 : 1;
+    cursor = found + 1;
+  }
+  return score;
+}
+function filterSessions(sessions, query) {
+  const needle = String(query ?? "").trim();
+  const list = sessions ?? [];
+  if (needle === "") {
+    return [...list];
+  }
+  return list.map((session) => ({ session, score: fuzzyScore(sessionSearchText(session), needle) })).filter((entry) => entry.score >= 0).sort((a, b2) => b2.score - a.score).map((entry) => entry.session);
+}
+var overlay = null;
+var overlayApi = null;
+function ensureOverlay() {
+  if (overlay) {
+    return overlay;
+  }
+  overlay = document.createElement("div");
+  overlay.id = "terminal-switcher-overlay";
+  overlay.className = "terminal-switcher";
+  overlay.hidden = true;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-label", "Switch session");
+  const panel = document.createElement("div");
+  panel.className = "terminal-switcher-panel";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "terminal-switcher-input";
+  input.placeholder = "Switch session\u2026";
+  input.setAttribute("aria-label", "Filter sessions");
+  input.autocomplete = "off";
+  const list = document.createElement("div");
+  list.className = "terminal-switcher-list";
+  list.setAttribute("role", "listbox");
+  panel.append(input, list);
+  overlay.append(panel);
+  document.body.append(overlay);
+  overlayApi = { overlay, panel, input, list };
+  return overlay;
+}
+function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
+  ensureOverlay();
+  const { overlay: root, input, list } = overlayApi;
+  let matches2 = filterSessions(sessions, "");
+  let selected2 = 0;
+  const renderList = () => {
+    const rows = matches2.map((session, index) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "terminal-switcher-item";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(index === selected2));
+      if (index === selected2) {
+        row.classList.add("is-selected");
+      }
+      const label = document.createElement("span");
+      label.className = "terminal-switcher-label";
+      label.textContent = sessionTabLabel(session);
+      const meta = document.createElement("span");
+      meta.className = "terminal-switcher-meta";
+      meta.textContent = [KIND_LABELS[session.kind] ?? session.kind, session.repo].filter(Boolean).join(" \xB7 ");
+      row.append(label, meta);
+      row.addEventListener("click", () => pick(session.id));
+      row.addEventListener("pointermove", () => {
+        selected2 = index;
+        renderList();
+      });
+      return row;
+    });
+    list.replaceChildren(...rows);
+    if (rows[selected2]) {
+      rows[selected2].scrollIntoView({ block: "nearest" });
+    }
+  };
+  const pick = (id) => {
+    close();
+    if (id) {
+      onPick?.(id);
+    }
+  };
+  const onInput = () => {
+    matches2 = filterSessions(sessions, input.value);
+    selected2 = 0;
+    renderList();
+  };
+  const onKeydown = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      selected2 = matches2.length === 0 ? 0 : (selected2 + 1) % matches2.length;
+      renderList();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      selected2 = matches2.length === 0 ? 0 : (selected2 - 1 + matches2.length) % matches2.length;
+      renderList();
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      pick(matches2[selected2]?.id ?? null);
+    }
+  };
+  const onBackdrop = (event) => {
+    if (event.target === root) {
+      close();
+    }
+  };
+  function close() {
+    input.removeEventListener("input", onInput);
+    input.removeEventListener("keydown", onKeydown);
+    root.removeEventListener("pointerdown", onBackdrop);
+    root.hidden = true;
+  }
+  input.value = "";
+  matches2 = filterSessions(sessions, "");
+  selected2 = Math.max(0, matches2.findIndex((session) => session.id === activeId));
+  renderList();
+  input.addEventListener("input", onInput);
+  input.addEventListener("keydown", onKeydown);
+  root.addEventListener("pointerdown", onBackdrop);
+  root.hidden = false;
+  input.focus();
+  input.select();
+  return { close, isOpen: () => !root.hidden };
+}
+
+// ui/strabo-terminal-linkify.js
+var CITATION_PATTERN = /(?<![\w:/.\\])((?:[A-Za-z]:[\\/]|\.{0,2}[\\/])?(?:[\w.@~+-]+[\\/])*[\w.@~+-]+\.[A-Za-z0-9]+):(\d+)(?::(\d+))?/g;
+var NOISE_SEGMENTS = ["node_modules", "vendor", "dist", "build", ".git"];
+function isRejected(path) {
+  const lower = path.toLowerCase();
+  if (lower.includes("://")) {
+    return true;
+  }
+  return NOISE_SEGMENTS.some(
+    (segment) => lower.includes(`${segment}/`) || lower.includes(`${segment}\\`)
+  );
+}
+function findCitations(text) {
+  if (typeof text !== "string" || text === "") {
+    return [];
+  }
+  const out = [];
+  CITATION_PATTERN.lastIndex = 0;
+  let match = CITATION_PATTERN.exec(text);
+  while (match !== null) {
+    const [full, path, line, column] = match;
+    const lineNumber = Number(line);
+    if (!isRejected(path) && lineNumber >= 1) {
+      out.push({
+        index: match.index,
+        length: full.length,
+        path,
+        line: lineNumber,
+        column: column === void 0 ? null : Number(column),
+        text: full
+      });
+    }
+    if (match.index === CITATION_PATTERN.lastIndex) {
+      CITATION_PATTERN.lastIndex += 1;
+    }
+    match = CITATION_PATTERN.exec(text);
+  }
+  return out;
+}
+function registerCitationLinks(term, { openSourceAt: openSourceAt2 } = {}) {
+  if (!term || typeof term.registerLinkProvider !== "function") {
+    return () => {
+    };
+  }
+  const provider = {
+    provideLinks(bufferLineNumber, callback) {
+      const buffer = term.buffer?.active;
+      const line = buffer?.getLine?.(bufferLineNumber - 1);
+      const text = line?.translateToString?.(true) ?? "";
+      const citations = findCitations(text);
+      if (citations.length === 0) {
+        callback(void 0);
+        return;
+      }
+      callback({
+        links: citations.map((citation) => ({
+          range: {
+            start: { x: citation.index + 1, y: bufferLineNumber },
+            end: { x: citation.index + citation.length, y: bufferLineNumber }
+          },
+          text: citation.text,
+          decorations: { underline: true, pointerCursor: true },
+          activate: () => openSourceAt2?.(citation.path, citation.line)
+        }))
+      });
+    }
+  };
+  const disposable = term.registerLinkProvider(provider);
+  return () => disposable?.dispose?.();
+}
+
+// ui/strabo-terminal-presets.js
+function normalizePresets(payload) {
+  const list = Array.isArray(payload) ? payload : Array.isArray(payload?.presets) ? payload.presets : [];
+  return list.map((entry) => {
+    if (typeof entry === "string") {
+      return { id: entry, label: entry, detail: "" };
+    }
+    const id = entry?.id ?? entry?.preset ?? entry?.key ?? "";
+    const label = entry?.title ?? entry?.label ?? entry?.name ?? id;
+    const detail = entry?.description ?? entry?.detail ?? entry?.source ?? "";
+    const preset = { id: String(id), label: String(label), detail: String(detail) };
+    if (typeof entry?.kind === "string") {
+      preset.kind = entry.kind;
+    }
+    return preset;
+  }).filter((preset) => preset.id !== "");
+}
+function presetId(preset) {
+  if (typeof preset === "string") {
+    return preset;
+  }
+  return String(preset?.id ?? preset?.preset ?? "");
+}
+function presetLabel(preset) {
+  if (typeof preset === "string") {
+    return preset;
+  }
+  return String(preset?.title ?? preset?.label ?? preset?.name ?? preset?.id ?? "");
+}
+async function loadPresets(repo, { fetchImpl = globalThis.fetch } = {}) {
+  const query = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+  const response = await fetchImpl(`${API_PATH}/terminal/presets${query}`, {
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) {
+    throw new Error(`Presets unavailable (${response.status})`);
+  }
+  return normalizePresets(await response.json());
+}
+function openPresetMenu(anchor, { presets = [], onPick } = {}) {
+  const items = presets.length ? presets.map((preset) => ({
+    label: presetLabel(preset),
+    hint: preset.detail,
+    action: () => onPick?.(preset)
+  })) : [{ label: "No presets available" }];
+  const rect = anchor?.getBoundingClientRect?.() ?? { left: 8, bottom: 8 };
+  return showContextMenu({
+    x: rect.left,
+    y: rect.bottom + 4,
+    title: "Run preset",
+    items
+  });
+}
+
+// ui/strabo-terminal.js
+var LAYOUT_PREFIX = "strabo.terminal.layout.";
+var BUFFER_LIMIT = 256 * 1024;
+var PERSIST_DEBOUNCE_MS = 250;
+function readTheme() {
+  const styles = getComputedStyle(document.documentElement);
+  const read = (name) => styles.getPropertyValue(name).trim() || void 0;
+  const background = read("--bg-1");
+  const foreground = read("--ink-1");
+  return {
+    background,
+    foreground,
+    cursor: read("--accent") ?? foreground,
+    cursorAccent: background,
+    selectionBackground: read("--accent-soft")
+  };
+}
+function readFontFamily() {
+  const value = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
+  return value || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+}
+function initTerminalScreen(container, hooks = {}) {
+  if (!container || typeof container.querySelector !== "function") {
+    return {
+      activate() {
+      },
+      applyTheme() {
+      },
+      async newSession() {
+        return null;
+      },
+      async openAgentSession() {
+        return null;
+      },
+      async runPreset() {
+        return null;
+      },
+      listSessions() {
+        return [];
+      },
+      openSession() {
+      },
+      destroy() {
+      }
+    };
+  }
+  const screen = container.closest?.(".terminal-screen") ?? container;
+  const toolbarEl = ensureElement(container, "terminal-toolbar", "terminal-toolbar");
+  const tabsEl = ensureElement(container, "terminal-tabs", "terminal-tabs");
+  const panesEl = ensureElement(container, "terminal-panes", "terminal-panes");
+  const metas = /* @__PURE__ */ new Map();
+  const views = /* @__PURE__ */ new Map();
+  const buffers = /* @__PURE__ */ new Map();
+  const savedMeta = /* @__PURE__ */ new Map();
+  const attachedSessions = /* @__PURE__ */ new Set();
+  const wantedSessions = /* @__PURE__ */ new Set();
+  let order = [];
+  let layout = createLayout("pane-1");
+  let activePaneId = "pane-1";
+  let paneCounter = 0;
+  let restored = false;
+  let restoredRoot = null;
+  let reconciled = false;
+  let lastRoot = null;
+  let persistTimer = null;
+  let resizeObserver = null;
+  const repoSelect = document.getElementById("repository");
+  const notify = typeof hooks.toast === "function" ? hooks.toast : (message) => showToast(message);
+  const mux = createTerminalMultiplexer({ onEvent: handleEvent });
+  function layoutKey(root) {
+    return `${LAYOUT_PREFIX}${root ?? "default"}`;
+  }
+  function resolveRepo() {
+    if (typeof hooks.resolveRepository === "function") {
+      try {
+        const resolved = hooks.resolveRepository();
+        if (resolved?.root) {
+          return resolved;
+        }
+      } catch {
+      }
+    }
+    const root = repoSelect?.value || null;
+    const name = repoSelect?.selectedOptions?.[0]?.textContent?.trim() || root;
+    return root ? { name, root } : { name: "default", root: "default" };
+  }
+  function newPaneId() {
+    let id;
+    do {
+      paneCounter += 1;
+      id = `pane-${paneCounter}`;
+    } while (panes(layout).some((leaf) => leaf.paneId === id));
+    return id;
+  }
+  function loadSavedFor(root) {
+    order = [];
+    layout = createLayout(newPaneId());
+    savedMeta.clear();
+    wantedSessions.clear();
+    try {
+      const raw = window.localStorage.getItem(layoutKey(root));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          if (Array.isArray(parsed.order)) {
+            order = parsed.order.filter((id) => typeof id === "string" && id !== "");
+          }
+          layout = sanitizeLayout(parsed.layout, newPaneId());
+          if (parsed.sessions && typeof parsed.sessions === "object") {
+            for (const [id, info] of Object.entries(parsed.sessions)) {
+              if (info && typeof info === "object") {
+                savedMeta.set(id, { title: info.title, kind: info.kind });
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      order = [];
+      layout = createLayout(newPaneId());
+    }
+    for (const id of order) {
+      wantedSessions.add(id);
+    }
+    for (const leaf of panes(layout)) {
+      if (leaf.sessionId) {
+        wantedSessions.add(leaf.sessionId);
+      }
+    }
+  }
+  function persistFor(root) {
+    if (!root) {
+      return;
+    }
+    const data = {
+      version: 1,
+      order: [...order],
+      layout,
+      sessions: Object.fromEntries([...metas].map(([id, meta]) => [id, { title: meta.title, kind: meta.kind }]))
+    };
+    try {
+      window.localStorage.setItem(layoutKey(root), JSON.stringify(data));
+    } catch {
+    }
+  }
+  function persistSoon() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => persistFor(resolveRepo().root), PERSIST_DEBOUNCE_MS);
+  }
+  function ensureRestored() {
+    const root = resolveRepo().root;
+    if (restored && restoredRoot === root) {
+      return;
+    }
+    restored = true;
+    restoredRoot = root;
+    lastRoot = root;
+    loadSavedFor(root);
+    activePaneId = panes(layout)[0]?.paneId ?? activePaneId;
+    syncOrder();
+    attachWanted();
+  }
+  function syncOrder() {
+    for (const id of metas.keys()) {
+      if (!order.includes(id)) {
+        order.push(id);
+      }
+    }
+  }
+  function attachWanted() {
+    for (const id of wantedSessions) {
+      const meta = metas.get(id);
+      if (meta) {
+        ensureView(meta);
+        attachSession(id);
+      }
+    }
+  }
+  function handleEvent(event) {
+    switch (event.type) {
+      case "sessions":
+        reconcileSessions(event.sessions);
+        return;
+      case "created":
+        onCreated(event.session);
+        return;
+      case "closed":
+        onClosed(event.id, event.code);
+        return;
+      case "output":
+        onOutput(event.id, event.data, event.reset === true);
+        return;
+      case "title":
+        onTitle(event.id, event.title);
+        return;
+      case "error":
+        notify(event.message, { tone: "error" });
+        return;
+      default:
+        return;
+    }
+  }
+  function reconcileSessions(sessions) {
+    ensureRestored();
+    for (const meta of sessions) {
+      if (meta && typeof meta.id === "string") {
+        metas.set(meta.id, meta);
+      }
+    }
+    const ids = /* @__PURE__ */ new Set([...metas.keys()]);
+    if (!reconciled) {
+      reconciled = true;
+      for (const id of [...savedMeta.keys()]) {
+        if (!ids.has(id)) {
+          order = order.filter((entry) => entry !== id);
+          layout = detachSession(layout, id);
+        }
+      }
+      savedMeta.clear();
+    }
+    order = order.filter((id) => ids.has(id));
+    syncOrder();
+    layout = detachUnknownSessions(layout, ids);
+    attachWanted();
+    if (!activeSessionId() && order.length > 0) {
+      const first = metas.get(order[0]);
+      if (first) {
+        ensureView(first);
+        attachSession(first.id);
+        assignToPane(first.id, activePaneId);
+      }
+    }
+    render();
+    hooks.onSessionsChanged?.(listSessions());
+  }
+  function onCreated(meta) {
+    if (!meta || typeof meta.id !== "string") {
+      return;
+    }
+    metas.set(meta.id, meta);
+    wantedSessions.add(meta.id);
+    if (!order.includes(meta.id)) {
+      order.push(meta.id);
+    }
+    ensureView(meta);
+    attachSession(meta.id);
+    render();
+    hooks.onSessionsChanged?.(listSessions());
+  }
+  function onClosed(id, code) {
+    const meta = metas.get(id);
+    if (meta) {
+      metas.set(id, { ...meta, status: "exited", exitCode: code });
+      render();
+      hooks.onSessionsChanged?.(listSessions());
+    }
+  }
+  function onOutput(id, data, reset = false) {
+    if (reset) {
+      buffers.set(id, data.slice(-BUFFER_LIMIT));
+      const view2 = views.get(id);
+      if (view2) {
+        view2.term.reset();
+        view2.term.write(data);
+      }
+      return;
+    }
+    buffers.set(id, ((buffers.get(id) ?? "") + data).slice(-BUFFER_LIMIT));
+    views.get(id)?.term.write(data);
+  }
+  function onTitle(id, title) {
+    const meta = metas.get(id);
+    if (meta && meta.title !== title) {
+      metas.set(id, { ...meta, title });
+      render();
+    }
+  }
+  function detachUnknownSessions(tree, ids) {
+    let next = tree;
+    for (const leaf of panes(tree)) {
+      if (leaf.sessionId && !ids.has(leaf.sessionId)) {
+        next = detachSession(next, leaf.sessionId);
+      }
+    }
+    return next;
+  }
+  function ensureView(meta) {
+    const existing = views.get(meta.id);
+    if (existing) {
+      existing.meta = meta;
+      return existing;
+    }
+    const term = new Dl({
+      cursorBlink: true,
+      fontSize: 13,
+      fontFamily: readFontFamily(),
+      scrollback: 5e3,
+      theme: readTheme()
+    });
+    const fit2 = new o();
+    term.loadAddon(fit2);
+    const surface = document.createElement("div");
+    surface.className = "terminal-surface";
+    term.open(surface);
+    term.onData((data) => mux.sendInput(meta.id, data));
+    term.onResize(({ cols, rows }) => mux.resize(meta.id, cols, rows));
+    if (typeof term.onTitleChange === "function") {
+      term.onTitleChange((title) => {
+        if (title) {
+          renameSession(meta.id, title);
+        }
+      });
+    }
+    registerCitationLinks(term, { openSourceAt: (file, line) => hooks.openSourceAt?.(file, line) });
+    const view2 = { id: meta.id, meta, term, fit: fit2, surface };
+    views.set(meta.id, view2);
+    const pending = buffers.get(meta.id);
+    if (pending) {
+      term.write(pending);
+    }
+    return view2;
+  }
+  function attachSession(id) {
+    if (attachedSessions.has(id)) {
+      return;
+    }
+    attachedSessions.add(id);
+    mux.attach(id);
+  }
+  function renameSession(id, title) {
+    const meta = metas.get(id);
+    if (meta?.title === title) {
+      return;
+    }
+    if (meta) {
+      metas.set(id, { ...meta, title });
+    }
+    mux.rename(id, title);
+    render();
+  }
+  function activeSessionId() {
+    return findPane(layout, activePaneId)?.sessionId ?? null;
+  }
+  function listSessions() {
+    return orderSessions([...metas.values()], order);
+  }
+  function render() {
+    renderTabs(tabsEl, listSessions(), activeSessionId(), {
+      onSelect: openSession,
+      onClose: closeSession,
+      onReorder: (fromId, toId) => {
+        order = moveInOrder(order, fromId, toId);
+        render();
+        persistSoon();
+      }
+    });
+    updateActiveChrome();
+    mountSurfaces();
+  }
+  function updateActiveChrome() {
+    for (const leaf of panes(layout)) {
+      const paneEl = paneElement(leaf.paneId);
+      if (paneEl) {
+        paneEl.classList.toggle("is-active", leaf.paneId === activePaneId);
+      }
+    }
+  }
+  function paneElement(paneId) {
+    return [...panesEl.querySelectorAll(".terminal-pane")].find((el2) => el2.dataset.paneId === paneId) ?? null;
+  }
+  function buildNode(node) {
+    if (node.type === "leaf") {
+      const paneEl = document.createElement("div");
+      paneEl.className = "terminal-pane";
+      paneEl.dataset.paneId = node.paneId;
+      paneEl.addEventListener("pointerdown", () => setActivePane(node.paneId));
+      return paneEl;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = `terminal-split terminal-split-${node.direction}`;
+    wrap.dataset.splitId = node.id;
+    const sideA = document.createElement("div");
+    sideA.className = "terminal-split-side";
+    sideA.style.flex = `${node.ratio} 1 0%`;
+    sideA.append(buildNode(node.a));
+    const sideB = document.createElement("div");
+    sideB.className = "terminal-split-side";
+    sideB.style.flex = `${1 - node.ratio} 1 0%`;
+    sideB.append(buildNode(node.b));
+    const splitter = document.createElement("div");
+    splitter.className = "terminal-splitter";
+    splitter.dataset.splitId = node.id;
+    splitter.setAttribute("role", "separator");
+    splitter.setAttribute("aria-orientation", node.direction === "row" ? "vertical" : "horizontal");
+    wireSplitter(splitter, node, sideA, sideB);
+    wrap.append(sideA, splitter, sideB);
+    return wrap;
+  }
+  function wireSplitter(splitter, node, sideA, sideB) {
+    splitter.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const wrap = splitter.parentElement;
+      const rect = wrap.getBoundingClientRect();
+      let ratio = node.ratio;
+      splitter.setPointerCapture(event.pointerId);
+      const move = (moveEvent) => {
+        const raw = node.direction === "row" ? (moveEvent.clientX - rect.left) / Math.max(1, rect.width) : (moveEvent.clientY - rect.top) / Math.max(1, rect.height);
+        ratio = Math.min(Math.max(raw, 0.05), 0.95);
+        sideA.style.flex = `${ratio} 1 0%`;
+        sideB.style.flex = `${1 - ratio} 1 0%`;
+      };
+      const end = () => {
+        splitter.removeEventListener("pointermove", move);
+        splitter.removeEventListener("pointerup", end);
+        splitter.removeEventListener("pointercancel", end);
+        layout = setRatio(layout, node.id, ratio);
+        fitVisible();
+        persistSoon();
+      };
+      splitter.addEventListener("pointermove", move);
+      splitter.addEventListener("pointerup", end);
+      splitter.addEventListener("pointercancel", end);
+      event.preventDefault();
+    });
+  }
+  function renderLayoutDom() {
+    panesEl.replaceChildren(buildNode(layout));
+    mountSurfaces();
+  }
+  function mountSurfaces() {
+    for (const leaf of panes(layout)) {
+      const paneEl = paneElement(leaf.paneId);
+      if (!paneEl) {
+        continue;
+      }
+      paneEl.classList.toggle("is-active", leaf.paneId === activePaneId);
+      const view2 = leaf.sessionId ? views.get(leaf.sessionId) : null;
+      if (view2) {
+        if (view2.surface.parentElement !== paneEl) {
+          paneEl.replaceChildren(view2.surface);
+        }
+        continue;
+      }
+      if (!paneEl.querySelector(".terminal-pane-empty")) {
+        const empty = document.createElement("div");
+        empty.className = "terminal-pane-empty";
+        empty.textContent = leaf.sessionId ? "This session is no longer available." : "No session. Press Ctrl+Shift+T for a shell.";
+        paneEl.replaceChildren(empty);
+      }
+    }
+  }
+  function setActivePane(paneId) {
+    if (!findPane(layout, paneId)) {
+      return;
+    }
+    activePaneId = paneId;
+    mountSurfaces();
+    const sessionId = activeSessionId();
+    if (sessionId) {
+      views.get(sessionId)?.term.focus();
+      fitPane(paneId);
+    }
+    render();
+  }
+  function fitPane(paneId) {
+    const leaf = findPane(layout, paneId);
+    if (!leaf?.sessionId) {
+      return;
+    }
+    const paneEl = paneElement(paneId);
+    if (!paneEl || paneEl.offsetParent === null) {
+      return;
+    }
+    try {
+      views.get(leaf.sessionId)?.fit.fit();
+    } catch {
+    }
+  }
+  function fitVisible() {
+    for (const leaf of panes(layout)) {
+      fitPane(leaf.paneId);
+    }
+  }
+  async function newSession(options = {}) {
+    const meta = await mux.create({ repo: resolveRepo().root, ...options });
+    if (!meta) {
+      notify("The server did not create a session.");
+      return null;
+    }
+    ensureView(meta);
+    attachSession(meta.id);
+    assignToPane(meta.id, activePaneId);
+    render();
+    persistSoon();
+    return meta;
+  }
+  async function openAgentSession({ agent, prompt, title, origin, repo } = {}) {
+    const options = {
+      kind: "agent",
+      title,
+      origin,
+      repo: repo ?? resolveRepo().root
+    };
+    if (agent) {
+      options.argv = [agent];
+    }
+    const meta = await newSession(options);
+    if (meta && prompt) {
+      mux.sendInput(meta.id, `${prompt}\r`);
+    }
+    return meta;
+  }
+  async function runPreset(preset) {
+    const id = presetId(preset);
+    if (!id) {
+      return null;
+    }
+    const label = presetLabel(preset);
+    return newSession({ preset: id, title: label || void 0 });
+  }
+  function assignToPane(sessionId, paneId = activePaneId) {
+    const existing = paneForSession(layout, sessionId);
+    if (existing) {
+      setActivePane(existing.paneId);
+      return;
+    }
+    const target = findPane(layout, paneId) ? paneId : panes(layout)[0]?.paneId ?? paneId;
+    layout = setPaneSession(layout, target, sessionId);
+    setActivePane(target);
+    mountSurfaces();
+  }
+  function openSession(id) {
+    if (typeof id !== "string" || id === "") {
+      return;
+    }
+    wantedSessions.add(id);
+    let meta = metas.get(id);
+    if (!meta) {
+      meta = provisionalMeta(id);
+      metas.set(id, meta);
+      if (!order.includes(id)) {
+        order.push(id);
+      }
+      mux.list();
+    }
+    ensureView(meta);
+    attachSession(id);
+    const existing = paneForSession(layout, id);
+    if (existing) {
+      setActivePane(existing.paneId);
+    } else {
+      assignToPane(id, activePaneId);
+    }
+    render();
+  }
+  function provisionalMeta(id) {
+    return {
+      id,
+      title: "Agent session",
+      kind: "agent",
+      cwd: "",
+      repo: resolveRepo().root ?? "",
+      pid: null,
+      cols: 0,
+      rows: 0,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      lastActivity: (/* @__PURE__ */ new Date()).toISOString(),
+      status: "running",
+      exitCode: null,
+      seq: 0
+    };
+  }
+  function closeSession(id) {
+    mux.kill(id);
+    attachedSessions.delete(id);
+    const view2 = views.get(id);
+    if (view2) {
+      try {
+        view2.term.dispose();
+      } catch {
+      }
+      views.delete(id);
+    }
+    buffers.delete(id);
+    metas.delete(id);
+    wantedSessions.delete(id);
+    order = order.filter((entry) => entry !== id);
+    layout = detachSession(layout, id);
+    renderLayoutDom();
+    render();
+    persistSoon();
+    if (order.length === 0 && typeof hooks.closeTerminal === "function") {
+      hooks.closeTerminal();
+    }
+  }
+  async function splitActive(direction) {
+    ensureRestored();
+    const target = findPane(layout, activePaneId) ? activePaneId : panes(layout)[0]?.paneId;
+    if (!target) {
+      return;
+    }
+    const paneId = newPaneId();
+    layout = splitPane(layout, target, direction, paneId) ?? layout;
+    renderLayoutDom();
+    setActivePane(paneId);
+    persistSoon();
+    await newSession();
+  }
+  function openSwitcher() {
+    openSessionSwitcher({
+      sessions: listSessions(),
+      activeId: activeSessionId(),
+      onPick: (id) => openSession(id)
+    });
+  }
+  function toolbarButton(label, hint, action) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "terminal-toolbar-button";
+    button3.textContent = label;
+    if (hint) {
+      button3.title = `${label} (${hint})`;
+    }
+    button3.addEventListener("click", action);
+    return button3;
+  }
+  function buildToolbar() {
+    toolbarEl.replaceChildren();
+    const newButton = toolbarButton("New shell", "Ctrl+Shift+T", () => {
+      newSession().catch(handleError);
+    });
+    const runButton = toolbarButton("Run\u2026", "", () => openRunMenu(runButton));
+    const splitButton = toolbarButton("Split", "Ctrl+Shift+E", () => {
+      splitActive("row").catch(handleError);
+    });
+    const switchButton = toolbarButton("Sessions", "Ctrl+K", openSwitcher);
+    switchButton.id = "terminal-switcher-button";
+    toolbarEl.append(newButton, runButton, splitButton, switchButton);
+  }
+  function openRunMenu(anchor) {
+    loadPresets(resolveRepo().root).then(
+      (presets) => openPresetMenu(anchor, {
+        presets,
+        onPick: (preset) => {
+          runPreset(preset).catch(handleError);
+        }
+      })
+    ).catch((error) => notify(error.message));
+  }
+  function handleError(error) {
+    notify(error instanceof Error ? error.message : String(error));
+  }
+  function onKeydown(event) {
+    if (screen.hidden) {
+      return;
+    }
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    const act = (fn2) => {
+      event.preventDefault();
+      event.stopPropagation();
+      fn2();
+    };
+    if (event.shiftKey && key === "t") {
+      act(() => newSession().catch(handleError));
+      return;
+    }
+    if (event.shiftKey && key === "w") {
+      act(() => {
+        const id = activeSessionId();
+        if (id) {
+          closeSession(id);
+        }
+      });
+      return;
+    }
+    if (event.shiftKey && key === "e") {
+      act(() => splitActive("row").catch(handleError));
+      return;
+    }
+    if (event.shiftKey && key === "o") {
+      act(() => splitActive("column").catch(handleError));
+      return;
+    }
+    if (key === "tab") {
+      act(() => {
+        const next = cycleSessionId(order, activeSessionId(), event.shiftKey ? -1 : 1);
+        if (next) {
+          openSession(next);
+        }
+      });
+      return;
+    }
+    if (key === "k") {
+      act(openSwitcher);
+      return;
+    }
+    if (!event.shiftKey && /^[1-9]$/.test(key)) {
+      const id = digitSessionId(order, key);
+      if (id) {
+        act(() => openSession(id));
+      }
+      return;
+    }
+  }
+  function onRepoChange() {
+    persistFor(lastRoot);
+    lastRoot = resolveRepo().root;
+    if (order.length === 0) {
+      loadSavedFor(lastRoot);
+      activePaneId = panes(layout)[0]?.paneId ?? "pane-1";
+      syncOrder();
+      attachWanted();
+      renderLayoutDom();
+      render();
+    }
+  }
+  function onWindowResize() {
+    if (!screen.hidden) {
+      fitVisible();
+    }
+  }
+  function persistNow() {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    persistFor(resolveRepo().root);
+  }
+  buildToolbar();
+  renderLayoutDom();
+  screen.addEventListener("keydown", onKeydown, true);
+  window.addEventListener("resize", onWindowResize);
+  window.addEventListener("beforeunload", persistNow);
+  repoSelect?.addEventListener("change", onRepoChange);
+  if (typeof ResizeObserver === "function") {
+    resizeObserver = new ResizeObserver(() => {
+      if (!screen.hidden) {
+        fitVisible();
+      }
+    });
+    resizeObserver.observe(panesEl);
+  }
+  return {
+    /** The screen became visible: restore once, then fit and focus the active pane. */
+    activate() {
+      ensureRestored();
+      renderLayoutDom();
+      render();
+      fitVisible();
+      const sessionId = activeSessionId();
+      if (sessionId) {
+        views.get(sessionId)?.term.focus();
+      }
+    },
+    applyTheme() {
+      for (const view2 of views.values()) {
+        view2.term.options.theme = readTheme();
+      }
+    },
+    newSession,
+    openAgentSession,
+    runPreset,
+    listSessions,
+    openSession,
+    destroy() {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+      mux.dispose();
+      for (const view2 of views.values()) {
+        try {
+          view2.term.dispose();
+        } catch {
+        }
+      }
+      views.clear();
+      buffers.clear();
+      metas.clear();
+      attachedSessions.clear();
+      wantedSessions.clear();
+      order = [];
+      layout = createLayout(newPaneId());
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      screen.removeEventListener("keydown", onKeydown, true);
+      window.removeEventListener("resize", onWindowResize);
+      window.removeEventListener("beforeunload", persistNow);
+      repoSelect?.removeEventListener("change", onRepoChange);
+      panesEl.replaceChildren();
+      tabsEl.replaceChildren();
+      toolbarEl.replaceChildren();
+    }
+  };
+}
+function ensureElement(container, id, className) {
+  const existing = container.querySelector(`#${id}`);
+  if (existing) {
+    return existing;
+  }
+  const element2 = document.createElement("div");
+  element2.id = id;
+  element2.className = className;
+  container.append(element2);
+  return element2;
 }
 
 // ui/strabo.js
@@ -20401,11 +22224,13 @@ function stopRuntimeReadout() {
   }
 }
 var clientPrefs = readSettings();
+var terminalScreen = null;
 function applyClientPrefs() {
   applyAppearance(clientPrefs);
   view.applyTheme();
   view.setLabelsVisible(clientPrefs.labels);
   view.setLabelsForceAll(clientPrefs.allLabels);
+  terminalScreen?.applyTheme();
 }
 applyClientPrefs();
 var elements = {
@@ -21251,6 +23076,28 @@ document.addEventListener("keydown", (event) => {
     elements.filter.select();
     return;
   }
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
+    const screenKey = event.key.toLowerCase();
+    if (screenKey === "t") {
+      event.preventDefault();
+      setScreen("terminal");
+      terminalScreen?.newSession?.({ kind: "shell" })?.catch((error) => {
+        showToast(`Could not open a shell (${error.message}).`);
+      });
+      return;
+    }
+    if (screenKey === "w") {
+      event.preventDefault();
+      terminalScreen?.closeActiveSession?.();
+      return;
+    }
+    if (screenKey === "r") {
+      event.preventDefault();
+      setScreen("terminal");
+      terminalScreen?.openPresetMenu?.();
+      return;
+    }
+  }
   if (event.key === "Escape") {
     closeOverflowMenu();
     if (!elements.memberView.hidden) {
@@ -21309,24 +23156,32 @@ async function toggleTimeline() {
   elements.timelinePanel.hidden = false;
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
   const result = await request(`/analysis/timeline${query}`);
-  const draw = (metrics) => renderTimeline(elements.timelinePanel, result, (commit) => {
+  const driftQuery = state.repository ? `?limit=20&repository=${encodeURIComponent(state.repository)}` : "?limit=20";
+  const draw = (metrics, drift2) => renderTimeline(elements.timelinePanel, result, (commit) => {
     selectCommit(commit).catch((error) => {
       elements.status.textContent = `Error: ${error.message}`;
     });
   }, {
     selectedHash: selectedCommitHash,
     metrics,
+    drift: drift2,
     onClose: () => {
       elements.timelinePanel.hidden = true;
     }
   });
-  draw(null);
+  draw(null, null);
   if (result?.available === false) {
     return;
   }
-  const history = await request(`/analysis/change-metrics/history${query}`).catch(() => null);
-  if (history?.available && !elements.timelinePanel.hidden) {
-    draw(new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])));
+  const [history, drift] = await Promise.all([
+    request(`/analysis/change-metrics/history${query}`).catch(() => null),
+    request(`/analysis/drift${driftQuery}`).catch(() => null)
+  ]);
+  if (!elements.timelinePanel.hidden && (history?.available || drift !== null)) {
+    draw(
+      history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+      drift
+    );
   }
 }
 async function toggleBranches() {
@@ -21453,8 +23308,8 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
     narratorStatus = await fetchNarratorStatus();
   }
   if (ticket !== reviewTicket) return;
-  const overlay = reviewOverlay(data);
-  view.overlay(overlay.classes);
+  const overlay2 = reviewOverlay(data);
+  view.overlay(overlay2.classes);
   elements.reviewPanel.hidden = false;
   renderReview(elements.reviewPanel, data, {
     onClose: closeReview,
@@ -21466,7 +23321,7 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
     onOpenNarratorSettings: openNarratorSettings
   });
   const label = branchName ?? (commit ? commit.shortHash : "working tree");
-  elements.status.textContent = `Review ${label}: ${overlay.summary}`;
+  elements.status.textContent = `Review ${label}: ${overlay2.summary}`;
 }
 async function reviewBack() {
   const previous = reviewHistory.pop();
@@ -21975,7 +23830,8 @@ var OVERLAY_TITLES = {
   "module-depth": "Module depth",
   ownership: "Ownership",
   smells: "Smells",
-  "hidden-coupling": "Hidden coupling (co-change, no import path)"
+  "hidden-coupling": "Hidden coupling (co-change, no import path)",
+  "declared-rules": "Declared rules"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -21986,9 +23842,10 @@ var OVERLAY_ENDPOINTS = {
   "module-depth": "/analysis/module-depth",
   ownership: "/analysis/ownership",
   smells: "/analysis/smells",
-  "hidden-coupling": "/analysis/co-change"
+  "hidden-coupling": "/analysis/co-change",
+  "declared-rules": "/analysis/rules"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules"];
 async function applyOverlay(generation) {
   const kind = state.overlay;
   if (kind === "none") {
@@ -22002,8 +23859,8 @@ async function applyOverlay(generation) {
   if (generation !== void 0 && generation !== scanGeneration) {
     return;
   }
-  const overlay = overlayFor(kind, data);
-  view.overlay(overlay.classes);
+  const overlay2 = overlayFor(kind, data);
+  view.overlay(overlay2.classes);
   view.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
   const actions = [];
   if (kind === "impact" && clientPrefs.commitEnabled) {
@@ -22016,7 +23873,7 @@ async function applyOverlay(generation) {
       })
     });
   }
-  renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
+  renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay2, {
     kind,
     onClose: clearOverlay,
     onSelect: (id) => selectNode(id),
@@ -22045,12 +23902,12 @@ async function loadFolder(path) {
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   const result = await request(`/browse${query}`);
   browsedFolder = result;
-  const location2 = folderLocation(result);
+  const location = folderLocation(result);
   elements.folderPath.textContent = result.path;
-  elements.folderNote.textContent = location2.note;
-  elements.folderNote.classList.toggle("at-ceiling", location2.atCeiling);
-  elements.folderUp.disabled = location2.atCeiling;
-  elements.folderUp.title = location2.upLabel;
+  elements.folderNote.textContent = location.note;
+  elements.folderNote.classList.toggle("at-ceiling", location.atCeiling);
+  elements.folderUp.disabled = location.atCeiling;
+  elements.folderUp.title = location.upLabel;
   elements.folderUp.dataset.parent = result.parent ?? "";
   renderFolderList(elements.folderList, result, (next) => {
     loadFolder(next).catch((error) => {
@@ -22366,6 +24223,32 @@ function closeSource() {
   elements.sourcePanel.hidden = true;
   elements.sourcePanel.replaceChildren();
 }
+function openSourceAt(file, line) {
+  const target = typeof file === "string" ? file.replace(/\\/g, "/") : "";
+  if (!target) {
+    return;
+  }
+  setScreen("graph");
+  const node = (current?.nodes ?? []).find((candidate) => candidate.id === target);
+  if (node) {
+    selectNode(node.id);
+  }
+  const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
+  viewSource(node?.id ?? target, { line: lineNumber });
+  if (lineNumber) {
+    revealSourceLine();
+  }
+}
+function revealSourceLine(attempt = 0) {
+  const marked = elements.sourcePanel?.querySelector(".src-mark");
+  if (marked) {
+    marked.scrollIntoView?.({ block: "center" });
+    return;
+  }
+  if (attempt < 20) {
+    setTimeout(() => revealSourceLine(attempt + 1), 50);
+  }
+}
 function reviewDiffSpec(result, file) {
   if (result?.kind === "commit" && result.ref) {
     return { ref: result.ref };
@@ -22627,11 +24510,25 @@ function closeOverflowMenu({ restoreFocus = false } = {}) {
 function openOverflowMenu() {
   elements.tbOverflowMenu.hidden = false;
   elements.tbOverflow.setAttribute("aria-expanded", "true");
+  positionOverflowMenu();
   const items = overflowItems();
   items.forEach((item, index) => {
     item.tabIndex = index === 0 ? 0 : -1;
   });
   items[0]?.focus();
+}
+function positionOverflowMenu() {
+  const menu = elements.tbOverflowMenu;
+  const anchor = menu.offsetParent;
+  if (!anchor) {
+    return;
+  }
+  menu.style.left = "";
+  menu.style.right = "";
+  const anchorRect = anchor.getBoundingClientRect();
+  const left = clampMenuLeft(anchorRect.right, menu.offsetWidth, window.innerWidth);
+  menu.style.left = `${left - anchorRect.left}px`;
+  menu.style.right = "auto";
 }
 if (elements.tbOverflow) {
   elements.tbOverflow.addEventListener("click", (event) => {
@@ -22879,15 +24776,17 @@ async function delegateToAgent(agent, target) {
     return;
   }
   try {
-    await launchAgent(agent, {
+    const result = await launchAgent(agent, {
       repository: state.repository ?? repository?.root,
       target: { kind: target.kind, id: target.id, label: target.label },
       prompt: reviewed,
       title
     });
-    showToast(`Opened ${agent} on ${title} \u2014 edit the prefilled task, then send.`);
+    showToast(
+      result?.sessionId ? `Opened ${agent} in the Terminal on ${title} \u2014 edit the prefilled task, then send.` : `Prepared ${agent} on ${title}.`
+    );
   } catch (error) {
-    showToast(`Could not open a terminal (${error.message}).`, {
+    showToast(`Could not open an agent session (${error.message}).`, {
       label: "Copy prompt",
       onClick: async () => {
         await copyText(reviewed);
@@ -22939,8 +24838,8 @@ function openDelegateMenu(target, x, y) {
     items: [
       ...narrateMenuItems(target),
       ...layoutMenuItems(target),
-      { label: "\u25B6 Delegate to OpenCode", hint: "opens TUI", action: () => delegateToAgent("opencode", target) },
-      { label: "\u25B6 Delegate to Claude", hint: "opens TUI", action: () => delegateToAgent("claude", target) },
+      { label: "\u25B6 Delegate to OpenCode", hint: "opens agent session", action: () => delegateToAgent("opencode", target) },
+      { label: "\u25B6 Delegate to Claude", hint: "opens agent session", action: () => delegateToAgent("claude", target) },
       { separator: true },
       {
         label: "\u29C9 Copy prompt",
@@ -23017,7 +24916,43 @@ function withSelection(resolved, selection) {
 view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);
-var terminalScreen = initTerminalScreen(elements.terminalContainer);
+var terminalBadge = document.createElement("span");
+terminalBadge.id = "terminal-badge";
+terminalBadge.className = "diag-badge";
+terminalBadge.hidden = true;
+elements.screenTabTerminal.append(terminalBadge);
+function updateTerminalBadge(sessions) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const running = list.filter((session) => session?.status === "running").length;
+  const failed = list.filter(
+    (session) => session?.status === "exited" && (session.exitCode ?? 0) !== 0
+  ).length;
+  const count = running + failed;
+  terminalBadge.hidden = count === 0;
+  terminalBadge.textContent = String(count);
+  terminalBadge.classList.toggle("has-errors", failed > 0);
+  terminalBadge.title = failed > 0 ? `${running} running, ${failed} failed` : `${running} running`;
+}
+function resolveRepository() {
+  const repository = current?.repository;
+  const root = repository?.root ?? state.repository ?? null;
+  const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : null);
+  return { name, root };
+}
+function terminalToast(message, options = {}) {
+  return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6e3 });
+}
+terminalScreen = initTerminalScreen(elements.terminalContainer, {
+  openSourceAt,
+  toast: terminalToast,
+  onSessionsChanged: updateTerminalBadge,
+  resolveRepository,
+  closeTerminal: () => setScreen("graph")
+});
+setDelegateSessionOpener((sessionId) => {
+  setScreen("terminal");
+  return terminalScreen?.openSession?.(sessionId);
+});
 function setScreen(screen) {
   store.set("ui", { screen });
   const showTerminal = screen === "terminal";

@@ -32,6 +32,7 @@ export function renderReportMarkdown(document: RepositoryReportDocument): string
   renderOverview(lines, document);
   renderPainPoints(lines, document.painPoints);
   renderChange(lines, document.change);
+  renderDrift(lines, document.drift);
   renderSuggestions(lines, document);
   renderEvidence(lines, document);
   return `${lines.join('\n')}\n`;
@@ -178,6 +179,34 @@ function renderStructure(lines: string[], change: RepositoryChangeSection): void
   );
   section(lines, `Entry points added (${diff.entryPointsAdded.length})`, diff.entryPointsAdded.map((file) => `\`${file}\``));
   section(lines, `Newly unreached (${diff.newlyUnreached.length})`, diff.newlyUnreached.map((file) => `\`${file}\``));
+}
+
+function renderDrift(lines: string[], drift: RepositoryReportDocument['drift']): void {
+  lines.push('## Architecture drift');
+  if (!drift) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  if (!drift.available) {
+    lines.push(`- unavailable: ${drift.reason ?? 'no drift series'}`);
+    lines.push('');
+    return;
+  }
+  if (drift.points.length === 0) {
+    lines.push('- no revision was measured');
+    lines.push('');
+    return;
+  }
+  const newest = drift.points[0]?.revision.slice(0, 7) ?? '?';
+  const oldest = drift.points[drift.points.length - 1]?.revision.slice(0, 7) ?? '?';
+  lines.push(`${drift.points.length} revision(s), newest first · \`${newest}\` … \`${oldest}\``);
+  lines.push('');
+  for (const series of drift.series) {
+    const values = series.points.map((point) => (point.value === null ? '—' : String(point.value)));
+    lines.push(`- ${series.label}: ${values.join(' → ')}`);
+  }
+  lines.push('');
 }
 
 function renderSuggestions(lines: string[], document: RepositoryReportDocument): void {

@@ -141,9 +141,42 @@ export function overlayFor(kind, data) {
       return smellsOverlay(data);
     case 'hidden-coupling':
       return hiddenCouplingOverlay(data);
+    case 'declared-rules':
+      return declaredRulesOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
+}
+
+/**
+ * The declared-rules lens: the operator's rules and the observed edges that break them.
+ *
+ * Only the recorded violations are annotated, and each row names the rule and edge kind it
+ * came from, so the overlay points at evidence rather than standing as a verdict. A report
+ * with no declared rules is unavailable and annotates nothing.
+ */
+export function declaredRulesOverlay(report) {
+  if (!report || report.available === false) {
+    return { classes: new Map(), summary: '', items: [] };
+  }
+  const rules = report.rules ?? [];
+  if (rules.length === 0) {
+    return { classes: new Map(), summary: 'No rules are declared.', items: [] };
+  }
+  const violations = report.violations ?? [];
+  const classes = new Map();
+  for (const violation of violations) {
+    classes.set(violation.edge.source, 'ov-declared-rule');
+  }
+  return {
+    classes,
+    summary: `${rules.length} rule(s) · ${violations.length} violation(s)`,
+    items: violations.map((violation) => ({
+      id: violation.edge.source,
+      label: `${violation.edge.source} → ${violation.edge.target}`,
+      detail: `${violation.rule}: ${violation.edge.kind}`,
+    })),
+  };
 }
 
 /**

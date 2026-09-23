@@ -9,7 +9,7 @@ import {
   createVirtualList,
 } from './strabo-core.js';
 
-import { appendFact, button } from './strabo-panel-kit.js';
+import { appendFact, button, svgElement } from './strabo-panel-kit.js';
 
 /** Render the summary for the active review overlay. */
 export function renderOverlayPanel(container, title, overlay, options = {}) {
@@ -69,6 +69,9 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     let filter = '';
     let changedOnly = false;
 
+    const itemText = (item) =>
+      typeof item === 'string' ? item : String(item?.label ?? item?.id ?? '');
+
     const rowFor = (item) => {
       const entry = document.createElement('div');
       entry.className = 'overlay-list-row';
@@ -78,6 +81,29 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
       }
       if (typeof item === 'string') {
         entry.dataset.delegateOverlayItem = item;
+      }
+      // A richer overlay may contribute a `{ id, label, detail }` row; the label is the
+      // selectable text and the detail rides beside it as evidence.
+      if (item !== null && typeof item === 'object') {
+        const id = item.id ?? itemText(item);
+        entry.dataset.delegateOverlayItem = id;
+        if (options.onSelect && id) {
+          const jump = document.createElement('button');
+          jump.type = 'button';
+          jump.textContent = item.label ?? id;
+          jump.title = item.detail ? `Select ${id} — ${item.detail}` : `Select ${id}`;
+          jump.addEventListener('click', () => options.onSelect(id));
+          entry.append(jump);
+        } else {
+          entry.textContent = item.label ?? id;
+        }
+        if (item.detail) {
+          const detail = document.createElement('span');
+          detail.className = 'evidence';
+          detail.textContent = ` · ${item.detail}`;
+          entry.append(detail);
+        }
+        return entry;
       }
       if (options.onSelect && typeof item === 'string' && !item.includes('↔') && !item.includes(':')) {
         const jump = document.createElement('button');
@@ -106,7 +132,7 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
         items = items.filter((item) => changedItems.has(item));
       }
       if (filter) {
-        items = items.filter((item) => String(item).toLowerCase().includes(filter));
+        items = items.filter((item) => itemText(item).toLowerCase().includes(filter));
       }
       return items;
     };
@@ -291,6 +317,102 @@ function edgeEndpoint(id, onSelect) {
 }
 
 
+/**
+ * The bounded categorical class for a drift series: three hues plus the neutral, per the
+ * colour budget (R8). The colour lives in `styles.css`, never as a literal here.
+ */
+function driftSeriesClass(index) {
+  return `drift-series-${index < 3 ? index + 1 : 'other'}`;
+}
+
+
+/**
+ * The architecture-drift chart: one line per structural measure across the newest
+ * revisions. A measure the revision cache could not supply is a gap, so the line breaks
+ * rather than dropping to zero, and an unavailable report says so.
+ */
+function renderDriftChart(container, drift) {
+  if (!drift) {
+    return;
+  }
+  if (drift.available === false) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.dataset.role = 'drift-unavailable';
+    note.textContent = `Architecture drift unavailable: ${drift.reason ?? 'not recorded'}`;
+    container.append(note);
+    return;
+  }
+  const points = drift.points ?? [];
+  const series = drift.series ?? [];
+  if (points.length === 0 || series.length === 0) {
+    return;
+  }
+
+  const width = 320;
+  const height = 120;
+  const padding = 8;
+  const svg = svgElement('svg', {
+    class: 'drift-chart',
+    'data-role': 'drift-chart',
+    viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: 'none',
+  });
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '120');
+
+  series.forEach((entry, index) => {
+    const values = (entry.points ?? []).map((point) => point.value);
+    const defined = values.filter((value) => value !== null && value !== undefined);
+    const min = defined.length > 0 ? Math.min(...defined) : 0;
+    const max = defined.length > 0 ? Math.max(...defined) : 0;
+    const span = max - min;
+    const xFor = (i) =>
+      values.length <= 1 ? width / 2 : padding + (i * (width - padding * 2)) / (values.length - 1);
+    const yFor = (value) =>
+      span === 0 ? height / 2 : height - padding - ((value - min) / span) * (height - padding * 2);
+
+    let segment = [];
+    const flush = () => {
+      if (segment.length === 0) return;
+      svg.append(
+        svgElement('polyline', {
+          class: driftSeriesClass(index),
+          points: segment.join(' '),
+          fill: 'none',
+          'stroke-width': '2',
+          'vector-effect': 'non-scaling-stroke',
+        }),
+      );
+      segment = [];
+    };
+    values.forEach((value, i) => {
+      if (value === null || value === undefined) {
+        flush();
+        return;
+      }
+      segment.push(`${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`);
+    });
+    flush();
+  });
+  container.append(svg);
+
+  const legend = document.createElement('div');
+  legend.className = 'drift-legend';
+  legend.dataset.role = 'drift-legend';
+  for (const entry of series) {
+    const item = document.createElement('span');
+    item.className = 'drift-legend-item';
+    const values = (entry.points ?? []).map((point) =>
+      point.value === null || point.value === undefined ? '—' : String(point.value),
+    );
+    item.textContent = `${entry.label}: ${values.join(' → ')}`;
+    legend.append(item);
+  }
+  container.append(legend);
+}
+
+
 /** Render recorded changes, newest first; selecting one compares it with the working tree. */
 export function renderTimeline(container, result, onSelect, options = {}) {
   container.replaceChildren();
@@ -307,6 +429,8 @@ export function renderTimeline(container, result, onSelect, options = {}) {
     dismiss.addEventListener('click', () => options.onClose());
     title.append(dismiss);
   }
+
+  renderDriftChart(container, options.drift);
 
   if (!result || result.available === false) {
     const note = document.createElement('p');

@@ -108,6 +108,7 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     overview: passport,
     painPoints: shown,
     change: inputs.change ?? null,
+    drift: inputs.drift ?? null,
     suggestions: shown.map(suggestionFor),
     evidence: {
       files: graph.nodes.length,

@@ -711,6 +711,104 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         return { content: [{ type: 'text', text: boundedText(body, args) }] };
       },
     },
+    {
+      name: 'get_scope_fence',
+      description:
+        'Changed paths outside a declared zone (comma-separated globs in `expect`), plus the changed paths inside it whose recorded importers lie outside it.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          expect: { type: 'string', description: 'Comma-separated globs, e.g. src/auth/**' },
+          base: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['expect'],
+        additionalProperties: false,
+      },
+      call: (args) =>
+        get(dispatch, '/analysis/scope-fence', args, {
+          expect: requiredArg(args, 'expect'),
+          base: stringArg(args, 'base'),
+        }),
+    },
+    {
+      name: 'get_public_api_diff',
+      description:
+        'Exported and pub symbols added, removed, or re-signed between two revisions, per language, with the recorded consumers that still name a removed or changed symbol.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          base: { type: 'string' },
+          head: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['base'],
+        additionalProperties: false,
+      },
+      call: (args) =>
+        get(dispatch, '/analysis/public-api-diff', args, {
+          base: requiredArg(args, 'base'),
+          head: stringArg(args, 'head'),
+        }),
+    },
+    {
+      name: 'get_clones',
+      description:
+        'Functions whose normalised bodies hash the same, grouped into clone clusters with their files, lines, and shared token count.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          minTokens: { type: 'number' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/clones', args),
+    },
+    {
+      name: 'get_string_edges',
+      description:
+        'Connections an import graph cannot see: environment variables, HTTP routes declared and called, and feature flags, each with its readers and declarations; dynamic keys are reported as not resolved.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/string-edges', args),
+    },
+    {
+      name: 'strabo_rules',
+      description:
+        'The architecture rules declared in strabo.rules.yml (or the rules key of strabo.groups.yml), and the observed edges that violate them, each with its evidence line.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/rules', args),
+    },
+    {
+      name: 'get_drift',
+      description:
+        'Architecture drift over recent commits: one series per structural measure (cycles, largest cycle, modules, largest module, edges, largest blast radius), each point naming its revision. A measure the cache cannot provide is null, never zero.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          base: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/drift', args),
+    },
   ];
 }
 
