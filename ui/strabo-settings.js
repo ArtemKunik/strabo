@@ -18,8 +18,47 @@ import { narratorKeyLabel, narratorModelsLabel, narratorTestLabel } from './stra
 
 export const SETTINGS_KEY = 'strabo.settings.v1';
 
-export const THEMES = ['system', 'dark', 'light'];
+/**
+ * Every theme id, `system` included. `dark` and `light` are the neutral pair; the rest are
+ * colour themes. Each id maps to a `:root[data-theme='<id>']` token block in styles.css.
+ */
+export const THEMES = [
+  'system',
+  'dark',
+  'light',
+  'nord',
+  'dracula',
+  'solarized-dark',
+  'solarized-light',
+  'gruvbox-dark',
+  'gruvbox-light',
+  'monokai',
+];
 export const DETAIL_MODES = ['block', 'file'];
+
+/** The theme picker: `System`, the neutral pair, then the colour themes. */
+export const THEME_OPTIONS = [
+  ['system', 'System'],
+  {
+    label: 'Neutral',
+    options: [
+      ['dark', 'Dark'],
+      ['light', 'Light'],
+    ],
+  },
+  {
+    label: 'Colour',
+    options: [
+      ['nord', 'Nord'],
+      ['dracula', 'Dracula'],
+      ['solarized-dark', 'Solarized Dark'],
+      ['solarized-light', 'Solarized Light'],
+      ['gruvbox-dark', 'Gruvbox Dark'],
+      ['gruvbox-light', 'Gruvbox Light'],
+      ['monokai', 'Monokai'],
+    ],
+  },
+];
 
 /** The client preference defaults, also the shape `readSettings` always returns. */
 export function defaultSettings() {
@@ -66,10 +105,13 @@ export function writeSettings(settings, storage = globalThis.localStorage) {
   }
 }
 
-/** Resolve `system` to the OS preference; every other value passes through. */
+/**
+ * Resolve the theme preference to a `data-theme` value. Only `system` consults the OS
+ * preference; every other valid id — the neutral pair or a colour theme — passes through.
+ */
 export function resolveTheme(theme, prefersLight = false) {
-  if (theme === 'light' || theme === 'dark') return theme;
-  return prefersLight ? 'light' : 'dark';
+  if (theme === 'system' || !THEMES.includes(theme)) return prefersLight ? 'light' : 'dark';
+  return theme;
 }
 
 /** Reduce motion is on when the preference asks for it or the OS does. */
@@ -141,13 +183,30 @@ function textInput(value, { placeholder = '', readOnly = false } = {}) {
   return input;
 }
 
+function optionElement(value, text) {
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = text;
+  return option;
+}
+
+/**
+ * A `<select>` from an ordered list of entries: `[value, label]` for a plain option, or
+ * `{ label, options: [[value, label], ...] }` for an `<optgroup>`.
+ */
 function selectInput(value, options, onChange) {
   const select = document.createElement('select');
-  for (const [optionValue, text] of options) {
-    const option = document.createElement('option');
-    option.value = optionValue;
-    option.textContent = text;
-    select.append(option);
+  for (const entry of options) {
+    if (Array.isArray(entry)) {
+      select.append(optionElement(entry[0], entry[1]));
+    } else {
+      const group = document.createElement('optgroup');
+      group.label = entry.label;
+      for (const [optionValue, text] of entry.options) {
+        group.append(optionElement(optionValue, text));
+      }
+      select.append(group);
+    }
   }
   select.value = value;
   select.addEventListener('change', () => onChange(select.value));
@@ -521,9 +580,7 @@ export function renderSettings(container, handlers = {}) {
   local.append(
     field(
       'Theme',
-      selectInput(prefs.theme, [['system', 'System'], ['dark', 'Dark'], ['light', 'Light']], (value) =>
-        handlers.onPref?.('theme', value),
-      ),
+      selectInput(prefs.theme, THEME_OPTIONS, (value) => handlers.onPref?.('theme', value)),
     ),
     field('Reduce motion', checkboxInput(prefs.reduceMotion, (value) => handlers.onPref?.('reduceMotion', value))),
     field(

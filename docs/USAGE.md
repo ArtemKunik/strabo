@@ -106,15 +106,16 @@ applied immediately:
 
 | Preference | Meaning |
 | ---------- | ------- |
-| Theme | `System`, `Dark`, or `Light`. `System` follows `prefers-color-scheme` and updates live. |
+| Theme | `System`, the neutral `Dark`/`Light` pair, or a colour theme (`Nord`, `Dracula`, `Solarized Dark`/`Light`, `Gruvbox Dark`/`Light`, `Monokai`). `System` follows `prefers-color-scheme` and updates live. |
 | Reduce motion | Collapse the app's transitions and the member-map playback; also follows the OS preference. |
 | Default detail | Whether the map opens in **Directories** or **Files** mode, unless a URL mode or a per-repository preference overrides it. |
 | Show node labels | Hide every node label for a cleaner map. Directory-island labels are a separate layer and are unaffected. |
 
 The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
 colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
-together (the graph stylesheet reads `--graph-*` at runtime). Reduce motion sets
-`data-reduce-motion`, which the graph viewport also honours.
+together (the graph stylesheet reads `--graph-*` at runtime). Every theme is a full token
+set in `ui/styles.css`, so the terminal, the graph, and the panels all follow. Reduce motion
+sets `data-reduce-motion`, which the graph viewport also honours.
 
 **Rendering** chooses the map's renderer: **GPU rendering (WebGL2)** on draws on the GPU,
 off on the 2D canvas. Cytoscape fixes its renderer when the map is constructed, so changing
@@ -150,3 +151,15 @@ refuse a `Host` header that names anything other than the server itself (loopbac
 configured interface), so a malicious page cannot reach the server through DNS rebinding:
 a rebinding domain resolves to 127.0.0.1 but arrives with the attacker's Host, which never
 matches.
+
+## Terminal
+
+The **Terminal** tab (beside **Graph**) runs shell and agent sessions in the app; the
+[multi-session terminal](./FEATURES.md#terminal-multi-session) feature detail lives in
+FEATURES.md. These global shortcuts are ignored while typing in a field:
+
+| Shortcut | Action |
+| -------- | ------ |
+| `Ctrl+Shift+T` | Open the Terminal and start a new shell. |
+| `Ctrl+Shift+W` | Close the active session. |
+| `Ctrl+Shift+R` | Open the Terminal's run-presets menu. |

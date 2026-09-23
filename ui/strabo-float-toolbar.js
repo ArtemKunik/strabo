@@ -5,7 +5,8 @@
  * resize edge, remembers the position and width per browser, and keeps the bar inside its
  * container. Elastic: dragging the edge changes the width and the icon buttons wrap, so the
  * bar reflows instead of overflowing its row. The overflow menu flips upward when the bar
- * sits in the lower half, so a menu opened from a bottom-anchored bar stays on screen.
+ * sits in the lower half, so a menu opened from a bottom-anchored bar stays on screen, and it
+ * is shifted sideways to stay inside the viewport when the bar floats near an edge.
  *
  * Dragging the bar down onto the bottom bar docks it there: it joins the footer as a normal
  * row item beside the panel dock, the grip drags it back out to float again, and the docked
@@ -32,6 +33,19 @@ export function clampToolbarPosition(left, top, { width, height, boundWidth, bou
     left: Math.min(Math.max(left, 0), maxLeft),
     top: Math.min(Math.max(top, 0), maxTop),
   };
+}
+
+/**
+ * Place an overflow menu so it stays inside the viewport.
+ *
+ * The menu is anchored to the right edge of its trigger. A floating toolbar dragged near the
+ * left of a narrow viewport would push that menu off the left edge, so this shifts it right,
+ * keeping `margin` from either side. Returns the menu's left edge in viewport coordinates.
+ */
+export function clampMenuLeft(anchorRight, menuWidth, viewportWidth, margin = 4) {
+  const wanted = anchorRight - menuWidth;
+  const maxLeft = Math.max(margin, viewportWidth - margin - menuWidth);
+  return Math.min(Math.max(wanted, margin), maxLeft);
 }
 
 function readStore(key) {

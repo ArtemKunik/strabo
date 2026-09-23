@@ -2,9 +2,10 @@
  * Agent delegation UI for Strabo.
  *
  * Framework-free helpers: a custom right-click menu, toast notifications, and
- * the POST /api/strabo/delegate call that opens a real terminal window running
- * opencode or claude on the server. No DOM is touched at import time; the menu
- * and toast containers are created lazily so this module stays inert until used.
+ * the POST /api/strabo/delegate call that seeds an in-app agent session (see
+ * `strabo-terminal.js`) running opencode or claude on the server. No DOM is
+ * touched at import time; the menu and toast containers are created lazily so
+ * this module stays inert until used.
  */
 
 import { API_PATH } from './strabo-core.js';
@@ -13,6 +14,23 @@ let menuElement = null;
 let toastStack = null;
 let promptDialog = null;
 let promptDialogResolve = null;
+
+/**
+ * How a successful delegation reaches the in-app Terminal screen. The delegate UI
+ * creates the session server-side but must not import the screen (the shell wires
+ * it), so `strabo.js` registers one opener here. Kept nullable: with no host the
+ * request still succeeds and the caller can offer the copy fallback.
+ */
+let sessionOpener = null;
+
+/**
+ * Register the host's handler for a launched delegate run. The handler receives the
+ * server-created `sessionId` and the full response body, and should attach the session
+ * in the Terminal screen. Passing a non-function clears it.
+ */
+export function setDelegateSessionOpener(opener) {
+  sessionOpener = typeof opener === 'function' ? opener : null;
+}
 
 const AGENT_LABELS = { opencode: 'OpenCode', claude: 'Claude' };
 
@@ -286,18 +304,24 @@ export function showPromptReview({ agent, title, prompt }) {
 }
 
 /**
- * Ask the server to open a new terminal running `agent` on the delegated item.
- * Throws with the server's error message so callers can offer a copy fallback.
+ * Ask the server to seed an agent session on the delegated item. The response names the
+ * in-app session, which the registered opener attaches; a `dryRun` returns the command
+ * with no session. Throws with the server's error message so callers can offer a copy
+ * fallback.
  */
-export async function launchAgent(agent, { repository, target, prompt, title }) {
+export async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
   const response = await fetch(`${API_PATH}/delegate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ agent, repository, target, prompt, title }),
+    body: JSON.stringify({ agent, repository, target, prompt, title, ...(dryRun ? { dryRun: true } : {}) }),
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(body.error ?? `Delegate failed (${response.status})`);
+  }
+  // A launched run carries a session to attach; a dry run has none, so nothing opens.
+  if (body.sessionId && sessionOpener) {
+    sessionOpener(body.sessionId, body);
   }
   return body;
 }

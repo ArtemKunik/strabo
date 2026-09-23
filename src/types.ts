@@ -910,6 +910,13 @@ export interface StraboConfig {
    * Defaults to true; `STRABO_AUTO_REBUILD=0` turns it off so a scan only runs on demand.
    */
   autoRebuild?: boolean;
+  /**
+   * Run terminal sessions in a detached `strabo-termd` daemon so they survive a server
+   * restart. Off by default: the in-process registry is simpler, and an embedded host
+   * or a machine without the native `node-pty` build should not spawn a background process.
+   * `STRABO_TERMINAL_DAEMON=1` or `--terminal-daemon` turns it on.
+   */
+  terminalDaemon?: boolean;
   integrations?: StraboIntegrations;
   /**
    * Explicit coverage report paths (relative to the repository root, or absolute inside the

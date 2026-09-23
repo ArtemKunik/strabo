@@ -3,6 +3,8 @@ import { test } from 'node:test';
 
 import {
   SETTINGS_KEY,
+  THEMES,
+  THEME_OPTIONS,
   applyAppearance,
   defaultSettings,
   effectiveReduceMotion,
@@ -81,6 +83,29 @@ test('resolveTheme follows the OS only for the system setting', () => {
   assert.equal(resolveTheme('system', false), 'dark');
   assert.equal(resolveTheme('dark', true), 'dark');
   assert.equal(resolveTheme('light', false), 'light');
+});
+
+test('resolveTheme passes every colour theme through untouched', () => {
+  for (const theme of THEMES.filter((name) => name !== 'system')) {
+    assert.equal(resolveTheme(theme, true), theme);
+    assert.equal(resolveTheme(theme, false), theme);
+  }
+  assert.equal(resolveTheme('unknown', true), 'light');
+  assert.equal(resolveTheme('unknown', false), 'dark');
+});
+
+test('every theme id round-trips through storage', () => {
+  for (const theme of THEMES) {
+    const storage = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ theme }) });
+    assert.equal(readSettings(storage).theme, theme);
+  }
+});
+
+test('the picker offers exactly the known themes, once each', () => {
+  const offered = THEME_OPTIONS.flatMap((entry) =>
+    Array.isArray(entry) ? [entry[0]] : entry.options.map((option) => option[0]),
+  );
+  assert.deepEqual([...offered].sort(), [...THEMES].sort());
 });
 
 test('effectiveReduceMotion is on when either the setting or the OS asks', () => {

@@ -41,41 +41,64 @@ function app(): express.Express {
   return instance;
 }
 
-async function launch(base: string, agent: string) {
+interface DryRun {
+  command: string[];
+  sessionId: string | null;
+  status: string;
+  promptFile: string;
+}
+
+async function dryRun(base: string, agent: string): Promise<DryRun> {
   const response = await fetch(`${base}/delegate`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ agent, prompt: 'Do the thing.', target: { kind: 'view' }, dryRun: true }),
   });
   assert.equal(response.status, 201);
-  const body = (await response.json()) as { command: string };
-  return body.command;
+  return (await response.json()) as DryRun;
 }
 
 /**
- * Delegation must open an interactive session, not a one-shot run, so the operator can add
- * their own instruction. `opencode run` is non-interactive and must not be used; the TUI
- * is started with `--prompt`, which prefills the editable input (there is no auto-submit
- * flag). The seed names the prompt file because the task is multi-line and may exceed the
- * cmd.exe command-line limit.
+ * Delegation builds an in-app agent session, not an external window. The dry run returns the
+ * exact argv that would be handed to the registry, so the shape is asserted without spawning
+ * a PTY. `opencode run` is non-interactive and must not be used; the TUI is started with
+ * `--prompt`, which prefills the editable input (there is no auto-submit flag). The seed
+ * names the prompt file because the task is multi-line and may exceed a command line.
  */
-test('the opencode launcher opens the interactive TUI, not a one-shot run', async () => {
-  const base = await listen(app());
-  const command = await launch(base, 'opencode');
+test('the opencode argv opens the interactive TUI, not a one-shot run', async () => {
+  const run = await dryRun(await listen(app()), 'opencode');
 
-  assert.match(command, /opencode --prompt "/, `expected a TUI launch: ${command}`);
-  assert.doesNotMatch(command, /opencode run\b/, `must not use the non-interactive run: ${command}`);
-  assert.doesNotMatch(command, /--dir\b/, `--dir is not a TUI flag; the launcher cds instead: ${command}`);
-  assert.match(command, /strabo-task\.md/, `the seed must name the prompt file: ${command}`);
+  assert.equal(run.status, 'dry-run');
+  assert.equal(run.sessionId, null);
+  assert.deepEqual(run.command.slice(0, 2), ['opencode', '--prompt']);
+  assert.doesNotMatch(run.command.join(' '), /opencode run\b/, `must not use the non-interactive run: ${run.command}`);
+  assert.match(run.command[2] ?? '', /strabo-task\.md/, `the seed must name the prompt file: ${run.command}`);
 });
 
-test('the claude launcher opens the interactive REPL with the message before --add-dir', async () => {
-  const base = await listen(app());
-  const command = await launch(base, 'claude');
+test('the claude argv puts the message before --add-dir', async () => {
+  const run = await dryRun(await listen(app()), 'claude');
 
-  assert.match(command, /claude "/, `expected an interactive launch: ${command}`);
-  assert.doesNotMatch(command, /claude -p\b|--print\b/, `print mode is non-interactive: ${command}`);
-  const messageIndex = command.indexOf('claude "');
-  const flagIndex = command.indexOf('--add-dir');
-  assert.ok(flagIndex > messageIndex, `--add-dir must follow the message, not precede it: ${command}`);
+  assert.equal(run.command[0], 'claude');
+  assert.match(run.command[1] ?? '', /strabo-task\.md/);
+  const flagIndex = run.command.indexOf('--add-dir');
+  assert.equal(flagIndex, 2, `--add-dir must follow the message: ${run.command}`);
+  assert.equal(run.command[3], path.dirname(run.promptFile).replace(/\\/g, '/'));
+  assert.doesNotMatch(run.command.join(' '), /--print\b|-p\b/, `print mode is non-interactive: ${run.command}`);
+});
+
+test('delegate rejects a prompt-less request and an unknown agent', async () => {
+  const base = await listen(app());
+  const empty = await fetch(`${base}/delegate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: 'opencode' }),
+  });
+  assert.equal(empty.status, 400);
+
+  const unknown = await fetch(`${base}/delegate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ agent: 'bash', prompt: 'x' }),
+  });
+  assert.equal(unknown.status, 400);
 });

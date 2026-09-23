@@ -11,6 +11,8 @@ export interface CliEnv {
   riskOnline: boolean;
   allowCeilingWidening: boolean;
   autoRebuild: boolean;
+  /** Opt-in detached terminal daemon; see `StraboConfig.terminalDaemon`. */
+  terminalDaemon: boolean;
   deniedLicenses?: string[];
   /** Explicit coverage report paths, overriding the conventional auto-detected locations. */
   coverageReports?: string[];
@@ -54,6 +56,9 @@ export function readEnv(
     // Background rebuilds are on unless the operator turns them off; a status poll can then
     // observe HEAD moving without forcing a synchronous scan on the next request.
     autoRebuild: !isDisabled(env.STRABO_AUTO_REBUILD),
+    // The terminal daemon is opt-in: it owns the PTYs in a detached process so sessions
+    // survive a restart, but it spawns a background process the in-process registry does not.
+    terminalDaemon: isEnabled(env.STRABO_TERMINAL_DAEMON) || hasFlag(argv, 'terminal-daemon'),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // An explicit report path (or a comma-separated list) overrides auto-detection; it is
     // still read only inside the scan ceiling.
@@ -122,6 +127,7 @@ export function configFromEnv(
     riskOnline,
     allowCeilingWidening,
     autoRebuild,
+    terminalDaemon,
     deniedLicenses,
     coverageReports,
     narratorEndpoint,
@@ -147,6 +153,7 @@ export function configFromEnv(
     host,
     allowCeilingWidening,
     autoRebuild,
+    terminalDaemon,
     risk: {
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),

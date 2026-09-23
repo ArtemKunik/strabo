@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float.js';
-import { clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
+import { clampMenuLeft, clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
   assert.deepEqual(sanitizeSize({ width: 420, height: 300 }), { width: 420, height: 300 });
@@ -71,4 +71,17 @@ test('clampToolbarPosition pins to the origin when the bar is larger than the co
     clampToolbarPosition(50, 50, { width: 900, height: 700, boundWidth: 800, boundHeight: 500 }),
     { left: 0, top: 0 },
   );
+});
+
+test('clampMenuLeft keeps the overflow menu inside the viewport', () => {
+  // Room to spare: the menu stays right-aligned to its trigger.
+  assert.equal(clampMenuLeft(600, 190, 800), 410);
+  // Near the left edge: the menu is pushed right, keeping the margin.
+  assert.equal(clampMenuLeft(120, 260, 445), 4);
+  // Near the right edge: the menu is pulled back inside.
+  assert.equal(clampMenuLeft(800, 190, 800), 606);
+});
+
+test('clampMenuLeft pins to the margin when the menu is wider than the viewport', () => {
+  assert.equal(clampMenuLeft(200, 900, 445), 4);
 });

@@ -407,12 +407,58 @@ Online lookup is one of only two features that contact a third party, and it is 
 `STRABO_RISK=online` is set; responses are cached under `STRABO_CACHE_DIR` to avoid repeat
 calls. `POST /vulnerabilities` remains a host-injectable seam for an external provider.
 
+## Terminal (multi-session)
+
+The **Terminal** tab (top-level, beside **Graph**) runs real PTY-backed sessions inside the
+app rather than in a separate OS window. One WebSocket multiplexes every session, so a session
+keeps its process and scrollback when you switch back to the map or reload the page. A session
+has one of four kinds:
+
+| Kind | What it is |
+| ---- | ---------- |
+| `shell` | An interactive shell started in the repository root. |
+| `agent` | A coding agent (`opencode` or `claude`) seeded with a Strabo prompt. |
+| `task` | A one-shot command, kept open after it exits so its output can be read. |
+| `watch` | A long-running command (a dev server, a test watcher). |
+
+Sessions are **tabs** across the top of the screen, with a **switcher** once there are more
+than fit and a **split** view that shows two at once. A shell can name its own tab with an
+**OSC title** escape (`\e]0;name\a`); Strabo shows the title the process sets rather than the
+command line. Every session keeps a bounded replay buffer keyed by sequence number, so a
+reconnect — or a **resume** after the socket drops — replays only the output the client
+missed instead of starting a fresh shell. The Terminal tab carries a count badge while a
+session is running, reddened when one has failed, so the state is visible from the map.
+
+Output is scanned for **`path:line` citations** (POSIX and Windows paths, with an optional
+column, and Node stack frames; URLs and `node_modules` noise are ignored). Clicking one opens
+the repository-relative file in the **Source** window at that line — the same viewer the map
+uses — and selects the file on the map when it is a node there.
+
+The **Run presets** menu lists commands derived from the repository's own manifests —
+`package.json` scripts, `make` targets, and Cargo, Go, and pytest commands — each shown with
+the manifest that declared it. Presets are computed server-side per repository, so the menu
+names what the checkout actually supports rather than a fixed list.
+
+### Agent sessions
+
+Delegating from the map, the review panel, or a diagnostic now opens an **agent session in the
+Terminal** rather than a separate OS window. `POST /delegate` writes the prompt to a temp file
+and creates an in-app `agent` session whose seed names that file; the app switches to the
+Terminal and attaches the new tab, and the response names the `sessionId` it created. The
+operator edits the prefilled task before sending: `opencode --prompt` prefills its editable
+input (the CLI has no auto-submit flag), while Claude's positional prompt is submitted
+immediately, so its seed asks for a summary and waits rather than editing anything. The
+evidence-based prompt is unchanged (see [Delegate to an agent](#delegate-to-an-agent)); only
+its destination moved into the app. When the request fails the **Copy prompt** fallback still
+offers the same text, and a `dryRun` returns the command without opening a session.
+
 ## Delegate to an agent
 
 Right-clicking a node, edge, diagnostic, commit, overlay item, the Git review panel, or
 empty canvas opens a **Delegate** menu that hands the selected item to a coding agent.
 `POST /delegate` accepts only `opencode` or `claude`, writes the prompt to a temp file, and
-opens the agent's **interactive TUI** with the repository as its working directory.
+opens the agent's **interactive session in the Terminal tab** with the repository as its
+working directory.
 
 Delegating from the Git review panel hands the agent the same evidence shown on screen —
 every changed file's status and line counts, plus the reverse-impact list — and asks it to
@@ -420,17 +466,15 @@ explain the change **as a function of the app**: what capability or behaviour it
 changes, or removes, not just which files moved. The agent still reads the actual diff
 itself; Strabo only ever hands over what it recorded, never a guess at intent.
 
-The TUI is seeded with a prompt that names the task file, so the operator can add their own
-instruction before sending — the delegation does not silently run Strabo's canned task.
-`opencode --prompt` prefills the editable input (the CLI has no auto-submit flag); its
-one-shot `run` subcommand is deliberately not used. Claude's positional prompt is submitted
-immediately, so its seed asks for a summary and waits rather than editing anything.
+The session is seeded with a prompt that names the task file, so the operator can add their
+own instruction before sending — the delegation does not silently run Strabo's canned task.
+See [Agent sessions](#agent-sessions) for how the seed is built and how the session opens.
 
 The repository is resolved through the scan ceiling like every other route, and delegated
 text only ever lands in the prompt file — it is never interpolated into a shell command.
-`GET /delegate` lists recent launches (a log, not supervision, since a terminal outlives
-the server); `GET /delegate/:id` returns one run. The endpoint is Windows-only and answers
-`501` elsewhere.
+`GET /delegate` lists recent launches (a log, not supervision, since a session outlives
+the server); `GET /delegate/:id` returns one run. The run is spawned as a PTY-backed session
+rather than a detached OS window, so the endpoint is no longer Windows-only.
 
 ⌘/ctrl-click toggles a node into a group, and shift-drag box-selects a region — Cytoscape's
 own selection, so it costs nothing to build. Once two or more are selected, a **Delegate

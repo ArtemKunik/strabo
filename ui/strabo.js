@@ -14,9 +14,9 @@ import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeE
 import { createView } from './strabo-view.js';
 import { createFrameSampler } from './strabo-perf.js';
 import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
-import { closeContextMenu, copyText, launchAgent, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
+import { closeContextMenu, copyText, launchAgent, setDelegateSessionOpener, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
-import { initFloatingToolbar } from './strabo-float-toolbar.js';
+import { clampMenuLeft, initFloatingToolbar } from './strabo-float-toolbar.js';
 import { createFreshnessBadge } from './strabo-freshness.js';
 import {
   renderBreadcrumb,
@@ -308,12 +308,16 @@ function stopRuntimeReadout() {
  * colours, so it is restyled here too.
  */
 let clientPrefs = readSettings();
+// Assigned once the Terminal screen is created further down; kept nullable so
+// `applyClientPrefs` can run before then without tripping the temporal dead zone.
+let terminalScreen = null;
 
 function applyClientPrefs() {
   applyAppearance(clientPrefs);
   view.applyTheme();
   view.setLabelsVisible(clientPrefs.labels);
   view.setLabelsForceAll(clientPrefs.allLabels);
+  terminalScreen?.applyTheme();
 }
 
 applyClientPrefs();
@@ -1368,6 +1372,33 @@ document.addEventListener('keydown', (event) => {
     elements.filter.select();
     return;
   }
+  // Screen-level shortcuts. The terminal screen owns its own Ctrl+K and tab keys; these
+  // only cover opening a shell, closing the active session, and the run presets, and stay
+  // out of the way while any field (including the terminal's own input) has focus.
+  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
+    const screenKey = event.key.toLowerCase();
+    if (screenKey === 't') {
+      event.preventDefault();
+      setScreen('terminal');
+      terminalScreen?.newSession?.({ kind: 'shell' })?.catch((error) => {
+        showToast(`Could not open a shell (${error.message}).`);
+      });
+      return;
+    }
+    if (screenKey === 'w') {
+      event.preventDefault();
+      // Closing the active tab is the screen's call; a screen without the extension no-ops.
+      terminalScreen?.closeActiveSession?.();
+      return;
+    }
+    if (screenKey === 'r') {
+      event.preventDefault();
+      setScreen('terminal');
+      // The presets menu lives in the screen; if it exposes no opener, the screen is still shown.
+      terminalScreen?.openPresetMenu?.();
+      return;
+    }
+  }
   if (event.key === 'Escape') {
     closeOverflowMenu();
     if (!elements.memberView.hidden) {
@@ -1430,7 +1461,10 @@ async function toggleTimeline() {
   elements.timelinePanel.hidden = false;
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
   const result = await request(`/analysis/timeline${query}`);
-  const draw = (metrics) =>
+  const driftQuery = state.repository
+    ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
+    : '?limit=20';
+  const draw = (metrics, drift) =>
     renderTimeline(elements.timelinePanel, result, (commit) => {
       selectCommit(commit).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
@@ -1438,19 +1472,27 @@ async function toggleTimeline() {
     }, {
       selectedHash: selectedCommitHash,
       metrics,
+      drift,
       onClose: () => {
         elements.timelinePanel.hidden = true;
       },
     });
-  draw(null);
+  draw(null, null);
   if (result?.available === false) {
     return;
   }
-  // Per-commit change metrics arrive after the list: uncached commits are measured on the
-  // server, so the timeline is usable first and the badges fill in when they are ready.
-  const history = await request(`/analysis/change-metrics/history${query}`).catch(() => null);
-  if (history?.available && !elements.timelinePanel.hidden) {
-    draw(new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])));
+  // Per-commit change metrics and the architecture-drift series arrive after the list:
+  // uncached commits are measured on the server, so the timeline is usable first and the
+  // badges and chart fill in when they are ready.
+  const [history, drift] = await Promise.all([
+    request(`/analysis/change-metrics/history${query}`).catch(() => null),
+    request(`/analysis/drift${driftQuery}`).catch(() => null),
+  ]);
+  if (!elements.timelinePanel.hidden && (history?.available || drift !== null)) {
+    draw(
+      history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+      drift,
+    );
   }
 }
 
@@ -2274,6 +2316,7 @@ const OVERLAY_TITLES = {
   ownership: 'Ownership',
   smells: 'Smells',
   'hidden-coupling': 'Hidden coupling (co-change, no import path)',
+  'declared-rules': 'Declared rules',
 };
 
 const OVERLAY_ENDPOINTS = {
@@ -2286,10 +2329,11 @@ const OVERLAY_ENDPOINTS = {
   ownership: '/analysis/ownership',
   smells: '/analysis/smells',
   'hidden-coupling': '/analysis/co-change',
+  'declared-rules': '/analysis/rules',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling'];
+const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules'];
 
 /**
  * Load the selected review analysis and annotate the graph. Overlays annotate only what
@@ -2785,6 +2829,41 @@ function closeSource() {
   elements.sourcePanel.replaceChildren();
 }
 
+/**
+ * The Terminal's `openSourceAt` hook: show a repo-relative file at a line from a clicked
+ * `path:line` citation. The viewer reads by path directly (`/source?file=`), so a file that
+ * is not a node on the current map still opens; when it is a node, the map selection follows
+ * the citation too. The viewer has no load callback, so poll briefly for the marked row.
+ */
+function openSourceAt(file, line) {
+  const target = typeof file === 'string' ? file.replace(/\\/g, '/') : '';
+  if (!target) {
+    return;
+  }
+  setScreen('graph');
+  const node = (current?.nodes ?? []).find((candidate) => candidate.id === target);
+  if (node) {
+    selectNode(node.id);
+  }
+  const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
+  viewSource(node?.id ?? target, { line: lineNumber });
+  if (lineNumber) {
+    revealSourceLine();
+  }
+}
+
+/** Bring the marked line into view once the async source fetch has rendered it. */
+function revealSourceLine(attempt = 0) {
+  const marked = elements.sourcePanel?.querySelector('.src-mark');
+  if (marked) {
+    marked.scrollIntoView?.({ block: 'center' });
+    return;
+  }
+  if (attempt < 20) {
+    setTimeout(() => revealSourceLine(attempt + 1), 50);
+  }
+}
+
 /** Which two sides a review row's change is between. */
 function reviewDiffSpec(result, file) {
   if (result?.kind === 'commit' && result.ref) {
@@ -3074,11 +3153,29 @@ function closeOverflowMenu({ restoreFocus = false } = {}) {
 function openOverflowMenu() {
   elements.tbOverflowMenu.hidden = false;
   elements.tbOverflow.setAttribute('aria-expanded', 'true');
+  positionOverflowMenu();
   const items = overflowItems();
   items.forEach((item, index) => {
     item.tabIndex = index === 0 ? 0 : -1;
   });
   items[0]?.focus();
+}
+
+/** Keep the menu on screen: right-aligned to its trigger normally, but shifted right when the
+ * floating toolbar sits near the left edge and the menu would run off the viewport. */
+function positionOverflowMenu() {
+  const menu = elements.tbOverflowMenu;
+  const anchor = menu.offsetParent;
+  if (!anchor) {
+    return;
+  }
+  // Clear first so the anchor's rect is measured without the previous placement.
+  menu.style.left = '';
+  menu.style.right = '';
+  const anchorRect = anchor.getBoundingClientRect();
+  const left = clampMenuLeft(anchorRect.right, menu.offsetWidth, window.innerWidth);
+  menu.style.left = `${left - anchorRect.left}px`;
+  menu.style.right = 'auto';
 }
 
 if (elements.tbOverflow) {
@@ -3375,7 +3472,10 @@ function resolveDomDelegateTarget(node) {
   return null;
 }
 
-/** Open the agent's interactive TUI on the delegated item, after the prompt is reviewed. */
+/**
+ * Seed an in-app agent session on the delegated item, after the prompt is reviewed.
+ * The delegate module attaches the returned session through the registered opener.
+ */
 async function delegateToAgent(agent, target) {
   const repository = current?.repository ?? null;
   const prompt = buildAgentPrompt({ agent, repository, target });
@@ -3385,15 +3485,19 @@ async function delegateToAgent(agent, target) {
     return;
   }
   try {
-    await launchAgent(agent, {
+    const result = await launchAgent(agent, {
       repository: state.repository ?? repository?.root,
       target: { kind: target.kind, id: target.id, label: target.label },
       prompt: reviewed,
       title,
     });
-    showToast(`Opened ${agent} on ${title} — edit the prefilled task, then send.`);
+    showToast(
+      result?.sessionId
+        ? `Opened ${agent} in the Terminal on ${title} — edit the prefilled task, then send.`
+        : `Prepared ${agent} on ${title}.`,
+    );
   } catch (error) {
-    showToast(`Could not open a terminal (${error.message}).`, {
+    showToast(`Could not open an agent session (${error.message}).`, {
       label: 'Copy prompt',
       onClick: async () => {
         await copyText(reviewed);
@@ -3462,8 +3566,8 @@ function openDelegateMenu(target, x, y) {
     items: [
       ...narrateMenuItems(target),
       ...layoutMenuItems(target),
-      { label: '▶ Delegate to OpenCode', hint: 'opens TUI', action: () => delegateToAgent('opencode', target) },
-      { label: '▶ Delegate to Claude', hint: 'opens TUI', action: () => delegateToAgent('claude', target) },
+      { label: '▶ Delegate to OpenCode', hint: 'opens agent session', action: () => delegateToAgent('opencode', target) },
+      { label: '▶ Delegate to Claude', hint: 'opens agent session', action: () => delegateToAgent('claude', target) },
       { separator: true },
       {
         label: '⧉ Copy prompt',
@@ -3564,8 +3668,57 @@ view.onEdge(selectEdge);
 /**
  * The Terminal screen. Created once at bootstrap — like the graph, it lives for the whole
  * page session, so switching tabs only shows/hides it rather than tearing it down.
+ *
+ * The tab badge is built here rather than in `index.html` (owned elsewhere); it reuses the
+ * diagnostics pill classes, so it needs no new CSS and reports running/failed sessions even
+ * while the Graph screen is showing.
  */
-const terminalScreen = initTerminalScreen(elements.terminalContainer);
+const terminalBadge = document.createElement('span');
+terminalBadge.id = 'terminal-badge';
+terminalBadge.className = 'diag-badge';
+terminalBadge.hidden = true;
+elements.screenTabTerminal.append(terminalBadge);
+
+/** Show a count of running sessions on the tab, reddened when any session has failed. */
+function updateTerminalBadge(sessions) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const running = list.filter((session) => session?.status === 'running').length;
+  const failed = list.filter(
+    (session) => session?.status === 'exited' && (session.exitCode ?? 0) !== 0,
+  ).length;
+  const count = running + failed;
+  terminalBadge.hidden = count === 0;
+  terminalBadge.textContent = String(count);
+  terminalBadge.classList.toggle('has-errors', failed > 0);
+  terminalBadge.title = failed > 0 ? `${running} running, ${failed} failed` : `${running} running`;
+}
+
+/** The active repository as `{ name, root }` for a new terminal session. */
+function resolveRepository() {
+  const repository = current?.repository;
+  const root = repository?.root ?? state.repository ?? null;
+  const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null);
+  return { name, root };
+}
+
+/** The Terminal's toast hook, accepting either a plain message or one carrying an action. */
+function terminalToast(message, options = {}) {
+  return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6000 });
+}
+
+terminalScreen = initTerminalScreen(elements.terminalContainer, {
+  openSourceAt,
+  toast: terminalToast,
+  onSessionsChanged: updateTerminalBadge,
+  resolveRepository,
+  closeTerminal: () => setScreen('graph'),
+});
+
+// A delegated run is created server-side; this is how its session reaches the screen.
+setDelegateSessionOpener((sessionId) => {
+  setScreen('terminal');
+  return terminalScreen?.openSession?.(sessionId);
+});
 
 function setScreen(screen) {
   store.set('ui', { screen });

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import * as graph from '../../ui/strabo-core.js';
 import { clusterSeriesClass } from '../../ui/strabo-member-map.js';
+import { THEMES } from '../../ui/strabo-settings.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const stylesPath = path.resolve(here, '..', '..', 'ui', 'styles.css');
@@ -27,6 +28,21 @@ const darkStart = styles.indexOf(':root {');
 const dark = tokensIn(darkStart);
 const lightStart = styles.indexOf(":root[data-theme='light']");
 const light = tokensIn(lightStart);
+
+/**
+ * Every theme's token block, keyed by theme id. `dark` is the bare `:root`; every other
+ * theme (the light theme and the colour themes) is a `:root[data-theme='<id>']` block.
+ */
+const themes = new Map();
+themes.set('dark', dark);
+for (const match of styles.matchAll(/:root\[data-theme='([^']+)'\]\s*\{/g)) {
+  themes.set(match[1], tokensIn(match.index));
+}
+
+const STATUS_TOKENS = ['--status-good', '--status-warning', '--status-serious', '--status-critical'];
+const TIER_TOKENS = ['frontend', 'api', 'domain', 'data', 'integration', 'infra', 'build', 'tests'].map(
+  (tier) => `--tier-${tier}`,
+);
 
 function channels(hex) {
   const value = hex.replace('#', '');
@@ -138,7 +154,7 @@ test('the dark status scale clears 3:1 on both surface tokens', () => {
   for (const surface of ['--bg-1', '--bg-2']) {
     const background = dark.get(surface);
     assert.ok(background, `${surface} should be defined`);
-    for (const token of ['--status-good', '--status-warning', '--status-serious', '--status-critical']) {
+    for (const token of STATUS_TOKENS) {
       const value = dark.get(token);
       assert.ok(value, `${token} should be defined`);
       const ratio = contrast(value, background);
@@ -146,6 +162,49 @@ test('the dark status scale clears 3:1 on both surface tokens', () => {
         ratio >= 3,
         `${token} (${value}) on ${surface} (${background}) is ${ratio.toFixed(2)}:1, below 3:1`,
       );
+    }
+  }
+});
+
+test('every theme defines the same colour tokens as the base dark theme', () => {
+  // Fonts, text sizes, and radii are theme-agnostic and live only on the bare `:root`.
+  const nonColour = new Set([
+    '--font-ui',
+    '--font-mono',
+    '--text-xs',
+    '--text-sm',
+    '--text-md',
+    '--radius-s',
+    '--radius-m',
+    '--radius-l',
+  ]);
+  const expected = [...dark.keys()].filter((key) => !nonColour.has(key)).sort();
+  for (const [name, tokens] of themes) {
+    const actual = [...tokens.keys()].filter((key) => !nonColour.has(key)).sort();
+    assert.deepEqual(actual, expected, `${name} should define the full colour token set`);
+  }
+});
+
+test('the settings theme list matches the stylesheet theme blocks', () => {
+  const explicit = THEMES.filter((theme) => theme !== 'system' && theme !== 'dark').sort();
+  const blocks = [...themes.keys()].filter((theme) => theme !== 'dark').sort();
+  assert.deepEqual(blocks, explicit, 'every offered theme needs a token block, and vice versa');
+});
+
+test('every theme\'s status scale clears 3:1 on both of its surfaces', () => {
+  for (const [name, tokens] of themes) {
+    for (const surface of ['--bg-1', '--bg-2']) {
+      const background = tokens.get(surface);
+      assert.ok(background, `${name} ${surface} should be defined`);
+      for (const token of STATUS_TOKENS) {
+        const value = tokens.get(token);
+        assert.ok(value, `${name} ${token} should be defined`);
+        const ratio = contrast(value, background);
+        assert.ok(
+          ratio >= 3,
+          `${name} ${token} (${value}) on ${surface} (${background}) is ${ratio.toFixed(2)}:1, below 3:1`,
+        );
+      }
     }
   }
 });
@@ -169,36 +228,28 @@ test('the one neutral node fill is defined and equal to the reserved surface', (
   assert.ok(light.get('--node-fill'));
 });
 
-test('the tier hues clear 3:1 on both surfaces in both themes (L10)', () => {
-  const tiers = ['frontend', 'api', 'domain', 'data', 'integration', 'infra', 'build', 'tests'].map(
-    (tier) => `--tier-${tier}`,
-  );
-  for (const [name, tokens] of [
-    ['dark', dark],
-    ['light', light],
-  ]) {
+test('the tier hues clear 3:1 on both surfaces in every theme (L10)', () => {
+  for (const [name, tokens] of themes) {
     for (const surface of ['--bg-1', '--bg-2']) {
       const background = tokens.get(surface);
       assert.ok(background, `${name} ${surface} should be defined`);
-      for (const token of tiers) {
+      for (const token of TIER_TOKENS) {
         const value = tokens.get(token);
         assert.ok(value, `${name} ${token} should be defined`);
         const ratio = contrast(value, background);
         assert.ok(
           ratio >= 3,
-          `${name} ${token} (${value}) on ${surface} is ${ratio.toFixed(2)}:1, below 3:1`,
+          `${name} ${token} (${value}) on ${surface} (${background}) is ${ratio.toFixed(2)}:1, below 3:1`,
         );
       }
     }
-  }
 
-  const values = tiers.map((token) => dark.get(token));
-  assert.equal(new Set(values).size, 8, 'the eight tier hues should be distinct');
-  const reserved = ['--accent', '--status-good', '--status-warning', '--status-serious', '--status-critical'].map(
-    (token) => dark.get(token),
-  );
-  for (const value of values) {
-    assert.ok(!reserved.includes(value), `${value} reuses a reserved accent or status hue`);
+    const values = TIER_TOKENS.map((token) => tokens.get(token));
+    assert.equal(new Set(values).size, 8, `${name}: the eight tier hues should be distinct`);
+    const reserved = ['--accent', ...STATUS_TOKENS].map((token) => tokens.get(token));
+    for (const value of values) {
+      assert.ok(!reserved.includes(value), `${name}: ${value} reuses a reserved accent or status hue`);
+    }
   }
 });
 
