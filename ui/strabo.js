@@ -42,7 +42,6 @@ import {
   renderMembers,
   renderOverlayPanel,
   renderShortcuts,
-  renderSource,
   renderTestsStrip,
 } from './strabo-panels.js';
 import { findPath, neighbourhood } from './strabo-selection.js';
@@ -62,6 +61,7 @@ import { createRepositoryPanels } from './strabo-repo-panels.js';
 import { createLensController } from './strabo-lens-controller.js';
 import { createRepositoryPicker } from './strabo-repositories.js';
 import { createSystemUnits } from './strabo-system-units.js';
+import { createSourceViewer } from './strabo-source-viewer.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -287,7 +287,6 @@ Object.assign(app, {
   scan,
   selectNode,
   setScreen,
-  viewDiff,
 });
 // </core-actions>
 
@@ -303,6 +302,7 @@ app.panels = createRepositoryPanels(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
+app.source = createSourceViewer(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -552,7 +552,7 @@ function selectNode(id) {
     onOpenWorkspace: (target) => openFile(target),
     onBack: passportBack,
     backTitle: passportHistory.length > 0 ? 'Back to the previously selected module' : 'Back to the map',
-    ...(isFileNode(id) ? { onViewSource: (target) => viewSource(target) } : {}),
+    ...(isFileNode(id) ? { onViewSource: (target) => app.source.viewSource(target) } : {}),
     // The reading route is repository-wide; a Module Passport opens it at its own file.
     ...(isFileNode(id) ? { onOpenRoute: (target) => app.panels.showRoute(target) } : {}),
     onOpenMemberMap: (target) => {
@@ -784,7 +784,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
   else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();
   else if (key === 'z' && state.mode === 'file') elements.tbLoc?.click();
-  else if (key === 's' && app.selected && isFileNode(app.selected)) viewSource(app.selected);
+  else if (key === 's' && app.selected && isFileNode(app.selected)) app.source.viewSource(app.selected);
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
   else if (key === 'v') elements.tbRisk.click();
@@ -831,7 +831,7 @@ function selectEdge(edgeId) {
     onSelect: (id) => selectNode(id),
     onTrace: (from, to) => tracePath(from, to),
     ...(evidence && isFileNode(evidence.source)
-      ? { onViewSource: (file, line) => viewSource(file, { line }) }
+      ? { onViewSource: (file, line) => app.source.viewSource(file, { line }) }
       : {}),
     onClear: () => {
       view.clearEdge();
@@ -883,7 +883,7 @@ function onDrill(id) {
       return;
     }
     if (node.systemUnit) {
-      if (!id.endsWith('#support')) viewSource(id);
+      if (!id.endsWith('#support')) app.source.viewSource(id);
       return;
     }
     app.units.openUnit(id);
@@ -896,7 +896,7 @@ function onDrill(id) {
     scan();
     return;
   }
-  viewSource(id);
+  app.source.viewSource(id);
 }
 
 function openFile(id) {
@@ -913,11 +913,6 @@ function openFile(id) {
   elements.status.textContent = `No opener available for ${id}`;
 }
 
-/* --------------------------------------------------------------- File viewer */
-
-/** The viewer's current target: the file, the two sides, and what has been fetched. */
-let sourceView = null;
-
 /** True when `id` is a file the viewer can read, not a directory block, unit, or shelf. */
 function isFileNode(id) {
   const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === id);
@@ -925,127 +920,6 @@ function isFileNode(id) {
     return false;
   }
   return state.mode === 'file' || Boolean(node.systemUnit && !id.endsWith('#support'));
-}
-
-/** Open the viewer on a file, at `line` when given. A `diffSpec` opens it on the change. */
-function viewSource(file, options = {}) {
-  sourceView = {
-    file,
-    ref: options.ref ?? null,
-    line: options.line ?? null,
-    status: options.status ?? null,
-    diffSpec: options.diffSpec ?? null,
-    hasDiff: Boolean(options.diffSpec),
-    mode: options.diffSpec ? 'diff' : 'content',
-    loading: true,
-    error: null,
-    content: null,
-    diff: null,
-  };
-  app.floatingWindows.find((controller) => controller.key === 'source')?.open();
-  loadSource(sourceView.mode).catch(() => {});
-}
-
-/** Open the viewer straight on a change; `spec` names the two sides for `/diff`. */
-function viewDiff(file, spec, options = {}) {
-  viewSource(file, { ...options, diffSpec: spec });
-}
-
-/** Fetch the side the viewer is showing; a late response is dropped if the target moved. */
-async function loadSource(mode) {
-  const target = sourceView;
-  if (!target) {
-    return;
-  }
-  target.mode = mode;
-  target.loading = true;
-  target.error = null;
-  sourceRender();
-  const query = new URLSearchParams({ file: target.file });
-  if (state.repository) {
-    query.set('repository', state.repository);
-  }
-  try {
-    if (mode === 'diff') {
-      for (const [key, value] of Object.entries(target.diffSpec ?? {})) {
-        query.set(key, String(value));
-      }
-      const body = await request(`/diff?${query.toString()}`);
-      if (sourceView !== target) return;
-      if (body.available === false) target.error = body.detail ?? body.reason;
-      else target.diff = body.diff;
-    } else {
-      if (target.ref) query.set('ref', target.ref);
-      const body = await request(`/source?${query.toString()}`);
-      if (sourceView !== target) return;
-      target.content = body.content;
-    }
-  } catch (error) {
-    if (sourceView !== target) return;
-    target.error = error.message;
-  } finally {
-    if (sourceView === target) {
-      target.loading = false;
-      sourceRender();
-    }
-  }
-}
-
-function sourceRender() {
-  if (!sourceView) {
-    return;
-  }
-  renderSource(elements.sourcePanel, sourceView, {
-    onClose: () => app.floatingWindows.find((controller) => controller.key === 'source')?.close(),
-    onShowFile: sourceView.hasDiff && sourceView.mode === 'diff' ? () => loadSource('content') : null,
-    onShowDiff: sourceView.hasDiff && sourceView.mode === 'content' ? () => loadSource('diff') : null,
-  });
-}
-
-/** Whether the viewer has a file to reopen. */
-function hasSourceTarget() {
-  return Boolean(sourceView);
-}
-
-/** Clear the panel but keep the target, so the dock chip can reopen the last file. */
-function closeSource() {
-  elements.sourcePanel.hidden = true;
-  elements.sourcePanel.replaceChildren();
-}
-
-/**
- * The Terminal's `openSourceAt` hook: show a repo-relative file at a line from a clicked
- * `path:line` citation. The viewer reads by path directly (`/source?file=`), so a file that
- * is not a node on the current map still opens; when it is a node, the map selection follows
- * the citation too. The viewer has no load callback, so poll briefly for the marked row.
- */
-function openSourceAt(file, line) {
-  const target = typeof file === 'string' ? file.replace(/\\/g, '/') : '';
-  if (!target) {
-    return;
-  }
-  setScreen('graph');
-  const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === target);
-  if (node) {
-    selectNode(node.id);
-  }
-  const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
-  viewSource(node?.id ?? target, { line: lineNumber });
-  if (lineNumber) {
-    revealSourceLine();
-  }
-}
-
-/** Bring the marked line into view once the async source fetch has rendered it. */
-function revealSourceLine(attempt = 0) {
-  const marked = elements.sourcePanel?.querySelector('.src-mark');
-  if (marked) {
-    marked.scrollIntoView?.({ block: 'center' });
-    return;
-  }
-  if (attempt < 20) {
-    setTimeout(() => revealSourceLine(attempt + 1), 50);
-  }
 }
 
 /** Whether an id names a node on the current map, so a control directive cannot point elsewhere. */
@@ -1075,7 +949,7 @@ function handleTerminalControl(directive) {
       const file = args[0];
       const line = Number.parseInt(args[1] ?? '', 10);
       if (file) {
-        openSourceAt(file, Number.isInteger(line) ? line : null);
+        app.source.openSourceAt(file, Number.isInteger(line) ? line : null);
       }
       return;
     }
@@ -1904,7 +1778,7 @@ function terminalToast(message, options = {}) {
 }
 
 app.terminalScreen = initTerminalScreen(elements.terminalContainer, {
-  openSourceAt,
+  openSourceAt: app.source.openSourceAt,
   toast: terminalToast,
   onSessionsChanged: updateTerminalBadge,
   resolveRepository,
@@ -2085,13 +1959,13 @@ app.floatingWindows = initFloatingWindows({
       pinned: 3,
       width: 720,
       height: 640,
-      canOpen: () => hasSourceTarget(),
+      canOpen: () => app.source.hasSourceTarget(),
       blockedTitle: 'Select a file to view its source',
       onBlocked: () => {
         elements.status.textContent = 'Select a file first — no source to show.';
       },
-      onOpen: () => sourceRender(),
-      onClose: () => closeSource(),
+      onOpen: () => app.source.sourceRender(),
+      onClose: () => app.source.closeSource(),
     },
     {
       key: 'legend',

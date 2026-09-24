@@ -380,7 +380,7 @@ export function createGitController(app) {
       onClose,
       ...navigation,
       onSelect: (id) => app.selectNode(id),
-      onOpenDiff: (file, entry) => app.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+      onOpenDiff: (file, entry) => app.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
       narratorStatus: app.narratorStatus,
       onNarrate: () => app.narration.narrateReview(data),
       onOpenNarratorSettings: app.settings.openNarratorSettings,
