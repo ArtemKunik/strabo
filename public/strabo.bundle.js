@@ -24175,7 +24175,10 @@ function renderSettingsView() {
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
     onRestart: () => restartServer(),
     onNarratorChange: async (patch2) => {
-      await saveServerSettings({ narrator: patch2 }, "Narrator updated.");
+      const saved = await saveServerSettings({ narrator: patch2 }, "Narrator updated.");
+      if (saved?.narrator?.keyCleared) {
+        showToast("The endpoint host changed, so the stored key was removed.");
+      }
       await refreshNarratorSettings();
       renderSettingsView();
       await refreshNarratorStatus();
@@ -24230,8 +24233,9 @@ async function refreshNarratorStatus() {
   narratorStatus = await fetchNarratorStatus();
 }
 async function saveServerSettings(patch2, successMessage) {
+  let saved = null;
   try {
-    await putServerSettings(patch2);
+    saved = await putServerSettings(patch2);
     settingsStatus = successMessage;
     settingsStatusError = false;
   } catch (error) {
@@ -24241,6 +24245,7 @@ async function saveServerSettings(patch2, successMessage) {
   renderSettingsView();
   loadCatalogue().catch(() => {
   });
+  return saved;
 }
 async function putServerSettings(patch2) {
   const response = await fetch(`${API_PATH}/settings`, {

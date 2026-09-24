@@ -51,8 +51,9 @@ Feature: Timeline and compare versions
     Then the review panel reports the commit and its changed files
     And the review panel can step back to the working-tree review
 
-  @review @narrator
+  @narrator-review
   Scenario: The review panel offers the narrator and stays inert without configuration
+    When I reset the narrator setup
     When I open the folder dialog
     And I go up one folder
     And I choose the "timeline-repo" folder
@@ -61,7 +62,7 @@ Feature: Timeline and compare versions
     When I select the most recent change
     Then the review panel offers the narrator and reports it is off
 
-  @review @narrator
+  @narrator-stub
   Scenario: The narrator explains a commit's change set against a loopback stub
     Given a loopback narrator stub is running
     When I open the Settings window

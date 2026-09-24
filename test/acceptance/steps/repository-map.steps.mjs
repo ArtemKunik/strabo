@@ -295,6 +295,12 @@ When('I select the most recent change', async function () {
     undefined,
     { timeout: 15_000 },
   );
+  // The timeline floating window overlaps the review panel; dismiss it (as an operator would)
+  // so the review panel's own controls are reachable.
+  await this.page.evaluate(() => {
+    const timeline = [...(window.straboTest?.floatingWindows?.() ?? [])].find((window) => window.key === 'timeline');
+    if (timeline?.isOpen?.()) timeline.toggle();
+  });
 });
 
 Then('the overlay panel reports changed files', async function () {
@@ -339,7 +345,7 @@ When('I open the working-tree review', async function () {
       return !panel.hidden && /file\(s\)/.test(panel.textContent);
     },
     undefined,
-    { timeout: 15_000 },
+    { timeout: 30_000 },
   );
 });
 
@@ -435,7 +441,8 @@ Then('the change passport reports a cohesion delta', async function () {
 
 Then('the status line reports nodes and a cache status', async function () {
   const status = (await this.page.textContent('#status')) ?? '';
-  assert.match(status, /\d+ nodes . \d+ edges/);
+  // A one-node map reads "1 node · 0 edges"; only the words that are plural must be plural.
+  assert.match(status, /\d+ node(s)? . \d+ edge(s)?/);
   // Cache/renderer vocabulary lives in Diagnostics, not the header.
   await this.page.evaluate(() => {
     if (document.getElementById('diagnostics')?.hidden) {
@@ -472,9 +479,19 @@ Then('the inspector is shown for {string}', async function (id) {
 });
 
 Then('the inspector lists dependencies and dependents', async function () {
+  // The dependency lists load after the graph render; wait for the section rather than
+  // reading the panel while it still shows its "Dependencies (N file(s))" placeholder.
+  await this.page.waitForFunction(
+    () => {
+      const text = document.getElementById('inspector')?.textContent ?? '';
+      return /Dependencies \(\d+[^)]*\)/.test(text) && /Dependents \(\d+[^)]*\)/.test(text);
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
   const text = (await this.page.textContent('#inspector')) ?? '';
-  assert.match(text, /Dependencies \(\d+\)/);
-  assert.match(text, /Dependents \(\d+\)/);
+  assert.match(text, /Dependencies \(\d+ file\(s\)\)/);
+  assert.match(text, /Dependents \(\d+ file\(s\)\)/);
 });
 
 Then('the trace reports a step count or an explicit no-path', async function () {

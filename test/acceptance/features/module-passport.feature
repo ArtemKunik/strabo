@@ -52,6 +52,7 @@ Feature: Module Passport
 
   @narrator
   Scenario: The narrator is offered but stays inert without configuration
+    When I reset the narrator setup
     When I switch to file detail
     And I select the "main.ts" node
     Then the inspector offers the narrator and reports it is off

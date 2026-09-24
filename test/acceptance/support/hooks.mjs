@@ -5,14 +5,14 @@ import { After, AfterAll, Before, BeforeAll, setDefaultTimeout } from '@cucumber
 import { chromium } from 'playwright';
 
 import { startServer, stopServer } from './server.mjs';
-import { ensureChangeRepo, ensureTimelineRepo } from './git-fixture.mjs';
+import { ensureChangeRepo, prepareTimelineRepo } from './git-fixture.mjs';
 
 setDefaultTimeout(60_000);
 
 let browser = null;
 
 BeforeAll(async () => {
-  ensureTimelineRepo();
+  prepareTimelineRepo();
   ensureChangeRepo();
   await startServer();
   browser = await chromium.launch();

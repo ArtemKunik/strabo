@@ -147,6 +147,16 @@ Then('the inspector shows the passport metrics for {string}', async function (id
 
 Then('the inspector reports members as not recorded', async function () {
   await this.openInspectorTab('members');
+  // The members section loads asynchronously; wait past its "Loading members…" placeholder
+  // before reading it, exactly as the listing steps do.
+  await this.page.waitForFunction(
+    () => {
+      const section = document.querySelector('#inspector [data-role="members"]');
+      return section != null && !/Loading members/.test(section.textContent ?? '');
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
   const text = (await this.page.textContent('#inspector [data-role="members"]')) ?? '';
   assert.match(text, /Members/);
   assert.match(text, /not recorded|not implemented/i);

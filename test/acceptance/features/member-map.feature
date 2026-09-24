@@ -111,6 +111,7 @@ Feature: Member map
 
   @member-view @narrator
   Scenario: The member map offers the narrator and stays inert without configuration
+    When I reset the narrator setup
     When I open the folder dialog
     And I go up one folder
     And I choose the "member-repo" folder

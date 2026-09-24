@@ -1828,9 +1828,13 @@ function renderSettingsView() {
     onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, 'Online risk lookup updated.'),
     onRestart: () => restartServer(),
     onNarratorChange: async (patch) => {
-      await saveServerSettings({ narrator: patch }, 'Narrator updated.');
+      const saved = await saveServerSettings({ narrator: patch }, 'Narrator updated.');
       // The server can change more than the patch asked for: a new endpoint host clears the
-      // stored key. Re-read `/settings` so the panel shows the key source it now has.
+      // stored key, because it cannot be redirected to another host.
+      if (saved?.narrator?.keyCleared) {
+        showToast('The endpoint host changed, so the stored key was removed.');
+      }
+      // Re-read `/settings` so the panel shows the key source it now has.
       await refreshNarratorSettings();
       renderSettingsView();
       await refreshNarratorStatus();
@@ -1891,8 +1895,9 @@ async function refreshNarratorStatus() {
 
 /** Write one server setting, then re-render; failures are shown in the panel, not thrown. */
 async function saveServerSettings(patch, successMessage) {
+  let saved = null;
   try {
-    await putServerSettings(patch);
+    saved = await putServerSettings(patch);
     settingsStatus = successMessage;
     settingsStatusError = false;
   } catch (error) {
@@ -1902,6 +1907,7 @@ async function saveServerSettings(patch, successMessage) {
   renderSettingsView();
   // The repository picker filters against the ceiling; refresh it so a change shows there.
   loadCatalogue().catch(() => {});
+  return saved;
 }
 
 async function putServerSettings(patch) {

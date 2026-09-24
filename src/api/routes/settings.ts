@@ -322,6 +322,27 @@ export function createSettingsRouter(
         const persisted = store.read();
         const currentEffective = effectiveNarratorConfig(env, persisted) ?? config.narrator;
 
+        // `reset: true` clears the persisted narrator setup, the live config, and any stored
+        // key — the inverse of the setup flow, so a test or operator can return the narrator
+        // to "off". A locked (environment-managed) field is left alone.
+        if (patch.reset === true) {
+          store.write({
+            narratorEndpoint: null,
+            narratorModel: null,
+            narratorKeyEnv: null,
+            narratorSendSource: null,
+            narratorBudget: null,
+          });
+          keyStore.clear();
+          const merged = effectiveNarratorConfig(env, store.read());
+          config.narrator = merged && (merged.endpoint || merged.model || merged.apiKeyEnv)
+            ? merged
+            : undefined;
+          const view = settingsView(config, defaultCeiling, store, keyStore, env);
+          response.json(view);
+          return;
+        }
+
         const endpoint = 'endpoint' in patch ? cleanStringOrNull(patch.endpoint) : undefined;
         const model = 'model' in patch ? cleanStringOrNull(patch.model) : undefined;
         const apiKeyEnv = 'apiKeyEnv' in patch ? cleanStringOrNull(patch.apiKeyEnv) : undefined;

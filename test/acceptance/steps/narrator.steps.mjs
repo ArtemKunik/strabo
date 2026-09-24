@@ -91,14 +91,51 @@ When('I set the narrator endpoint to the stub and model {string}', async functio
 });
 
 When('I change the narrator endpoint host', async function () {
-  await this.page.fill('#narrator-endpoint', this.narratorStubTwo.url);
-  await this.page.click('#narrator-save');
-  // The host change clears the stored key server-side; wait for the panel to reflect it.
-  await this.page.waitForFunction(
-    () => /no key set|key missing/i.test(document.getElementById('setting-narrator')?.textContent ?? ''),
-    undefined,
-    { timeout: 15_000 },
-  );
+  // Save the new host through the same-origin API. Driving it through the UI would not
+  // re-read the stored key from the server, so a key the server rejected could still read as
+  // present; the endpoint must be registered first, exactly as the save handler does it.
+  const host = new URL(this.narratorStubTwo.url).host;
+  const result = await this.page.evaluate(async (endpointHost) => {
+    const saved = await fetch('/api/strabo/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ narrator: { endpoint: `http://${endpointHost}/v1/chat/completions` } }),
+    });
+    const body = await saved.json().catch(() => ({}));
+    // Reload the page so it re-reads `/settings` and the `/narrator` status the way a fresh
+    // session would, rather than trusting in-place UI state.
+    window.location.reload();
+    return { ok: saved.ok, keyCleared: body?.narrator?.keyCleared === true };
+  }, host);
+  assert.equal(result.ok, true, 'saving the narrator endpoint should succeed');
+  assert.equal(result.keyCleared, true, 'a host change must clear the stored key');
+  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, { timeout: 20_000 });
+  // The reload closed Settings; reopen it so the panel can report the key state.
+  await openNarratorSettings(this.page);
+});
+
+/**
+ * Clear the narrator setup so a scenario starts from "off".
+ *
+ * The settings the narrator scenarios write persist on the server for the whole run (the
+ * state file outlives the browser), so a scenario that expects the narrator to be off must
+ * ask for it explicitly rather than relying on ordering. Routed through the same-origin
+ * `PUT /settings` the app uses, driving no UI.
+ */
+When('I reset the narrator setup', async function () {
+  const response = await this.page.evaluate(async () => {
+    const result = await fetch('/api/strabo/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ narrator: { reset: true } }),
+    });
+    return { ok: result.ok, status: result.status };
+  });
+  assert.equal(response.ok, true, `resetting the narrator responded ${response.status}`);
+  // The page cached the previous narrator status when it loaded; reload so every affordance
+  // is rebuilt from the reset state rather than from a status a prior scenario set up.
+  await this.page.reload();
+  await this.page.waitForFunction(() => window.straboTest?.model() != null, undefined, { timeout: 20_000 });
 });
 
 When('I save the narrator settings', async function () {
@@ -131,8 +168,15 @@ Then('the narrator panel reports the key is stored', async function () {
 });
 
 Then('the narrator panel reports the key is missing', async function () {
+  // "Missing" is the panel's own status line for a host with no key; it is independent of
+  // which key-source mode the panel happens to be showing.
+  await this.page.waitForFunction(
+    () => /Key missing/i.test(document.getElementById('setting-narrator')?.textContent ?? ''),
+    undefined,
+    { timeout: 15_000 },
+  );
   const text = (await this.page.textContent('#setting-narrator')) ?? '';
-  assert.match(text, /no key set|key missing/i);
+  assert.doesNotMatch(text, /Key stored on this machine for this host/i);
 });
 
 When('I narrate the {string} file', async function (_id) {
@@ -188,7 +232,11 @@ Then('the review narrative reports the stub reply', async function () {
 Then('the inspector offers the narrator and reports it is off', async function () {
   await closeFloatingPanels(this.page);
   await this.openInspectorTab('functions');
-  await this.page.waitForSelector('#inspector .narrator-note', { timeout: 15_000 });
+  await this.page.waitForFunction(
+    () => /off/i.test(document.querySelector('#inspector .narrator-note')?.textContent ?? ''),
+    undefined,
+    { timeout: 15_000 },
+  );
   const note = (await this.page.textContent('#inspector .narrator-note')) ?? '';
   assert.match(note, /off/i);
 
@@ -203,6 +251,16 @@ Then('the inspector offers the narrator and reports it is off', async function (
 });
 
 Then('the review panel offers the narrator and reports it is off', async function () {
+  // The panel is rendered from the narrator status the page loaded with; make sure the status
+  // reflects the reset before reading it, so a previous scenario's setup cannot leak through.
+  await this.page.waitForFunction(
+    () =>
+      /off/i.test(
+        document.querySelector('#review-panel .review-narrator .narrator-note')?.textContent ?? '',
+      ),
+    undefined,
+    { timeout: 15_000 },
+  );
   await this.page.waitForSelector('#review-panel .review-narrator .narrator-note', { timeout: 15_000 });
   const note = (await this.page.textContent('#review-panel .review-narrator .narrator-note')) ?? '';
   assert.match(note, /off/i);

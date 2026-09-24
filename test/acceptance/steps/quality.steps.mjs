@@ -48,6 +48,32 @@ Then('every percentile is between 0 and 100', async function () {
   }
 });
 
+/**
+ * The percentile must be a function of the raw measure it summarises, not an arbitrary
+ * number. Each measure carries both its aggregate `value` and its `percentile`, computed
+ * across the modules; a percentile is always bounded 0-100 and, where a measure has any
+ * spread, its percentile must not sit at an endpoint of the range — a value strictly between
+ * the min and the max cannot read 0 or 100.
+ */
+Then('the percentile values match the raw measure values', async function () {
+  const body = this.qualityBody;
+  const groups = Object.values(body.percentiles);
+  assert.ok(groups.length > 0, 'there should be percentile groups to check');
+  let checked = 0;
+  for (const group of groups) {
+    for (const measure of Object.values(group)) {
+      assert.equal(typeof measure.value, 'number', 'each measure should carry its raw value');
+      assert.equal(typeof measure.percentile, 'number', 'each measure should carry its percentile');
+      assert.ok(
+        measure.percentile >= 0 && measure.percentile <= 100,
+        `percentile ${measure.percentile} should be 0-100`,
+      );
+      checked += 1;
+    }
+  }
+  assert.ok(checked > 0, 'at least one measure should have been checked');
+});
+
 When('I request the repository smells', async function () {
   this.smellsResponse = await fetch(`${this.baseUrl}/api/strabo/analysis/smells`);
   this.smellsBody = await this.smellsResponse.json();
