@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { JSDOM } from 'jsdom';
 
+import { bundleStyles } from '../../scripts/styles.mjs';
+
 /**
  * The Review and History tabs are declared in the served markup and styled in the sheet.
  * They are wired by the browser controller, which runs on import, so the contract that can
@@ -15,7 +17,7 @@ import { JSDOM } from 'jsdom';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(here, '..', '..', 'ui');
 const html = fs.readFileSync(path.join(uiDir, 'index.html'), 'utf8');
-const styles = fs.readFileSync(path.join(uiDir, 'styles.css'), 'utf8');
+const styles = bundleStyles(uiDir);
 
 const dom = new JSDOM(html);
 const { document } = dom.window;

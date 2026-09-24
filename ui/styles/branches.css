@@ -1,0 +1,171 @@
+/* Branches: one row per branch, with divergence from the base drawn around a centre line. */
+.branches-panel li.branch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 6px 0 6px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.branches-panel li.branch-row::before {
+  display: none;
+}
+
+.branches-panel li.current-branch {
+  border-left-color: var(--accent);
+}
+
+.branches-panel li.selected-branch {
+  border-left-color: var(--status-warning);
+  background: var(--wash);
+}
+
+.branch-base select {
+  margin-left: 4px;
+  max-width: 60%;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--input-bg);
+  color: var(--ink-1);
+  font: inherit;
+  font-family: var(--font-mono);
+}
+
+.branch {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.branch:disabled {
+  color: var(--ink-2);
+  cursor: default;
+}
+
+.branch-meta,
+.branch-tags {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.branch-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.branch-tags .metric-delta {
+  border: 1px solid var(--line);
+}
+
+/* Fetch / Sync in the header, Push on a row: the only branch actions that write. */
+.branch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.branch-action {
+  padding: 1px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.branch-action:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.branch-action:disabled {
+  color: var(--ink-3);
+  cursor: default;
+}
+
+.divergence {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.divergence-track {
+  position: relative;
+  display: inline-block;
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--wash);
+}
+
+.divergence-track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--ink-3);
+}
+
+.divergence-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.divergence-fill.behind {
+  right: 50%;
+  border-radius: 3px 0 0 3px;
+  background: var(--ink-3);
+}
+
+.divergence-fill.ahead {
+  left: 50%;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.merge-verdict {
+  margin: 6px 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-s);
+  border-left: 3px solid var(--line);
+  background: var(--wash);
+}
+
+.merge-verdict.clean {
+  border-left-color: var(--status-good);
+}
+
+.merge-verdict.conflicted {
+  border-left-color: var(--status-critical);
+}
+

@@ -1,0 +1,222 @@
+.cluster {
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.cluster.series-1 { color: var(--series-1); border-color: color-mix(in srgb, var(--series-1) 42%, transparent); background: color-mix(in srgb, var(--series-1) 10%, transparent); }
+.cluster.series-2 { color: var(--series-2); border-color: color-mix(in srgb, var(--series-2) 42%, transparent); background: color-mix(in srgb, var(--series-2) 10%, transparent); }
+.cluster.series-3 { color: var(--series-3); border-color: color-mix(in srgb, var(--series-3) 42%, transparent); background: color-mix(in srgb, var(--series-3) 10%, transparent); }
+.cluster.series-other { color: var(--series-other); border-color: color-mix(in srgb, var(--series-other) 42%, transparent); background: color-mix(in srgb, var(--series-other) 10%, transparent); }
+
+.member-main h4 {
+  margin: 14px 0 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.member-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+/* The public surface of a barrel: one row per forwarded name, mono like the source it mirrors. */
+.member-reexports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member-reexport {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+  transition: transform 0.12s, border-color 0.12s, opacity 0.14s;
+}
+
+.member-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+/* Hover-to-trace: the hovered member and its recorded wiring stay lit; the rest recede. */
+.member-card.trace-unrelated {
+  opacity: 0.25;
+}
+
+.member-card.trace-hit {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.member-card.trace-source {
+  border-color: var(--accent);
+}
+
+.method-card {
+  border-left-color: var(--status-good);
+}
+
+.card-eyebrow {
+  color: var(--ink-3);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.card-signature {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.card-tag {
+  align-self: flex-start;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.card-tag.is-wired {
+  border-color: var(--status-good);
+  color: var(--status-good);
+}
+
+.card-metrics {
+  color: var(--ink-3);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.member-view.wiring-off .card-tag,
+.member-view.wiring-off .card-metrics {
+  visibility: hidden;
+}
+
+.member-dataflow {
+  margin-top: 16px;
+}
+
+.flow-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto 1.4fr;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.flow-panel {
+  min-height: 120px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.flow-panel header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.flow-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-panel ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.flow-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flow-divider {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+.flow-marker {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.flow-marker::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+.flow-divider::before,
+.flow-divider::after {
+  content: '';
+  flex: 1;
+  width: 1px;
+  background: linear-gradient(var(--line), var(--accent), var(--line));
+}
+
+.flow-divider-label {
+  writing-mode: vertical-rl;
+}
+
+.flow-divider-axis {
+  color: var(--ink-3);
+  font-size: 9px;
+  writing-mode: vertical-rl;
+}
+

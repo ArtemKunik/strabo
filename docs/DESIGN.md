@@ -179,7 +179,10 @@ test/acceptance/   Gherkin .feature browser acceptance specs
 ```
 
 `scripts/build-ui.mjs` bundles `ui/` into `public/` with esbuild (not minified, so the
-served code stays readable); `npm run build` runs it after `tsc`. The published package
+served code stays readable); `npm run build` runs it after `tsc`. The stylesheet is
+authored as one part per surface under `ui/styles/`; `ui/styles.css` lists them in cascade
+order and the build concatenates them into the single `public/styles.css` (`scripts/styles.mjs`,
+which the unit tests read too). The published package
 ships the built `public/`, so a consumer never needs a build step. The UI stays
 framework-free: `ui/view.js` is a small `h()` / `mount()` keyed renderer that panels adopt
 incrementally, and `ui/store.js` is the observable state store whose single subscription

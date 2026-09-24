@@ -1,0 +1,102 @@
+/* The reading route: a step-through control, then each unit's summary above its files. */
+.route-panel {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.route-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.route-counter {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.route-summary,
+.route-truncated {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 4px 0 8px;
+}
+
+.route-unit {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.route-unit h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.route-unit-why {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+.route-step {
+  display: block;
+  width: 100%;
+  text-align: left;
+  word-break: break-all;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+}
+
+.route-step.is-current {
+  background: var(--veiled-surface);
+  outline: 1px solid var(--line);
+}
+
+.route-unreached {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.route-unreached-file {
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.route-error-detail {
+  color: var(--ink-3);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.route-retry,
+.route-narrate-step {
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-1);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.route-retry:hover,
+.route-narrate-step:hover {
+  border-color: var(--accent, var(--ink-1));
+}
+
+.route-narrate-step:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.route-step-narrative {
+  margin: 4px 0 8px;
+}
+

@@ -1,0 +1,18 @@
+/* ---------------------------------------------------------------- Bottom meta */
+.bottom-meta {
+  /* The status line and index badge live here; on a narrow row the status truncates. */
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bottom-meta-item[hidden] {
+  display: none;
+}
+

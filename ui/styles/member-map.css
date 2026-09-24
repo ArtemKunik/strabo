@@ -1,0 +1,240 @@
+/* ---------------------------------------------------------------- Member map */
+.member-open {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.member-view {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: auto;
+  padding-bottom: 90px;
+  background: var(--bg-1);
+}
+
+.member-view.dim-unrelated .member-card.unrelated {
+  opacity: 0.25;
+}
+
+.member-header {
+  padding: 14px 20px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.member-crumb {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  word-break: break-all;
+  order: 2;
+  flex-basis: 100%;
+}
+
+.member-view h2 {
+  margin: 2px 0 10px;
+  font-size: 20px;
+}
+
+.member-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 20px;
+  border-block: 1px solid var(--line);
+  background: var(--veiled-surface);
+  backdrop-filter: blur(8px);
+}
+
+.tb-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+
+.member-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.member-control input[type='search'],
+.member-control select {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 12px;
+}
+
+.member-toolbar button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.member-toolbar button:hover {
+  color: var(--ink-1);
+  border-color: var(--accent);
+}
+
+.member-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--ink-3);
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+}
+
+.member-zoom button {
+  border: none;
+}
+
+.member-zoom button.active {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* stepped walkthrough footer */
+.member-walkthrough {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* Above the statusbar so the step line never covers it. Fixed to the viewport
+     in both fullscreen and floating member modes: the floating member window can
+     sit under sibling windows, and an in-flow bar would be covered by them. */
+  bottom: 26px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--veiled-surface);
+}
+
+.walk-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.walk-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line);
+  border: none;
+  padding: 0;
+}
+
+.walk-dot[aria-current="step"] {
+  background: var(--accent);
+}
+
+.member-step {
+  margin: 0;
+  padding: 8px 20px;
+  color: var(--ink-3);
+  font-size: 12px;
+  flex: 1;
+}
+
+.walk-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.member-explain {
+  margin: 8px 20px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.member-narrator {
+  margin: 8px 20px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.member-narrator .narrator-block {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.member-narrator .narrator-note,
+.member-narrator .narrator-setup {
+  margin: 0;
+}
+
+.member-narrator .narrator-reply {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.member-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+  padding: 0 20px;
+}
+
+.member-main {
+  min-width: 0;
+}
+
+.member-type-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.member-count {
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.member-clusters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+

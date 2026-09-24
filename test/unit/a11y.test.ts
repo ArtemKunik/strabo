@@ -4,10 +4,11 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { bundleStyles } from '../../scripts/styles.mjs';
 import { ROVING_KEYS, rovingIndex } from '../../ui/strabo-a11y.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const styles = fs.readFileSync(path.resolve(here, '..', '..', 'ui', 'styles.css'), 'utf8');
+const styles = bundleStyles(path.resolve(here, '..', '..', 'ui'));
 
 test('rovingIndex moves and wraps in both orientations', () => {
   assert.equal(rovingIndex(0, 3, 'ArrowRight'), 1);

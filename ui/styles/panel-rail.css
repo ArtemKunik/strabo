@@ -1,0 +1,133 @@
+/* --------------------------------------------------------- Panel rail */
+/*
+ * The dock is a vertical rail on the graph screen's right edge: pinned panels, any open
+ * panel, then "More" for the rest. Each chip draws its icon from `data-glyph` above its
+ * label, so the chip's text is still just the label. Floating windows open to its left.
+ */
+.float-dock {
+  --rail-width: 64px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  width: var(--rail-width);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 4px;
+  border-left: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+.graph-wrap > .graph {
+  right: 64px;
+}
+
+.dock-chip,
+.dock-more {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+
+.dock-chip::before,
+.dock-more::before {
+  content: attr(data-glyph);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.dock-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.dock-chip:hover:not(:disabled),
+.dock-more:hover {
+  background: var(--bg-3);
+  color: var(--ink-1);
+}
+
+.dock-more {
+  margin-top: auto;
+}
+
+/* "More": the unpinned panels, opening to the left of the rail. */
+.dock-more-menu {
+  position: absolute;
+  right: calc(100% + 6px);
+  bottom: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  width: 260px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-2);
+}
+
+.dock-more-menu .dock-chip {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.dock-more-menu .dock-chip::before {
+  width: 18px;
+  font-size: 14px;
+}
+
+.dock-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.dock-chip.collapsed {
+  border-style: dashed;
+}
+
+/* Flash the chip whose window just opened, so a panel placed in the rail is not missed. */
+.dock-chip.is-flash {
+  animation: dock-chip-flash 0.7s ease-out;
+}
+
+@keyframes dock-chip-flash {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  25% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 55%, transparent);
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+}
+

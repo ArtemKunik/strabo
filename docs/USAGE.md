@@ -127,7 +127,8 @@ applied immediately:
 The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
 colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
 together (the graph stylesheet reads `--graph-*` at runtime). Every theme is a full token
-set in `ui/styles.css`, so the terminal, the graph, and the panels all follow. Reduce motion
+set in `ui/styles/themes-dark.css` or `ui/styles/themes-light.css` (the default dark set is
+`ui/styles/tokens.css`), so the terminal, the graph, and the panels all follow. Reduce motion
 sets `data-reduce-motion`, which the graph viewport also honours.
 
 **Rendering** chooses the map's renderer: **GPU rendering (WebGL2)** on draws on the GPU,
