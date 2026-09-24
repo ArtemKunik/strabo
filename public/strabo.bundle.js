@@ -99,6 +99,7 @@ function createVirtualList({
 var API_PATH = "/api/strabo";
 var MIN_DIAMETER = 22;
 var MAX_DIAMETER = 62;
+var MAX_LOC_DIAMETER = 74;
 var MIN_UNIT_DIAMETER = 48;
 var MAX_UNIT_DIAMETER = 130;
 var MIN_SHELF_DIAMETER = 26;
@@ -245,7 +246,7 @@ function mapCounts(model) {
   }));
   return { tests, modules, entries };
 }
-function readingLegend(model) {
+function readingLegend(model, locLens = false) {
   if (model?.systemUnit) {
     return [
       "box = unit frame",
@@ -263,7 +264,12 @@ function readingLegend(model) {
       "support = unit footer"
     ];
   }
-  return ["size = dependents", "island = directory", "diamond = test", "star = entry"];
+  return [
+    locLens ? "size = lines of code" : "size = dependents",
+    "island = directory",
+    "diamond = test",
+    "star = entry"
+  ];
 }
 function shortcutSheet() {
   return [
@@ -273,6 +279,7 @@ function shortcutSheet() {
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
     { keys: "L", action: "Show a file name under every file" },
+    { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
     { keys: "C", action: "Show recorded function calls instead of imports" },
     { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
     { keys: "S", action: "View the selected file\u2019s source" },
@@ -328,6 +335,10 @@ function withUnitHotspots(cards, report) {
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
+function locDiameter(lines) {
+  const scaled = Math.sqrt(Math.max(0, lines ?? 0)) * 2.4 + MIN_DIAMETER;
+  return Math.max(MIN_DIAMETER, Math.min(MAX_LOC_DIAMETER, Math.round(scaled)));
 }
 function edgeStrokeWidth(weight) {
   const count = Number.isFinite(weight) && weight > 0 ? weight : 1;
@@ -416,6 +427,10 @@ function buildElements(model) {
       // its component count instead of blast radius; the hub ring is reserved for files,
       // so a unit's only outline is selection (L18).
       diameter: nodeDiameter(node),
+      // The large-file lens reads these: `lines` is the file's line count (absent on
+      // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
+      lines: typeof node.lines === "number" ? node.lines : null,
+      locDiameter: locDiameter(node.lines),
       hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf"
     },
     position: positionOf(positions.get(node.id))
@@ -1606,20 +1621,25 @@ function memberMapSteps(memberMap, context2 = {}) {
   const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, "fields");
   const methods = totalMembers(memberMap, "methods");
+  const reExports = memberMap?.reExports ?? [];
   const flow = memberMap?.dataFlow;
   const consumers = context2.consumers ?? null;
   const subject = types.length > 1 ? `This file (${types.length} types) contains` : `${primary?.name ?? "This file"} contains`;
+  const reExportModules = new Set(reExports.map((entry) => entry.from)).size;
+  const barrel = fields === 0 && methods === 0 && reExports.length > 0;
+  const fingerprint = barrel ? `This file re-exports ${reExports.length} name(s) from ${reExportModules} module(s).` : `${subject} ${fields} field(s) and ${methods} behavior(s).`;
+  const membersCaption = barrel ? `${reExports.length} re-export(s) and no declared members.` : `${fields} field(s) and ${methods} method(s) recorded.`;
   const wiring2 = flow?.available === false ? "No field-to-behavior wiring was recorded in the scan." : `${(flow?.transforms ?? []).length} transform(s) read and write state across ${(flow?.resources ?? []).length} shared field(s).`;
   return [
     {
       key: "fingerprint",
       label: "fingerprint",
-      caption: `${subject} ${fields} field(s) and ${methods} behavior(s).`
+      caption: fingerprint
     },
     {
       key: "members",
       label: "members",
-      caption: `${fields} field(s) and ${methods} method(s) recorded.`
+      caption: membersCaption
     },
     { key: "wiring", label: "wiring", caption: wiring2 },
     {
@@ -1750,6 +1770,11 @@ function layoutFlowGraph(graph, { width = 680, nodeWidth = 170, nodeHeight = 30,
 function explainClass(memberMap) {
   const type = (memberMap?.types ?? [])[0];
   if (!type) {
+    const reExports = memberMap?.reExports ?? [];
+    if (reExports.length > 0) {
+      const modules = new Set(reExports.map((entry) => entry.from)).size;
+      return `This file declares no members; it re-exports ${reExports.length} name(s) from ${modules} module(s).`;
+    }
     return "No type was recorded for this file.";
   }
   const flow = memberMap.dataFlow;
@@ -2293,6 +2318,11 @@ function stylesheet() {
     { selector: "node.kind-shelf", style: { "border-width": 1.5, "border-style": "dashed", "border-color": theme.nodeLine, opacity: 0.85 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
+    // The large-file lens swaps the size encoding to lines of code and hides files under
+    // the threshold. `loc-sized` outranks the base `node` width/height mapping; the mark
+    // is a heavier neutral ring (weight, not hue), so it never collides with a status.
+    { selector: "node.loc-sized", style: { width: "data(locDiameter)", height: "data(locDiameter)" } },
+    { selector: "node.large-file", style: { "border-width": 2.5, "border-color": theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
     // the card's header row. Selection is the only outline it earns (L18).
     { selector: "node.kind-unit, node.kind-shelf", style: { "text-opacity": 0, "border-width": 1.5 } },
@@ -2327,6 +2357,7 @@ function stylesheet() {
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
+    { selector: "node.loc-hidden", style: { display: "none" } },
     { selector: "edge.edge-hidden", style: { display: "none" } },
     { selector: "edge.edge-kind-hidden", style: { display: "none" } },
     // Level of detail: at far zoom on a large graph the unweighted edges drop from the draw
@@ -2717,6 +2748,9 @@ var RESET_CLASSES = [
   "label-hidden",
   "filtered-out",
   "tier-hidden",
+  "loc-hidden",
+  "loc-sized",
+  "large-file",
   "tier-upward",
   "tier-skip",
   "edge-tier-upward",
@@ -3021,6 +3055,27 @@ function applyTier(cy, tierByFile, filterTier = "all") {
       }
       const keep = filterTier === "all" || tier === filterTier;
       node.toggleClass("tier-hidden", !keep);
+    }
+  });
+}
+function applyLocLens(cy, threshold, on2) {
+  const enabled = on2 === true;
+  const min = Number.isFinite(threshold) && threshold > 0 ? threshold : 0;
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      const kind = node.data("kind");
+      const lines = node.data("lines");
+      const isFile = kind !== "unit" && kind !== "shelf";
+      if (!enabled || !isFile || typeof lines !== "number") {
+        node.removeClass("loc-hidden");
+        node.removeClass("large-file");
+        node.removeClass("loc-sized");
+        continue;
+      }
+      const large = lines >= min;
+      node.toggleClass("loc-hidden", !large);
+      node.toggleClass("large-file", large);
+      node.addClass("loc-sized");
     }
   });
 }
@@ -3487,6 +3542,14 @@ function createView(container) {
      */
     applyTier(tierByFile, filterTier = "all") {
       applyTier(cy, tierByFile, filterTier);
+    },
+    /**
+     * The large-file lens: keep only files at or above `threshold` lines and size them by
+     * lines of code. Pass `on: false` to clear it and restore the blast-radius encoding.
+     */
+    applyLocLens(threshold, on2) {
+      applyLocLens(cy, threshold, on2);
+      applyLabelBudget(cy, true);
     },
     /**
      * Mark the files and edges in a wrong-way dependency. Pass null to clear.
@@ -4273,10 +4336,12 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     for (const controller of controllers) {
       const win = controller.window;
       if (win.hidden) continue;
+      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
+      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
       const left = parseFloat(win.style.left) || 0;
       const top = parseFloat(win.style.top) || 0;
-      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - 60))}px`;
-      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
+      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
     }
   });
   renderDock();
@@ -6863,8 +6928,10 @@ function setAttribute(dom, name, value) {
 function renderMembers(container, result) {
   container.replaceChildren();
   const symbols = result?.symbols ?? [];
+  const memberMap = result.memberMap;
+  const reExports = memberMap?.reExports ?? [];
   const title = document.createElement("h3");
-  title.textContent = `Members (${symbols.length})`;
+  title.textContent = reExports.length > 0 ? `Members (${symbols.length}) \xB7 ${reExports.length} re-export(s)` : `Members (${symbols.length})`;
   container.append(title);
   if (!result || result.available === false) {
     const note3 = document.createElement("p");
@@ -6873,20 +6940,19 @@ function renderMembers(container, result) {
     container.append(note3);
     return;
   }
-  if (symbols.length === 0) {
+  if (symbols.length === 0 && reExports.length === 0) {
     const note3 = document.createElement("p");
     note3.className = "unavailable";
     note3.textContent = "No members declared.";
     container.append(note3);
     return;
   }
-  const memberMap = result.memberMap;
   const types = memberMap?.types ?? [];
   if (types.length > 0) {
     for (const type of types) {
       container.append(renderMemberType(type));
     }
-  } else {
+  } else if (symbols.length > 0) {
     const list = document.createElement("ul");
     for (const symbol of symbols.slice(0, 200)) {
       const item = document.createElement("li");
@@ -6896,6 +6962,9 @@ function renderMembers(container, result) {
       list.append(item);
     }
     container.append(list);
+  }
+  if (reExports.length > 0) {
+    container.append(buildReExportSection(reExports));
   }
   container.append(renderDataFlow(memberMap?.dataFlow));
 }
@@ -7092,16 +7161,46 @@ function buildMemberMain(memberMap, view2, data) {
   const main = document.createElement("section");
   main.className = "member-main";
   const clusters = memberClusters(memberMap);
-  for (const type of memberMap?.types ?? []) {
+  const types = memberMap?.types ?? [];
+  const reExports = memberMap?.reExports ?? [];
+  for (const type of types) {
     main.append(buildTypeSection(type, view2, clusters, {}));
   }
-  if ((memberMap?.types ?? []).length === 0) {
+  if (types.length === 0 && reExports.length === 0) {
     main.append(unavailableNote(memberMap?.detail ?? "No members declared for this file."));
+  }
+  if (reExports.length > 0) {
+    main.append(buildReExportSection(reExports));
   }
   if (view2.dataFlow !== false) {
     main.append(buildDataFlow(memberMap, data?.consumerIds ?? null));
   }
   return main;
+}
+function buildReExportSection(reExports) {
+  const section2 = document.createElement("section");
+  section2.className = "member-type member-reexports";
+  section2.dataset.role = "re-exports";
+  const heading2 = document.createElement("h3");
+  heading2.className = "member-type-name";
+  heading2.textContent = "Public surface";
+  const count = document.createElement("span");
+  count.className = "member-count";
+  count.textContent = `${reExports.length} re-export(s)`;
+  heading2.append(count);
+  section2.append(heading2);
+  const list = document.createElement("ul");
+  list.className = "member-reexports-list";
+  for (const entry of reExports) {
+    const item = document.createElement("li");
+    item.className = "member-reexport";
+    const kind = entry.typeOnly ? "type " : "";
+    const name = entry.name === "*" ? `*` : `{ ${entry.name} }`;
+    item.textContent = `export ${kind}${name} from '${entry.from}'`;
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
 }
 function buildMemberInsights(data, memberMap) {
   const insights = document.createElement("aside");
@@ -7676,7 +7775,15 @@ function buildHealth(report, metrics) {
     const line = document.createElement("p");
     line.className = "health-metrics";
     line.dataset.role = "health-metrics";
-    line.textContent = `${metrics.directImporters} importer(s) \xB7 ${metrics.blastRadius} blast radius \xB7 ${metrics.directImports} direct import(s)`;
+    const parts = [
+      `${metrics.directImporters} importer(s)`,
+      `${metrics.blastRadius} blast radius`,
+      `${metrics.directImports} direct import(s)`
+    ];
+    if (metrics.reExports > 0) {
+      parts.push(`${metrics.reExports} re-exported module(s)`);
+    }
+    line.textContent = parts.join(" \xB7 ");
     section2.append(line);
   }
   if (!report || !Array.isArray(report.axes) || report.axes.length === 0) {
@@ -9363,15 +9470,23 @@ function renderDriftChart(container, drift) {
   const legend = document.createElement("div");
   legend.className = "drift-legend";
   legend.dataset.role = "drift-legend";
-  for (const entry of series) {
+  series.forEach((entry, index) => {
     const item = document.createElement("span");
     item.className = "drift-legend-item";
     const values = (entry.points ?? []).map(
       (point) => point.value === null || point.value === void 0 ? "\u2014" : String(point.value)
     );
-    item.textContent = `${entry.label}: ${values.join(" \u2192 ")}`;
+    const shown = values.length <= 2 ? values.join(" \u2192 ") : `${values[0]} \u2192 \u2026 \u2192 ${values[values.length - 1]}`;
+    const swatch = document.createElement("span");
+    swatch.className = `drift-legend-swatch ${driftSeriesClass(index)}`;
+    swatch.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.className = "drift-legend-text";
+    text.textContent = `${entry.label}: ${shown}`;
+    item.title = `${entry.label}: ${values.join(" \u2192 ")}`;
+    item.append(swatch, text);
     legend.append(item);
-  }
+  });
   container.append(legend);
 }
 function renderTimeline(container, result, onSelect2, options = {}) {
@@ -9486,6 +9601,7 @@ function renderDiagnostics(container, model, runtime = {}) {
 }
 var LEGEND_SWATCHES = {
   "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "size = lines of code": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
   "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
@@ -9494,11 +9610,11 @@ var LEGEND_SWATCHES = {
   "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
   "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))"
 };
-function renderLegend(container, model) {
+function renderLegend(container, model, options = {}) {
   container.replaceChildren();
   const guide = document.createElement("div");
   guide.className = "legend-guide";
-  for (const text of readingLegend(model)) {
+  for (const text of readingLegend(model, options.locLens === true)) {
     const item = document.createElement("span");
     item.className = "legend-item";
     const swatch = document.createElement("span");
@@ -11095,6 +11211,15 @@ var THEME_OPTIONS = [
     ]
   }
 ];
+var LOC_THRESHOLD_DEFAULT = 300;
+var LOC_THRESHOLD_MAX = 1e6;
+function sanitizeLocThreshold(value) {
+  const number = typeof value === "number" ? value : Number.parseInt(value, 10);
+  if (!Number.isFinite(number) || number < 1) {
+    return null;
+  }
+  return Math.min(Math.round(number), LOC_THRESHOLD_MAX);
+}
 function defaultSettings() {
   return {
     theme: "system",
@@ -11102,7 +11227,8 @@ function defaultSettings() {
     labels: true,
     allLabels: false,
     reduceMotion: false,
-    commitEnabled: false
+    commitEnabled: false,
+    locThreshold: LOC_THRESHOLD_DEFAULT
   };
 }
 function sanitize(parsed, defaults) {
@@ -11116,6 +11242,8 @@ function sanitize(parsed, defaults) {
   if (typeof parsed.allLabels === "boolean") settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
   if (typeof parsed.commitEnabled === "boolean") settings.commitEnabled = parsed.commitEnabled;
+  const locThreshold = sanitizeLocThreshold(parsed.locThreshold);
+  if (locThreshold !== null) settings.locThreshold = locThreshold;
   return settings;
 }
 function readSettings(storage = globalThis.localStorage) {
@@ -11221,6 +11349,19 @@ function checkboxInput(checked, onChange) {
   input.type = "checkbox";
   input.checked = Boolean(checked);
   input.addEventListener("change", () => onChange(input.checked));
+  return input;
+}
+function numberInput(value, fallback, onChange) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "1";
+  input.step = "1";
+  input.value = value ?? "";
+  input.addEventListener("change", () => {
+    const next = sanitizeLocThreshold(input.value);
+    input.value = String(next ?? fallback);
+    onChange(next ?? fallback);
+  });
   return input;
 }
 function section(title) {
@@ -11513,6 +11654,11 @@ function renderSettings(container, handlers = {}) {
     ),
     field("Show node labels", checkboxInput(prefs.labels, (value) => handlers.onPref?.("labels", value))),
     field("Show a file name under every file", checkboxInput(prefs.allLabels, (value) => handlers.onPref?.("allLabels", value))),
+    field(
+      "Large-file threshold (lines)",
+      numberInput(prefs.locThreshold, LOC_THRESHOLD_DEFAULT, (value) => handlers.onPref?.("locThreshold", value))
+    ),
+    note2("The large-file lens (canvas \u201CZ\u201D) keeps files at or above this line count and sizes them by lines of code."),
     note2("Preferences are stored in this browser.")
   );
   container.append(local);
@@ -21771,6 +21917,21 @@ function extractControl(carry, chunk) {
   return { text: text + partial, directives, carry: "" };
 }
 
+// ui/strabo-terminal-menu.js
+function terminalMenuItems({ hasSelection = false } = {}) {
+  return [
+    {
+      id: "copy",
+      label: "\u29C9 Copy",
+      hint: "selection",
+      ...hasSelection ? {} : { title: "Select text in the terminal first" }
+    },
+    { id: "paste", label: "\u2913 Paste", hint: "clipboard" },
+    { separator: true },
+    { id: "select-all", label: "Select all" }
+  ];
+}
+
 // ui/strabo-terminal.js
 var LAYOUT_PREFIX = "strabo.terminal.layout.";
 var BUFFER_LIMIT = 256 * 1024;
@@ -22379,29 +22540,73 @@ function initTerminalScreen(container, hooks = {}) {
       onPick: (id) => openSession(id)
     });
   }
-  function toolbarButton(label, hint, action) {
+  async function pasteInto(view2) {
+    view2.term.focus();
+    if (typeof navigator.clipboard?.readText !== "function") {
+      notify("Press Ctrl+V to paste.");
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        view2.term.paste(text);
+      }
+    } catch {
+      notify("The browser blocked clipboard access \u2014 press Ctrl+V to paste.");
+    }
+  }
+  function onContextMenu(event) {
+    if (screen.hidden) {
+      return;
+    }
+    const paneEl = event.target.closest?.(".terminal-pane");
+    const leaf = paneEl ? findPane(layout, paneEl.dataset.paneId) : null;
+    const view2 = leaf?.sessionId ? views.get(leaf.sessionId) : null;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!view2) {
+      return;
+    }
+    const selection = view2.term.getSelection();
+    const actions = {
+      copy: selection ? () => copyText(selection) : null,
+      paste: () => pasteInto(view2),
+      "select-all": () => view2.term.selectAll()
+    };
+    const items = terminalMenuItems({ hasSelection: selection !== "" }).map(
+      (item) => item.separator || !actions[item.id] ? item : { ...item, action: actions[item.id] }
+    );
+    showContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: view2.meta?.title ?? "Terminal",
+      items
+    });
+  }
+  function toolbarButton(glyph, label, hint, action) {
     const button3 = document.createElement("button");
     button3.type = "button";
     button3.className = "terminal-toolbar-button";
-    button3.textContent = label;
-    if (hint) {
-      button3.title = `${label} (${hint})`;
-    }
+    button3.textContent = glyph;
+    button3.setAttribute("aria-label", label);
+    button3.title = hint ? `${label} (${hint})` : label;
     button3.addEventListener("click", action);
     return button3;
   }
   function buildToolbar() {
     toolbarEl.replaceChildren();
-    const newButton = toolbarButton("New shell", "Ctrl+Shift+T", () => {
+    const newButton = toolbarButton("+", "New shell", "Ctrl+Shift+T", () => {
       newSession().catch(handleError);
     });
-    const runButton = toolbarButton("Run\u2026", "", () => openRunMenu(runButton));
-    const splitButton = toolbarButton("Split", "Ctrl+Shift+E", () => {
+    newButton.classList.add("terminal-new");
+    const runButton = toolbarButton("\u25BE", "Run a command", "", () => openRunMenu(runButton));
+    runButton.classList.add("terminal-run");
+    const spacer = document.createElement("span");
+    spacer.className = "terminal-toolbar-spacer";
+    const splitButton = toolbarButton("\u25EB", "Split pane", "Ctrl+Shift+E", () => {
       splitActive("row").catch(handleError);
     });
-    const switchButton = toolbarButton("Sessions", "Ctrl+K", openSwitcher);
-    switchButton.id = "terminal-switcher-button";
-    toolbarEl.append(newButton, runButton, splitButton, switchButton);
+    toolbarEl.append(newButton, runButton, spacer, splitButton);
   }
   function openRunMenu(anchor) {
     loadPresets(resolveRepo().root).then(
@@ -22496,6 +22701,7 @@ function initTerminalScreen(container, hooks = {}) {
   buildToolbar();
   renderLayoutDom();
   screen.addEventListener("keydown", onKeydown, true);
+  screen.addEventListener("contextmenu", onContextMenu);
   window.addEventListener("resize", onWindowResize);
   window.addEventListener("beforeunload", persistNow);
   repoSelect?.addEventListener("change", onRepoChange);
@@ -22549,6 +22755,7 @@ function initTerminalScreen(container, hooks = {}) {
       resizeObserver?.disconnect();
       resizeObserver = null;
       screen.removeEventListener("keydown", onKeydown, true);
+      screen.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("resize", onWindowResize);
       window.removeEventListener("beforeunload", persistNow);
       repoSelect?.removeEventListener("change", onRepoChange);
@@ -22590,6 +22797,8 @@ var store = createStore({
     edgeKind: "imports",
     /** The co-change coupling lens: off by default, since it needs a git history pass. */
     coChange: false,
+    /** The large-file lens: keep only files at or above the line threshold. Off by default. */
+    locLens: false,
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: "off",
     pathMode: false,
@@ -22654,6 +22863,9 @@ function readViewPrefs(repository) {
     if (parsed.coChange === true) {
       prefs.coChange = true;
     }
+    if (parsed.locLens === true) {
+      prefs.locLens = true;
+    }
     return prefs;
   } catch {
     return null;
@@ -22668,7 +22880,8 @@ function writeViewPrefs() {
         overlay: state.overlay,
         filter: state.filter,
         edgeKind: state.edgeKind,
-        coChange: state.coChange
+        coChange: state.coChange,
+        locLens: state.locLens
       })
     );
   } catch {
@@ -22710,6 +22923,9 @@ function applyViewPrefs() {
   }
   if (prefs.coChange) {
     state.coChange = true;
+  }
+  if (prefs.locLens) {
+    state.locLens = true;
   }
 }
 var view = createView(document.getElementById("graph"));
@@ -22801,6 +23017,7 @@ var elements = {
   tbCalls: document.getElementById("tb-calls"),
   tbCoChange: document.getElementById("tb-cochange"),
   tbLabels: document.getElementById("tb-labels"),
+  tbLoc: document.getElementById("tb-loc"),
   tbTimeline: document.getElementById("tb-timeline"),
   tbReview: document.getElementById("tb-review"),
   tbRisk: document.getElementById("tb-risk"),
@@ -22948,9 +23165,10 @@ async function scan({ refresh = false } = {}) {
     view.focusFile(null);
     applyFilterToView();
     applyTierLens();
+    applyLocLens2();
     applyEdgeKindLens();
     applyCoChangeLens();
-    renderLegend(elements.legend, model);
+    renderLegend(elements.legend, model, { locLens: state.mode === "file" && state.locLens });
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
       renderer: rendererName(),
@@ -23685,6 +23903,7 @@ document.addEventListener("keydown", (event) => {
   else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
   else if (key === "h" && state.mode === "file") elements.tbCoChange?.click();
   else if (key === "l" && state.mode === "file") elements.tbLabels?.click();
+  else if (key === "z" && state.mode === "file") elements.tbLoc?.click();
   else if (key === "s" && selected && isFileNode(selected)) viewSource(selected);
   else if (key === "t") elements.tbTimeline.click();
   else if (key === "r") elements.tbReview.click();
@@ -23930,6 +24149,9 @@ function setClientPref(key, value) {
   writeSettings(clientPrefs);
   applyClientPrefs();
   updateLabelsButton();
+  if (key === "locThreshold") {
+    applyLocLens2();
+  }
   renderSettingsView();
   if (key === "commitEnabled" && state.overlay === "impact") {
     applyOverlay();
@@ -24631,6 +24853,29 @@ function updateLabelsButton() {
   elements.tbLabels.classList.toggle("active", on2);
   elements.tbLabels.setAttribute("aria-pressed", String(on2));
 }
+function applyLocLens2() {
+  const enabled = state.mode === "file" && state.locLens;
+  view.applyLocLens(clientPrefs.locThreshold, enabled);
+  updateLocButton();
+}
+function toggleLocLens() {
+  if (state.mode !== "file") {
+    return;
+  }
+  state.locLens = !state.locLens;
+  applyLocLens2();
+  schedulePrefsSave();
+}
+function updateLocButton() {
+  if (!elements.tbLoc) {
+    return;
+  }
+  const shown = state.mode === "file";
+  const on2 = shown && state.locLens;
+  elements.tbLoc.hidden = !shown;
+  elements.tbLoc.classList.toggle("active", on2);
+  elements.tbLoc.setAttribute("aria-pressed", String(on2));
+}
 function updateOutsideButton() {
   if (!elements.tbOutside) {
     return;
@@ -25079,6 +25324,9 @@ if (elements.tbCoChange) {
 if (elements.tbLabels) {
   elements.tbLabels.addEventListener("click", () => setClientPref("allLabels", !clientPrefs.allLabels));
 }
+if (elements.tbLoc) {
+  elements.tbLoc.addEventListener("click", toggleLocLens);
+}
 elements.tbBranches.addEventListener("click", () => {
   toggleBranches().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
@@ -25139,6 +25387,7 @@ function positionOverflowMenu() {
 if (elements.tbOverflow) {
   elements.tbOverflow.addEventListener("click", (event) => {
     event.stopPropagation();
+    for (const closeHeaderPopover of headerPopoverClosers) closeHeaderPopover();
     if (elements.tbOverflowMenu.hidden) {
       openOverflowMenu();
     } else {
@@ -25170,6 +25419,70 @@ if (elements.tbOverflow) {
     if (!event.target.closest?.(".tb-overflow-wrap")) closeOverflowMenu();
   });
 }
+var headerPopoverClosers = [];
+function bindHeaderPopover(toggle, popover) {
+  if (!toggle || !popover) {
+    return;
+  }
+  const close = ({ restoreFocus = false } = {}) => {
+    if (popover.hidden) return;
+    popover.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    if (restoreFocus) toggle.focus();
+  };
+  headerPopoverClosers.push(close);
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeOverflowMenu();
+    if (!popover.hidden) {
+      close();
+      return;
+    }
+    for (const closeOther of headerPopoverClosers) closeOther();
+    popover.hidden = false;
+    toggle.setAttribute("aria-expanded", "true");
+    popover.querySelector("button:not(:disabled), select")?.focus();
+  });
+  popover.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      event.preventDefault();
+      close({ restoreFocus: true });
+    }
+  });
+  popover.addEventListener("click", (event) => {
+    if (event.target.closest?.('[role="menuitem"]')) close();
+  });
+  document.addEventListener("click", (event) => {
+    if (!toggle.parentElement?.contains(event.target)) close();
+  });
+}
+bindHeaderPopover(document.getElementById("repo-menu-toggle"), document.getElementById("repo-menu"));
+bindHeaderPopover(document.getElementById("view-menu-toggle"), document.getElementById("view-menu"));
+var viewSummary = document.getElementById("view-summary");
+function updateViewSummary() {
+  if (!viewSummary) return;
+  const text = (select) => select.selectedOptions[0]?.textContent.trim() ?? "";
+  const parts = [text(elements.detail)];
+  if (elements.tier.value !== "off") parts.push(text(elements.tier));
+  if (elements.overlay.value !== "none") parts.push(text(elements.overlay));
+  viewSummary.textContent = parts.filter(Boolean).join(" \xB7 ");
+}
+var selectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+for (const select of [elements.detail, elements.tier, elements.overlay]) {
+  Object.defineProperty(select, "value", {
+    configurable: true,
+    get() {
+      return selectValue.get.call(this);
+    },
+    set(next) {
+      selectValue.set.call(this, next);
+      updateViewSummary();
+    }
+  });
+  select.addEventListener("change", updateViewSummary);
+}
+updateViewSummary();
 function toggleShortcuts() {
   floatingWindows?.find?.((controller) => controller.key === "shortcuts")?.toggle();
 }
@@ -25487,6 +25800,9 @@ view.onContext((target, originalEvent) => {
 });
 document.addEventListener("contextmenu", (event) => {
   if (event.target.closest?.('input, select, textarea, [contenteditable="true"], dialog')) {
+    return;
+  }
+  if (event.target.closest?.(".terminal-screen")) {
     return;
   }
   if (event.target.closest?.("#graph")) {
@@ -25895,7 +26211,7 @@ var floatingWindows = initFloatingWindows({
       key: "passport",
       element: elements.passportPanel,
       title: "Repository passport",
-      dockLabel: "Passport",
+      dockLabel: "Repo passport",
       width: 460,
       onOpen: () => {
         showPassport().catch(() => {

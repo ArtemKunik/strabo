@@ -105,6 +105,8 @@ const store = createStore({
     edgeKind: 'imports',
     /** The co-change coupling lens: off by default, since it needs a git history pass. */
     coChange: false,
+    /** The large-file lens: keep only files at or above the line threshold. Off by default. */
+    locLens: false,
     /** The tier lens: 'off', 'all' to colour every tier, or one tier to colour and filter. */
     tier: 'off',
     pathMode: false,
@@ -179,6 +181,9 @@ function readViewPrefs(repository) {
     if (parsed.coChange === true) {
       prefs.coChange = true;
     }
+    if (parsed.locLens === true) {
+      prefs.locLens = true;
+    }
     return prefs;
   } catch {
     return null;
@@ -195,6 +200,7 @@ function writeViewPrefs() {
         filter: state.filter,
         edgeKind: state.edgeKind,
         coChange: state.coChange,
+        locLens: state.locLens,
       }),
     );
   } catch {
@@ -244,6 +250,10 @@ function applyViewPrefs() {
   // The co-change lens is remembered, but its report is only fetched when file mode draws it.
   if (prefs.coChange) {
     state.coChange = true;
+  }
+  // The large-file lens needs a line count, which only file nodes carry.
+  if (prefs.locLens) {
+    state.locLens = true;
   }
 }
 
@@ -365,6 +375,7 @@ const elements = {
   tbCalls: document.getElementById('tb-calls'),
   tbCoChange: document.getElementById('tb-cochange'),
   tbLabels: document.getElementById('tb-labels'),
+  tbLoc: document.getElementById('tb-loc'),
   tbTimeline: document.getElementById('tb-timeline'),
   tbReview: document.getElementById('tb-review'),
   tbRisk: document.getElementById('tb-risk'),
@@ -546,9 +557,10 @@ async function scan({ refresh = false } = {}) {
     view.focusFile(null);
     applyFilterToView();
     applyTierLens();
+    applyLocLens();
     applyEdgeKindLens();
     applyCoChangeLens();
-    renderLegend(elements.legend, model);
+    renderLegend(elements.legend, model, { locLens: state.mode === 'file' && state.locLens });
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
       renderer: rendererName(),
@@ -1465,6 +1477,7 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
   else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
   else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();
+  else if (key === 'z' && state.mode === 'file') elements.tbLoc?.click();
   else if (key === 's' && selected && isFileNode(selected)) viewSource(selected);
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
@@ -1785,6 +1798,10 @@ function setClientPref(key, value) {
   writeSettings(clientPrefs);
   applyClientPrefs();
   updateLabelsButton();
+  // The large-file lens reads the threshold, so re-apply it when that preference changes.
+  if (key === 'locThreshold') {
+    applyLocLens();
+  }
   renderSettingsView();
   // The commit action is drawn by the impact overlay, so re-render it when it toggles.
   if (key === 'commitEnabled' && state.overlay === 'impact') {
@@ -2682,6 +2699,38 @@ function updateLabelsButton() {
   elements.tbLabels.setAttribute('aria-pressed', String(on));
 }
 
+/**
+ * The large-file lens, re-applied after every render. It needs a line count, so it only
+ * ever turns on in file mode; the threshold is a client preference set in Settings.
+ */
+function applyLocLens() {
+  const enabled = state.mode === 'file' && state.locLens;
+  view.applyLocLens(clientPrefs.locThreshold, enabled);
+  updateLocButton();
+}
+
+/** Toggle the large-file lens; a change of reading, so no rescan. */
+function toggleLocLens() {
+  if (state.mode !== 'file') {
+    return;
+  }
+  state.locLens = !state.locLens;
+  applyLocLens();
+  schedulePrefsSave();
+}
+
+/** The large-file button appears in file mode; its pressed state follows the lens. */
+function updateLocButton() {
+  if (!elements.tbLoc) {
+    return;
+  }
+  const shown = state.mode === 'file';
+  const on = shown && state.locLens;
+  elements.tbLoc.hidden = !shown;
+  elements.tbLoc.classList.toggle('active', on);
+  elements.tbLoc.setAttribute('aria-pressed', String(on));
+}
+
 /** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
 function updateOutsideButton() {
   if (!elements.tbOutside) {
@@ -3213,6 +3262,9 @@ if (elements.tbCoChange) {
 if (elements.tbLabels) {
   elements.tbLabels.addEventListener('click', () => setClientPref('allLabels', !clientPrefs.allLabels));
 }
+if (elements.tbLoc) {
+  elements.tbLoc.addEventListener('click', toggleLocLens);
+}
 elements.tbBranches.addEventListener('click', () => {
   toggleBranches().catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
@@ -3285,6 +3337,7 @@ function positionOverflowMenu() {
 if (elements.tbOverflow) {
   elements.tbOverflow.addEventListener('click', (event) => {
     event.stopPropagation();
+    for (const closeHeaderPopover of headerPopoverClosers) closeHeaderPopover();
     if (elements.tbOverflowMenu.hidden) {
       openOverflowMenu();
     } else {
@@ -3317,6 +3370,88 @@ if (elements.tbOverflow) {
     if (!event.target.closest?.('.tb-overflow-wrap')) closeOverflowMenu();
   });
 }
+
+/* ------------------------------------------- Header menus: repository + view */
+
+/**
+ * A header popover: the toggle opens and closes it, a click outside or Escape closes it.
+ * Menu items (`role="menuitem"`) close it when picked; the View popover's selects do not,
+ * so several view options can be changed in one visit.
+ */
+const headerPopoverClosers = [];
+
+function bindHeaderPopover(toggle, popover) {
+  if (!toggle || !popover) {
+    return;
+  }
+  const close = ({ restoreFocus = false } = {}) => {
+    if (popover.hidden) return;
+    popover.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) toggle.focus();
+  };
+  headerPopoverClosers.push(close);
+  toggle.addEventListener('click', (event) => {
+    // The click stops here, so the document handler below never sees it: close the other
+    // header popovers by hand, or two would stay open at once.
+    event.stopPropagation();
+    closeOverflowMenu();
+    if (!popover.hidden) {
+      close();
+      return;
+    }
+    for (const closeOther of headerPopoverClosers) closeOther();
+    popover.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+    popover.querySelector('button:not(:disabled), select')?.focus();
+  });
+  popover.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      event.preventDefault();
+      close({ restoreFocus: true });
+    }
+  });
+  popover.addEventListener('click', (event) => {
+    if (event.target.closest?.('[role="menuitem"]')) close();
+  });
+  document.addEventListener('click', (event) => {
+    if (!toggle.parentElement?.contains(event.target)) close();
+  });
+}
+
+bindHeaderPopover(document.getElementById('repo-menu-toggle'), document.getElementById('repo-menu'));
+bindHeaderPopover(document.getElementById('view-menu-toggle'), document.getElementById('view-menu'));
+
+/**
+ * The View button names what the popover is set to, e.g. "Files · All tiers · Cycles".
+ * Tier and overlay appear only when set. The selects are also set from code (shortcuts,
+ * prefs, URL state), which fires no `change` event, so their `value` setter is wrapped too.
+ */
+const viewSummary = document.getElementById('view-summary');
+function updateViewSummary() {
+  if (!viewSummary) return;
+  const text = (select) => select.selectedOptions[0]?.textContent.trim() ?? '';
+  const parts = [text(elements.detail)];
+  if (elements.tier.value !== 'off') parts.push(text(elements.tier));
+  if (elements.overlay.value !== 'none') parts.push(text(elements.overlay));
+  viewSummary.textContent = parts.filter(Boolean).join(' · ');
+}
+const selectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+for (const select of [elements.detail, elements.tier, elements.overlay]) {
+  Object.defineProperty(select, 'value', {
+    configurable: true,
+    get() {
+      return selectValue.get.call(this);
+    },
+    set(next) {
+      selectValue.set.call(this, next);
+      updateViewSummary();
+    },
+  });
+  select.addEventListener('change', updateViewSummary);
+}
+updateViewSummary();
 
 /** Show the keyboard cheat-sheet in its own floating window. Declared with `function` so
  * the key handler above can call it before `floatingWindows` is assigned. */
@@ -3723,6 +3858,10 @@ view.onContext((target, originalEvent) => {
 document.addEventListener('contextmenu', (event) => {
   // Editable fields and dialogs keep the native menu (copy/paste, close).
   if (event.target.closest?.('input, select, textarea, [contenteditable="true"], dialog')) {
+    return;
+  }
+  // The terminal owns its right-click menu (copy/paste); the delegate menu is noise there.
+  if (event.target.closest?.('.terminal-screen')) {
     return;
   }
   // The canvas menu comes from cytoscape's cxttap; just suppress the browser one.
@@ -4205,7 +4344,7 @@ const floatingWindows = initFloatingWindows({
       key: 'passport',
       element: elements.passportPanel,
       title: 'Repository passport',
-      dockLabel: 'Passport',
+      dockLabel: 'Repo passport',
       width: 460,
       onOpen: () => {
         showPassport().catch(() => {});

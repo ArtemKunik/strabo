@@ -38,6 +38,7 @@ import {
 } from '../../ui/terminal-multiplexer.js';
 import { filterSessions, fuzzyScore } from '../../ui/strabo-terminal-switcher.js';
 import { loadPresets, normalizePresets, presetId, presetLabel } from '../../ui/strabo-terminal-presets.js';
+import { terminalMenuItems } from '../../ui/strabo-terminal-menu.js';
 
 /* --------------------------------------------------------------- split model */
 
@@ -369,6 +370,22 @@ test('loadPresets fetches through API_PATH and surfaces an error on failure', as
     loadPresets('demo', { fetchImpl: async () => ({ ok: false, status: 503 }) }),
     /Presets unavailable \(503\)/,
   );
+});
+
+/* --------------------------------------------------------- context menu */
+
+test('terminalMenuItems offers copy, paste, and select-all, gating copy on a selection', () => {
+  const items = terminalMenuItems({ hasSelection: false });
+  const byId = (id: string) => items.find((item) => item.id === id);
+
+  assert.equal(byId('copy')?.label, '⧉ Copy');
+  assert.ok(byId('copy')?.title, 'copy must explain why it is inactive without a selection');
+  assert.equal(byId('paste')?.label, '⤓ Paste');
+  assert.equal(byId('select-all')?.label, 'Select all');
+  assert.equal(items.filter((item) => item.separator).length, 1);
+
+  const selected = terminalMenuItems({ hasSelection: true });
+  assert.equal(selected.find((item) => item.id === 'copy')?.title, undefined);
 });
 
 test('tabLabels disambiguates duplicate names with an ordinal', () => {

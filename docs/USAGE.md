@@ -111,6 +111,7 @@ applied immediately:
 | Reduce motion | Collapse the app's transitions and the member-map playback; also follows the OS preference. |
 | Default detail | Whether the map opens in **Directories** or **Files** mode, unless a URL mode or a per-repository preference overrides it. |
 | Show node labels | Hide every node label for a cleaner map. Directory-island labels are a separate layer and are unaffected. |
+| Large-file threshold (lines) | The line count the large-file lens treats as "large". Defaults to 300; a positive integer. |
 
 The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
 colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin

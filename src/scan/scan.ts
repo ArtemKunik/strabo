@@ -11,7 +11,34 @@ import { scanJsTsCalls } from './calls.ts';
 import { scanJsTsEdges } from './scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from './scan-polyglot.ts';
 
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+/**
+ * Files larger than this are mapped but not parsed: their line count is recorded and a
+ * diagnostic says parsing was skipped, so a very large authored file is still visible on
+ * the diagram instead of vanishing from it. Content is retained only below this bound, so
+ * a multi-megabyte file cannot sit in the parse working set.
+ */
+export const MAX_PARSE_BYTES = 2 * 1024 * 1024;
+
+/**
+ * The hard ceiling: past this a file is not mapped at all.
+ *
+ * A file this large is far more likely to be a generated or binary blob than authored
+ * source, and reading it would cost more than it explains.
+ */
+export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+export type FileSizeClass = 'parse' | 'node-only' | 'exclude';
+
+/** Decide how a file's byte size is handled: parsed, mapped without parsing, or dropped. */
+export function classifyFileSize(bytes: number): FileSizeClass {
+  if (!Number.isFinite(bytes) || bytes > MAX_FILE_BYTES) {
+    return 'exclude';
+  }
+  if (bytes > MAX_PARSE_BYTES) {
+    return 'node-only';
+  }
+  return 'parse';
+}
 
 /**
  * Produce the repository file graph:
@@ -38,6 +65,8 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   });
 
   const contentByFile = new Map<string, string>();
+  const linesByFile = new Map<string, number>();
+  const nodeFiles: string[] = [];
   const extensionCounts: Record<string, number> = {};
   const unsupportedExtensionCounts: Record<string, number> = {};
 
@@ -62,20 +91,50 @@ export async function scanRepository(root: string): Promise<ScanReport> {
       });
       continue;
     }
-    if (stat.size > MAX_FILE_BYTES) {
+    const sizeClass = classifyFileSize(stat.size);
+    if (sizeClass === 'exclude') {
       excluded.push({ path: file, reason: 'unsupported', detail: 'file too large' });
       continue;
     }
-    const content = fs.readFileSync(absolute, 'utf8');
+    let content: string;
+    try {
+      content = fs.readFileSync(absolute, 'utf8');
+    } catch {
+      diagnostics.push({
+        file,
+        line: 1,
+        message: `Could not read file; skipped.`,
+        severity: 'warning',
+        kind: 'read-failure',
+      });
+      continue;
+    }
     if (looksMinified(content)) {
       excluded.push({ path: file, reason: 'minified' });
       continue;
     }
-    contentByFile.set(file, content);
+    linesByFile.set(file, countLines(content));
+    nodeFiles.push(file);
     extensionCounts[extension] = (extensionCounts[extension] ?? 0) + 1;
+    if (sizeClass === 'parse') {
+      contentByFile.set(file, content);
+    } else {
+      // Mapped, but too large to keep in the parse working set: report that its imports and
+      // calls were not read rather than silently presenting it as a file with no edges.
+      diagnostics.push({
+        file,
+        line: 1,
+        message: `File is larger than ${Math.round(MAX_PARSE_BYTES / (1024 * 1024))} MB; it is mapped by line count but its imports and calls were not parsed.`,
+        severity: 'info',
+        kind: 'unsupported',
+      });
+    }
   }
 
-  const files = [...contentByFile.keys()].sort();
+  const files = nodeFiles.sort();
+  // Only files whose content was retained can be parsed; `files` stays the full node set so
+  // an import of a large file still resolves to it instead of reading as unresolved.
+  const parseFiles = [...contentByFile.keys()].sort();
   const entryByFile = new Map(detectEntryPoints(root, files).map((entry) => [entry.file, entry.reason]));
   const nodes: GraphNode[] = files.map((id) => ({
     id,
@@ -84,18 +143,18 @@ export async function scanRepository(root: string): Promise<ScanReport> {
     kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
     directory: directoryOf(id),
     ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
-    lines: countLines(contentByFile.get(id) as string),
+    lines: linesByFile.get(id) ?? 0,
   }));
 
   const [jsScan, polyglot, calls] = await Promise.all([
     scanJsTsEdges(files, contentByFile, { root }),
-    scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
+    scanPolyglotEdges(parseFiles.filter(isPolyglotSource), contentByFile),
     scanJsTsCalls(files, contentByFile, { root }),
   ]);
 
   const externalImports: ExternalImport[] = [
     ...jsScan.externalImports,
-    ...collectPolyglotExternalImports(files, contentByFile, diagnostics),
+    ...collectPolyglotExternalImports(parseFiles, contentByFile, diagnostics),
   ];
 
   const graphDiagnostics = [...diagnostics, ...jsScan.diagnostics, ...polyglot.diagnostics];

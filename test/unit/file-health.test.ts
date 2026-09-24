@@ -56,7 +56,7 @@ test('computeFileHealth scopes the graph axes and counts connections and blast r
   const report = computeFileHealth(graph, 'src/a.ts', symbols, accesses);
 
   assert.equal(report.found, true);
-  assert.deepEqual(report.metrics, { directImports: 0, directImporters: 2, blastRadius: 2 });
+  assert.deepEqual(report.metrics, { directImports: 0, directImporters: 2, blastRadius: 2, reExports: 0 });
   assert.equal(axisValue(report, 'lowCoupling'), 83);
   assert.equal(axisValue(report, 'lowFanOut'), 100);
   assert.equal(axisValue(report, 'lowComplexity'), 100);
@@ -100,11 +100,44 @@ test('coverage reports a test file and is unavailable without tests', () => {
   assert.equal(coverage?.detail, 'no test files identified');
 });
 
+test('a barrel counts its re-exports as outgoing dependencies instead of reading as a leaf', () => {
+  const reExport = (source: string, target: string) => ({
+    source,
+    target,
+    kind: 're-export' as const,
+    evidence: { line: 1, specifier: target, resolution: 'exact' as const },
+    role: 'declare' as const,
+    relationship: 're-export' as const,
+  });
+  const barrel: Graph = {
+    nodes: [node('src/index.ts'), node('src/a.ts'), node('src/b.ts'), node('src/consumer.ts')],
+    edges: [
+      reExport('src/index.ts', 'src/a.ts'),
+      reExport('src/index.ts', 'src/b.ts'),
+      edge('src/consumer.ts', 'src/index.ts'),
+    ],
+  };
+  const report = computeFileHealth(barrel, 'src/index.ts');
+
+  assert.equal(report.metrics.directImports, 0, 'the use-only count still excludes re-exports');
+  assert.equal(report.metrics.reExports, 2);
+  assert.equal(report.metrics.directImporters, 1);
+  assert.equal(axisValue(report, 'lowFanOut'), 80, 'two forwarded modules lower fan-out');
+  assert.match(
+    report.axes.find((axis) => axis.key === 'lowFanOut')?.detail ?? '',
+    /2 re-exported module\(s\)/,
+  );
+  assert.match(
+    report.axes.find((axis) => axis.key === 'lowCoupling')?.detail ?? '',
+    /1 in, 2 re-exported/,
+  );
+});
+
 test('a file outside the graph keeps its graph axes unavailable rather than zero', () => {
   const report = computeFileHealth(graph, 'src/missing.ts', symbols, accesses);
 
   assert.equal(report.found, false);
-  assert.deepEqual(report.metrics, { directImports: 0, directImporters: 0, blastRadius: 0 });
+  assert.deepEqual(report.metrics, { directImports: 0, directImporters: 0, blastRadius: 0, reExports: 0 });
   assert.equal(axisValue(report, 'lowCoupling'), null);
   assert.equal(axisValue(report, 'coverage'), null);
   assert.equal(axisValue(report, 'cohesion'), 80);

@@ -26,6 +26,14 @@ selects or drags that file, so the plate's padding and the gaps between nodes ar
 The arrangement is stored per repository in `localStorage` and replayed on the next visit, and
 **Reset map layout** on the empty-canvas right-click menu restores the computed positions.
 
+**Large files** (toolbar `Z`, file mode) is a reading of size rather than coupling: it hides
+every file below a line-count threshold and sizes the survivors by lines of code, so a
+repository's biggest files stand out. The threshold is a browser preference, 300 lines by
+default and editable in **Settings**; the lens is remembered per repository. Files the scan
+maps but does not parse because they are very large still carry their line count, so they
+appear and are filtered like any other file. The lens composes with the path filter and the
+tier lens, and off it the map keeps its default encoding (size = transitive dependents).
+
 **Calls** (toolbar `C`, file mode) swaps the map from import coupling to the recorded
 function-call graph: a dashed edge means the source file calls a function the target file
 declares. The switch is a change of reading, not of reachability — a call edge always sits

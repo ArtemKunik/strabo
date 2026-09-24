@@ -7,7 +7,12 @@ import { fileURLToPath } from 'node:url';
 
 import { scanRepository } from '../../src/index.ts';
 import { classifyExclusion } from '../../src/scan/exclusions.ts';
-import { countLines } from '../../src/scan/scan.ts';
+import {
+  MAX_FILE_BYTES,
+  MAX_PARSE_BYTES,
+  classifyFileSize,
+  countLines,
+} from '../../src/scan/scan.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'sample-repo');
@@ -34,6 +39,44 @@ test('countLines numbers lines the way an editor does', () => {
   assert.equal(countLines('one\ntwo'), 2);
   assert.equal(countLines('one\r\ntwo\r\n'), 2);
   assert.equal(countLines('\n\n'), 2);
+});
+
+test('classifyFileSize routes a file to parse, map-without-parse, or drop', () => {
+  assert.equal(classifyFileSize(0), 'parse');
+  assert.equal(classifyFileSize(MAX_PARSE_BYTES), 'parse');
+  assert.equal(classifyFileSize(MAX_PARSE_BYTES + 1), 'node-only');
+  assert.equal(classifyFileSize(MAX_FILE_BYTES), 'node-only');
+  assert.equal(classifyFileSize(MAX_FILE_BYTES + 1), 'exclude');
+  assert.equal(classifyFileSize(Number.NaN), 'exclude');
+});
+
+test('a file over the parse cap is mapped by line count but not parsed', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-large-file-'));
+  try {
+    fs.writeFileSync(path.join(root, 'other.ts'), 'export const other = 1;\n');
+    const line = "import { other } from './other';\n";
+    const count = Math.ceil((MAX_PARSE_BYTES + 1) / line.length);
+    fs.writeFileSync(path.join(root, 'big.ts'), line.repeat(count));
+    fs.writeFileSync(path.join(root, 'index.ts'), "import { other } from './big';\n");
+
+    const report = await scanRepository(root);
+    const big = report.graph.nodes.find((node) => node.id === 'big.ts');
+
+    assert.ok(big, 'the large file is still mapped');
+    assert.equal(big.lines, count);
+    // An import of the large file still resolves to its mapped node.
+    assert.ok(report.graph.edges.some((edge) => edge.source === 'index.ts' && edge.target === 'big.ts'));
+    // The skip is reported rather than silently presenting a file with no edges.
+    assert.ok(
+      report.graph.diagnostics.some(
+        (item) => item.file === 'big.ts' && item.kind === 'unsupported' && /not parsed/.test(item.message),
+      ),
+    );
+    // Its own imports are not parsed, so no edge originates from it.
+    assert.ok(!report.graph.edges.some((edge) => edge.source === 'big.ts'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('scanRepository resolves internal JS/TS edges', async () => {

@@ -552,10 +552,14 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       const win = controller.window;
       // A hidden window has no position yet; it takes a rail slot when it opens.
       if (win.hidden) continue;
+      // Pull the whole window back on screen. A window placed for a wider viewport would
+      // otherwise hang off the right edge with its header and controls unreachable.
+      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
+      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
       const left = parseFloat(win.style.left) || 0;
       const top = parseFloat(win.style.top) || 0;
-      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - 60))}px`;
-      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
+      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
     }
   });
 

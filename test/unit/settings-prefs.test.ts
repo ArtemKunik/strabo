@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  LOC_THRESHOLD_DEFAULT,
+  LOC_THRESHOLD_MAX,
   SETTINGS_KEY,
   THEMES,
   THEME_OPTIONS,
@@ -10,6 +12,7 @@ import {
   effectiveReduceMotion,
   readSettings,
   resolveTheme,
+  sanitizeLocThreshold,
   writeSettings,
 } from '../../ui/strabo-settings.js';
 
@@ -51,13 +54,14 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
     allLabels: false,
     reduceMotion: false,
     commitEnabled: false,
+    locThreshold: LOC_THRESHOLD_DEFAULT,
   });
 });
 
 test('writeSettings round-trips a sanitized preference set', () => {
   const storage = fakeStorage();
   writeSettings(
-    { theme: 'light', defaultDetail: 'file', labels: false, allLabels: true, reduceMotion: true, commitEnabled: true },
+    { theme: 'light', defaultDetail: 'file', labels: false, allLabels: true, reduceMotion: true, commitEnabled: true, locThreshold: 450 },
     storage,
   );
   assert.deepEqual(readSettings(storage), {
@@ -67,7 +71,33 @@ test('writeSettings round-trips a sanitized preference set', () => {
     allLabels: true,
     reduceMotion: true,
     commitEnabled: true,
+    locThreshold: 450,
   });
+});
+
+test('the large-file threshold defaults to 300 and only a positive integer changes it', () => {
+  assert.equal(defaultSettings().locThreshold, LOC_THRESHOLD_DEFAULT);
+  assert.equal(LOC_THRESHOLD_DEFAULT, 300);
+
+  const bad = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ locThreshold: -5 }) });
+  assert.equal(readSettings(bad).locThreshold, LOC_THRESHOLD_DEFAULT);
+  const zero = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ locThreshold: 0 }) });
+  assert.equal(readSettings(zero).locThreshold, LOC_THRESHOLD_DEFAULT);
+  const text = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ locThreshold: 'lots' }) });
+  assert.equal(readSettings(text).locThreshold, LOC_THRESHOLD_DEFAULT);
+
+  const good = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ locThreshold: 512 }) });
+  assert.equal(readSettings(good).locThreshold, 512);
+});
+
+test('sanitizeLocThreshold coerces and clamps a typed value', () => {
+  assert.equal(sanitizeLocThreshold('420'), 420);
+  assert.equal(sanitizeLocThreshold(7.6), 8);
+  assert.equal(sanitizeLocThreshold('0'), null);
+  assert.equal(sanitizeLocThreshold('-1'), null);
+  assert.equal(sanitizeLocThreshold('abc'), null);
+  assert.equal(sanitizeLocThreshold(undefined), null);
+  assert.equal(sanitizeLocThreshold(LOC_THRESHOLD_MAX + 1000), LOC_THRESHOLD_MAX);
 });
 
 test('the commit action is off by default and only a boolean turns it on', () => {

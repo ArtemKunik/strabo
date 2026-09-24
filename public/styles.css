@@ -727,6 +727,9 @@ body {
 
 /* ------------------------------------------------------------------ Top bar */
 .toolbar {
+  /* Above the floating-panel layer (z-index 50), so the header's menus open over panels. */
+  position: relative;
+  z-index: 60;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -756,17 +759,98 @@ body {
   border-right: none;
 }
 
-/* The header is two deliberate rows: the primary controls (repository, detail, tier, filter)
-   on the first, the review lens and meta on the second. A zero-height full-width item forces
-   the break instead of letting the browser wrap at an arbitrary point. */
-.tb-break {
-  flex-basis: 100%;
-  height: 0;
-  margin: 0;
-}
-
 .tb-view-group {
   border-right: none;
+}
+
+/* Graph controls (View, filter, drill-down, tests strip, panel dock) act only on the map, so
+   the other screens do not show them. */
+body.screen-off-graph .tb-graph-only,
+body.screen-off-graph #strip,
+body.screen-off-graph #float-dock {
+  display: none !important;
+}
+
+body.screen-off-graph .bottom-bar {
+  min-height: 0;
+  padding-block: 3px;
+  justify-content: flex-end;
+}
+
+.tb-menu-wrap {
+  position: relative;
+  display: flex;
+}
+
+.tb-menu.tb-menu-left {
+  left: 0;
+  right: auto;
+}
+
+.tb-menu .tb-menu-danger {
+  color: var(--status-serious);
+}
+
+.tb-menu button:disabled {
+  color: var(--ink-3);
+  background: none;
+  cursor: default;
+}
+
+/* A square icon button in the header (repo actions, diagnostics, settings). */
+.tb-icon-button {
+  position: relative;
+  min-width: 30px;
+  padding: 4px 7px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tb-icon-button .diag-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+}
+
+/* View: one button naming the current detail / tier / overlay, opening their selects. */
+.tb-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tb-view-key {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tb-view-caret {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.tb-view-menu {
+  gap: 10px;
+  min-width: 230px;
+  padding: 12px;
+}
+
+.view-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view-field-label {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.view-field select {
+  width: 100%;
 }
 
 /* System mode (L20): hide the per-file lenses and file-map tools the unit map cannot act on. */
@@ -928,6 +1012,9 @@ button.primary {
 }
 
 .status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--ink-3);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
@@ -1049,7 +1136,8 @@ button.primary {
   flex: 1 1 auto;
   min-height: 0;
   padding: 16px;
-  overflow-y: auto;
+  overflow-y: auto;             /* the scroll container for history/review */
+  overflow-x: hidden;           /* a wide child clips instead of scrolling the whole screen */
 }
 
 body.screen-off-graph .float-window {
@@ -1082,26 +1170,58 @@ body.screen-off-graph .float-window {
 .terminal-container {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
+  /* One chrome row: the session tabs, then the actions (+, run, split) on the same line.
+     The toolbar comes first in the DOM, so grid areas put it after the tabs. */
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "tabs actions"
+    "panes panes";
   min-height: 0;
-}
-
-.terminal-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--line-soft);
   background: var(--bg-2);
 }
 
+.terminal-toolbar {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px 0 4px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+.terminal-toolbar-spacer {
+  flex: 1;
+}
+
 .terminal-toolbar-button {
-  font-size: var(--text-sm);
+  min-width: 28px;
+  height: 26px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.terminal-toolbar-button:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--ink-1);
+}
+
+/* The run chevron hugs the + it belongs to. */
+.terminal-toolbar-button.terminal-run {
+  min-width: 18px;
+  padding: 0 3px;
+  font-size: 11px;
 }
 
 /* The strip scrolls horizontally rather than wrapping, so the pane host never shrinks. */
 .terminal-tabs {
+  grid-area: tabs;
   display: flex;
   align-items: stretch;
   gap: 2px;
@@ -1195,6 +1315,7 @@ body.screen-off-graph .float-window {
 }
 
 .terminal-panes {
+  grid-area: panes;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -1548,7 +1669,8 @@ body.screen-off-graph .float-window {
   position: relative;
   bottom: auto;
   left: auto;
-  flex: 0 1 auto;
+  /* Keep its one-row width: the tests strip, panel dock, and status text give way first. */
+  flex: 0 0 auto;
   max-width: min(560px, 62vw);
   z-index: auto;
 }
@@ -2997,28 +3119,52 @@ body.screen-off-graph .float-window {
   word-break: break-word;
 }
 
-/* Architecture drift: one line per structural measure, then its newest -> oldest legend. */
+/* Architecture drift: one line per structural measure, then a bounded key that names each
+   line, shows its newest and oldest value, and never overflows the screen. */
 .drift-chart {
   display: block;
   width: 100%;
   height: 120px;
-  margin: 4px 0;
+  margin: 4px 0 8px;
   border: 1px solid var(--line-soft);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-2);
 }
 
 .drift-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 4px 0 8px;
-  color: var(--ink-3);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 2px 20px;
+  margin: 0 0 10px;
   font-size: 11px;
 }
 
 .drift-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.drift-legend-swatch {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--series-other);
+}
+
+.drift-legend-swatch.drift-series-1 { background: var(--series-1); }
+.drift-legend-swatch.drift-series-2 { background: var(--series-2); }
+.drift-legend-swatch.drift-series-3 { background: var(--series-3); }
+
+.drift-legend-text {
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-3);
 }
 
 /* Bounded categorical set (R8): three series hues plus one neutral, never cycled. */
@@ -3901,7 +4047,9 @@ table.change-metrics td:first-child .link {
 
 /* ---------------------------------------------------------------- Bottom meta */
 .bottom-meta {
-  flex: none;
+  /* The status line and index badge live here; on a narrow row the status truncates. */
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -4336,6 +4484,30 @@ table.change-metrics td:first-child .link {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
+}
+
+/* The public surface of a barrel: one row per forwarded name, mono like the source it mirrors. */
+.member-reexports-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.member-reexport {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .member-card {

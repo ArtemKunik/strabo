@@ -25,6 +25,7 @@ export function memberMapSteps(memberMap, context = {}) {
   const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, 'fields');
   const methods = totalMembers(memberMap, 'methods');
+  const reExports = memberMap?.reExports ?? [];
   const flow = memberMap?.dataFlow;
   const consumers = context.consumers ?? null;
 
@@ -34,6 +35,16 @@ export function memberMapSteps(memberMap, context = {}) {
     types.length > 1
       ? `This file (${types.length} types) contains`
       : `${primary?.name ?? 'This file'} contains`;
+  // A barrel declares nothing, so its re-exports are the whole fingerprint; naming them
+  // keeps "0 field(s) and 0 behavior(s)" from reading as an empty file.
+  const reExportModules = new Set(reExports.map((entry) => entry.from)).size;
+  const barrel = fields === 0 && methods === 0 && reExports.length > 0;
+  const fingerprint = barrel
+    ? `This file re-exports ${reExports.length} name(s) from ${reExportModules} module(s).`
+    : `${subject} ${fields} field(s) and ${methods} behavior(s).`;
+  const membersCaption = barrel
+    ? `${reExports.length} re-export(s) and no declared members.`
+    : `${fields} field(s) and ${methods} method(s) recorded.`;
 
   const wiring =
     flow?.available === false
@@ -44,12 +55,12 @@ export function memberMapSteps(memberMap, context = {}) {
     {
       key: 'fingerprint',
       label: 'fingerprint',
-      caption: `${subject} ${fields} field(s) and ${methods} behavior(s).`,
+      caption: fingerprint,
     },
     {
       key: 'members',
       label: 'members',
-      caption: `${fields} field(s) and ${methods} method(s) recorded.`,
+      caption: membersCaption,
     },
     { key: 'wiring', label: 'wiring', caption: wiring },
     {
@@ -226,6 +237,11 @@ export function layoutFlowGraph(graph, { width = 680, nodeWidth = 170, nodeHeigh
 export function explainClass(memberMap) {
   const type = (memberMap?.types ?? [])[0];
   if (!type) {
+    const reExports = memberMap?.reExports ?? [];
+    if (reExports.length > 0) {
+      const modules = new Set(reExports.map((entry) => entry.from)).size;
+      return `This file declares no members; it re-exports ${reExports.length} name(s) from ${modules} module(s).`;
+    }
     return 'No type was recorded for this file.';
   }
   const flow = memberMap.dataFlow;

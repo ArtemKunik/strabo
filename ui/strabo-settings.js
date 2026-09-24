@@ -60,6 +60,27 @@ export const THEME_OPTIONS = [
   },
 ];
 
+/**
+ * The default line count at which a file counts as "large" on the map.
+ *
+ * The large-file lens (canvas `Z`) keeps only files at or above this line count and sizes
+ * the survivors by lines of code, so the map answers "show me the big files". It is a
+ * client preference, editable in Settings.
+ */
+export const LOC_THRESHOLD_DEFAULT = 300;
+
+/** The widest line count the threshold accepts, so a mistyped value cannot hide every file. */
+export const LOC_THRESHOLD_MAX = 1_000_000;
+
+/** Coerce a stored or typed threshold to a positive integer, or null when it is not one. */
+export function sanitizeLocThreshold(value) {
+  const number = typeof value === 'number' ? value : Number.parseInt(value, 10);
+  if (!Number.isFinite(number) || number < 1) {
+    return null;
+  }
+  return Math.min(Math.round(number), LOC_THRESHOLD_MAX);
+}
+
 /** The client preference defaults, also the shape `readSettings` always returns. */
 export function defaultSettings() {
   return {
@@ -69,6 +90,7 @@ export function defaultSettings() {
     allLabels: false,
     reduceMotion: false,
     commitEnabled: false,
+    locThreshold: LOC_THRESHOLD_DEFAULT,
   };
 }
 
@@ -83,6 +105,8 @@ function sanitize(parsed, defaults) {
   if (typeof parsed.allLabels === 'boolean') settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === 'boolean') settings.reduceMotion = parsed.reduceMotion;
   if (typeof parsed.commitEnabled === 'boolean') settings.commitEnabled = parsed.commitEnabled;
+  const locThreshold = sanitizeLocThreshold(parsed.locThreshold);
+  if (locThreshold !== null) settings.locThreshold = locThreshold;
   return settings;
 }
 
@@ -218,6 +242,21 @@ function checkboxInput(checked, onChange) {
   input.type = 'checkbox';
   input.checked = Boolean(checked);
   input.addEventListener('change', () => onChange(input.checked));
+  return input;
+}
+
+/** A positive-integer input; an empty or invalid entry falls back to `fallback`. */
+function numberInput(value, fallback, onChange) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.step = '1';
+  input.value = value ?? '';
+  input.addEventListener('change', () => {
+    const next = sanitizeLocThreshold(input.value);
+    input.value = String(next ?? fallback);
+    onChange(next ?? fallback);
+  });
   return input;
 }
 
@@ -591,6 +630,11 @@ export function renderSettings(container, handlers = {}) {
     ),
     field('Show node labels', checkboxInput(prefs.labels, (value) => handlers.onPref?.('labels', value))),
     field('Show a file name under every file', checkboxInput(prefs.allLabels, (value) => handlers.onPref?.('allLabels', value))),
+    field(
+      'Large-file threshold (lines)',
+      numberInput(prefs.locThreshold, LOC_THRESHOLD_DEFAULT, (value) => handlers.onPref?.('locThreshold', value)),
+    ),
+    note('The large-file lens (canvas “Z”) keeps files at or above this line count and sizes them by lines of code.'),
     note('Preferences are stored in this browser.'),
   );
   container.append(local);

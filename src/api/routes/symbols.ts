@@ -78,7 +78,7 @@ export function createSymbolsRouter(config: StraboConfig): Router {
         available: true,
         symbols: result.symbols,
         diagnostics: result.diagnostics,
-        memberMap: buildMemberMap(file, result.symbols, result.accesses ?? []),
+        memberMap: buildMemberMap(file, result.symbols, result.accesses ?? [], result.reExports ?? []),
         coverage:
           measuredFileFigure(measured, file) ?? {
             basis: 'reachable',

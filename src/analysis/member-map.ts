@@ -1,14 +1,16 @@
-import type { CodeSymbol, MemberAccess } from '../scan/languages/symbols.ts';
+import type { CodeSymbol, MemberAccess, ReExport } from '../scan/languages/symbols.ts';
 
 /**
- * The Member map for one file: declared members grouped by type, plus data-flow panels
- * derived only from field references the scan recorded inside this file.
+ * The Member map for one file: declared members grouped by type, the names the file
+ * re-exports, and data-flow panels derived only from field references the scan recorded
+ * inside this file.
  *
  * Nothing is inferred. A member declared in another file appears only when the scan
  * recorded an edge to it — a C++ implementation borrows the fields its own header declares,
  * and each carries `declaredIn` so the map says where it came from. When no field access was
  * recorded, `dataFlow` reports `available: false` rather than showing empty panels that
- * imply there is no wiring.
+ * imply there is no wiring. A barrel (`index.ts`) declares no members, so its `reExports` are
+ * the only evidence of its public surface.
  */
 export interface MemberMapField {
   name: string;
@@ -63,6 +65,8 @@ export interface MemberMap {
   reason?: string;
   detail?: string;
   types: MemberMapType[];
+  /** Names the file forwards from other modules; empty for a file that re-exports nothing. */
+  reExports: ReExport[];
   dataFlow: DataFlowPanels;
 }
 
@@ -76,11 +80,12 @@ const NO_ACCESS: DataFlowPanels = {
   sinks: [],
 };
 
-/** Build the member map for a file from its extracted symbols and field references. */
+/** Build the member map for a file from its extracted symbols, field references, and re-exports. */
 export function buildMemberMap(
   file: string,
   symbols: CodeSymbol[],
   accesses: MemberAccess[],
+  reExports: ReExport[] = [],
 ): MemberMap {
   const typeSymbols = new Map(
     symbols
@@ -117,6 +122,7 @@ export function buildMemberMap(
     file,
     available: true,
     types,
+    reExports: [...reExports].sort((a, b) => a.line - b.line || a.name.localeCompare(b.name)),
     dataFlow: buildDataFlow(accesses),
   };
 }

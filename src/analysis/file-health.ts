@@ -15,6 +15,11 @@ export interface FileHealthMetrics {
   directImports: number;
   directImporters: number;
   blastRadius: number;
+  /**
+   * Outgoing barrel re-exports (`export … from`). They are `declare` edges, so the use-only
+   * adjacency leaves them out; they are counted here so a forwarder is not read as a leaf.
+   */
+  reExports: number;
 }
 
 export interface FileHealthReport {
@@ -46,27 +51,33 @@ export function computeFileHealth(
   measured?: MeasuredCoverageSummary | null,
 ): FileHealthReport {
   const { forward, backward } = buildAdjacency(graph);
+  // A barrel's `export … from` edges are `declare` edges, so they are absent from the
+  // use-only adjacency above. Following them here keeps a forwarder from reading as a leaf
+  // with a perfect fan-out; `reExports` is the count the use-only adjacency left out.
+  const withReExports = buildAdjacency(graph, { includeReExports: true });
   const metrics = computeGraphMetrics(graph);
   const node = graph.nodes.find((candidate) => candidate.id === file);
   const directImports = (forward.get(file) ?? []).length;
   const directImporters = (backward.get(file) ?? []).length;
+  const importsWithReExports = (withReExports.forward.get(file) ?? []).length;
+  const reExports = Math.max(0, importsWithReExports - directImports);
   const blastRadius = metrics.transitiveDependents.get(file) ?? 0;
 
   const axes: HealthAxis[] = [];
 
   if (node) {
-    const connections = directImports + directImporters;
+    const connections = importsWithReExports + directImporters;
     axes.push({
       key: 'lowCoupling',
       label: 'Low coupling',
       value: score(1 - normalise(connections, 12)),
-      detail: `${connections} connection(s) (${directImports} out, ${directImporters} in)`,
+      detail: `${connections} connection(s) (${directImports} out, ${directImporters} in${reExports > 0 ? `, ${reExports} re-exported` : ''})`,
     });
     axes.push({
       key: 'lowFanOut',
       label: 'Low fan-out',
-      value: score(1 - normalise(directImports, 10)),
-      detail: `${directImports} direct import(s)`,
+      value: score(1 - normalise(importsWithReExports, 10)),
+      detail: `${directImports} direct import(s)${reExports > 0 ? ` · ${reExports} re-exported module(s)` : ''}`,
     });
     const cycle = computeCycles(graph).find((group) => group.members.includes(file));
     axes.push({
@@ -98,7 +109,7 @@ export function computeFileHealth(
     found: Boolean(node),
     score: available.length > 0 ? Math.round(available.reduce((sum, n) => sum + n, 0) / available.length) : null,
     axes,
-    metrics: { directImports, directImporters, blastRadius },
+    metrics: { directImports, directImporters, blastRadius, reExports },
     ...(measured ? { coverage: coverageProvenance(measured) } : {}),
   };
 }

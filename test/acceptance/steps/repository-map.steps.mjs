@@ -4,6 +4,13 @@ import { Given, Then, When } from '@cucumber/cucumber';
 
 import { ACCEPTANCE_ROOT } from '../support/server.mjs';
 
+/** Detail, tier, and overlay live in the header's View popover: open it, pick, close it. */
+async function selectViewOption(page, selector, value) {
+  await page.click('#view-menu-toggle');
+  await page.selectOption(selector, value);
+  await page.click('#view-menu-toggle');
+}
+
 const CACHE_STATUS = /cache:\s*(memory|disk|miss|refreshed)/;
 
 /**
@@ -42,7 +49,7 @@ Given('I open the Strabo UI', async function () {
 
 When('I switch to file detail', async function () {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
-  await this.page.selectOption('#detail', 'file');
+  await selectViewOption(this.page, '#detail', 'file');
   await this.page.waitForFunction(
     (generation) =>
       window.straboTest?.state.mode === 'file' &&
@@ -100,6 +107,7 @@ When('I open the diagnostics panel', async function () {
 });
 
 When('I press Refresh', async function () {
+  await this.page.click('#repo-menu-toggle');
   await this.page.click('#refresh');
 });
 
@@ -113,6 +121,7 @@ When('I close the open panels', async function () {
 
 When('I open the folder dialog', async function () {
   await this.dismissPassportGreeting();
+  await this.page.click('#repo-menu-toggle');
   await this.page.click('#browse');
   await this.page.waitForFunction(() => document.getElementById('folder-dialog')?.open === true);
   await this.page.waitForFunction(
@@ -224,7 +233,7 @@ Then('the repository picker marks {string} as active', async function (name) {
 });
 
 When('I select the review overlay {string}', async function (kind) {
-  await this.page.selectOption('#overlay', kind);
+  await selectViewOption(this.page, '#overlay', kind);
   await this.page.waitForFunction(
     (expected) =>
       window.straboTest?.state.overlay === expected &&

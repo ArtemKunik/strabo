@@ -59,6 +59,11 @@ export function stylesheet() {
     { selector: 'node.kind-shelf', style: { 'border-width': 1.5, 'border-style': 'dashed', 'border-color': theme.nodeLine, opacity: 0.85 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
+    // The large-file lens swaps the size encoding to lines of code and hides files under
+    // the threshold. `loc-sized` outranks the base `node` width/height mapping; the mark
+    // is a heavier neutral ring (weight, not hue), so it never collides with a status.
+    { selector: 'node.loc-sized', style: { width: 'data(locDiameter)', height: 'data(locDiameter)' } },
+    { selector: 'node.large-file', style: { 'border-width': 2.5, 'border-color': theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
     // the card's header row. Selection is the only outline it earns (L18).
     { selector: 'node.kind-unit, node.kind-shelf', style: { 'text-opacity': 0, 'border-width': 1.5 } },
@@ -93,6 +98,7 @@ export function stylesheet() {
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
+    { selector: 'node.loc-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-hidden', style: { display: 'none' } },
     { selector: 'edge.edge-kind-hidden', style: { display: 'none' } },
     // Level of detail: at far zoom on a large graph the unweighted edges drop from the draw

@@ -109,6 +109,30 @@ test('extractTypeScriptSymbols groups module declarations under the file base na
   );
 });
 
+test('extractTypeScriptSymbols records re-exported names so a barrel is not empty', async () => {
+  const source = [
+    "export * from './types.ts';",
+    "export * as ns from './ns.ts';",
+    "export { a, b as c } from './x.ts';",
+    "export type { T, U as V } from './t.ts';",
+    'export { localOnly };',
+    'const localOnly = 1;',
+  ].join('\n');
+
+  const { symbols, reExports } = await extractTypeScriptSymbols('src/index.ts', source);
+
+  assert.deepEqual(reExports, [
+    { name: '*', from: './types.ts', typeOnly: false, line: 1 },
+    { name: 'ns', from: './ns.ts', typeOnly: false, line: 2 },
+    { name: 'a', from: './x.ts', typeOnly: false, line: 3 },
+    { name: 'c', from: './x.ts', typeOnly: false, line: 3 },
+    { name: 'T', from: './t.ts', typeOnly: true, line: 4 },
+    { name: 'V', from: './t.ts', typeOnly: true, line: 4 },
+  ]);
+  // `export { localOnly }` has no `from`; its declaration is captured as an ordinary symbol.
+  assert.ok(symbols.some((symbol) => symbol.name === 'localOnly'));
+});
+
 test('extractTypeScriptSymbols parses interfaces and TSX with the TSX grammar', async () => {
   const source = [
     'interface Props { title: string }',

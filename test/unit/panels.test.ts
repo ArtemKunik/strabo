@@ -1052,6 +1052,35 @@ test('renderMemberMap offers Back to the module passport', () => {  const target
   assert.equal(backs, 1);
 });
 
+test('renderMemberMap lists a barrel re-export surface instead of saying no members', () => {
+  const target = container();
+  renderMemberMap(
+    target,
+    {
+      file: 'src/index.ts',
+      repository: 'acme',
+      memberMap: {
+        types: [],
+        reExports: [
+          { name: '*', from: './types.ts', typeOnly: false, line: 1 },
+          { name: 'scan', from: './scan.ts', typeOnly: false, line: 2 },
+        ],
+        dataFlow: { available: false },
+      },
+    },
+    {},
+    {},
+  );
+
+  const section = target.querySelector('[data-role="re-exports"]');
+  assert.ok(section, 'the public surface is rendered');
+  assert.match(section.textContent, /Public surface/);
+  assert.match(section.textContent, /2 re-export\(s\)/);
+  assert.match(section.textContent, /export \* from '\.\/types\.ts'/);
+  assert.match(section.textContent, /export \{ scan \} from '\.\/scan\.ts'/);
+  assert.doesNotMatch(target.textContent, /No members declared for this file/);
+});
+
 test('provenance text names the fingerprint and scan time and flags stale (T6)', () => {
   const fresh = passportProvenanceText({
     fingerprint: 'abcdef1234567:deadbeef',

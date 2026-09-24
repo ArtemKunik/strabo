@@ -22,7 +22,7 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 
-import { showToast } from './strabo-delegate.js';
+import { copyText, showContextMenu, showToast } from './strabo-delegate.js';
 import { createTerminalMultiplexer } from './terminal-multiplexer.js';
 import {
   createLayout,
@@ -46,6 +46,7 @@ import { openSessionSwitcher } from './strabo-terminal-switcher.js';
 import { registerCitationLinks } from './strabo-terminal-linkify.js';
 import { loadPresets, openPresetMenu, presetId, presetLabel } from './strabo-terminal-presets.js';
 import { extractControl } from './strabo-terminal-control.js';
+import { terminalMenuItems } from './strabo-terminal-menu.js';
 
 const LAYOUT_PREFIX = 'strabo.terminal.layout.';
 const BUFFER_LIMIT = 256 * 1024;
@@ -771,32 +772,91 @@ export function initTerminalScreen(container, hooks = {}) {
     });
   }
 
+  /** Paste the clipboard into a session, steering to Ctrl+V when the browser blocks access. */
+  async function pasteInto(view) {
+    view.term.focus();
+    if (typeof navigator.clipboard?.readText !== 'function') {
+      notify('Press Ctrl+V to paste.');
+      return;
+    }
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        view.term.paste(text);
+      }
+    } catch {
+      notify('The browser blocked clipboard access — press Ctrl+V to paste.');
+    }
+  }
+
+  /**
+   * The terminal's right-click menu. The app-wide menu is the delegate menu, which offers no
+   * paste; the terminal shows copy/paste/select-all instead. `stopPropagation` keeps the
+   * document-level delegate handler from also firing.
+   */
+  function onContextMenu(event) {
+    if (screen.hidden) {
+      return;
+    }
+    const paneEl = event.target.closest?.('.terminal-pane');
+    const leaf = paneEl ? findPane(layout, paneEl.dataset.paneId) : null;
+    const view = leaf?.sessionId ? views.get(leaf.sessionId) : null;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!view) {
+      return;
+    }
+    const selection = view.term.getSelection();
+    const actions = {
+      copy: selection ? () => copyText(selection) : null,
+      paste: () => pasteInto(view),
+      'select-all': () => view.term.selectAll(),
+    };
+    const items = terminalMenuItems({ hasSelection: selection !== '' }).map((item) =>
+      item.separator || !actions[item.id] ? item : { ...item, action: actions[item.id] },
+    );
+    showContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      title: view.meta?.title ?? 'Terminal',
+      items,
+    });
+  }
+
   /* ----------------------------------------------------------------- toolbar */
 
-  function toolbarButton(label, hint, action) {
+  /** An icon button: `glyph` is what shows, `label` names it for the tooltip and screen readers. */
+  function toolbarButton(glyph, label, hint, action) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'terminal-toolbar-button';
-    button.textContent = label;
-    if (hint) {
-      button.title = `${label} (${hint})`;
-    }
+    button.textContent = glyph;
+    button.setAttribute('aria-label', label);
+    button.title = hint ? `${label} (${hint})` : label;
     button.addEventListener('click', action);
     return button;
   }
 
+  /**
+   * The actions sit at the end of the session tab strip rather than in a row of their own:
+   * `+` opens a shell, the chevron beside it runs a preset, and split is an icon on the far
+   * side. The session switcher has no button; the tabs already list the sessions and Ctrl+K
+   * opens it.
+   */
   function buildToolbar() {
     toolbarEl.replaceChildren();
-    const newButton = toolbarButton('New shell', 'Ctrl+Shift+T', () => {
+    const newButton = toolbarButton('+', 'New shell', 'Ctrl+Shift+T', () => {
       newSession().catch(handleError);
     });
-    const runButton = toolbarButton('Run…', '', () => openRunMenu(runButton));
-    const splitButton = toolbarButton('Split', 'Ctrl+Shift+E', () => {
+    newButton.classList.add('terminal-new');
+    const runButton = toolbarButton('▾', 'Run a command', '', () => openRunMenu(runButton));
+    runButton.classList.add('terminal-run');
+    const spacer = document.createElement('span');
+    spacer.className = 'terminal-toolbar-spacer';
+    const splitButton = toolbarButton('◫', 'Split pane', 'Ctrl+Shift+E', () => {
       splitActive('row').catch(handleError);
     });
-    const switchButton = toolbarButton('Sessions', 'Ctrl+K', openSwitcher);
-    switchButton.id = 'terminal-switcher-button';
-    toolbarEl.append(newButton, runButton, splitButton, switchButton);
+    toolbarEl.append(newButton, runButton, spacer, splitButton);
   }
 
   function openRunMenu(anchor) {
@@ -905,6 +965,7 @@ export function initTerminalScreen(container, hooks = {}) {
   buildToolbar();
   renderLayoutDom();
   screen.addEventListener('keydown', onKeydown, true);
+  screen.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('beforeunload', persistNow);
   repoSelect?.addEventListener('change', onRepoChange);
@@ -963,6 +1024,7 @@ export function initTerminalScreen(container, hooks = {}) {
       resizeObserver?.disconnect();
       resizeObserver = null;
       screen.removeEventListener('keydown', onKeydown, true);
+      screen.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('beforeunload', persistNow);
       repoSelect?.removeEventListener('change', onRepoChange);

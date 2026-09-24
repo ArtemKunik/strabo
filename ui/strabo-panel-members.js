@@ -43,8 +43,13 @@ import { appendNarratorBlock } from './strabo-panel-narrative.js';
  */
 export function renderMembers(container, result) {  container.replaceChildren();
   const symbols = result?.symbols ?? [];
+  const memberMap = result.memberMap;
+  const reExports = memberMap?.reExports ?? [];
   const title = document.createElement('h3');
-  title.textContent = `Members (${symbols.length})`;
+  title.textContent =
+    reExports.length > 0
+      ? `Members (${symbols.length}) · ${reExports.length} re-export(s)`
+      : `Members (${symbols.length})`;
   container.append(title);
 
   if (!result || result.available === false) {
@@ -55,7 +60,7 @@ export function renderMembers(container, result) {  container.replaceChildren();
     return;
   }
 
-  if (symbols.length === 0) {
+  if (symbols.length === 0 && reExports.length === 0) {
     const note = document.createElement('p');
     note.className = 'unavailable';
     note.textContent = 'No members declared.';
@@ -63,13 +68,12 @@ export function renderMembers(container, result) {  container.replaceChildren();
     return;
   }
 
-  const memberMap = result.memberMap;
   const types = memberMap?.types ?? [];
   if (types.length > 0) {
     for (const type of types) {
       container.append(renderMemberType(type));
     }
-  } else {
+  } else if (symbols.length > 0) {
     const list = document.createElement('ul');
     for (const symbol of symbols.slice(0, 200)) {
       const item = document.createElement('li');
@@ -79,6 +83,11 @@ export function renderMembers(container, result) {  container.replaceChildren();
       list.append(item);
     }
     container.append(list);
+  }
+
+  // A barrel declares no members, so its re-exports are the whole surface.
+  if (reExports.length > 0) {
+    container.append(buildReExportSection(reExports));
   }
 
   container.append(renderDataFlow(memberMap?.dataFlow));
@@ -328,16 +337,53 @@ function buildMemberMain(memberMap, view, data) {
   const main = document.createElement('section');
   main.className = 'member-main';
   const clusters = memberClusters(memberMap);
-  for (const type of memberMap?.types ?? []) {
+  const types = memberMap?.types ?? [];
+  const reExports = memberMap?.reExports ?? [];
+  for (const type of types) {
     main.append(buildTypeSection(type, view, clusters, {}));
   }
-  if ((memberMap?.types ?? []).length === 0) {
+  if (types.length === 0 && reExports.length === 0) {
     main.append(unavailableNote(memberMap?.detail ?? 'No members declared for this file.'));
+  }
+  // A barrel declares no members, so its re-exports are the whole public surface; showing
+  // them keeps the file from reading as empty.
+  if (reExports.length > 0) {
+    main.append(buildReExportSection(reExports));
   }
   if (view.dataFlow !== false) {
     main.append(buildDataFlow(memberMap, data?.consumerIds ?? null));
   }
   return main;
+}
+
+
+/** The names a file forwards from other modules, the public surface of a barrel. */
+function buildReExportSection(reExports) {
+  const section = document.createElement('section');
+  section.className = 'member-type member-reexports';
+  section.dataset.role = 're-exports';
+
+  const heading = document.createElement('h3');
+  heading.className = 'member-type-name';
+  heading.textContent = 'Public surface';
+  const count = document.createElement('span');
+  count.className = 'member-count';
+  count.textContent = `${reExports.length} re-export(s)`;
+  heading.append(count);
+  section.append(heading);
+
+  const list = document.createElement('ul');
+  list.className = 'member-reexports-list';
+  for (const entry of reExports) {
+    const item = document.createElement('li');
+    item.className = 'member-reexport';
+    const kind = entry.typeOnly ? 'type ' : '';
+    const name = entry.name === '*' ? `*` : `{ ${entry.name} }`;
+    item.textContent = `export ${kind}${name} from '${entry.from}'`;
+    list.append(item);
+  }
+  section.append(list);
+  return section;
 }
 
 
@@ -996,7 +1042,17 @@ function buildHealth(report, metrics) {
     const line = document.createElement('p');
     line.className = 'health-metrics';
     line.dataset.role = 'health-metrics';
-    line.textContent = `${metrics.directImporters} importer(s) · ${metrics.blastRadius} blast radius · ${metrics.directImports} direct import(s)`;
+    const parts = [
+      `${metrics.directImporters} importer(s)`,
+      `${metrics.blastRadius} blast radius`,
+      `${metrics.directImports} direct import(s)`,
+    ];
+    // A barrel's re-exports are left out of the use-only import count; naming them keeps
+    // "0 direct import(s)" from reading as if the file depends on nothing.
+    if (metrics.reExports > 0) {
+      parts.push(`${metrics.reExports} re-exported module(s)`);
+    }
+    line.textContent = parts.join(' · ');
     section.append(line);
   }
 

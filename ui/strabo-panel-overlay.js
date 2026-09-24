@@ -400,15 +400,29 @@ function renderDriftChart(container, drift) {
   const legend = document.createElement('div');
   legend.className = 'drift-legend';
   legend.dataset.role = 'drift-legend';
-  for (const entry of series) {
+  series.forEach((entry, index) => {
     const item = document.createElement('span');
     item.className = 'drift-legend-item';
     const values = (entry.points ?? []).map((point) =>
       point.value === null || point.value === undefined ? '—' : String(point.value),
     );
-    item.textContent = `${entry.label}: ${values.join(' → ')}`;
+    // The chart already draws the shape, so the legend names the line and shows its ends.
+    // Printing every value made each item thousands of pixels wide and unreadable; the ends
+    // are enough to key the line, and the full series stays in the tooltip.
+    const shown =
+      values.length <= 2
+        ? values.join(' → ')
+        : `${values[0]} → … → ${values[values.length - 1]}`;
+    const swatch = document.createElement('span');
+    swatch.className = `drift-legend-swatch ${driftSeriesClass(index)}`;
+    swatch.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'drift-legend-text';
+    text.textContent = `${entry.label}: ${shown}`;
+    item.title = `${entry.label}: ${values.join(' → ')}`;
+    item.append(swatch, text);
     legend.append(item);
-  }
+  });
   container.append(legend);
 }
 

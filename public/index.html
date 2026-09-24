@@ -51,36 +51,90 @@
           <span class="control-label">Repository</span>
           <select id="repository"></select>
         </label>
-        <button id="browse" type="button" title="Browse filesystem for a repository">
-          Choose folder…
-        </button>
-        <button id="forget" type="button" disabled title="Forget this repository">Forget</button>
+        <div class="tb-menu-wrap">
+          <button
+            id="repo-menu-toggle"
+            type="button"
+            class="quiet-button tb-icon-button"
+            title="Repository actions"
+            aria-label="Repository actions"
+            aria-haspopup="menu"
+            aria-expanded="false"
+            aria-controls="repo-menu"
+          >
+            <span aria-hidden="true">⋯</span>
+          </button>
+          <div id="repo-menu" class="tb-menu tb-menu-left" role="menu" aria-label="Repository actions" hidden>
+            <button id="browse" type="button" role="menuitem" title="Browse filesystem for a repository">
+              Open folder…
+            </button>
+            <button id="refresh" type="button" role="menuitem" title="Rescan repository (bypass cache)">
+              Rescan repository
+            </button>
+            <button id="forget" type="button" role="menuitem" class="tb-menu-danger" disabled title="Forget this repository">
+              Forget this repository
+            </button>
+          </div>
+        </div>
       </div>
-      <div class="tb-group tb-view-group" role="group" aria-label="View">
-        <label class="control">
-          <span class="control-label">Detail</span>
-          <select id="detail">
-            <option value="block" selected>Directories</option>
-            <option value="file">Files</option>
-            <option value="system">System</option>
-          </select>
-        </label>
-        <label class="control control-tier">
-          <span class="control-label">Tier</span>
-          <select id="tier">
-            <option value="off" selected>Off</option>
-            <option value="all">All tiers</option>
-            <option value="frontend">Frontend</option>
-            <option value="api">API surface</option>
-            <option value="domain">Domain/service</option>
-            <option value="data">Data</option>
-            <option value="integration">Integration</option>
-            <option value="infra">Infra/config</option>
-            <option value="build">Build/tooling</option>
-            <option value="tests">Tests</option>
-            <option value="unclassified">Unclassified</option>
-          </select>
-        </label>
+      <div class="tb-group tb-view-group tb-graph-only" role="group" aria-label="View">
+        <div class="tb-menu-wrap">
+          <button
+            id="view-menu-toggle"
+            type="button"
+            class="tb-view-toggle"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="view-menu"
+            title="Detail, tier colors, and overlay"
+          >
+            <span class="tb-view-key">View</span>
+            <span id="view-summary" class="tb-view-summary"></span>
+            <span class="tb-view-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="view-menu" class="tb-menu tb-menu-left tb-view-menu" role="dialog" aria-label="View options" hidden>
+            <label class="view-field">
+              <span class="view-field-label">Detail</span>
+              <select id="detail">
+                <option value="block" selected>Directories</option>
+                <option value="file">Files</option>
+                <option value="system">System</option>
+              </select>
+            </label>
+            <label class="view-field control-tier">
+              <span class="view-field-label">Color by tier</span>
+              <select id="tier">
+                <option value="off" selected>Off</option>
+                <option value="all">All tiers</option>
+                <option value="frontend">Frontend</option>
+                <option value="api">API surface</option>
+                <option value="domain">Domain/service</option>
+                <option value="data">Data</option>
+                <option value="integration">Integration</option>
+                <option value="infra">Infra/config</option>
+                <option value="build">Build/tooling</option>
+                <option value="tests">Tests</option>
+                <option value="unclassified">Unclassified</option>
+              </select>
+            </label>
+            <label class="view-field control-overlay">
+              <span class="view-field-label">Overlay</span>
+              <select id="overlay">
+                <option value="none" selected>None</option>
+                <option value="impact">Change impact</option>
+                <option value="cycles">Cycles</option>
+                <option value="test-reach">Test reach</option>
+                <option value="module-depth">Module depth</option>
+                <option value="ownership">Ownership</option>
+                <option value="smells">Smells</option>
+                <option value="hidden-coupling">Hidden coupling</option>
+                <option value="declared-rules">Declared rules</option>
+                <option value="architecture">Architecture health</option>
+                <option value="hotspots">Function hotspots</option>
+              </select>
+            </label>
+          </div>
+        </div>
         <label class="control control-search">
           <span class="search-wrap">
             <input
@@ -97,55 +151,30 @@
           <span id="filter-count" class="filter-count" aria-live="polite" hidden></span>
         </label>
       </div>
-      <span class="tb-break" aria-hidden="true"></span>
-      <div class="tb-group tb-review-group" role="group" aria-label="Review">
-        <label class="control control-overlay">
-          <span class="control-label">Review</span>
-          <select id="overlay">
-            <option value="none" selected>None</option>
-            <option value="impact">Change impact</option>
-            <option value="cycles">Cycles</option>
-            <option value="test-reach">Test reach</option>
-            <option value="module-depth">Module depth</option>
-            <option value="ownership">Ownership</option>
-            <option value="smells">Smells</option>
-            <option value="hidden-coupling">Hidden coupling</option>
-            <option value="declared-rules">Declared rules</option>
-            <option value="architecture">Architecture health</option>
-            <option value="hotspots">Function hotspots</option>
-          </select>
-        </label>
-        <button id="refresh" type="button" title="Rescan repository (bypass cache)">Refresh</button>
-      </div>
-      <nav id="breadcrumb" class="breadcrumb tb-group" aria-label="Directory drill-down"></nav>
+      <nav id="breadcrumb" class="breadcrumb tb-group tb-graph-only" aria-label="Directory drill-down"></nav>
       <span class="tb-spacer"></span>
-      <button
-        id="settings-toggle"
-        type="button"
-        class="quiet-button"
-        aria-expanded="false"
-        aria-controls="settings-panel"
-        title="Strabo settings"
-      >
-        Settings
-      </button>
       <button
         id="diagnostics-toggle"
         type="button"
-        class="quiet-button"
+        class="quiet-button tb-icon-button"
         aria-expanded="false"
         aria-controls="diagnostics"
+        aria-label="Diagnostics"
+        title="Scan diagnostics"
       >
-        Diagnostics <span id="diagnostics-badge" class="diag-badge" hidden></span>
+        <span aria-hidden="true">⚠</span><span id="diagnostics-badge" class="diag-badge" hidden></span>
       </button>
-      <span id="status" class="status" role="status"></span>
       <button
-        id="freshness"
+        id="settings-toggle"
         type="button"
-        class="freshness-badge"
-        hidden
-        title="The revision this map was indexed at"
-      ></button>
+        class="quiet-button tb-icon-button"
+        aria-expanded="false"
+        aria-controls="settings-panel"
+        aria-label="Settings"
+        title="Strabo settings"
+      >
+        <span aria-hidden="true">⚙</span>
+      </button>
     </header>
 
     <main class="workspace">
@@ -231,6 +260,17 @@
             aria-label="Show a file name under every file"
           >
             <span aria-hidden="true">Aa</span>
+          </button>
+          <button
+            id="tb-loc"
+            type="button"
+            class="tb-icon"
+            hidden
+            aria-pressed="false"
+            title="Show only large files, sized by lines of code (Z)"
+            aria-label="Show only large files, sized by lines of code"
+          >
+            <span aria-hidden="true">☰</span>
           </button>
           <button id="tb-clear" type="button" class="tb-icon" title="Clear selection (Esc)" aria-label="Clear selection">
             <span aria-hidden="true">✕</span>
@@ -339,6 +379,14 @@
       <div id="float-dock" class="float-dock" role="toolbar" aria-label="Panels"></div>
       <div class="bottom-meta">
         <span id="statusbar-legend" class="bottom-meta-item"></span>
+        <span id="status" class="status" role="status"></span>
+        <button
+          id="freshness"
+          type="button"
+          class="freshness-badge"
+          hidden
+          title="The revision this map was indexed at"
+        ></button>
       </div>
     </footer>
 

@@ -82,6 +82,7 @@ export function renderDiagnostics(container, model, runtime = {}) {
 
 const LEGEND_SWATCHES = {
   'size = dependents': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'size = lines of code': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'island = directory': 'linear-gradient(135deg,var(--island-fill),var(--node-fill))',
   'diamond = test': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'hover = blast radius': 'linear-gradient(135deg,var(--ink-3),var(--accent))',
@@ -92,12 +93,12 @@ const LEGEND_SWATCHES = {
 };
 
 
-export function renderLegend(container, model) {
+export function renderLegend(container, model, options = {}) {
   container.replaceChildren();
 
   const guide = document.createElement('div');
   guide.className = 'legend-guide';
-  for (const text of readingLegend(model)) {
+  for (const text of readingLegend(model, options.locLens === true)) {
     const item = document.createElement('span');
     item.className = 'legend-item';
     const swatch = document.createElement('span');

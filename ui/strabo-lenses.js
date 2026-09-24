@@ -171,6 +171,37 @@ export function applyTier(cy, tierByFile, filterTier = 'all') {
 }
 
 /**
+ * The large-file lens: keep only files at or above `threshold` lines and size them by lines.
+ *
+ * Off by default and file-mode only. `loc-hidden` is separate from the text filter's
+ * `filtered-out` and the tier lens's `tier-hidden`, so the three compose instead of
+ * clearing each other; `loc-sized` swaps the width/height mapping to `data(locDiameter)`,
+ * and `large-file` marks a survivor so it reads as large even when its neighbours differ.
+ * Pass `on: false` to clear the lens and restore the default blast-radius encoding.
+ */
+export function applyLocLens(cy, threshold, on) {
+  const enabled = on === true;
+  const min = Number.isFinite(threshold) && threshold > 0 ? threshold : 0;
+  cy.batch(() => {
+    for (const node of cy.nodes()) {
+      const kind = node.data('kind');
+      const lines = node.data('lines');
+      const isFile = kind !== 'unit' && kind !== 'shelf';
+      if (!enabled || !isFile || typeof lines !== 'number') {
+        node.removeClass('loc-hidden');
+        node.removeClass('large-file');
+        node.removeClass('loc-sized');
+        continue;
+      }
+      const large = lines >= min;
+      node.toggleClass('loc-hidden', !large);
+      node.toggleClass('large-file', large);
+      node.addClass('loc-sized');
+    }
+  });
+}
+
+/**
  * Mark the files and edges in a wrong-way dependency. Pass null to clear.
  *
  * `byNode` maps a file to its classes and `edges` names the endpoints to mark. Upward

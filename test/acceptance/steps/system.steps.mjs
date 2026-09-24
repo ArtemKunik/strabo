@@ -41,7 +41,10 @@ Given('I open the single-unit fixture repository', async function () {
 
 When('I switch to system detail', async function () {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  // Detail lives in the header's View popover.
+  await this.page.click('#view-menu-toggle');
   await this.page.selectOption('#detail', 'system');
+  await this.page.click('#view-menu-toggle');
   await this.page.waitForFunction(
     (generation) =>
       window.straboTest?.state.mode === 'system' &&

@@ -10,6 +10,7 @@ import {
   type CallRules,
   type CodeSymbol,
   type MemberAccess,
+  type ReExport,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
   collectFunctionCalls,
@@ -67,6 +68,7 @@ export async function extractTypeScriptSymbols(
   return withParser(grammarFor(file), (parser) => {
     const diagnostics: Diagnostic[] = [];
     const symbols: CodeSymbol[] = [];
+    const reExports: ReExport[] = [];
     const fieldsByOwner = new Map<string, Set<string>>();
     const methodBodies: MethodBody[] = [];
     const seen = new Set<string>();
@@ -330,6 +332,12 @@ export async function extractTypeScriptSymbols(
         return;
       }
 
+      // A re-export forwards a name from another module; the declaration walk below still
+      // descends into any `export function`/`export const` the statement carries.
+      if (node.type === 'export_statement') {
+        collectReExports(node, reExports);
+      }
+
       for (const child of node.namedChildren) {
         visit(child, owner, testContext);
       }
@@ -366,8 +374,51 @@ export async function extractTypeScriptSymbols(
     markRecursive(symbols, calls);
     markEntries(symbols, content);
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
+    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls, reExports };
   });
+}
+
+/**
+ * Record the names an `export … from` forwards.
+ *
+ * Only a re-export with a `from` source is recorded: `export { a }` without a source names a
+ * declaration in this file, which the symbol walk already captures. A clause records each
+ * exported name (its alias when present), `export * as ns from` records the alias, and a bare
+ * `export * from` records `*`.
+ */
+function collectReExports(node: Node, reExports: ReExport[]): void {
+  const sourceNode = node.childForFieldName('source');
+  if (!sourceNode) {
+    return;
+  }
+  const from = sourceNode.text.replace(/^['"]|['"]$/g, '');
+  const statementTypeOnly = hasToken(node, 'type');
+  const line = node.startPosition.row + 1;
+
+  const clause = node.namedChildren.find((child) => child.type === 'export_clause');
+  if (clause) {
+    for (const specifier of clause.namedChildren) {
+      if (specifier.type !== 'export_specifier') {
+        continue;
+      }
+      const name = specifier.childForFieldName('name')?.text;
+      if (!name) {
+        continue;
+      }
+      const alias = specifier.childForFieldName('alias')?.text;
+      reExports.push({
+        name: alias ?? name,
+        from,
+        typeOnly: statementTypeOnly || hasToken(specifier, 'type'),
+        line,
+      });
+    }
+    return;
+  }
+
+  const namespace = node.namedChildren.find((child) => child.type === 'namespace_export');
+  const alias = namespace?.namedChildren.find((child) => child.type === 'identifier')?.text;
+  reExports.push({ name: alias ?? '*', from, typeOnly: statementTypeOnly, line });
 }
 
 const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {

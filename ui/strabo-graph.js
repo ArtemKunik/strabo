@@ -11,6 +11,9 @@ export const API_PATH = '/api/strabo';
 export const MIN_DIAMETER = 22;
 export const MAX_DIAMETER = 62;
 
+/** The large-file lens sizes a file by lines of code; its own ceiling sits above the default. */
+export const MAX_LOC_DIAMETER = 74;
+
 /** A System-view unit is a card, not a file dot: bigger floor and ceiling, square-root size. */
 export const MIN_UNIT_DIAMETER = 48;
 export const MAX_UNIT_DIAMETER = 130;
@@ -224,7 +227,7 @@ export function mapCounts(model) {  const isBlock = model.prefixLength !== undef
  * Keyboard gestures moved to the shortcut sheet (`?`), so this box states only what the
  * drawing encodes and how to read it.
  */
-export function readingLegend(model) {
+export function readingLegend(model, locLens = false) {
   if (model?.systemUnit) {
     return [
       'box = unit frame',
@@ -242,7 +245,12 @@ export function readingLegend(model) {
       'support = unit footer',
     ];
   }
-  return ['size = dependents', 'island = directory', 'diamond = test', 'star = entry'];
+  return [
+    locLens ? 'size = lines of code' : 'size = dependents',
+    'island = directory',
+    'diamond = test',
+    'star = entry',
+  ];
 }
 
 /** The shortcut sheet shown on `?`: gestures, not encodings. */
@@ -254,6 +262,7 @@ export function shortcutSheet() {
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
     { keys: 'L', action: 'Show a file name under every file' },
+    { keys: 'Z', action: 'Show only files above the line-count threshold, sized by lines' },
     { keys: 'C', action: 'Show recorded function calls instead of imports' },
     { keys: 'H', action: 'Show co-change coupling (commits that changed files together)' },
     { keys: 'S', action: 'View the selected file’s source' },
@@ -336,6 +345,17 @@ export function withUnitHotspots(cards, report) {
 export function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
+
+/**
+ * The diameter a file draws at under the large-file lens: area grows with lines of code.
+ *
+ * The default map sizes a node by blast radius; the lens swaps in this so a big file is a
+ * big dot. Square-root, like the default, so a few very large files do not swamp the map.
+ */
+export function locDiameter(lines) {
+  const scaled = Math.sqrt(Math.max(0, lines ?? 0)) * 2.4 + MIN_DIAMETER;
+  return Math.max(MIN_DIAMETER, Math.min(MAX_LOC_DIAMETER, Math.round(scaled)));
 }
 
 /**
@@ -462,6 +482,10 @@ export function buildElements(model) {
       // its component count instead of blast radius; the hub ring is reserved for files,
       // so a unit's only outline is selection (L18).
       diameter: nodeDiameter(node),
+      // The large-file lens reads these: `lines` is the file's line count (absent on
+      // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
+      lines: typeof node.lines === 'number' ? node.lines : null,
+      locDiameter: locDiameter(node.lines),
       hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
     },
     position: positionOf(positions.get(node.id)),

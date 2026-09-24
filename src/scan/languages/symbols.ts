@@ -113,6 +113,23 @@ export interface MemberAccess {
   line: number;
 }
 
+/**
+ * A name a module forwards from another file: a re-export (`export { x } from './y'`) or a
+ * wildcard (`export * from './y'`).
+ *
+ * A barrel file (`index.ts`) declares no members of its own, so these are the only evidence
+ * of its public surface; without them the member map reads a busy barrel as empty.
+ */
+export interface ReExport {
+  /** The exported name; `*` for a wildcard re-export, or the alias for `export * as ns`. */
+  name: string;
+  /** The module specifier as authored, e.g. `./types.ts`. */
+  from: string;
+  /** True for a type-only re-export (`export type …`). */
+  typeOnly: boolean;
+  line: number;
+}
+
 export interface SymbolExtraction {
   symbols: CodeSymbol[];
   diagnostics: Diagnostic[];
@@ -120,6 +137,8 @@ export interface SymbolExtraction {
   accesses?: MemberAccess[];
   /** Intra-file calls recorded in method bodies; empty when the language records none. */
   calls?: FunctionCall[];
+  /** Names forwarded from other modules; empty when the language records none. */
+  reExports?: ReExport[];
 }
 
 /** Language-specific node rules used to find field references in a method body. */

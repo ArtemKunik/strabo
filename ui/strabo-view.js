@@ -25,6 +25,7 @@ import {
   applyEdgeKind,
   applyEdgeLod,
   applyHiddenCoupling,
+  applyLocLens,
   applyTier,
   applyTierDirections,
   dimOutside,
@@ -511,6 +512,15 @@ export function createView(container) {
      */
     applyTier(tierByFile, filterTier = 'all') {
       applyTier(cy, tierByFile, filterTier);
+    },
+    /**
+     * The large-file lens: keep only files at or above `threshold` lines and size them by
+     * lines of code. Pass `on: false` to clear it and restore the blast-radius encoding.
+     */
+    applyLocLens(threshold, on) {
+      applyLocLens(cy, threshold, on);
+      // Hidden files must not hold label budget, exactly as the text filter reallocates it.
+      applyLabelBudget(cy, true);
     },
     /**
      * Mark the files and edges in a wrong-way dependency. Pass null to clear.

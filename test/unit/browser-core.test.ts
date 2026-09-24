@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   MAX_DELEGATE_PROMPT,
   MAX_DIAMETER,
+  MAX_LOC_DIAMETER,
   MIN_DIAMETER,
   SHAPES,
   breadcrumb,
@@ -27,6 +28,7 @@ import {
   isWiredField,
   isWiredMethod,
   layoutFlowGraph,
+  locDiameter,
   mapCounts,
   memberClusters,
   memberMapSteps,
@@ -145,6 +147,42 @@ test('diameter uses a square-root scale bounded to the documented range', () => 
   assert.equal(diameter(0), MIN_DIAMETER);
   assert.equal(diameter(1_000_000), MAX_DIAMETER);
   assert.ok(diameter(16) > MIN_DIAMETER);
+});
+
+test('locDiameter sizes by lines of code, bounded to its own range', () => {
+  assert.equal(locDiameter(0), MIN_DIAMETER);
+  assert.equal(locDiameter(undefined), MIN_DIAMETER);
+  assert.equal(locDiameter(1_000_000), MAX_LOC_DIAMETER);
+  assert.ok(locDiameter(1000) > locDiameter(300));
+  assert.ok(MAX_LOC_DIAMETER > MAX_DIAMETER);
+});
+
+test('buildElements carries each file line count and its lens diameter', () => {
+  const { nodes } = buildElements({
+    nodes: [
+      { id: 'src/big.ts', kind: 'module', transitiveDependents: 1, lines: 900 },
+      { id: 'src/small.ts', kind: 'module', transitiveDependents: 1, lines: 40 },
+    ],
+    edges: [],
+    positions: [],
+  });
+  const big = nodes.find((node) => node.data.id === 'src/big.ts');
+  const small = nodes.find((node) => node.data.id === 'src/small.ts');
+
+  assert.equal(big.data.lines, 900);
+  assert.equal(big.data.locDiameter, locDiameter(900));
+  assert.equal(small.data.lines, 40);
+  assert.ok(big.data.locDiameter > small.data.locDiameter);
+});
+
+test('buildElements leaves lines null on an aggregate node with no line count', () => {
+  const { nodes } = buildElements({ nodes: [{ id: 'src', kind: 'unit', files: 3 }], edges: [], positions: [] });
+  assert.equal(nodes[0].data.lines, null);
+});
+
+test('readingLegend swaps the size encoding when the large-file lens is on', () => {
+  assert.deepEqual(readingLegend(), ['size = dependents', 'island = directory', 'diamond = test', 'star = entry']);
+  assert.deepEqual(readingLegend({}, true), ['size = lines of code', 'island = directory', 'diamond = test', 'star = entry']);
 });
 
 test('buildElements joins positions and marks hub nodes', () => {
@@ -866,6 +904,27 @@ test('memberMapSteps reports missing wiring and consumers instead of inventing t
   );
   assert.equal(steps[2].caption, 'No field-to-behavior wiring was recorded in the scan.');
   assert.equal(steps[4].caption, 'Repository consumers were not recorded for this file.');
+});
+
+test('memberMapSteps describes a barrel by its re-exports, not as an empty file', () => {
+  const barrel = {
+    available: true,
+    types: [],
+    reExports: [
+      { name: '*', from: './types.ts', typeOnly: false, line: 1 },
+      { name: 'resolve', from: './resolve/index.ts', typeOnly: false, line: 2 },
+      { name: 'scan', from: './scan.ts', typeOnly: false, line: 3 },
+    ],
+    dataFlow: { available: false, reason: 'no-field-access' },
+  };
+  const steps = memberMapSteps(barrel, { consumers: 64 });
+  assert.equal(steps[0].caption, 'This file re-exports 3 name(s) from 3 module(s).');
+  assert.equal(steps[1].caption, '3 re-export(s) and no declared members.');
+
+  assert.match(
+    explainClass(barrel),
+    /declares no members; it re-exports 3 name\(s\) from 3 module\(s\)/,
+  );
 });
 
 test('fieldCard and methodCard describe recorded signatures and wiring', () => {

@@ -76,6 +76,28 @@ test('buildMemberMap classifies data-flow panels from recorded references', () =
   assert.match(dataFlow.caveat ?? '', /recorded in this file/);
 });
 
+test('buildMemberMap carries the names a barrel re-exports, sorted by line', () => {
+  const map = buildMemberMap('src/index.ts', [], [], [
+    { name: 'beta', from: './b.ts', typeOnly: false, line: 2 },
+    { name: 'alpha', from: './a.ts', typeOnly: true, line: 1 },
+  ]);
+
+  assert.equal(map.available, true);
+  assert.equal(map.types.length, 0);
+  assert.deepEqual(
+    map.reExports.map((entry) => [entry.name, entry.from, entry.typeOnly]),
+    [
+      ['alpha', './a.ts', true],
+      ['beta', './b.ts', false],
+    ],
+  );
+});
+
+test('buildMemberMap reports no re-exports for a file that forwards nothing', () => {
+  const map = buildMemberMap('Main.java', [], []);
+  assert.deepEqual(map.reExports, []);
+});
+
 test('buildMemberMap reports unavailable data flow when no reference was recorded', () => {
   const symbols: CodeSymbol[] = [
     symbol({ name: 'Main', kind: 'type' }),

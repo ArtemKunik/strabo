@@ -42,6 +42,7 @@ export type {
   FunctionCall,
   FunctionMetrics,
   MemberAccess,
+  ReExport,
   SymbolExtraction,
 } from './scan/languages/symbols.ts';
 export { collectFunctionMetrics } from './scan/languages/function-metrics.ts';

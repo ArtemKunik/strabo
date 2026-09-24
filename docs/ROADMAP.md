@@ -42,6 +42,7 @@ record is reported as `unavailable`, never invented.
 | 29 | Reviewing an agent's change | Landed (E1-E3: module, route, CLI, MCP, UI; acceptance scenarios pending) |
 | 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; acceptance scenarios pending) |
 | 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
+| 32 | Screen-scoped chrome | Partial (C1-C4 done: graph controls only on Graph, one header row, View popover, terminal actions in the tab strip; C5-C8 open) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1814,6 +1815,59 @@ gains `get_drift`, the repository report gains a **Drift** section (Markdown and
 bounded categorical strokes per R8) above the commit list. Unit coverage is
 `test/unit/drift.test.ts` and `test/unit/phase-29-31.test.ts`. O4 (the published static drift
 artifact) is not started.
+
+## Phase 32 - Screen-scoped chrome
+
+A UX review of the Terminal screen counted about 45 controls around the shell, of which about 6
+act on it. The rest were Graph controls that stayed visible on every screen, plus controls
+repeated in several places. The rule this phase applies: **a control belongs to one screen and
+shows only there**, and actions used rarely live one click deeper, in a menu or ⌘K, rather
+than being removed. The target layout is the "Strabo chrome cleanup" design canvas
+(<https://claude.ai/artifact/JVexoaVkv4n6pJpxtLx92r>).
+
+- **C1 - Graph controls only on Graph (done).** The View button, path filter, breadcrumb, tests
+  strip, and panel dock carry `.tb-graph-only` or are hidden under `body.screen-off-graph`;
+  Terminal, Review, and History show only the header and a thin status line.
+- **C2 - One header row (done).** Choose folder, Refresh, and Forget moved into a `⋯` menu beside
+  the repository picker ("Open folder…", "Rescan repository", "Forget this repository"). Settings
+  and Diagnostics are icon buttons; the Diagnostics badge sits on its icon. The node/edge count
+  and the freshness badge moved to the footer's status line, which truncates rather than
+  squeezing a docked canvas toolbar.
+- **C3 - Labelled View popover (done).** The unlabelled Detail, Tier, and Overlay selects live
+  in one **View** popover with a label on each; the button names the current state
+  ("Directories · Cycles"). The selects keep their ids, so shortcuts, prefs, and URL state
+  still drive them. Only one header popover is open at a time.
+- **C4 - Terminal actions in the tab strip (done).** New shell (`+`), Run (`▾`), and Split (icon)
+  sit on the session tab row; the Sessions button is gone, since the tabs list the sessions and
+  Ctrl+K opens the switcher.
+- **C5 - Panel rail (open).** Replace the horizontally scrolling bottom dock (about 17 chips)
+  with a vertical icon rail on the right of the Graph screen: a handful of pinned panels, the
+  rest behind a `⋯` list. Panels that cannot open yet (Narrator, Edge, Overlay, Passport,
+  Member map without a selection) stay listed but greyed, not in the rail. The acceptance steps
+  in `panel-dock.feature` address chips by label and need moving with it.
+- **C6 - Remove duplicate dock entries (open).** Settings, Diagnostics, and Shortcuts are in
+  the dock as well as the header or `?`; Review and History are both screens and dock panels.
+  Keep one entry point each. "Passport" (module) and "Repo passport" read as the same word in a
+  narrow dock; name them "Module" and "Repository" or merge them under the rail.
+- **C7 - Scope dropdown for the tests strip (open).** The directory chips (`tests 145`,
+  `modules 238`, …) become a **Scope** popover in the Graph toolbar beside View, freeing the
+  footer for the status line alone. `review-panels.steps.mjs` clicks `#strip .strip-chip` and
+  moves with it.
+- **C8 - Graph tool bar placement (open).** Focus, Impact, Path, Boundaries, and Clear float
+  centred over the top of the canvas as in the design, with zoom bottom-left; confirm the
+  dock-to-footer behaviour still earns its place once the footer is only a status line.
+
+Acceptance: on the Terminal screen no element with `.tb-graph-only`, `#strip`, or `#float-dock`
+is visible, and the header is a single row at 1280 px; opening the repository or View menu
+closes the other. Steps that used `#browse`, `#refresh`, `#detail`, and `#overlay` open their
+menu first (`repository-map.steps.mjs`, `system.steps.mjs`).
+
+Known state, named rather than hidden: when C1-C4 landed, the acceptance suite ran 89 scenarios
+with 8 failing, and every one of the 8 also fails on a clean checkout of `c92af73`: the toolbar
+undock drag, the inspector's Dependencies list, members "not recorded", the narrator endpoint
+host, module-quality percentiles, a folder scan reporting `1 node · 0 edges`, stepping back
+through reviews, and narrator "off" state leaking between scenarios. They are not caused by this
+phase and are tracked with Phase 21 G1's non-blocking acceptance job.
 
 ## Reading route (landed)
 
