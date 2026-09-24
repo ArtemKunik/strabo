@@ -5,7 +5,7 @@
  * Pure functions only: no DOM, no fetch.
  */
 
-import { hash } from './strabo-graph.js';
+import { hash } from './strabo-graph-ids.js';
 
 /**
  * Points for the Architecture Health radar, one per axis.

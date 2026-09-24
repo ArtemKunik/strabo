@@ -10,7 +10,7 @@
  * with Cytoscape's own `rendered = model * zoom + pan`, the inverse of `projectIsland`.
  */
 
-import { nodeDiameter } from './strabo-graph.js';
+import { nodeDiameter } from './strabo-graph-sizing.js';
 
 /** Side of one grid cell, in model units. Larger than the largest drawn node. */
 export const GRID_CELL = 256;
