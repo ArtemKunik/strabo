@@ -20,6 +20,20 @@ export const MIN_HEIGHT = 160;
 export const RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
 export const RAIL_TOP = 64;
 
+/**
+ * The highest a window's top may sit: the header's bottom edge. The header stacks above the
+ * floating-panel layer and wraps to a second row when its controls do not fit, so a window
+ * above this line has its title bar (the drag handle) hidden and unreachable.
+ */
+export function topFloor(headerBottom) {
+  return Number.isFinite(headerBottom) && headerBottom > 0 ? Math.ceil(headerBottom) : 0;
+}
+
+/** Where the rail starts: `RAIL_TOP` under a one-row header, one gap below a taller one. */
+export function railTopBelow(headerBottom) {
+  return Math.max(RAIL_TOP, topFloor(headerBottom) + GAP);
+}
+
 export function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }

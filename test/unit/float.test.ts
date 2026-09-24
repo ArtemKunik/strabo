@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float-geometry.js';
+import { firstFreeSlotTop, railTopBelow, RAIL_TOP, sanitizeSize, topFloor } from '../../ui/strabo-float-geometry.js';
 import { clampMenuLeft, clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
@@ -84,4 +84,22 @@ test('clampMenuLeft keeps the overflow menu inside the viewport', () => {
 
 test('clampMenuLeft pins to the margin when the menu is wider than the viewport', () => {
   assert.equal(clampMenuLeft(200, 900, 445), 4);
+});
+
+test('railTopBelow keeps the default rail top under a one-row header', () => {
+  assert.equal(railTopBelow(52), RAIL_TOP);
+  assert.equal(railTopBelow(0), RAIL_TOP);
+});
+
+test('railTopBelow opens the rail below a header that wrapped to two rows', () => {
+  // The header sits above the panel layer, so a window under it has an unreachable title bar.
+  assert.equal(railTopBelow(86), 98);
+  assert.equal(railTopBelow(85.4), 98);
+});
+
+test('topFloor keeps a dragged window title bar below the header', () => {
+  assert.equal(topFloor(86), 86);
+  assert.equal(topFloor(85.2), 86);
+  assert.equal(topFloor(undefined), 0);
+  assert.equal(topFloor(NaN), 0);
 });

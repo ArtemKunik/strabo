@@ -14,16 +14,24 @@ import {
   MIN_HEIGHT,
   GAP,
   RAIL_RIGHT,
-  RAIL_TOP,
+  railTopBelow,
+  topFloor,
 } from './strabo-float-geometry.js';
+
+/** The app header's bottom edge in viewport pixels; 0 when there is no header. */
+export function appHeaderBottom() {
+  return document.querySelector('header.toolbar')?.getBoundingClientRect().bottom ?? 0;
+}
 
 export function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
   /** Whether `win` has a position worth persisting; an unplaced window gets a rail slot. */
   let hasPosition = false;
 
   const place = (x, y) => {
+    // Never above the app header: it stacks over the panels, so the title bar would be lost.
+    const floor = topFloor(appHeaderBottom());
     win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-    win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    win.style.top = `${clamp(y, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4))}px`;
     hasPosition = true;
   };
 
@@ -41,7 +49,7 @@ export function createPlacement({ win, controllers, width, fallbackHeight, confi
       }
     }
     occupied.sort((a, b) => a.top - b.top);
-    return firstFreeSlotTop(occupied, height);
+    return firstFreeSlotTop(occupied, height, { startTop: railTopBelow(appHeaderBottom()) });
   };
 
   const placeInRail = () => {
@@ -51,7 +59,7 @@ export function createPlacement({ win, controllers, width, fallbackHeight, confi
     // When the rail is full and the next slot would fall past the bottom edge, reuse the
     // top slot instead: the window just opened is raised, so it is usable on top rather
     // than opening off-screen with its controls unreachable.
-    const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
+    const placedTop = top + height <= window.innerHeight ? top : railTopBelow(appHeaderBottom());
     // Keep the window on screen: a tall panel opened below another (e.g. Settings below
     // the Legend) would otherwise run past the bottom edge. The body scrolls within
     // whatever height is left.

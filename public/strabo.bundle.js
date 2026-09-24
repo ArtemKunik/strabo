@@ -4059,6 +4059,12 @@ var MIN_WIDTH = 240;
 var MIN_HEIGHT = 160;
 var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
 var RAIL_TOP = 64;
+function topFloor(headerBottom) {
+  return Number.isFinite(headerBottom) && headerBottom > 0 ? Math.ceil(headerBottom) : 0;
+}
+function railTopBelow(headerBottom) {
+  return Math.max(RAIL_TOP, topFloor(headerBottom) + GAP);
+}
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
@@ -4132,11 +4138,15 @@ function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, heig
 }
 
 // ui/strabo-float-placement.js
+function appHeaderBottom() {
+  return document.querySelector("header.toolbar")?.getBoundingClientRect().bottom ?? 0;
+}
 function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
   let hasPosition = false;
   const place = (x, y) => {
+    const floor = topFloor(appHeaderBottom());
     win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-    win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    win.style.top = `${clamp(y, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4))}px`;
     hasPosition = true;
   };
   const firstFreeRailTop = () => {
@@ -4152,13 +4162,13 @@ function createPlacement({ win, controllers, width, fallbackHeight, config, save
       }
     }
     occupied.sort((a, b2) => a.top - b2.top);
-    return firstFreeSlotTop(occupied, height);
+    return firstFreeSlotTop(occupied, height, { startTop: railTopBelow(appHeaderBottom()) });
   };
   const placeInRail = () => {
     const railWidth = win.offsetWidth || width;
     const height = win.offsetHeight || fallbackHeight;
     const top = firstFreeRailTop();
-    const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
+    const placedTop = top + height <= window.innerHeight ? top : railTopBelow(appHeaderBottom());
     const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
     win.style.maxHeight = `${available}px`;
     place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
@@ -4483,20 +4493,26 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     const saved = store2[config.key] ?? {};
     createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
   }
-  window.addEventListener("resize", () => {
+  const keepOnScreen = () => {
+    const floor = topFloor(appHeaderBottom());
     for (const controller of controllers) {
       const win = controller.window;
       if (win.hidden) continue;
       const left = parseFloat(win.style.left) || 0;
-      const top = clamp(parseFloat(win.style.top) || 0, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4));
+      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4));
       win.style.top = `${top}px`;
       win.style.maxHeight = `${Math.max(MIN_HEIGHT, window.innerHeight - top - GAP)}px`;
       const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
       const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
       win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
-      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
+      win.style.top = `${clamp(top, floor, Math.max(floor, window.innerHeight - height))}px`;
     }
-  });
+  };
+  window.addEventListener("resize", keepOnScreen);
+  const header = document.querySelector("header.toolbar");
+  if (header && typeof ResizeObserver === "function") {
+    new ResizeObserver(keepOnScreen).observe(header);
+  }
   dockRail.render();
   controllers.refresh = dockRail.render;
   return controllers;

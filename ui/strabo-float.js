@@ -16,7 +16,8 @@
 import { createDockRail } from './strabo-float-dock.js';
 import { createFloatingWindow } from './strabo-float-window.js';
 import { readStore, writeStore } from './strabo-float-store.js';
-import { clamp, DEFAULT_WIDTH, HEADER_HEIGHT, MIN_HEIGHT, GAP } from './strabo-float-geometry.js';
+import { clamp, DEFAULT_WIDTH, HEADER_HEIGHT, MIN_HEIGHT, GAP, topFloor } from './strabo-float-geometry.js';
+import { appHeaderBottom } from './strabo-float-placement.js';
 
 export * from './strabo-float-geometry.js';
 
@@ -62,7 +63,13 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
   }
 
-  window.addEventListener('resize', () => {
+  /**
+   * Pull every open window back on screen and below the app header. Runs when the viewport
+   * resizes and when the header changes height: it wraps to a second row when its controls
+   * do not fit, which can happen after the windows were placed (a repository chip arriving).
+   */
+  const keepOnScreen = () => {
+    const floor = topFloor(appHeaderBottom());
     for (const controller of controllers) {
       const win = controller.window;
       // A hidden window has no position yet; it takes a rail slot when it opens.
@@ -72,7 +79,7 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       // the stylesheet's `calc(100vh - 116px)`: left stale it lets a shrunk viewport keep
       // the old, taller cap, so the panel hangs off the bottom with its controls unreachable.
       const left = parseFloat(win.style.left) || 0;
-      const top = clamp(parseFloat(win.style.top) || 0, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4));
+      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4));
       win.style.top = `${top}px`;
       win.style.maxHeight = `${Math.max(MIN_HEIGHT, window.innerHeight - top - GAP)}px`;
       // Pull the whole window back on screen. A window placed for a wider viewport would
@@ -80,9 +87,15 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
       const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
       win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
-      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
+      win.style.top = `${clamp(top, floor, Math.max(floor, window.innerHeight - height))}px`;
     }
-  });
+  };
+
+  window.addEventListener('resize', keepOnScreen);
+  const header = document.querySelector('header.toolbar');
+  if (header && typeof ResizeObserver === 'function') {
+    new ResizeObserver(keepOnScreen).observe(header);
+  }
 
   dockRail.render();
   // The array doubles as a handle: callers refresh disabled/active chips after
