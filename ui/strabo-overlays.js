@@ -9,6 +9,37 @@
 
 import { coverageAge, coverageLabel } from './strabo-functions.js';
 
+/** The heading each analysis overlay shows in its panel. */
+export const OVERLAY_TITLES = {
+  impact: 'Change impact',
+  cycles: 'Cycles',
+  'test-reach': 'Test reach',
+  architecture: 'Architecture health',
+  hotspots: 'Function hotspots',
+  'module-depth': 'Module depth',
+  ownership: 'Ownership',
+  smells: 'Smells',
+  'hidden-coupling': 'Hidden coupling (co-change, no import path)',
+  'declared-rules': 'Declared rules',
+};
+
+/** The analysis endpoint each overlay reads. */
+export const OVERLAY_ENDPOINTS = {
+  impact: '/analysis/impact',
+  cycles: '/analysis/cycles',
+  'test-reach': '/analysis/test-reach',
+  architecture: '/analysis/architecture-health',
+  hotspots: '/analysis/functions',
+  'module-depth': '/analysis/module-depth',
+  ownership: '/analysis/ownership',
+  smells: '/analysis/smells',
+  'hidden-coupling': '/analysis/co-change',
+  'declared-rules': '/analysis/rules',
+};
+
+/** Overlays that annotate file nodes and therefore need Files mode. */
+export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules'];
+
 /**
  * Map a review analysis result onto node classes and a panel summary.
  *

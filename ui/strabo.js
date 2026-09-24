@@ -12,6 +12,7 @@
 
 import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
+import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
 import { createFrameSampler } from './strabo-perf.js';
 import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, setDelegateSessionOpener, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
@@ -75,18 +76,36 @@ import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 import { initTerminalScreen } from './strabo-terminal.js';
 
-/** Incremented on every scan; async completions check their captured generation. */
-let scanGeneration = 0;
-let current = null;
-let selected = null;
-/** Edge id (`e<N>`) with an open evidence panel, or null. */
-let selectedEdgeId = null;
-/** Node ids currently held in cytoscape's own selection: ⌘/ctrl-click or shift-drag. */
-let groupSelection = [];
-/** The Git review result currently shown in the review panel, for delegation. */
-let currentReview = null;
-/** The narrator status from `/narrator`, fetched once; null until it resolves. */
-let narratorStatus = null;
+/**
+ * The state several features read and write. It lives on one object, rather than in
+ * module-level `let`s, so a feature controller in its own module sees the same values.
+ */
+const app = {
+  /** Incremented on every scan; async completions check their captured generation. */
+  scanGeneration: 0,
+  /** The graph model the canvas is drawing, or null before the first scan. */
+  current: null,
+  /** The node the Module Passport shows, or null. */
+  selected: null,
+  /** Edge id (`e<N>`) with an open evidence panel, or null. */
+  selectedEdgeId: null,
+  /** Node ids currently held in cytoscape's own selection: ⌘/ctrl-click or shift-drag. */
+  groupSelection: [],
+  /** The Git review result currently shown in the review panel, for delegation. */
+  currentReview: null,
+  /** The narrator status from `/narrator`, fetched once; null until it resolves. */
+  narratorStatus: null,
+  /** Provider presets for the Settings Narrator section, from `/narrator`. */
+  narratorPresets: [],
+  /** Client preferences, read once and re-applied on every change. */
+  clientPrefs: readSettings(),
+  /** The Terminal screen, assigned once it is created at bootstrap. */
+  terminalScreen: null,
+  /** The last loaded member-map payload. */
+  memberData: null,
+  /** The floating-window controllers, assigned once the panels are wrapped. */
+  floatingWindows: null,
+};
 
 /**
  * One store for the app's UI state. `state` and `memberUI` stay the view onto the `view` and
@@ -306,6 +325,11 @@ function startRuntimeReadout() {
   refreshRuntimeReadout();
 }
 
+/** Keep the per-graph half of the runtime line the Diagnostics panel just wrote. */
+function setRuntimeBase(text) {
+  runtimeBase = text;
+}
+
 function stopRuntimeReadout() {
   frameSampler.stop();
   if (runtimeTimer) {
@@ -315,21 +339,16 @@ function stopRuntimeReadout() {
 }
 
 /**
- * Client preferences, read once and re-applied on every change. `applyAppearance` sets the
- * theme and reduce-motion attributes before the first render; the canvas reads their
- * colours, so it is restyled here too.
+ * Re-apply the client preferences. `applyAppearance` sets the theme and reduce-motion
+ * attributes before the first render; the canvas reads their colours, so it is restyled
+ * here too.
  */
-let clientPrefs = readSettings();
-// Assigned once the Terminal screen is created further down; kept nullable so
-// `applyClientPrefs` can run before then without tripping the temporal dead zone.
-let terminalScreen = null;
-
 function applyClientPrefs() {
-  applyAppearance(clientPrefs);
+  applyAppearance(app.clientPrefs);
   view.applyTheme();
-  view.setLabelsVisible(clientPrefs.labels);
-  view.setLabelsForceAll(clientPrefs.allLabels);
-  terminalScreen?.applyTheme();
+  view.setLabelsVisible(app.clientPrefs.labels);
+  view.setLabelsForceAll(app.clientPrefs.allLabels);
+  app.terminalScreen?.applyTheme();
 }
 
 applyClientPrefs();
@@ -423,8 +442,6 @@ const elements = {
   historyScreenRefresh: document.getElementById('history-screen-refresh'),
 };
 
-/** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
-let memberData = null;
 let memberTimer = null;
 let selectedCommitHash = null;
 let selectedBranchName = null;
@@ -456,6 +473,15 @@ async function request(path) {
   return response.json();
 }
 
+Object.assign(app, { store, state, memberUI, view, elements, request });
+
+/*
+ * Feature controllers. Each takes `app`, reads shared state from it, and reaches other
+ * features through it (`app.git.showReview(…)`) at call time, so creation order is free.
+ */
+// <controllers>
+// </controllers>
+
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
 const freshness = createFreshnessBadge(elements.freshness, {
   request,
@@ -485,9 +511,9 @@ function renderRepositoryOptions(repositories, active) {
     option.disabled = true;
     elements.repository.append(option);
   }
-  const selected = active ?? repositories[0]?.root ?? null;
-  if (selected) {
-    elements.repository.value = selected;
+  const chosen = active ?? repositories[0]?.root ?? null;
+  if (chosen) {
+    elements.repository.value = chosen;
   }
   state.repository = elements.repository.value || null;
   elements.forget.disabled = !state.repository;
@@ -513,7 +539,7 @@ async function rememberRepository(root) {
  * for an old repository cannot overwrite the current view.
  */
 async function scan({ refresh = false } = {}) {
-  const generation = ++scanGeneration;
+  const generation = ++app.scanGeneration;
   elements.status.textContent = 'Scanning…';
   if (elements.graphLoading) elements.graphLoading.hidden = false;
   if (elements.graphEmpty) elements.graphEmpty.hidden = true;
@@ -522,10 +548,10 @@ async function scan({ refresh = false } = {}) {
 
   try {
     const model = await request(`/graph${buildGraphQuery(state, { refresh })}`);
-    if (generation !== scanGeneration) {
+    if (generation !== app.scanGeneration) {
       return;
     }
-    current = model;
+    app.current = model;
     // L19: with one build unit there is no L0 worth drawing, so open it at its layers. The
     // flag keeps a later Escape from bouncing straight back into the unit.
     if (
@@ -539,10 +565,9 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     const restoreFile = state.mode === 'system' ? state.unitFile : null;
-    selected = null;
-    selectedEdgeId = null;
-    selectedCommitHash = null;
-    selectedBranchName = null;
+    app.selected = null;
+    app.selectedEdgeId = null;
+    clearReviewMarks();
     state.renderedGeneration = generation;
     if (model.systemUnit) {
       state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
@@ -568,7 +593,7 @@ async function scan({ refresh = false } = {}) {
     });
     // Keep the per-graph half of the runtime line, so the live perf fields can be appended
     // without losing the cache/renderer/shown facts the panel just wrote.
-    runtimeBase = elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? '';
+    setRuntimeBase(elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? '');
     refreshRuntimeReadout();
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
@@ -597,7 +622,7 @@ async function scan({ refresh = false } = {}) {
     fit(view.cy);
     if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
       // A toggle (e.g. outside links) refetches; keep the file it acted on selected.
-      if (generation === scanGeneration) {
+      if (generation === app.scanGeneration) {
         selectNode(restoreFile);
       }
     }
@@ -614,7 +639,7 @@ async function scan({ refresh = false } = {}) {
     }
     refreshDock();
   } catch (error) {
-    if (generation !== scanGeneration) {
+    if (generation !== app.scanGeneration) {
       return;
     }
     if (elements.graphLoading) elements.graphLoading.hidden = true;
@@ -668,7 +693,7 @@ function dismissHint() {
 }
 
 function updateEmptyState() {
-  if (!elements.graphEmpty || !current) return;
+  if (!elements.graphEmpty || !app.current) return;
   const visible = view.cy.nodes().filter((n) => !n.hasClass('filtered-out')).length;
   const filtering = state.filter.trim().length > 0;
   elements.graphEmpty.hidden = !(filtering && visible === 0);
@@ -687,13 +712,13 @@ function updateFilterChrome(matchedCount, totalCount) {
 }
 
 function applyFilterToView() {
-  if (!current) return;
-  const ids = filterNodes(current, state.filter);
+  if (!app.current) return;
+  const ids = filterNodes(app.current, state.filter);
   view.filter(ids);
-  updateFilterChrome(ids.length, current.nodes.length);
+  updateFilterChrome(ids.length, app.current.nodes.length);
   updateEmptyState();
-  if (current) {
-    renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
+  if (app.current) {
+    renderTestsStrip(elements.strip, mapCounts(app.current), applyStripFilter, state.filter);
   }
 }
 
@@ -707,7 +732,7 @@ function applyFilterToView() {
 let tierReportCache = { generation: -1, report: null };
 
 async function applyTierLens() {
-  if (state.tier === 'off' || !current || current.system || current.prefixLength !== undefined) {
+  if (state.tier === 'off' || !app.current || app.current.system || app.current.prefixLength !== undefined) {
     view.applyTier(null);
     view.applyTierDirections(null);
     return;
@@ -725,7 +750,7 @@ async function applyTierLens() {
       tierReportCache = { generation, report: null };
     }
   }
-  if (!current || state.tier === 'off' || state.renderedGeneration !== generation) {
+  if (!app.current || state.tier === 'off' || state.renderedGeneration !== generation) {
     view.applyTier(null);
     view.applyTierDirections(null);
     return;
@@ -736,7 +761,7 @@ async function applyTierLens() {
 }
 
 function selectNode(id) {
-  if (!current) {
+  if (!app.current) {
     return;
   }
   dismissHint();
@@ -746,14 +771,14 @@ function selectNode(id) {
     if (!state.pathFrom) {
       state.pathFrom = id;
       elements.hover.textContent = `Path start: ${id}. Select the end node.`;
-      view.highlight(neighbourhood(current, id));
+      view.highlight(neighbourhood(app.current, id));
       return;
     }
     const from = state.pathFrom;
     state.pathFrom = null;
     state.pathMode = false;
     elements.tbPath.classList.remove('active');
-    const path = findPath(current, from, id);
+    const path = findPath(app.current, from, id);
     elements.hover.textContent = path
       ? `${path.length - 1} step(s): ${path.join(' -> ')}`
       : `No directed path from ${from} to ${id}.`;
@@ -761,8 +786,8 @@ function selectNode(id) {
     return;
   }
 
-  const previousSelection = selected;
-  selected = id;
+  const previousSelection = app.selected;
+  app.selected = id;
   store.set('ui', { node: id });
   if (!passportGoingBack && previousSelection && previousSelection !== id) {
     // Keep the module the passport is leaving, so Back can step down to it. Re-selecting
@@ -770,17 +795,17 @@ function selectNode(id) {
     passportHistory.push(previousSelection);
   }
   view.clearEdge();
-  selectedEdgeId = null;
+  app.selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   updateFocusButton();
-  view.highlight(neighbourhood(current, id));
-  const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
-  if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith('#support')) {
+  view.highlight(neighbourhood(app.current, id));
+  const unitNode = (app.current?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (app.current?.systemUnit && unitNode?.systemUnit && !id.endsWith('#support')) {
     // L16: a file inside the open unit draws its own in-unit edges.
     state.unitFile = id;
     view.focusFile(id);
   }
-  renderInspector(elements.inspector, current, id, {
+  renderInspector(elements.inspector, app.current, id, {
     onSelect: (target) => selectNode(target),
     onTrace: (from, to) => tracePath(from, to),
     onOpenWorkspace: (target) => openFile(target),
@@ -795,18 +820,18 @@ function selectNode(id) {
       // retire the passport window instead of leaving the two stacked.
       openMemberMap(target)
         .then(() => {
-          floatingWindows.find((controller) => controller.key === 'inspector')?.close();
+          app.floatingWindows.find((controller) => controller.key === 'inspector')?.close();
         })
         .catch((error) => {
           elements.status.textContent = `Error: ${error.message}`;
         });
     },
     // A System-view unit may ask the opt-in narrator to name its group.
-    ...(current?.system && !current?.systemUnit
-      ? { narratorStatus, onNarrate: () => narrateGroup(id), onOpenNarratorSettings: openNarratorSettings }
+    ...(app.current?.system && !app.current?.systemUnit
+      ? { narratorStatus: app.narratorStatus, onNarrate: () => narrateGroup(id), onOpenNarratorSettings: openNarratorSettings }
       : {}),
     // Inside a unit, the selected file may show its cross-unit links (L17).
-    ...(current?.systemUnit
+    ...(app.current?.systemUnit
       ? {
           outsideShown: state.showOutside,
           onShowOutside: () => toggleOutsideLinks(),
@@ -814,7 +839,7 @@ function selectNode(id) {
         }
       : {}),
   });
-  if (!current?.system) {
+  if (!app.current?.system) {
     loadMembers(id);
   }
   refreshDock();
@@ -835,8 +860,8 @@ async function loadMembers(id) {
   }
   const impactParams = new URLSearchParams(params);
   try {
-    if (narratorStatus === null) {
-      narratorStatus = await fetchNarratorStatus();
+    if (app.narratorStatus === null) {
+      app.narratorStatus = await fetchNarratorStatus();
     }
     const [symbolsResponse, impactResponse] = await Promise.all([
       fetch(`${API_PATH}/symbols?${params.toString()}`),
@@ -847,14 +872,14 @@ async function loadMembers(id) {
       : { available: false, detail: 'Symbols are unavailable for this file.' };
     const impact = impactResponse.ok ? await impactResponse.json() : null;
     const changesWith = changesWithSection ? await loadChangesWith(id) : null;
-    if (selected === id) {
+    if (app.selected === id) {
       if (membersSection) renderMembers(membersSection, result);
       if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
       if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
       if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
     }
   } catch {
-    if (selected === id) {
+    if (app.selected === id) {
       const fallback = { available: false, detail: 'Symbols could not be loaded.' };
       if (membersSection) renderMembers(membersSection, fallback);
       if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
@@ -905,7 +930,7 @@ function impactPassportSet(card) {
 /** Handlers that let the Functions tab ask the opt-in narrator about the recorded evidence. */
 function functionsHandlers(result) {
   return {
-    narratorStatus,
+    narratorStatus: app.narratorStatus,
     onNarrate: () => narrateFile(result),
     onOpenNarratorSettings: openNarratorSettings,
   };
@@ -920,7 +945,7 @@ async function fetchNarratorStatus() {
     }
     const body = await response.json();
     if (Array.isArray(body?.presets) && body.presets.length > 0) {
-      narratorPresets = body.presets;
+      app.narratorPresets = body.presets;
     }
     return body;
   } catch {
@@ -930,10 +955,10 @@ async function fetchNarratorStatus() {
 
 /** Resolve the narrator status once, so a panel can render its narration controls honestly. */
 async function ensureNarratorStatus() {
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
+  if (app.narratorStatus === null) {
+    app.narratorStatus = await fetchNarratorStatus();
   }
-  return narratorStatus;
+  return app.narratorStatus;
 }
 
 /**
@@ -943,12 +968,12 @@ async function ensureNarratorStatus() {
  * or splits a group.
  */
 async function narrateGroup(id) {
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
+  if (app.narratorStatus === null) {
+    app.narratorStatus = await fetchNarratorStatus();
   }
   return postNarration(
     GROUP_NAMING_INSTRUCTION,
-    buildGroupNamingEvidence(current, id),
+    buildGroupNamingEvidence(app.current, id),
   );
 }
 
@@ -974,7 +999,7 @@ async function narrateFile(result) {
 async function narrateMemberMap() {
   return postNarration(
     MEMBER_NARRATION_INSTRUCTION,
-    fileNarrationEvidence(memberData?.file, memberData, memberData?.importIds, memberData?.consumerIds),
+    fileNarrationEvidence(app.memberData?.file, app.memberData, app.memberData?.importIds, app.memberData?.consumerIds),
   );
 }
 
@@ -1007,10 +1032,10 @@ function fileNarrationEvidence(file, source, imports, usedBy) {
 
 /** True when a graph node is something the narrator can describe: a file or a System unit. */
 function isNarratable(id) {
-  if (!id || !current || state.mode === 'block' || id.endsWith('#support')) {
+  if (!id || !app.current || state.mode === 'block' || id.endsWith('#support')) {
     return false;
   }
-  return current.nodes.some((candidate) => candidate.id === id);
+  return app.current.nodes.some((candidate) => candidate.id === id);
 }
 
 /**
@@ -1020,15 +1045,15 @@ function isNarratable(id) {
  * functions, and import neighbours. The reply is model-generated and the window says so.
  */
 async function narrateNode(id) {
-  const label = current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
+  const label = app.current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
   const showPanel = (panelState) => {
     renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
   };
   showPanel({ label, phase: 'loading' });
-  floatingWindows.find((controller) => controller.key === 'narration')?.open();
+  app.floatingWindows.find((controller) => controller.key === 'narration')?.open();
   try {
     let reply;
-    if (current?.system && !current?.systemUnit) {
+    if (app.current?.system && !app.current?.systemUnit) {
       reply = await narrateGroup(id);
     } else {
       const params = new URLSearchParams({ file: id });
@@ -1036,7 +1061,7 @@ async function narrateNode(id) {
         params.set('repository', state.repository);
       }
       const result = await request(`/symbols?${params.toString()}`);
-      const passport = passportFor(current, id);
+      const passport = passportFor(app.current, id);
       reply = await postNarration(
         MEMBER_NARRATION_INSTRUCTION,
         fileNarrationEvidence(
@@ -1083,7 +1108,7 @@ async function narrateRouteTour() {
 async function narrateRouteStep(step) {
   return postNarration(
     ROUTE_STEP_INSTRUCTION,
-    buildRouteStepEvidence(step, currentRoute?.summary),
+    buildRouteStepEvidence(step, currentRouteSummary()),
   );
 }
 
@@ -1102,7 +1127,7 @@ async function postNarration(instruction, evidence) {
 }
 
 function clearSelection() {
-  selected = null;
+  app.selected = null;
   passportHistory = [];
   store.set('ui', { node: null });
   state.pathFrom = null;
@@ -1114,7 +1139,7 @@ function clearSelection() {
   hideTooltip();
   view.highlight(null);
   view.clearEdge();
-  selectedEdgeId = null;
+  app.selectedEdgeId = null;
   renderEdgeEvidence(elements.edgePanel, null);
   closeReview();
   closeRisk();
@@ -1144,7 +1169,7 @@ function passportBack() {
 
 /** Step the Member map back to the Module Passport it was opened from. */
 function memberMapBack() {
-  const file = memberData?.file;
+  const file = app.memberData?.file;
   closeMemberMap();
   if (file) {
     selectNode(file);
@@ -1167,8 +1192,8 @@ async function openMemberMap(id) {
     const healthQuery = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
     health = await request(`/analysis/architecture-health${healthQuery}`).catch(() => null);
   }
-  const passport = passportFor(current, id);
-  memberData = {
+  const passport = passportFor(app.current, id);
+  app.memberData = {
     file: id,
     repository: state.repository,
     memberMap: result.memberMap,
@@ -1180,30 +1205,30 @@ async function openMemberMap(id) {
     functions: result.functions,
   };
   // The member map's narrator affordance needs the status before it renders.
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
+  if (app.narratorStatus === null) {
+    app.narratorStatus = await fetchNarratorStatus();
   }
   store.set('ui', { memberOpen: true, node: id });
   store.set('member', { stepIndex: 0, find: '' });
   // Open through the window controller, not `memberView.hidden = false` directly: the
   // controller raises the window above the passport and lands focus in it. Setting the
   // `hidden` attribute alone let the window appear behind the passport, silently.
-  floatingWindows.find((controller) => controller.key === 'member')?.open();
+  app.floatingWindows.find((controller) => controller.key === 'member')?.open();
   refreshDock();
 }
 
 function memberStepCount() {
-  return memberMapSteps(memberData?.memberMap, {
-    consumers: memberData?.consumerIds ? memberData.consumerIds.length : null,
+  return memberMapSteps(app.memberData?.memberMap, {
+    consumers: app.memberData?.consumerIds ? app.memberData.consumerIds.length : null,
   }).length;
 }
 
 function renderMemberMapView() {
-  if (!memberData) {
+  if (!app.memberData) {
     return;
   }
   // The view layer reuses the find input, so its focus and caret survive a re-render.
-  renderMemberMap(elements.memberView, memberData, memberUI, {
+  renderMemberMap(elements.memberView, app.memberData, memberUI, {
     onFind: (value) => store.set('member', { find: value }),
     onOrder: (value) => store.set('member', { order: value }),
     onWiring: (value) => store.set('member', { showWiring: value }),
@@ -1235,7 +1260,7 @@ function renderMemberMapView() {
       }),
     onDataFlow: (value) => store.set('member', { dataFlow: value }),
     // The member map may ask the opt-in narrator to explain the recorded members and data flow.
-    narratorStatus,
+    narratorStatus: app.narratorStatus,
     onNarrate: () => narrateMemberMap(),
     onOpenNarratorSettings: openNarratorSettings,
     onStep: (delta) => {
@@ -1373,7 +1398,7 @@ async function restoreUrlPanel() {
   if (!intent || intent.panel !== 'member-map' || !intent.node) {
     return;
   }
-  if (!current || !(current.nodes ?? []).some((entry) => entry.id === intent.node)) {
+  if (!app.current || !(app.current.nodes ?? []).some((entry) => entry.id === intent.node)) {
     return;
   }
   selectNode(intent.node);
@@ -1413,7 +1438,7 @@ document.addEventListener('keydown', (event) => {
     if (screenKey === 't') {
       event.preventDefault();
       setScreen('terminal');
-      terminalScreen?.newSession?.({ kind: 'shell' })?.catch((error) => {
+      app.terminalScreen?.newSession?.({ kind: 'shell' })?.catch((error) => {
         showToast(`Could not open a shell (${error.message}).`);
       });
       return;
@@ -1421,14 +1446,14 @@ document.addEventListener('keydown', (event) => {
     if (screenKey === 'w') {
       event.preventDefault();
       // Closing the active tab is the screen's call; a screen without the extension no-ops.
-      terminalScreen?.closeActiveSession?.();
+      app.terminalScreen?.closeActiveSession?.();
       return;
     }
     if (screenKey === 'r') {
       event.preventDefault();
       setScreen('terminal');
       // The presets menu lives in the screen; if it exposes no opener, the screen is still shown.
-      terminalScreen?.openPresetMenu?.();
+      app.terminalScreen?.openPresetMenu?.();
       return;
     }
   }
@@ -1452,12 +1477,12 @@ document.addEventListener('keydown', (event) => {
     if (!inField) clearSelection();
     return;
   }
-  if (event.key === 'Enter' && !inField && state.mode === 'system' && selected) {
-    const node = current?.nodes.find((candidate) => candidate.id === selected);
+  if (event.key === 'Enter' && !inField && state.mode === 'system' && app.selected) {
+    const node = app.current?.nodes.find((candidate) => candidate.id === app.selected);
     if (node && !node.systemUnit) {
       // Enter opens the focused unit, matching a double-click.
       event.preventDefault();
-      openUnit(selected);
+      openUnit(app.selected);
       return;
     }
   }
@@ -1468,7 +1493,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (inField || !elements.memberView.hidden || !onGraph) return;
   const key = event.key.toLowerCase();
-  if (key === 'f' && selected) focus(view.cy, selected);
+  if (key === 'f' && app.selected) focus(view.cy, app.selected);
   else if (key === 'i') elements.tbImpact.click();
   else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
   else if (key === 'u' && state.mode === 'system' && state.systemUnit) closeUnit();
@@ -1478,12 +1503,12 @@ document.addEventListener('keydown', (event) => {
   else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
   else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();
   else if (key === 'z' && state.mode === 'file') elements.tbLoc?.click();
-  else if (key === 's' && selected && isFileNode(selected)) viewSource(selected);
+  else if (key === 's' && app.selected && isFileNode(app.selected)) viewSource(app.selected);
   else if (key === 't') elements.tbTimeline.click();
   else if (key === 'r') elements.tbReview.click();
   else if (key === 'v') elements.tbRisk.click();
   else if (key === 'n') elements.tbBranches.click();
-  else if (key === 'g' && groupSelection.length >= 2) elements.tbDelegateGroup.click();
+  else if (key === 'g' && app.groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 
 /** Show or hide recorded changes; selecting one compares it with the working tree. */
@@ -1666,7 +1691,7 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
   // The panel was closed, or another review started, while this one was computing.
   if (ticket !== reviewTicket) return;
 
-  currentReview = data;
+  app.currentReview = data;
   if (data.available === false) {
     elements.reviewPanel.hidden = false;
     renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
@@ -1685,8 +1710,8 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
   }
 
   // The review's narrator affordance needs the status before it renders.
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
+  if (app.narratorStatus === null) {
+    app.narratorStatus = await fetchNarratorStatus();
   }
   // The panel was closed, or another review started, during the status fetch.
   if (ticket !== reviewTicket) return;
@@ -1722,11 +1747,17 @@ let reviewTicket = 0;
 
 function closeReview() {
   reviewTicket += 1;
-  currentReview = null;
+  app.currentReview = null;
   reviewHistory = [];
   currentReviewRequest = null;
   elements.reviewPanel.hidden = true;
   elements.reviewPanel.replaceChildren();
+}
+
+/** Forget which commit and branch the panels marked; a new scan starts unmarked. */
+function clearReviewMarks() {
+  selectedCommitHash = null;
+  selectedBranchName = null;
 }
 
 /** Review pending working-tree changes: staged, unstaged, and untracked. */
@@ -1784,8 +1815,6 @@ async function toggleRisk() {
 let serverSettings = null;
 let settingsStatus = '';
 let settingsStatusError = false;
-/** Provider presets for the Narrator section, from `/narrator`. */
-let narratorPresets = [];
 /** Transient Narrator-section UI state (key mode, fetched models, last test result). */
 let narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
 
@@ -1794,8 +1823,8 @@ let narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: n
  * panel and the toolbar. Shared by the Settings checkboxes and the in-graph toolbar toggle.
  */
 function setClientPref(key, value) {
-  clientPrefs = { ...clientPrefs, [key]: value };
-  writeSettings(clientPrefs);
+  app.clientPrefs = { ...app.clientPrefs, [key]: value };
+  writeSettings(app.clientPrefs);
   applyClientPrefs();
   updateLabelsButton();
   // The large-file lens reads the threshold, so re-apply it when that preference changes.
@@ -1812,9 +1841,9 @@ function setClientPref(key, value) {
 function renderSettingsView() {
   if (!elements.settingsPanel) return;
   renderSettings(elements.settingsPanel, {
-    prefs: clientPrefs,
+    prefs: app.clientPrefs,
     server: serverSettings,
-    presets: narratorPresets,
+    presets: app.narratorPresets,
     narratorState: narratorUiState,
     onNarratorState: (patch) => {
       narratorUiState = { ...narratorUiState, ...patch };
@@ -1890,7 +1919,7 @@ async function refreshNarratorSettings() {
 
 /** Re-read `/narrator` and refresh the Functions-tab affordance after a settings change. */
 async function refreshNarratorStatus() {
-  narratorStatus = await fetchNarratorStatus();
+  app.narratorStatus = await fetchNarratorStatus();
 }
 
 /** Write one server setting, then re-render; failures are shown in the panel, not thrown. */
@@ -1973,8 +2002,8 @@ async function openSettings() {
   try {
     serverSettings = await request('/settings');
     // Presets arrive with the narrator status; fetch once if the Functions tab never did.
-    if (narratorPresets.length === 0) {
-      narratorStatus = await fetchNarratorStatus();
+    if (app.narratorPresets.length === 0) {
+      app.narratorStatus = await fetchNarratorStatus();
     }
   } catch (error) {
     settingsStatus = error.message;
@@ -1996,7 +2025,7 @@ async function showWorkspace() {
     workspaceTools.databases = await request('/workspace/databases').catch(() => null);
     renderWorkspaceView();
     // Ring the files on this map that the report records on one side of a cross-repo flow.
-    view.crossRepo(crossRepoNodeIds(workspaceReport, (current?.nodes ?? []).map((node) => node.id)));
+    view.crossRepo(crossRepoNodeIds(workspaceReport, (app.current?.nodes ?? []).map((node) => node.id)));
   } catch (error) {
     workspaceReport = null;
     renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
@@ -2016,9 +2045,9 @@ async function showWorkspace() {
  * Nothing is fetched: a map with no nodes reports that there is nothing to assemble.
  */
 function showBlocks() {
-  const assembly = buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []);
+  const assembly = buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []);
   renderBlocks(elements.blocksPanel, assembly, {
-    selected,
+    selected: app.selected,
     onOpen: (id) => selectNode(id),
   });
   elements.blocksPanel.hidden = false;
@@ -2225,7 +2254,7 @@ async function showRoute(preferredFile) {
 function renderRouteView() {
   renderRoutePanel(elements.routePanel, currentRoute, {
     index: routeIndex,
-    narratorStatus,
+    narratorStatus: app.narratorStatus,
   }, {
     onStep: (index) => stepRoute(index),
     onFocus: (file) => focusRouteFile(file),
@@ -2253,12 +2282,17 @@ function stepRoute(index) {
  * rather than silently selected off-screen.
  */
 function focusRouteFile(file) {
-  const visible = (current?.nodes ?? []).some((node) => node.id === file);
+  const visible = (app.current?.nodes ?? []).some((node) => node.id === file);
   if (!visible) {
     elements.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
     return;
   }
   selectNode(file);
+}
+
+/** The summary of the route the panel is showing, for the narrator. */
+function currentRouteSummary() {
+  return currentRoute?.summary;
 }
 
 function closeRoute() {
@@ -2313,7 +2347,7 @@ function applyStripFilter(filter) {
 }
 
 function tracePath(from, to) {
-  const path = findPath(current, from, to);
+  const path = findPath(app.current, from, to);
   const trace = elements.inspector.querySelector('[data-role="trace"]');
   if (trace) {
     if (path) {
@@ -2332,15 +2366,15 @@ function tracePath(from, to) {
 
 /** Explain the tapped edge from the evidence the scanner recorded. */
 function selectEdge(edgeId) {
-  if (!current || !edgeId) {
+  if (!app.current || !edgeId) {
     view.clearEdge();
-    selectedEdgeId = null;
+    app.selectedEdgeId = null;
     renderEdgeEvidence(elements.edgePanel, null);
     refreshDock();
     return;
   }
-  selectedEdgeId = edgeId;
-  const evidence = edgeEvidenceFor(current, edgeId);
+  app.selectedEdgeId = edgeId;
+  const evidence = edgeEvidenceFor(app.current, edgeId);
   renderEdgeEvidence(elements.edgePanel, evidence, {
     onSelect: (id) => selectNode(id),
     onTrace: (from, to) => tracePath(from, to),
@@ -2349,7 +2383,7 @@ function selectEdge(edgeId) {
       : {}),
     onClear: () => {
       view.clearEdge();
-      selectedEdgeId = null;
+      app.selectedEdgeId = null;
       renderEdgeEvidence(elements.edgePanel, null);
       refreshDock();
     },
@@ -2363,35 +2397,6 @@ function selectEdge(edgeId) {
 function onSelect(id) {
   selectNode(id);
 }
-
-const OVERLAY_TITLES = {
-  impact: 'Change impact',
-  cycles: 'Cycles',
-  'test-reach': 'Test reach',
-  architecture: 'Architecture health',
-  hotspots: 'Function hotspots',
-  'module-depth': 'Module depth',
-  ownership: 'Ownership',
-  smells: 'Smells',
-  'hidden-coupling': 'Hidden coupling (co-change, no import path)',
-  'declared-rules': 'Declared rules',
-};
-
-const OVERLAY_ENDPOINTS = {
-  impact: '/analysis/impact',
-  cycles: '/analysis/cycles',
-  'test-reach': '/analysis/test-reach',
-  architecture: '/analysis/architecture-health',
-  hotspots: '/analysis/functions',
-  'module-depth': '/analysis/module-depth',
-  ownership: '/analysis/ownership',
-  smells: '/analysis/smells',
-  'hidden-coupling': '/analysis/co-change',
-  'declared-rules': '/analysis/rules',
-};
-
-/** Overlays that annotate file nodes and therefore need Files mode. */
-const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules'];
 
 /**
  * Load the selected review analysis and annotate the graph. Overlays annotate only what
@@ -2407,7 +2412,7 @@ async function applyOverlay(generation) {
   }
   const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
   const data = await request(`${OVERLAY_ENDPOINTS[kind]}${query}`);
-  if (generation !== undefined && generation !== scanGeneration) {
+  if (generation !== undefined && generation !== app.scanGeneration) {
     return;
   }
   const overlay = overlayFor(kind, data);
@@ -2418,7 +2423,7 @@ async function applyOverlay(generation) {
   // The Change impact list is the working tree's own changes, so it is where the opt-in
   // commit action lives. It generates a message with the narrator, then commits and pushes.
   const actions = [];
-  if (kind === 'impact' && clientPrefs.commitEnabled) {
+  if (kind === 'impact' && app.clientPrefs.commitEnabled) {
     actions.push({
       label: 'Commit…',
       title: 'Generate a commit message with the narrator, then commit and push',
@@ -2447,18 +2452,18 @@ async function applyOverlay(generation) {
  */
 let unitHotspotCache = null;
 async function enrichUnitCards(generation) {
-  const repository = current?.repository?.root ?? null;
-  if (!current?.unitCards?.length || unitHotspotCache?.repository === repository) {
+  const repository = app.current?.repository?.root ?? null;
+  if (!app.current?.unitCards?.length || unitHotspotCache?.repository === repository) {
     return;
   }
   try {
     const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
     const report = await request(`/analysis/functions${query}`);
-    if (generation !== scanGeneration || current?.repository?.root !== repository) {
+    if (generation !== app.scanGeneration || app.current?.repository?.root !== repository) {
       return;
     }
     unitHotspotCache = { repository, report };
-    view.setUnitCards(withUnitHotspots(current.unitCards, report));
+    view.setUnitCards(withUnitHotspots(app.current.unitCards, report));
   } catch {
     // The card keeps `hotspots —`; a missing analysis must not fail the map.
   }
@@ -2536,7 +2541,7 @@ function openUnit(id) {
   if (state.mode !== 'system') {
     return;
   }
-  const node = current?.nodes.find((candidate) => candidate.id === id);
+  const node = app.current?.nodes.find((candidate) => candidate.id === id);
   state.systemUnit = id;
   state.systemUnitLabel = node?.label ?? id;
   state.unitFile = null;
@@ -2699,7 +2704,7 @@ function updateLabelsButton() {
     return;
   }
   const shown = state.mode === 'file';
-  const on = shown && Boolean(clientPrefs.allLabels);
+  const on = shown && Boolean(app.clientPrefs.allLabels);
   elements.tbLabels.hidden = !shown;
   elements.tbLabels.classList.toggle('active', on);
   elements.tbLabels.setAttribute('aria-pressed', String(on));
@@ -2711,7 +2716,7 @@ function updateLabelsButton() {
  */
 function applyLocLens() {
   const enabled = state.mode === 'file' && state.locLens;
-  view.applyLocLens(clientPrefs.locThreshold, enabled);
+  view.applyLocLens(app.clientPrefs.locThreshold, enabled);
   updateLocButton();
 }
 
@@ -2769,7 +2774,7 @@ function updateFocusButton() {
   if (!elements.tbFocus) {
     return;
   }
-  elements.tbFocus.disabled = !selected;
+  elements.tbFocus.disabled = !app.selected;
 }
 
 /**
@@ -2789,7 +2794,7 @@ function applyModeChrome() {
  */
 function onDrill(id) {
   if (state.mode === 'system') {
-    const node = current?.nodes.find((candidate) => candidate.id === id);
+    const node = app.current?.nodes.find((candidate) => candidate.id === id);
     if (!node) {
       return;
     }
@@ -2816,7 +2821,7 @@ function openFile(id) {
     adapters.openWorkspaceFile(id);
     return;
   }
-  const url = fileWebUrl(current?.repository, id);
+  const url = fileWebUrl(app.current?.repository, id);
   if (url) {
     window.open(url, '_blank', 'noopener');
     return;
@@ -2831,7 +2836,7 @@ let sourceView = null;
 
 /** True when `id` is a file the viewer can read, not a directory block, unit, or shelf. */
 function isFileNode(id) {
-  const node = (current?.nodes ?? []).find((candidate) => candidate.id === id);
+  const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === id);
   if (!node || node.kind === 'unit' || node.kind === 'shelf') {
     return false;
   }
@@ -2853,7 +2858,7 @@ function viewSource(file, options = {}) {
     content: null,
     diff: null,
   };
-  floatingWindows.find((controller) => controller.key === 'source')?.open();
+  app.floatingWindows.find((controller) => controller.key === 'source')?.open();
   loadSource(sourceView.mode).catch(() => {});
 }
 
@@ -2864,39 +2869,39 @@ function viewDiff(file, spec, options = {}) {
 
 /** Fetch the side the viewer is showing; a late response is dropped if the target moved. */
 async function loadSource(mode) {
-  const view = sourceView;
-  if (!view) {
+  const target = sourceView;
+  if (!target) {
     return;
   }
-  view.mode = mode;
-  view.loading = true;
-  view.error = null;
+  target.mode = mode;
+  target.loading = true;
+  target.error = null;
   sourceRender();
-  const query = new URLSearchParams({ file: view.file });
+  const query = new URLSearchParams({ file: target.file });
   if (state.repository) {
     query.set('repository', state.repository);
   }
   try {
     if (mode === 'diff') {
-      for (const [key, value] of Object.entries(view.diffSpec ?? {})) {
+      for (const [key, value] of Object.entries(target.diffSpec ?? {})) {
         query.set(key, String(value));
       }
       const body = await request(`/diff?${query.toString()}`);
-      if (sourceView !== view) return;
-      if (body.available === false) view.error = body.detail ?? body.reason;
-      else view.diff = body.diff;
+      if (sourceView !== target) return;
+      if (body.available === false) target.error = body.detail ?? body.reason;
+      else target.diff = body.diff;
     } else {
-      if (view.ref) query.set('ref', view.ref);
+      if (target.ref) query.set('ref', target.ref);
       const body = await request(`/source?${query.toString()}`);
-      if (sourceView !== view) return;
-      view.content = body.content;
+      if (sourceView !== target) return;
+      target.content = body.content;
     }
   } catch (error) {
-    if (sourceView !== view) return;
-    view.error = error.message;
+    if (sourceView !== target) return;
+    target.error = error.message;
   } finally {
-    if (sourceView === view) {
-      view.loading = false;
+    if (sourceView === target) {
+      target.loading = false;
       sourceRender();
     }
   }
@@ -2907,10 +2912,15 @@ function sourceRender() {
     return;
   }
   renderSource(elements.sourcePanel, sourceView, {
-    onClose: () => floatingWindows.find((controller) => controller.key === 'source')?.close(),
+    onClose: () => app.floatingWindows.find((controller) => controller.key === 'source')?.close(),
     onShowFile: sourceView.hasDiff && sourceView.mode === 'diff' ? () => loadSource('content') : null,
     onShowDiff: sourceView.hasDiff && sourceView.mode === 'content' ? () => loadSource('diff') : null,
   });
+}
+
+/** Whether the viewer has a file to reopen. */
+function hasSourceTarget() {
+  return Boolean(sourceView);
 }
 
 /** Clear the panel but keep the target, so the dock chip can reopen the last file. */
@@ -2931,7 +2941,7 @@ function openSourceAt(file, line) {
     return;
   }
   setScreen('graph');
-  const node = (current?.nodes ?? []).find((candidate) => candidate.id === target);
+  const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === target);
   if (node) {
     selectNode(node.id);
   }
@@ -2956,7 +2966,7 @@ function revealSourceLine(attempt = 0) {
 
 /** Whether an id names a node on the current map, so a control directive cannot point elsewhere. */
 function isMappedNode(id) {
-  return Boolean(id) && (current?.nodes ?? []).some((candidate) => candidate.id === id);
+  return Boolean(id) && (app.current?.nodes ?? []).some((candidate) => candidate.id === id);
 }
 
 /**
@@ -3163,13 +3173,13 @@ elements.folderUse.addEventListener('click', () => {
 });
 
 function showTooltip(id, clientX, clientY) {
-  if (!elements.tooltip || !current) return;
-  const node = current.nodes.find((candidate) => candidate.id === id);
+  if (!elements.tooltip || !app.current) return;
+  const node = app.current.nodes.find((candidate) => candidate.id === id);
   if (!node) return;
   elements.tooltip.replaceChildren();
   const kind = node.kind ?? '';
   // L20: a unit or shelf reads in unit vocabulary, not as a file with a blast radius.
-  const unit = kind === 'unit' ? unitHoverFacts(current, id) : null;
+  const unit = kind === 'unit' ? unitHoverFacts(app.current, id) : null;
   const title = document.createElement('div');
   title.className = 'tt-title';
   title.textContent = unit ? unit.title : node.label ?? id;
@@ -3213,8 +3223,8 @@ view.onHover((id, event) => {
     hideTooltip();
     return;
   }
-  const node = current?.nodes.find((candidate) => candidate.id === id);
-  const unit = node?.kind === 'unit' ? unitHoverFacts(current, id) : null;
+  const node = app.current?.nodes.find((candidate) => candidate.id === id);
+  const unit = node?.kind === 'unit' ? unitHoverFacts(app.current, id) : null;
   const insideUnit = node?.systemUnit && !id.endsWith('#support');
   if (unit) {
     elements.hover.textContent = `${unit.title} · ${unit.rows.join(' · ')}`;
@@ -3229,8 +3239,8 @@ view.onHover((id, event) => {
 });
 
 elements.tbFocus.addEventListener('click', () => {
-  if (selected) {
-    focus(view.cy, selected);
+  if (app.selected) {
+    focus(view.cy, app.selected);
   }
 });
 elements.tbImpact.addEventListener('click', () => {
@@ -3266,7 +3276,7 @@ if (elements.tbCoChange) {
   });
 }
 if (elements.tbLabels) {
-  elements.tbLabels.addEventListener('click', () => setClientPref('allLabels', !clientPrefs.allLabels));
+  elements.tbLabels.addEventListener('click', () => setClientPref('allLabels', !app.clientPrefs.allLabels));
 }
 if (elements.tbLoc) {
   elements.tbLoc.addEventListener('click', toggleLocLens);
@@ -3493,12 +3503,12 @@ updateViewSummary();
 /** Show the keyboard cheat-sheet in its own floating window. Declared with `function` so
  * the key handler above can call it before `floatingWindows` is assigned. */
 function toggleShortcuts() {
-  floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
+  app.floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
 }
 
 /** Open Settings at the Narrator section, the one call to action when the narrator is off. */
 function openNarratorSettings() {
-  floatingWindows?.find?.((controller) => controller.key === 'settings')?.open?.();
+  app.floatingWindows?.find?.((controller) => controller.key === 'settings')?.open?.();
   // The panel renders asynchronously; bring the Narrator section into view once it has.
   const reveal = (attempt = 0) => {
     const target = elements.settingsPanel?.querySelector('#setting-narrator');
@@ -3517,8 +3527,8 @@ function openNarratorSettings() {
 
 /** Recorded facts for a node, from the passport the scan computed. */
 function nodeDelegateTarget(id) {
-  const passport = current ? passportFor(current, id) : null;
-  const node = current?.nodes.find((candidate) => candidate.id === id);
+  const passport = app.current ? passportFor(app.current, id) : null;
+  const node = app.current?.nodes.find((candidate) => candidate.id === id);
   const evidence = [];
   if (passport) {
     for (const metric of passport.metrics) {
@@ -3540,14 +3550,14 @@ function nodeDelegateTarget(id) {
 
 /** Combine every selected node's passport into one delegation target. */
 function groupDelegateTarget() {
-  const items = groupSelection.map((id) => nodeDelegateTarget(id));
+  const items = app.groupSelection.map((id) => nodeDelegateTarget(id));
   return { kind: 'group', label: `${items.length} file(s)`, items };
 }
 
 /** Reflect cytoscape's native selection in the toolbar chip and delegate button. */
 function updateGroupUI(ids) {
-  groupSelection = ids ?? [];
-  const count = groupSelection.length;
+  app.groupSelection = ids ?? [];
+  const count = app.groupSelection.length;
   // A plain click already selects its one node in cytoscape's terms — that's not a
   // "group" a person meant to build, so the toolbar stays quiet until there are two.
   const active = count >= 2;
@@ -3567,7 +3577,7 @@ elements.tbDelegateGroup.addEventListener('click', () => {
 
 /** Recorded facts for an edge, from the evidence the scanner recorded. */
 function edgeDelegateTarget(edgeId) {
-  const evidence = current ? edgeEvidenceFor(current, edgeId) : null;
+  const evidence = app.current ? edgeEvidenceFor(app.current, edgeId) : null;
   if (!evidence) {
     return null;
   }
@@ -3658,7 +3668,7 @@ function commitDelegateTarget(button) {
 
 function memberDelegateTarget(card) {
   const name = card.dataset.member ?? 'member';
-  const file = memberData?.file ?? selected;
+  const file = app.memberData?.file ?? app.selected;
   const facts = [...card.querySelectorAll('.card-signature, .card-tag, .card-metrics')]
     .map((part) => part.textContent.trim())
     .filter(Boolean);
@@ -3683,10 +3693,10 @@ function overlayDelegateTarget(item) {
 function viewDelegateTarget(detail) {
   return {
     kind: 'view',
-    label: detail ?? graphSummary(current ?? { nodes: [], edges: [] }),
+    label: detail ?? graphSummary(app.current ?? { nodes: [], edges: [] }),
     detail: detail ?? undefined,
     evidence: [
-      current ? graphSummary(current) : 'No scan loaded.',
+      app.current ? graphSummary(app.current) : 'No scan loaded.',
       state.filter ? `active filter: ${state.filter}` : 'no active filter',
       state.overlay !== 'none' ? `active review: ${state.overlay}` : 'no active review overlay',
       state.mode === 'block'
@@ -3699,7 +3709,7 @@ function viewDelegateTarget(detail) {
 }
 
 function fallbackDelegateTarget() {
-  return selected ? nodeDelegateTarget(selected) : viewDelegateTarget();
+  return app.selected ? nodeDelegateTarget(app.selected) : viewDelegateTarget();
 }
 
 function resolveDomDelegateTarget(node) {
@@ -3719,23 +3729,23 @@ function resolveDomDelegateTarget(node) {
     return commitDelegateTarget(commit);
   }
   const reviewPanel = node.closest('#review-panel');
-  if (reviewPanel && currentReview?.available) {
-    return reviewDelegateTarget(currentReview);
+  if (reviewPanel && app.currentReview?.available) {
+    return reviewDelegateTarget(app.currentReview);
   }
   const overlayItem = node.closest('#overlay-panel [data-delegate-overlay-item]');
   if (overlayItem) {
     return overlayDelegateTarget(overlayItem);
   }
   const edgePanel = node.closest('#edge-panel');
-  if (edgePanel && selectedEdgeId) {
-    return edgeDelegateTarget(selectedEdgeId);
+  if (edgePanel && app.selectedEdgeId) {
+    return edgeDelegateTarget(app.selectedEdgeId);
   }
   const card = node.closest('#member-view .member-card');
   if (card) {
     return memberDelegateTarget(card);
   }
-  if (node.closest('#inspector') && selected) {
-    return nodeDelegateTarget(selected);
+  if (node.closest('#inspector') && app.selected) {
+    return nodeDelegateTarget(app.selected);
   }
   const chip = node.closest('.strip-chip');
   if (chip) {
@@ -3753,7 +3763,7 @@ function resolveDomDelegateTarget(node) {
  * The delegate module attaches the returned session through the registered opener.
  */
 async function delegateToAgent(agent, target) {
-  const repository = current?.repository ?? null;
+  const repository = app.current?.repository ?? null;
   const prompt = buildAgentPrompt({ agent, repository, target });
   const title = (target.label ?? target.id ?? 'repository view').slice(0, 80);
   const reviewed = await showPromptReview({ agent, title, prompt });
@@ -3793,7 +3803,7 @@ function narrateMenuItems(target) {
     return [];
   }
   const menuState = isNarratable(target.id)
-    ? narratorMenuState(narratorStatus)
+    ? narratorMenuState(app.narratorStatus)
     : { enabled: false, hint: 'Narrate works on a file or a System unit — open the folder to reach its files.' };
   return [
     {
@@ -3832,7 +3842,7 @@ function openDelegateMenu(target, x, y) {
   if (!target) {
     return;
   }
-  const repository = current?.repository ?? null;
+  const repository = app.current?.repository ?? null;
   const menuTitle = (target.label ?? target.id ?? 'repository view').slice(0, 80);
   const promptFor = (agent) => buildAgentPrompt({ agent, repository, target });
   showContextMenu({
@@ -3881,7 +3891,7 @@ view.onContext((target, originalEvent) => {
   // Right-clicking a node that's part of the current multi-selection acts on the whole
   // group, same as most desktop apps; right-clicking outside it targets just that node,
   // leaving the group selection as-is underneath.
-  if (target.kind === 'node' && target.id && groupSelection.length >= 2 && groupSelection.includes(target.id)) {
+  if (target.kind === 'node' && target.id && app.groupSelection.length >= 2 && app.groupSelection.includes(target.id)) {
     openDelegateMenu(groupDelegateTarget(), x, y);
   } else if (target.kind === 'node' && target.id) {
     openDelegateMenu(nodeDelegateTarget(target.id), x, y);
@@ -3975,7 +3985,7 @@ function updateTerminalBadge(sessions) {
 
 /** The active repository as `{ name, root }` for a new terminal session. */
 function resolveRepository() {
-  const repository = current?.repository;
+  const repository = app.current?.repository;
   const root = repository?.root ?? state.repository ?? null;
   const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null);
   return { name, root };
@@ -3986,7 +3996,7 @@ function terminalToast(message, options = {}) {
   return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6000 });
 }
 
-terminalScreen = initTerminalScreen(elements.terminalContainer, {
+app.terminalScreen = initTerminalScreen(elements.terminalContainer, {
   openSourceAt,
   toast: terminalToast,
   onSessionsChanged: updateTerminalBadge,
@@ -3998,7 +4008,7 @@ terminalScreen = initTerminalScreen(elements.terminalContainer, {
 // A delegated run is created server-side; this is how its session reaches the screen.
 setDelegateSessionOpener((sessionId) => {
   setScreen('terminal');
-  return terminalScreen?.openSession?.(sessionId);
+  return app.terminalScreen?.openSession?.(sessionId);
 });
 
 function setScreen(screen) {
@@ -4025,7 +4035,7 @@ function setScreen(screen) {
   elements.screenTabReview?.setAttribute('aria-selected', String(showReview));
   elements.screenTabHistory?.setAttribute('aria-selected', String(showHistory));
   if (showTerminal) {
-    terminalScreen.activate();
+    app.terminalScreen.activate();
   } else if (showReview) {
     openReviewScreen();
   } else if (showHistory) {
@@ -4051,7 +4061,7 @@ function reviewHandlers(data, navigation, onClose = closeReview) {
     ...navigation,
     onSelect: (id) => selectNode(id),
     onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
-    narratorStatus,
+    narratorStatus: app.narratorStatus,
     onNarrate: () => narrateReview(data),
     onOpenNarratorSettings: openNarratorSettings,
   };
@@ -4070,7 +4080,7 @@ function openReviewScreen() {
   if (!body) {
     return;
   }
-  if (!currentReview) {
+  if (!app.currentReview) {
     body.replaceChildren();
     const note = document.createElement('p');
     note.className = 'evidence';
@@ -4082,8 +4092,8 @@ function openReviewScreen() {
     return;
   }
   const navigation = { canGoBack: reviewHistory.length > 0, onBack: reviewBack };
-  renderReview(body, currentReview, reviewHandlers(currentReview, navigation, () => setScreen('graph')));
-  if (currentReview.available !== false) {
+  renderReview(body, app.currentReview, reviewHandlers(app.currentReview, navigation, () => setScreen('graph')));
+  if (app.currentReview.available !== false) {
     const label = currentReviewRequest?.branchName
       ?? (currentReviewRequest?.commit ? currentReviewRequest.commit.shortHash : 'working tree');
     elements.status.textContent = `Review ${label}`;
@@ -4092,8 +4102,8 @@ function openReviewScreen() {
 
 /** Recompute the change set currently shown in the full-screen Review tab. */
 function refreshReviewScreen() {
-  const request = currentReviewRequest ?? { query: '', commit: null, branchName: null };
-  showReview(request.query, request.commit, request.branchName, { fromHistory: true }).catch((error) => {
+  const entry = currentReviewRequest ?? { query: '', commit: null, branchName: null };
+  showReview(entry.query, entry.commit, entry.branchName, { fromHistory: true }).catch((error) => {
     elements.status.textContent = `Error: ${error.message}`;
   });
 }
@@ -4160,7 +4170,7 @@ function openHistoryScreen() {
  * `hidden` semantics; these handlers only supply app-aware open/close so the dock can
  * restore a panel without desyncing overlay or selection state.
  */
-const floatingWindows = initFloatingWindows({
+app.floatingWindows = initFloatingWindows({
   dock: document.getElementById('float-dock'),
   panels: [
     {
@@ -4269,7 +4279,7 @@ const floatingWindows = initFloatingWindows({
       pinned: 6,
       width: 360,
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
-      canOpen: () => Boolean(selectedEdgeId),
+      canOpen: () => Boolean(app.selectedEdgeId),
       blockedTitle: 'Click an edge in the graph to open Edge',
       onBlocked: () => {
         elements.status.textContent = 'Click an edge in the graph first — no edge selected.';
@@ -4285,7 +4295,7 @@ const floatingWindows = initFloatingWindows({
       pinned: 3,
       width: 720,
       height: 640,
-      canOpen: () => Boolean(sourceView),
+      canOpen: () => hasSourceTarget(),
       blockedTitle: 'Select a file to view its source',
       onBlocked: () => {
         elements.status.textContent = 'Select a file first — no source to show.';
@@ -4310,7 +4320,7 @@ const floatingWindows = initFloatingWindows({
       glyph: 'ⓘ',
       pinned: 2,
       width: 384,
-      canOpen: () => Boolean(selected),
+      canOpen: () => Boolean(app.selected),
       blockedTitle: 'Select a module in the graph to open Passport',
       onBlocked: () => {
         elements.status.textContent = 'Select a module first — no passport to show.';
@@ -4378,7 +4388,7 @@ const floatingWindows = initFloatingWindows({
       width: 900,
       height: 700,
       center: true,
-      canOpen: () => Boolean(memberData),
+      canOpen: () => Boolean(app.memberData),
       blockedTitle: 'Open a member map from a module passport first',
       onBlocked: () => {
         elements.status.textContent = 'Open a member map from a module passport first.';
@@ -4445,18 +4455,18 @@ initFloatingToolbar(elements.graphToolbar, { dock: document.getElementById('bott
 
 function refreshDock() {
   try {
-    floatingWindows?.refresh?.();
+    app.floatingWindows?.refresh?.();
   } catch {
     // Dock not yet initialized; initial renderDock() covers startup.
   }
 }
 
 elements.settingsToggle?.addEventListener('click', () => {
-  floatingWindows.find((controller) => controller.key === 'settings')?.toggle();
+  app.floatingWindows.find((controller) => controller.key === 'settings')?.toggle();
 });
 
 // Follow the OS theme/motion preference while the theme is set to "system".
-watchSystemPreferences(clientPrefs, () => applyClientPrefs());
+watchSystemPreferences(app.clientPrefs, () => applyClientPrefs());
 
 // Gated automation hook for browser acceptance tests. It exposes measurement and the
 // same handlers the UI uses; it is inert unless the page opts in with window.STRABO_TEST.
@@ -4472,18 +4482,18 @@ if (window.STRABO_TEST) {
     toggleExpandedUnit,
     outsideShown: () => state.showOutside,
     selectEdge,
-    model: () => current,
+    model: () => app.current,
     renderedGeneration: () => state.renderedGeneration,
     openMemberMap: (id) => openMemberMap(id),
     closeMemberMap: () => closeMemberMap(),
     memberUI,
-    memberData: () => memberData,
+    memberData: () => app.memberData,
     memberStepCount,
     review: () => showReview(''),
     reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
     risk: () => showRisk(),
-    groupSelection: () => groupSelection,
-    floatingWindows: () => floatingWindows,
+    groupSelection: () => app.groupSelection,
+    floatingWindows: () => app.floatingWindows,
     islands: () => view.islandDirectories(),
     islandBoxes: () => view.islandBoxes(),
     islandOffsets: () => view.islandOffsets(),
@@ -4493,7 +4503,7 @@ if (window.STRABO_TEST) {
     passport: () => showPassport(),
     route: (file) => showRoute(file),
     blocks: () => showBlocks(),
-    brickAssembly: () => buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []),
+    brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,
     openReviewScreen,
@@ -4503,14 +4513,14 @@ if (window.STRABO_TEST) {
 
 // The right-click Narrate entry needs the narrator status before the first menu opens.
 fetchNarratorStatus().then((status) => {
-  narratorStatus ??= status;
+  app.narratorStatus ??= status;
 });
 
 loadCatalogue()
   .then(() => {
     // The graph default is the fallback: a URL mode or a per-repository pref overrides it.
-    state.mode = clientPrefs.defaultDetail;
-    elements.detail.value = clientPrefs.defaultDetail;
+    state.mode = app.clientPrefs.defaultDetail;
+    elements.detail.value = app.clientPrefs.defaultDetail;
     applyUrl();
     if (
       state.repository &&
