@@ -26,7 +26,14 @@ import {
 } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { writeIslandLayout } from './strabo-island-layout.js';
-import { closeContextMenu, copyText, launchAgent, setDelegateSessionOpener, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
+import {
+  closeContextMenu,
+  copyText,
+  launchAgent,
+  showContextMenu,
+  showPromptReview,
+  showToast,
+} from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
 import { clampMenuLeft, initFloatingToolbar } from './strabo-float-toolbar.js';
 import { createFreshnessBadge } from './strabo-freshness.js';
@@ -49,7 +56,6 @@ import { buildBrickAssembly } from './strabo-lego.js';
 import { applyAppearance, readSettings, watchSystemPreferences } from './strabo-settings.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
-import { initTerminalScreen } from './strabo-terminal.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
 import { createRuntimeReadout } from './strabo-runtime-readout.js';
 import { createUrlState } from './strabo-url-state.js';
@@ -62,6 +68,7 @@ import { createLensController } from './strabo-lens-controller.js';
 import { createRepositoryPicker } from './strabo-repositories.js';
 import { createSystemUnits } from './strabo-system-units.js';
 import { createSourceViewer } from './strabo-source-viewer.js';
+import { createTerminalBridge } from './strabo-terminal-bridge.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -303,6 +310,7 @@ app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
 app.source = createSourceViewer(app);
+app.terminal = createTerminalBridge(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -920,75 +928,6 @@ function isFileNode(id) {
     return false;
   }
   return state.mode === 'file' || Boolean(node.systemUnit && !id.endsWith('#support'));
-}
-
-/** Whether an id names a node on the current map, so a control directive cannot point elsewhere. */
-function isMappedNode(id) {
-  return Boolean(id) && (app.current?.nodes ?? []).some((candidate) => candidate.id === id);
-}
-
-/**
- * The Terminal's `onControl` hook: a `::strabo::` marker printed by the `strabo` shim on a
- * session's PATH becomes a read-only map action. The verbs are a fixed set and anything
- * unknown is ignored; node and file arguments are matched against the current map, so a
- * directive can never reach a path the source viewer would not already allow.
- */
-function handleTerminalControl(directive) {
-  const verb = directive?.verb;
-  const args = Array.isArray(directive?.args) ? directive.args : [];
-  switch (verb) {
-    case 'focus': {
-      const id = args[0];
-      if (isMappedNode(id)) {
-        setScreen('graph');
-        selectNode(id);
-      }
-      return;
-    }
-    case 'open': {
-      const file = args[0];
-      const line = Number.parseInt(args[1] ?? '', 10);
-      if (file) {
-        app.source.openSourceAt(file, Number.isInteger(line) ? line : null);
-      }
-      return;
-    }
-    case 'highlight': {
-      const ids = args.filter(isMappedNode);
-      if (ids.length > 0) {
-        setScreen('graph');
-        view.highlight(ids);
-      }
-      return;
-    }
-    case 'review': {
-      setScreen('graph');
-      const ref = args[0];
-      const pending = ref
-        ? app.git.showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref })
-        : app.git.showReview('');
-      Promise.resolve(pending).catch((error) => {
-        showToast(`Review failed (${error.message}).`);
-      });
-      return;
-    }
-    case 'note': {
-      const message = args.join(' ').trim();
-      if (message) {
-        showToast(message);
-      }
-      return;
-    }
-    case 'screen': {
-      const target = args[0];
-      if (target === 'graph' || target === 'terminal') {
-        setScreen(target);
-      }
-      return;
-    }
-    default:
-      return;
-  }
 }
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
@@ -1735,62 +1674,6 @@ function withSelection(resolved, selection) {
 view.onSelect(onSelect);
 view.onDrill(onDrill);
 view.onEdge(selectEdge);
-
-/**
- * The Terminal screen. Created once at bootstrap — like the graph, it lives for the whole
- * page session, so switching tabs only shows/hides it rather than tearing it down.
- *
- * The tab badge is built here rather than in `index.html` (owned elsewhere); it reuses the
- * diagnostics pill classes, so it needs no new CSS and reports running/failed sessions even
- * while the Graph screen is showing.
- */
-const terminalBadge = document.createElement('span');
-terminalBadge.id = 'terminal-badge';
-terminalBadge.className = 'diag-badge';
-terminalBadge.hidden = true;
-elements.screenTabTerminal.append(terminalBadge);
-
-/** Show a count of running sessions on the tab, reddened when any session has failed. */
-function updateTerminalBadge(sessions) {
-  const list = Array.isArray(sessions) ? sessions : [];
-  const running = list.filter((session) => session?.status === 'running').length;
-  const failed = list.filter(
-    (session) => session?.status === 'exited' && (session.exitCode ?? 0) !== 0,
-  ).length;
-  const count = running + failed;
-  terminalBadge.hidden = count === 0;
-  terminalBadge.textContent = String(count);
-  terminalBadge.classList.toggle('has-errors', failed > 0);
-  terminalBadge.title = failed > 0 ? `${running} running, ${failed} failed` : `${running} running`;
-}
-
-/** The active repository as `{ name, root }` for a new terminal session. */
-function resolveRepository() {
-  const repository = app.current?.repository;
-  const root = repository?.root ?? state.repository ?? null;
-  const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : null);
-  return { name, root };
-}
-
-/** The Terminal's toast hook, accepting either a plain message or one carrying an action. */
-function terminalToast(message, options = {}) {
-  return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6000 });
-}
-
-app.terminalScreen = initTerminalScreen(elements.terminalContainer, {
-  openSourceAt: app.source.openSourceAt,
-  toast: terminalToast,
-  onSessionsChanged: updateTerminalBadge,
-  resolveRepository,
-  closeTerminal: () => setScreen('graph'),
-  onControl: handleTerminalControl,
-});
-
-// A delegated run is created server-side; this is how its session reaches the screen.
-setDelegateSessionOpener((sessionId) => {
-  setScreen('terminal');
-  return app.terminalScreen?.openSession?.(sessionId);
-});
 
 function setScreen(screen) {
   store.set('ui', { screen });
