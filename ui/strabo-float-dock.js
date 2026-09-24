@@ -1,64 +1,20 @@
 /**
  * The floating-window dock rail: the vertical strip of chips that restores closed or
- * collapsed panels, its overflow fades, and the "More" menu for chips that do not fit on
- * the rail.
+ * collapsed panels, and its keyboard contract.
  *
- * `createDockRail` owns the rail's DOM and keyboard contract; `strabo-float.js` drives it
- * with `render()` after the set of windows or their open state changes.
+ * `createDockRail` owns the rail's DOM; the "More" menu is built by
+ * `strabo-float-dock-menu.js` and the edge fades by `strabo-float-dock-overflow.js`.
+ * `strabo-float.js` drives it with `render()` after the set of windows or their open state
+ * changes.
  */
 
 import { rovingIndex } from './strabo-core.js';
+import { createDockMoreMenu } from './strabo-float-dock-menu.js';
+import { createDockOverflow } from './strabo-float-dock-overflow.js';
 
 export function createDockRail({ dock, controllers }) {
-  /**
-   * Fade a dock edge while more chips sit past it. The rail is nowrap and its native
-   * scrollbar is hidden, so without a fade the clipped chips just look cut off.
-   */
-  const syncOverflow = () => {
-    if (!dock) return;
-    const max = dock.scrollHeight - dock.clientHeight;
-    dock.classList.toggle('is-overflow-top', dock.scrollTop > 1);
-    dock.classList.toggle('is-overflow-bottom', max > 1 && dock.scrollTop < max - 1);
-  };
-
-  /** The "More" list: every docked panel without a rail chip right now. */
-  let moreOpen = false;
-  const moreToggle = document.createElement('button');
-  moreToggle.type = 'button';
-  moreToggle.className = 'dock-more';
-  moreToggle.dataset.glyph = '⋯';
-  moreToggle.textContent = 'More';
-  moreToggle.title = 'More panels';
-  moreToggle.setAttribute('aria-haspopup', 'menu');
-  const moreMenu = document.createElement('div');
-  moreMenu.className = 'dock-more-menu';
-  moreMenu.setAttribute('role', 'menu');
-  moreMenu.setAttribute('aria-label', 'More panels');
-
-  const setMoreOpen = (open) => {
-    moreOpen = open;
-    moreMenu.hidden = !open;
-    moreToggle.setAttribute('aria-expanded', String(open));
-  };
-  moreToggle.addEventListener('click', (event) => {
-    event.stopPropagation();
-    setMoreOpen(!moreOpen);
-    if (moreOpen) moreMenu.querySelector('.dock-chip:not(:disabled)')?.focus();
-  });
-  moreMenu.addEventListener('click', (event) => {
-    if (event.target.closest?.('.dock-chip')) setMoreOpen(false);
-  });
-  moreMenu.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      setMoreOpen(false);
-      moreToggle.focus();
-    }
-  });
-  document.addEventListener('click', (event) => {
-    if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
-  });
-  setMoreOpen(false);
+  const syncOverflow = createDockOverflow(dock);
+  const { moreToggle, moreMenu, setMoreOpen } = createDockMoreMenu();
 
   const render = () => {
     if (!dock) return;
@@ -127,13 +83,6 @@ export function createDockRail({ dock, controllers }) {
     });
     chips[next].focus();
   });
-
-  // The rail scrolls vertically on a short window; the edge fades follow. Observe size
-  // changes so the fades appear the moment the window is shortened.
-  dock?.addEventListener('scroll', syncOverflow, { passive: true });
-  if (dock && typeof ResizeObserver !== 'undefined') {
-    new ResizeObserver(syncOverflow).observe(dock);
-  }
 
   return { dock, moreMenu, moreToggle, render, railItems, flashChip };
 }

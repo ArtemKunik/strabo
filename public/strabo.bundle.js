@@ -3935,14 +3935,8 @@ async function launchAgent(agent, { repository, target, prompt, title, dryRun = 
   return body;
 }
 
-// ui/strabo-float-dock.js
-function createDockRail({ dock, controllers }) {
-  const syncOverflow = () => {
-    if (!dock) return;
-    const max = dock.scrollHeight - dock.clientHeight;
-    dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
-    dock.classList.toggle("is-overflow-bottom", max > 1 && dock.scrollTop < max - 1);
-  };
+// ui/strabo-float-dock-menu.js
+function createDockMoreMenu() {
   let moreOpen = false;
   const moreToggle = document.createElement("button");
   moreToggle.type = "button";
@@ -3979,6 +3973,28 @@ function createDockRail({ dock, controllers }) {
     if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
   });
   setMoreOpen(false);
+  return { moreToggle, moreMenu, setMoreOpen };
+}
+
+// ui/strabo-float-dock-overflow.js
+function createDockOverflow(dock) {
+  const sync2 = () => {
+    if (!dock) return;
+    const max = dock.scrollHeight - dock.clientHeight;
+    dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
+    dock.classList.toggle("is-overflow-bottom", max > 1 && dock.scrollTop < max - 1);
+  };
+  dock?.addEventListener("scroll", sync2, { passive: true });
+  if (dock && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(sync2).observe(dock);
+  }
+  return sync2;
+}
+
+// ui/strabo-float-dock.js
+function createDockRail({ dock, controllers }) {
+  const syncOverflow = createDockOverflow(dock);
+  const { moreToggle, moreMenu, setMoreOpen } = createDockMoreMenu();
   const render = () => {
     if (!dock) return;
     const docked = controllers.filter((controller) => controller.docked);
@@ -4031,10 +4047,6 @@ function createDockRail({ dock, controllers }) {
     });
     chips[next].focus();
   });
-  dock?.addEventListener("scroll", syncOverflow, { passive: true });
-  if (dock && typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(syncOverflow).observe(dock);
-  }
   return { dock, moreMenu, moreToggle, render, railItems, flashChip };
 }
 
@@ -4070,19 +4082,16 @@ function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } =
   return candidate;
 }
 
-// ui/strabo-float-window.js
-function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
+// ui/strabo-float-chrome.js
+function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, height = null }) {
   const element2 = config.element;
-  const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
-  let size = sanitizeSize(saved.size);
-  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
   const win = document.createElement("section");
   win.className = "float-window";
   win.dataset.panel = config.key;
   win.hidden = true;
   win.style.width = `${width}px`;
-  if (size.height) {
-    win.style.height = `${size.height}px`;
+  if (height) {
+    win.style.height = `${height}px`;
   }
   const header = document.createElement("header");
   header.className = "float-header";
@@ -4119,7 +4128,11 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
   win.append(header, body, resizeHandle);
   element2.parentNode.insertBefore(win, element2);
   body.append(element2);
-  const fallbackHeight = config.height ?? 260;
+  return { win, header, title, collapseButton, closeButton, resizeHandle };
+}
+
+// ui/strabo-float-placement.js
+function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
   let hasPosition = false;
   const place = (x, y) => {
     win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
@@ -4161,150 +4174,21 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
     place(left, top);
   }
-  const isCollapsed = () => win.classList.contains("is-collapsed");
-  const updateCollapseChrome = () => {
-    const collapsed = isCollapsed();
-    collapseButton.textContent = collapsed ? "+" : "\u2013";
-    collapseButton.title = collapsed ? "Expand" : "Collapse";
-    collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-  };
-  const setCollapsed = (collapsed) => {
-    win.classList.toggle("is-collapsed", collapsed);
-    updateCollapseChrome();
-    persist();
-  };
-  if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
-  updateCollapseChrome();
-  let lastHidden = null;
-  const raise = () => {
-    win.style.zIndex = String(nextZ());
-  };
-  const sync2 = () => {
-    const hidden = element2.hidden === true;
-    win.hidden = hidden;
-    if (!hidden && config.titleFrom) {
-      const heading2 = config.titleFrom(element2);
-      if (heading2) {
-        title.textContent = heading2;
-      }
-    }
-    win.setAttribute("aria-label", title.textContent);
-    if (hidden !== lastHidden) {
-      lastHidden = hidden;
-      renderDock();
-      if (!hidden) {
-        if (!hasPosition) placeInRail();
-        raise();
-        flashChip(config.key);
-      }
-    }
-  };
-  new MutationObserver(sync2).observe(element2, {
-    attributes: true,
-    attributeFilter: ["hidden"],
-    childList: true,
-    subtree: true,
-    characterData: true
-  });
-  const controller = {
-    key: config.key,
-    docked: config.dock !== false,
-    pinned: Boolean(config.pinned),
-    // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
-    pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
-    window: win,
-    element: element2,
-    isOpen: () => !win.hidden,
-    isCollapsed,
-    // Bring an already-open window to the top of the stack without the focus shift and
-    // re-placement `open()` performs, for callers that only need it seen (a selection).
-    raise,
-    open() {
-      if (config.canOpen && !config.canOpen()) {
-        config.onBlocked?.();
-        return false;
-      }
-      config.onOpen?.();
-      element2.hidden = false;
-      win.hidden = false;
-      if (!hasPosition) {
-        placeInRail();
-      }
-      sync2();
-      raise();
-      persist();
-      win.focus({ preventScroll: true });
-      return true;
-    },
-    close() {
-      const hadFocus = win.contains(document.activeElement);
-      if (config.onClose) config.onClose();
-      else element2.hidden = true;
-      win.hidden = true;
-      lastHidden = true;
-      renderDock();
-      persist();
-      if (hadFocus) {
-        const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
-        if (chip && !moreMenu.contains(chip)) chip.focus();
-        else moreToggle.focus();
-      }
-    },
-    toggle() {
-      if (win.hidden) {
-        return this.open();
-      } else if (isCollapsed()) {
-        setCollapsed(false);
-        raise();
-        return true;
-      } else {
-        this.close();
-        return true;
-      }
-    },
-    snapshot() {
-      const snapshot = {
-        size: { ...size },
-        collapsed: isCollapsed()
-      };
-      if (hasPosition) {
-        snapshot.position = {
-          left: parseFloat(win.style.left) || 0,
-          top: parseFloat(win.style.top) || 0
-        };
-      }
-      return snapshot;
-    },
-    dockButton() {
-      const button3 = document.createElement("button");
-      button3.type = "button";
-      button3.className = "dock-chip";
-      button3.dataset.panel = config.key;
-      const open = !win.hidden;
-      const canOpen = !config.canOpen || config.canOpen();
-      button3.classList.toggle("active", open);
-      button3.classList.toggle("collapsed", open && isCollapsed());
-      button3.setAttribute("aria-pressed", String(open));
-      button3.textContent = config.dockLabel ?? config.title ?? config.key;
-      button3.dataset.glyph = config.glyph ?? "\u2022";
-      if (!canOpen && !open) {
-        button3.disabled = true;
-        const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
-        button3.title = reason;
-      } else {
-        button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
-      }
-      button3.addEventListener("click", () => controller.toggle());
-      return button3;
-    }
-  };
-  win.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !event.defaultPrevented) {
-      event.stopPropagation();
-      event.preventDefault();
-      controller.close();
-    }
-  });
+  return { place, placeInRail, hasPosition: () => hasPosition };
+}
+
+// ui/strabo-float-gestures.js
+function wireWindowGestures({
+  win,
+  header,
+  resizeHandle,
+  place,
+  raise,
+  persist,
+  onResized,
+  isCollapsed,
+  setCollapsed
+}) {
   header.addEventListener("pointerdown", (event) => {
     if (event.target.closest("button") || event.button !== 0) return;
     const startX = event.clientX;
@@ -4350,11 +4234,10 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       resizeHandle.removeEventListener("pointermove", move);
       resizeHandle.removeEventListener("pointerup", end);
       resizeHandle.removeEventListener("pointercancel", end);
-      const resized = sanitizeSize({
+      onResized(sanitizeSize({
         width: parseFloat(win.style.width),
         height: parseFloat(win.style.height)
-      });
-      size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
+      }));
       persist();
     };
     resizeHandle.addEventListener("pointermove", move);
@@ -4368,6 +4251,181 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     if (event.target.closest("button")) return;
     setCollapsed(!isCollapsed());
   });
+}
+
+// ui/strabo-float-window.js
+function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
+  const element2 = config.element;
+  const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
+  let size = sanitizeSize(saved.size);
+  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
+  const { win, header, title, collapseButton, closeButton, resizeHandle } = buildWindowChrome({ config, width, height: size.height });
+  const fallbackHeight = config.height ?? 260;
+  const { place, placeInRail, hasPosition } = createPlacement({
+    win,
+    controllers,
+    width,
+    fallbackHeight,
+    config,
+    saved
+  });
+  const isCollapsed = () => win.classList.contains("is-collapsed");
+  const updateCollapseChrome = () => {
+    const collapsed = isCollapsed();
+    collapseButton.textContent = collapsed ? "+" : "\u2013";
+    collapseButton.title = collapsed ? "Expand" : "Collapse";
+    collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
+  };
+  const setCollapsed = (collapsed) => {
+    win.classList.toggle("is-collapsed", collapsed);
+    updateCollapseChrome();
+    persist();
+  };
+  if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
+  updateCollapseChrome();
+  let lastHidden = null;
+  const raise = () => {
+    win.style.zIndex = String(nextZ());
+  };
+  const sync2 = () => {
+    const hidden = element2.hidden === true;
+    win.hidden = hidden;
+    if (!hidden && config.titleFrom) {
+      const heading2 = config.titleFrom(element2);
+      if (heading2) {
+        title.textContent = heading2;
+      }
+    }
+    win.setAttribute("aria-label", title.textContent);
+    if (hidden !== lastHidden) {
+      lastHidden = hidden;
+      renderDock();
+      if (!hidden) {
+        if (!hasPosition()) placeInRail();
+        raise();
+        flashChip(config.key);
+      }
+    }
+  };
+  new MutationObserver(sync2).observe(element2, {
+    attributes: true,
+    attributeFilter: ["hidden"],
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+  const controller = {
+    key: config.key,
+    docked: config.dock !== false,
+    pinned: Boolean(config.pinned),
+    // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
+    pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
+    window: win,
+    element: element2,
+    isOpen: () => !win.hidden,
+    isCollapsed,
+    // Bring an already-open window to the top of the stack without the focus shift and
+    // re-placement `open()` performs, for callers that only need it seen (a selection).
+    raise,
+    open() {
+      if (config.canOpen && !config.canOpen()) {
+        config.onBlocked?.();
+        return false;
+      }
+      config.onOpen?.();
+      element2.hidden = false;
+      win.hidden = false;
+      if (!hasPosition()) {
+        placeInRail();
+      }
+      sync2();
+      raise();
+      persist();
+      win.focus({ preventScroll: true });
+      return true;
+    },
+    close() {
+      const hadFocus = win.contains(document.activeElement);
+      if (config.onClose) config.onClose();
+      else element2.hidden = true;
+      win.hidden = true;
+      lastHidden = true;
+      renderDock();
+      persist();
+      if (hadFocus) {
+        const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
+        if (chip && !moreMenu.contains(chip)) chip.focus();
+        else moreToggle.focus();
+      }
+    },
+    toggle() {
+      if (win.hidden) {
+        return this.open();
+      } else if (isCollapsed()) {
+        setCollapsed(false);
+        raise();
+        return true;
+      } else {
+        this.close();
+        return true;
+      }
+    },
+    snapshot() {
+      const snapshot = {
+        size: { ...size },
+        collapsed: isCollapsed()
+      };
+      if (hasPosition()) {
+        snapshot.position = {
+          left: parseFloat(win.style.left) || 0,
+          top: parseFloat(win.style.top) || 0
+        };
+      }
+      return snapshot;
+    },
+    dockButton() {
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "dock-chip";
+      button3.dataset.panel = config.key;
+      const open = !win.hidden;
+      const canOpen = !config.canOpen || config.canOpen();
+      button3.classList.toggle("active", open);
+      button3.classList.toggle("collapsed", open && isCollapsed());
+      button3.setAttribute("aria-pressed", String(open));
+      button3.textContent = config.dockLabel ?? config.title ?? config.key;
+      button3.dataset.glyph = config.glyph ?? "\u2022";
+      if (!canOpen && !open) {
+        button3.disabled = true;
+        const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
+        button3.title = reason;
+      } else {
+        button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
+      }
+      button3.addEventListener("click", () => controller.toggle());
+      return button3;
+    }
+  };
+  win.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.stopPropagation();
+      event.preventDefault();
+      controller.close();
+    }
+  });
+  wireWindowGestures({
+    win,
+    header,
+    resizeHandle,
+    place,
+    raise,
+    persist,
+    onResized: (resized) => {
+      size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
+    },
+    isCollapsed,
+    setCollapsed
+  });
   collapseButton.addEventListener("click", (event) => {
     event.stopPropagation();
     setCollapsed(!isCollapsed());
@@ -4378,7 +4436,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
   });
   win.addEventListener("pointerdown", raise, true);
   win.addEventListener("contextmenu", raise, true);
-  if (!hasPosition && element2.hidden !== true) {
+  if (!hasPosition() && element2.hidden !== true) {
     placeInRail();
   }
   controllers.push(controller);
