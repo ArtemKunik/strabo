@@ -49,7 +49,7 @@ the Functions tab is unchanged.
 
 Every panel — Repository passport, Review, Dependency risk, Timeline, Branches, Narrator,
 Overlay, Edge evidence, Legend, the Module passport, Diagnostics, Member map, Workspace,
-Settings, and Keyboard shortcuts — opens as a **floating window** rather than a
+Blocks, Settings, and Keyboard shortcuts — opens as a **floating window** rather than a
 docked column, so the map keeps the full width. Drag a window by its header to move it,
 double-click the header (or use `–`) to collapse it to its title bar, and close it with `×`.
 The **dock** along the bottom restores any window, showing a solid chip for an open window,
@@ -114,6 +114,17 @@ for the current step comes forward and the others step back, member cards reveal
 order, and the `data flow` step pulses the recorded panels while a dot falls down the
 `read / write` divider. Hovering a field or method traces the members the scan recorded it
 reading or writing, and the rest recede.
+
+The **Blocks** panel draws the map currently on screen as a Lego-style brick assembly: every
+recorded node is a brick and every recorded edge a snap. Bricks stack by dependency depth —
+the foundation is the most depended-upon, the top is what nothing rests on — and a brick's
+studs are the recorded dependents that snap onto it. The assembly is a refactoring read, not
+a decoration: a dependency cycle is a `tangled` brick the stack cannot hold, the most
+load-bearing brick is a `keystone` (with the number of bricks removing it topples), and a
+brick with no recorded import either way is `detached`. Each finding is listed under
+**Assembly notes** with the recorded edges behind it, and every status rides on outline shape
+as well as hue, so the two read apart without colour. It reflects whatever detail level is on
+the map (directories, files, or System units) and reads no evidence of its own.
 
 See [ROADMAP.md](./ROADMAP.md) for the phased plan.
 

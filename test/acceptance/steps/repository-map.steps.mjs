@@ -561,6 +561,38 @@ Then('the {string} tab is the active screen', async function (name) {
   );
   const screen = await this.page.evaluate(() => window.straboTest?.screen?.());
   assert.equal(screen, name.toLowerCase());
+
+  // Every screen shares one grid cell and is toggled with `hidden`. A screen that sets its own
+  // `display` would outrank the user-agent `[hidden]` rule and keep painting over the active
+  // one, so the active screen must be the only one computed as visible.
+  const painted = await this.page.evaluate((active) => {
+    const ids = {
+      review: 'review-screen',
+      history: 'history-screen',
+      graph: 'graph-screen',
+      terminal: 'terminal-screen',
+    };
+    const visible = {};
+    for (const [key, elementId] of Object.entries(ids)) {
+      const element = document.getElementById(elementId);
+      if (element) visible[key] = getComputedStyle(element).display !== 'none';
+    }
+    return visible;
+  }, name.toLowerCase());
+  assert.equal(painted[name.toLowerCase()], true, `the ${name} screen should be visible`);
+  for (const [key, isVisible] of Object.entries(painted)) {
+    if (key !== name.toLowerCase()) {
+      assert.equal(isVisible, false, `the inactive ${key} screen must not paint over ${name}`);
+    }
+  }
+
+  // The chrome is a `minmax(0, 1fr)` grid track, so it must clamp to the viewport. An implicit
+  // `auto` column would grow to the widest child's max-content and push the header, the screen
+  // toolbar, and its Refresh button past the right edge.
+  const overflow = await this.page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  assert.ok(overflow <= 1, `the app must fit the viewport, but it overflows by ${overflow}px`);
 });
 
 When('the Review screen shows the working-tree change set', async function () {

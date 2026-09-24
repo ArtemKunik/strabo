@@ -46,6 +46,10 @@ in [docs/USAGE.md](docs/USAGE.md).
 - **Reading the map** — size, position, shape, and status encode the graph; floating
   panels, the Module Passport, the Functions tab, edge evidence, the Member map, and the
   recorded function-call view. See [docs/FEATURES.md](docs/FEATURES.md#reading-the-map).
+- **Blocks (Lego view)** — the map on screen as a brick assembly: bricks stack by dependency
+  depth, studs are the recorded dependents, and cycles, load-bearing bricks, and detached
+  bricks are named as refactoring notes.
+  See [docs/FEATURES.md](docs/FEATURES.md#floating-panels).
 - **Review overlays** — change impact, cycles, test reach, module depth, ownership,
   architecture health, and function hotspots annotate the map from recorded analysis.
   See [docs/FEATURES.md](docs/FEATURES.md#review-overlays).
