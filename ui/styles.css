@@ -2532,6 +2532,41 @@ body.screen-off-graph .float-window {
   margin: 0 0 8px;
 }
 
+.passport-start {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+
+.passport-start h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.passport-job {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.passport-job:hover,
+.passport-job:focus-visible {
+  border-color: var(--accent);
+}
+
+.passport-job span {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
 .passport-section-heading {
   margin: 12px 0 4px;
   font-size: 12px;

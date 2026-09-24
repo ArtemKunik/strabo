@@ -1163,6 +1163,45 @@ test('renderRepositoryPassport offers an export control that passes the chosen f
   assert.deepEqual(formats, ['html']);
 });
 
+test('renderRepositoryPassport leads with the three Start here jobs, above the summary sections', () => {
+  const target = container();
+  const jobs: string[] = [];
+  const report = {
+    repository: 'acme',
+    size: { files: 3, edges: 2, directories: 1, tests: 0, diagnostics: 0, excluded: 0 },
+    languages: [],
+    entryPoints: [],
+    topDirectories: [],
+    topFiles: [],
+    cycles: { total: 0, largest: [] },
+    untested: { total: 0, files: [] },
+  };
+  renderRepositoryPassport(target, report, {
+    onOpenRoute: () => jobs.push('route'),
+    onReviewChange: () => jobs.push('review'),
+    onCheckBranches: () => jobs.push('branches'),
+  });
+
+  const start = target.querySelector('[data-role="passport-start"]');
+  assert.ok(start, 'the Start here block is rendered');
+  assert.ok(
+    start!.compareDocumentPosition(target.querySelector('.passport-section-heading')!) & 4,
+    'Start here comes before the first section',
+  );
+  const buttons = [...start!.querySelectorAll('button')] as HTMLButtonElement[];
+  assert.deepEqual(buttons.map((button) => button.id), ['open-route', 'start-review', 'start-branches']);
+  for (const button of buttons) button.click();
+  assert.deepEqual(jobs, ['route', 'review', 'branches']);
+
+  // A job with no handler is left out rather than drawn as an inert button.
+  const partial = container();
+  renderRepositoryPassport(partial, report, { onOpenRoute: () => {} });
+  assert.deepEqual([...partial.querySelectorAll('[data-role="passport-start"] button')].map((b) => b.id), ['open-route']);
+  const none = container();
+  renderRepositoryPassport(none, report, {});
+  assert.equal(none.querySelector('[data-role="passport-start"]'), null);
+});
+
 test('initFloatingToolbar adds a drag grip and a resize edge', () => {
   const target = container();
   target.innerHTML = '<button type="button">A</button>';

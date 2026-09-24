@@ -536,6 +536,41 @@ function passportPlainList(entries, label) {
 
 
 /**
+ * "Start here": the three jobs people open Strabo for, each one click from the passport that
+ * greets a first visit. A job whose handler is absent is left out, never drawn inert.
+ */
+function passportStartHere(handlers) {
+  const jobs = [
+    ['onOpenRoute', 'open-route', 'Learn this codebase', 'Read the files in order, starting from the entry points'],
+    ['onReviewChange', 'start-review', 'Review my change', 'What your uncommitted changes reach, and which tests to run'],
+    ['onCheckBranches', 'start-branches', 'Check a branch before merging', 'Ahead and behind, conflicts, and what the branch reaches'],
+  ].filter(([key]) => typeof handlers[key] === 'function');
+  if (jobs.length === 0) {
+    return null;
+  }
+  const block = document.createElement('div');
+  block.className = 'passport-start';
+  block.dataset.role = 'passport-start';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Start here';
+  block.append(heading);
+  for (const [key, id, label, hint] of jobs) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = id;
+    button.className = 'passport-job';
+    const name = document.createElement('strong');
+    name.textContent = label;
+    const detail = document.createElement('span');
+    detail.textContent = hint;
+    button.append(name, detail);
+    button.addEventListener('click', () => handlers[key]());
+    block.append(button);
+  }
+  return block;
+}
+
+/**
  * The Repository passport: the opening summary for an unfamiliar repository.
  *
  * Languages, size, entry points, top-level layers, the files that decide the codebase by
@@ -570,6 +605,11 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
     `${size.files ?? 0} files · ${size.edges ?? 0} edges · ${size.directories ?? 0} directories · ` +
     `${size.tests ?? 0} tests · ${size.diagnostics ?? 0} diagnostics · ${size.excluded ?? 0} excluded`;
   container.append(summary);
+
+  const start = passportStartHere(handlers);
+  if (start) {
+    container.append(start);
+  }
 
   const languages = report.languages ?? [];
   container.append(passportSection('Languages', languages.length));
@@ -640,16 +680,6 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
           () => '',
         ),
   );
-
-  if (handlers.onOpenRoute) {
-    const route = document.createElement('button');
-    route.type = 'button';
-    route.id = 'open-route';
-    route.textContent = 'Read next';
-    route.title = 'Step through the outward route from the declared entry points';
-    route.addEventListener('click', () => handlers.onOpenRoute());
-    container.append(route);
-  }
 
   if (handlers.onExportReport) {
     const bar = document.createElement('p');

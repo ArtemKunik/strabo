@@ -6723,6 +6723,36 @@ function passportPlainList(entries, label) {
   }
   return list;
 }
+function passportStartHere(handlers) {
+  const jobs = [
+    ["onOpenRoute", "open-route", "Learn this codebase", "Read the files in order, starting from the entry points"],
+    ["onReviewChange", "start-review", "Review my change", "What your uncommitted changes reach, and which tests to run"],
+    ["onCheckBranches", "start-branches", "Check a branch before merging", "Ahead and behind, conflicts, and what the branch reaches"]
+  ].filter(([key]) => typeof handlers[key] === "function");
+  if (jobs.length === 0) {
+    return null;
+  }
+  const block = document.createElement("div");
+  block.className = "passport-start";
+  block.dataset.role = "passport-start";
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Start here";
+  block.append(heading2);
+  for (const [key, id, label, hint] of jobs) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.id = id;
+    button3.className = "passport-job";
+    const name = document.createElement("strong");
+    name.textContent = label;
+    const detail = document.createElement("span");
+    detail.textContent = hint;
+    button3.append(name, detail);
+    button3.addEventListener("click", () => handlers[key]());
+    block.append(button3);
+  }
+  return block;
+}
 function renderRepositoryPassport(container, report, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -6745,6 +6775,10 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   summary.className = "passport-summary";
   summary.textContent = `${size.files ?? 0} files \xB7 ${size.edges ?? 0} edges \xB7 ${size.directories ?? 0} directories \xB7 ${size.tests ?? 0} tests \xB7 ${size.diagnostics ?? 0} diagnostics \xB7 ${size.excluded ?? 0} excluded`;
   container.append(summary);
+  const start = passportStartHere(handlers);
+  if (start) {
+    container.append(start);
+  }
   const languages = report.languages ?? [];
   container.append(passportSection("Languages", languages.length));
   container.append(
@@ -6798,15 +6832,6 @@ function renderRepositoryPassport(container, report, handlers = {}) {
       () => ""
     )
   );
-  if (handlers.onOpenRoute) {
-    const route = document.createElement("button");
-    route.type = "button";
-    route.id = "open-route";
-    route.textContent = "Read next";
-    route.title = "Step through the outward route from the declared entry points";
-    route.addEventListener("click", () => handlers.onOpenRoute());
-    container.append(route);
-  }
   if (handlers.onExportReport) {
     const bar = document.createElement("p");
     bar.className = "passport-export";
@@ -24589,6 +24614,18 @@ async function showPassport() {
     renderRepositoryPassport(elements.passportPanel, report, {
       onSelect: (id) => selectNode(id),
       onOpenRoute: () => showRoute(),
+      onReviewChange: () => {
+        closePassport();
+        setScreen("review");
+      },
+      onCheckBranches: () => {
+        closePassport();
+        if (elements.branchesPanel.hidden) {
+          toggleBranches().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      },
       onExportReport: (format) => exportRepositoryReport(format),
       onClose: closePassport
     });
@@ -24706,10 +24743,11 @@ function markPassportSeen(repository) {
   }
 }
 async function maybeOpenPassport() {
-  if (!state.repository || passportSeen(state.repository)) {
+  const key = state.repository ?? (await request("/status").catch(() => null))?.repository?.root ?? null;
+  if (!key || passportSeen(key)) {
     return;
   }
-  markPassportSeen(state.repository);
+  markPassportSeen(key);
   await showPassport();
 }
 function clearOverlay() {

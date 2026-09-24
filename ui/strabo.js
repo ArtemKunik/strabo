@@ -2124,6 +2124,18 @@ async function showPassport() {
     renderRepositoryPassport(elements.passportPanel, report, {
       onSelect: (id) => selectNode(id),
       onOpenRoute: () => showRoute(),
+      onReviewChange: () => {
+        closePassport();
+        setScreen('review');
+      },
+      onCheckBranches: () => {
+        closePassport();
+        if (elements.branchesPanel.hidden) {
+          toggleBranches().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      },
       onExportReport: (format) => exportRepositoryReport(format),
       onClose: closePassport,
     });
@@ -2290,10 +2302,14 @@ function markPassportSeen(repository) {
 }
 
 async function maybeOpenPassport() {
-  if (!state.repository || passportSeen(state.repository)) {
+  // A fresh install (`npx strabo-map <path>`) has no remembered repositories, so the picker is
+  // empty and the served root identifies the repository instead. That is exactly the visit
+  // the passport's Start here jobs are for, so it must not be skipped.
+  const key = state.repository ?? (await request('/status').catch(() => null))?.repository?.root ?? null;
+  if (!key || passportSeen(key)) {
     return;
   }
-  markPassportSeen(state.repository);
+  markPassportSeen(key);
   await showPassport();
 }
 
