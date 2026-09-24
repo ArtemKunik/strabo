@@ -1,0 +1,109 @@
+name: Strabo change review
+description: >-
+  Post Strabo's change report on a pull request: files changed, what they reach, tests to
+  run, cycles and wrong-way tier edges introduced, and the public API diff.
+author: Artem Kunyk
+branding:
+  icon: map
+  color: blue
+
+inputs:
+  base:
+    description: Revision to compare against. Defaults to the pull request's base commit.
+    required: false
+    default: ''
+  fail-on:
+    description: >-
+      Comma-separated rules that fail the check when the change introduces them
+      (`cycle`, `tier`). Empty reports without failing.
+    required: false
+    default: ''
+  expect:
+    description: >-
+      Comma-separated globs the change is expected to stay inside (the scope fence).
+    required: false
+    default: ''
+  comment:
+    description: Post or update the report as a pull request comment (`true` / `false`).
+    required: false
+    default: 'true'
+  version:
+    description: The strabo-map version to run.
+    required: false
+    default: 'latest'
+  github-token:
+    description: Token used to write the pull request comment.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  report:
+    description: Path of the Markdown report file.
+    value: ${{ steps.report.outputs.report }}
+  failed:
+    description: '`true` when a `fail-on` rule tripped.'
+    value: ${{ steps.report.outputs.failed }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - id: report
+      shell: bash
+      env:
+        BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        EXPECT: ${{ inputs.expect }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        if [ -z "$BASE" ]; then
+          echo "::error::No base revision: set the 'base' input or run on a pull_request event."
+          exit 1
+        fi
+        # A shallow checkout lacks the base commit; fetch it rather than report an empty diff.
+        if ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+          git fetch --no-tags --depth=1 origin "$BASE"
+        fi
+        args=(report . "--base=$BASE" --format=md)
+        [ -n "$FAIL_ON" ] && args+=("--fail-on=$FAIL_ON")
+        [ -n "$EXPECT" ] && args+=("--expect=$EXPECT")
+        report="$RUNNER_TEMP/strabo-report.md"
+        set +e
+        npx --yes "strabo-map@$VERSION" "${args[@]}" > "$report"
+        status=$?
+        set -e
+        cat "$report" >> "$GITHUB_STEP_SUMMARY"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+        if [ "$status" -ne 0 ]; then echo "failed=true"; else echo "failed=false"; fi >> "$GITHUB_OUTPUT"
+        # An empty report is a crash, not a pass; surface it instead of posting nothing.
+        if [ ! -s "$report" ]; then
+          echo "::error::strabo report produced no output (exit $status)."
+          exit 1
+        fi
+
+    - if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ github.event.pull_request.number }}
+        REPORT: ${{ steps.report.outputs.report }}
+      run: |
+        marker='<!-- strabo-change-report -->'
+        body="$(printf '%s\n\n%s\n' "$marker" "$(cat "$REPORT")")"
+        existing="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+          --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n1)"
+        if [ -n "$existing" ]; then
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+        else
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$body" > /dev/null
+        fi
+
+    - if: steps.report.outputs.failed == 'true'
+      shell: bash
+      run: |
+        echo "::error::Strabo: the change introduces a rule named in fail-on (${{ inputs.fail-on }})."
+        exit 1
