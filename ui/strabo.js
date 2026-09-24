@@ -13,7 +13,6 @@
 import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeEvidenceFor, fileWebUrl, filterNodes, folderLocation, graphSummary, mapCounts, memberMapSteps, overlayFor, passportFor, reviewOverlay, riskSummary, rovingIndex, shelfHoverText, tierOfFile, unitHoverFacts, withUnitHotspots } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
-import { createFrameSampler } from './strabo-perf.js';
 import { writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, setDelegateSessionOpener, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
@@ -76,6 +75,7 @@ import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 import { initTerminalScreen } from './strabo-terminal.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
+import { createRuntimeReadout } from './strabo-runtime-readout.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -169,59 +169,6 @@ const view = createView(document.getElementById('graph'));
 view.onIslandLayout((offsets) => {
   writeIslandLayout(state.repository, offsets);
 });
-
-/**
- * A rolling frame-time readout for the Diagnostics panel.
- *
- * Rendering is CPU-bound — the renderer walks every element in JS before the GPU sees
- * anything — so the useful numbers are the frame interval and the renderer's own redraw
- * count, not GPU utilisation. Sampled only while Diagnostics is open, since an idle rAF loop
- * is itself work. The renderer's `redraws` counter is the honest "did the map actually
- * repaint" signal behind the viewport fast paths.
- */
-const frameSampler = createFrameSampler(window);
-let runtimeBase = '';
-let runtimeTimer = 0;
-
-function runtimeSuffix() {
-  const { fps, ms } = frameSampler.stats();
-  const redraws = view.cy?.renderer?.()?.redraws ?? 0;
-  const drawn = view.cy?.elements().length ?? 0;
-  const fpsText = fps === null ? 'fps: sampling…' : `${Math.round(fps)} fps`;
-  const msText = ms === null ? '' : ` / ${ms.toFixed(1)} ms`;
-  return `${fpsText}${msText} · ${redraws} redraws · ${drawn} elements`;
-}
-
-function refreshRuntimeReadout() {
-  if (!elements.diagnostics || elements.diagnostics.hidden || !runtimeBase) {
-    return;
-  }
-  const line = elements.diagnostics.querySelector('[data-role="runtime"]');
-  if (line) {
-    line.textContent = `${runtimeBase} · ${runtimeSuffix()}`;
-  }
-}
-
-function startRuntimeReadout() {
-  frameSampler.start();
-  if (!runtimeTimer) {
-    runtimeTimer = setInterval(refreshRuntimeReadout, 500);
-  }
-  refreshRuntimeReadout();
-}
-
-/** Keep the per-graph half of the runtime line the Diagnostics panel just wrote. */
-function setRuntimeBase(text) {
-  runtimeBase = text;
-}
-
-function stopRuntimeReadout() {
-  frameSampler.stop();
-  if (runtimeTimer) {
-    clearInterval(runtimeTimer);
-    runtimeTimer = 0;
-  }
-}
 
 /**
  * Re-apply the client preferences. `applyAppearance` sets the theme and reduce-motion
@@ -372,6 +319,7 @@ Object.assign(app, {
 
 // <controllers>
 app.prefs = createViewPrefs(app);
+app.runtime = createRuntimeReadout(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -485,8 +433,8 @@ async function scan({ refresh = false } = {}) {
     });
     // Keep the per-graph half of the runtime line, so the live perf fields can be appended
     // without losing the cache/renderer/shown facts the panel just wrote.
-    setRuntimeBase(elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? '');
-    refreshRuntimeReadout();
+    app.runtime.setRuntimeBase(elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? '');
+    app.runtime.refreshRuntimeReadout();
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === 'system') {
@@ -3041,8 +2989,8 @@ elements.diagnosticsToggle.addEventListener('click', () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
   elements.diagnosticsToggle.setAttribute('aria-expanded', String(hidden));
-  if (hidden) startRuntimeReadout();
-  else stopRuntimeReadout();
+  if (hidden) app.runtime.startRuntimeReadout();
+  else app.runtime.stopRuntimeReadout();
 });
 elements.browse.addEventListener('click', openFolderDialog);
 document.getElementById('graph')?.addEventListener('pointerdown', dismissHint, { capture: true });
@@ -4230,12 +4178,12 @@ app.floatingWindows = initFloatingWindows({
       width: 420,
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       onOpen: () => {
-        startRuntimeReadout();
+        app.runtime.startRuntimeReadout();
       },
       onClose: () => {
         elements.diagnostics.hidden = true;
         elements.diagnosticsToggle.setAttribute('aria-expanded', 'false');
-        stopRuntimeReadout();
+        app.runtime.stopRuntimeReadout();
       },
     },
     {
