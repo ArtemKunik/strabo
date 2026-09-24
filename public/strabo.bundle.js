@@ -95,29 +95,7 @@ function createVirtualList({
   };
 }
 
-// ui/strabo-graph.js
-var API_PATH = "/api/strabo";
-var MIN_DIAMETER = 22;
-var MAX_DIAMETER = 62;
-var MAX_LOC_DIAMETER = 74;
-var MIN_UNIT_DIAMETER = 48;
-var MAX_UNIT_DIAMETER = 130;
-var MIN_SHELF_DIAMETER = 26;
-var MAX_SHELF_DIAMETER = 64;
-var SHAPES = {
-  module: "round-rectangle",
-  test: "diamond",
-  entry: "star",
-  service: "hexagon",
-  topic: "ellipse",
-  queue: "rectangle",
-  table: "barrel",
-  entity: "round-tag",
-  schema: "round-diamond",
-  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
-  unit: "round-rectangle",
-  shelf: "rectangle"
-};
+// ui/strabo-graph-ids.js
 function hash(value) {
   let result = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -130,208 +108,15 @@ function topLevelDirectory(id) {
   const slash = value.indexOf("/");
   return slash === -1 ? "." : value.slice(0, slash);
 }
-function passportFor(model, id) {
-  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
-  if (!node) {
-    return null;
-  }
-  const edges = model.edges ?? [];
-  const imports = distinctByFile(
-    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
-  );
-  const usedBy = distinctByFile(
-    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
-  );
-  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
-  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
-    metrics.push(
-      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
-      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
-    );
-  } else {
-    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
-  }
-  metrics.push(
-    { label: "Direct imports", value: imports.length, unit: "files" },
-    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
-  );
-  if (typeof node.lines === "number") {
-    metrics.push({ label: "Lines", value: node.lines });
-  }
-  if (typeof node.files === "number") {
-    metrics.push({ label: "Files", value: node.files });
-  }
-  if (typeof node.periphery === "number" && node.periphery > 0) {
-    metrics.push({ label: "Support files", value: node.periphery });
-  }
-  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
-  if (card) {
-    metrics.push(
-      { label: "Lines", value: card.loc },
-      { label: "Layers", value: card.layers.length },
-      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
-      { label: "Depends on units", value: card.dependsOn },
-      { label: "Used by units", value: card.usedBy }
-    );
-    if (card.hotspots !== null) {
-      metrics.push({ label: "Hotspots", value: card.hotspots });
-    }
-  }
-  if (node.shelf) {
-    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
-  }
-  return {
-    id: node.id,
-    kind: node.kind,
-    // The "why grouped" caption a System-view unit carries; absent on file nodes.
-    why: node.why,
-    metrics,
-    imports,
-    usedBy
-  };
-}
-function edgeEntry(id, edge) {
-  return {
-    id,
-    line: edge.evidence?.line,
-    specifier: edge.evidence?.specifier,
-    role: edge.role
-  };
-}
-function distinctByFile(entries) {
-  const byFile = /* @__PURE__ */ new Map();
-  for (const entry of entries) {
-    if (entry.role === "declare" || byFile.has(entry.id)) {
-      continue;
-    }
-    byFile.set(entry.id, entry);
-  }
-  return [...byFile.values()];
-}
-function coChangePartnersFor(report, file, limit = 20) {
-  const edges = (report?.edges ?? []).filter(
-    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
-  );
-  return edges.sort(
-    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
-      b2.source === file ? b2.target : b2.source
-    )
-  ).slice(0, limit).map((edge) => ({
-    file: edge.source === file ? edge.target : edge.source,
-    hidden: edge.hidden === true,
-    ratio: edge.ratio,
-    commitsShared: edge.commitsShared ?? edge.commits.length,
-    commits: edge.commits
-  }));
-}
-function mapCounts(model) {
-  const isBlock = model.prefixLength !== void 0 || model.system === true;
-  const byKey = /* @__PURE__ */ new Map();
-  let tests = 0;
-  let modules = 0;
-  for (const node of model.nodes ?? []) {
-    if (node.kind === "test") {
-      tests += 1;
-    } else {
-      modules += 1;
-    }
-    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
-    byKey.set(key, (byKey.get(key) ?? 0) + 1);
-  }
-  const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
-    label: key,
-    count,
-    // Block ids are whole directories; file ids filter by their directory prefix.
-    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
-  }));
-  return { tests, modules, entries };
-}
-function readingLegend(model, locLens = false) {
-  if (model?.systemUnit) {
-    return [
-      "box = unit frame",
-      "lane = layer",
-      "edge = selected file import",
-      "badge = files in another unit",
-      "tag = support shelf"
-    ];
-  }
-  if (model?.system) {
-    return [
-      "box = build unit",
-      "size = files",
-      "edge = import between units",
-      "support = unit footer"
-    ];
-  }
-  return [
-    locLens ? "size = lines of code" : "size = dependents",
-    "island = directory",
-    "diamond = test",
-    "star = entry"
-  ];
-}
-function shortcutSheet() {
-  return [
-    { keys: "F", action: "Center the selection" },
-    { keys: "I", action: "Show change impact" },
-    { keys: "O", action: "Show the selected file\u2019s links to other units" },
-    { keys: "P", action: "Trace a path between two nodes" },
-    { keys: "B", action: "Toggle directories / files" },
-    { keys: "L", action: "Show a file name under every file" },
-    { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
-    { keys: "C", action: "Show recorded function calls instead of imports" },
-    { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
-    { keys: "S", action: "View the selected file\u2019s source" },
-    { keys: "T", action: "Timeline" },
-    { keys: "N", action: "Branches" },
-    { keys: "R", action: "Review working-tree changes" },
-    { keys: "V", action: "Dependency risk" },
-    { keys: "G", action: "Delegate the selected files" },
-    { keys: "\u2318K / ctrl-K", action: "Filter paths" },
-    { keys: "Esc", action: "Clear the selection or close a panel" },
-    { keys: "?", action: "Show this sheet" },
-    { keys: "hover a node", action: "Report its blast radius" },
-    { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
-  ];
-}
-function unitHoverFacts(model, id) {
-  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
-  if (!card) {
-    return null;
-  }
-  return {
-    title: `${card.ecosystem} package \`${card.name}\``,
-    rows: [
-      `${card.files} files`,
-      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
-      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
-      `why: ${card.manifest ?? card.why}`
-    ]
-  };
-}
-function shelfHoverText(shelf) {
-  if (!shelf) {
-    return "support files";
-  }
-  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
-  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
-  return `${tests}, ${scripts}: folded support`;
-}
-function withUnitHotspots(cards, report) {
-  const list = cards ?? [];
-  const byPrefix = list.map((card) => card.id).sort((a, b2) => b2.length - a.length);
-  const counts = new Map(list.map((card) => [card.id, 0]));
-  for (const spot of report?.hotspots ?? []) {
-    const owner = byPrefix.find(
-      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
-    );
-    if (owner !== void 0) {
-      counts.set(owner, (counts.get(owner) ?? 0) + 1);
-    }
-  }
-  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
-}
+
+// ui/strabo-graph-sizing.js
+var MIN_DIAMETER = 22;
+var MAX_DIAMETER = 62;
+var MAX_LOC_DIAMETER = 74;
+var MIN_UNIT_DIAMETER = 48;
+var MAX_UNIT_DIAMETER = 130;
+var MIN_SHELF_DIAMETER = 26;
+var MAX_SHELF_DIAMETER = 64;
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
@@ -357,37 +142,22 @@ function nodeDiameter(node) {
   if (node?.kind === "shelf") return shelfDiameter(node.files);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
-function buildGraphQuery(state2, options = {}) {
-  const params = new URLSearchParams();
-  if (state2.repository) {
-    params.set("repository", state2.repository);
-  }
-  if (options.refresh) {
-    params.set("refresh", "1");
-  }
-  if (state2.mode === "system") {
-    params.set("system", "1");
-    if (state2.systemUnit) {
-      params.set("systemUnit", state2.systemUnit);
-      if (state2.showOutside) {
-        params.set("outside", "1");
-        if (state2.unitFile) {
-          params.set("selected", state2.unitFile);
-        }
-        if (state2.expandedUnits?.length) {
-          params.set("expanded", state2.expandedUnits.join(","));
-        }
-      }
-    }
-  } else if (state2.mode === "block") {
-    params.set("blockDepth", String(state2.depth ?? 1));
-    if (state2.prefix) {
-      params.set("blockPrefix", state2.prefix);
-    }
-  }
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
+
+// ui/strabo-graph-elements.js
+var SHAPES = {
+  module: "round-rectangle",
+  test: "diamond",
+  entry: "star",
+  service: "hexagon",
+  topic: "ellipse",
+  queue: "rectangle",
+  table: "barrel",
+  entity: "round-tag",
+  schema: "round-diamond",
+  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
+  unit: "round-rectangle",
+  shelf: "rectangle"
+};
 function ambiguousFileIds(model) {
   const byName = /* @__PURE__ */ new Map();
   for (const node of model.nodes ?? []) {
@@ -534,6 +304,8 @@ function buildHiddenCouplingElements(model, report, startIndex = 0) {
 function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
 }
+
+// ui/strabo-graph-diff.js
 function diffElements(previous = [], next = []) {
   const before = new Map(previous.map((element2) => [element2.data.id, element2]));
   const added = [];
@@ -565,6 +337,8 @@ function elementSignature(element2) {
     position: element2.position ?? null
   });
 }
+
+// ui/strabo-graph-traversal.js
 function adjacency(model) {
   const forward = /* @__PURE__ */ new Map();
   const backward = /* @__PURE__ */ new Map();
@@ -622,50 +396,145 @@ function findPath(model, from, to, maxHops = 12) {
   }
   return null;
 }
-function breadcrumb(state2) {
-  if (state2.mode === "system") {
-    const crumbs2 = [{ label: "System", prefix: "" }];
-    if (state2.systemUnit) {
-      crumbs2.push({ label: state2.systemUnitLabel ?? state2.systemUnit, prefix: state2.systemUnit });
-    }
-    return crumbs2;
-  }
-  if (state2.mode !== "block") {
-    return [];
-  }
-  const crumbs = [{ label: "repository", prefix: "" }];
-  const segments = (state2.prefix ?? "").split("/").filter(Boolean);
-  segments.forEach((segment, index) => {
-    crumbs.push({ label: segment, prefix: segments.slice(0, index + 1).join("/") });
-  });
-  return crumbs;
-}
-function summarizeDiagnostics(model) {
-  const byKind = {};
-  for (const diagnostic of model.diagnostics ?? []) {
-    byKind[diagnostic.kind] = (byKind[diagnostic.kind] ?? 0) + 1;
-  }
-  const excludedByReason = {};
-  for (const exclusion of model.excluded ?? []) {
-    excludedByReason[exclusion.reason] = (excludedByReason[exclusion.reason] ?? 0) + 1;
-  }
-  return {
-    diagnostics: (model.diagnostics ?? []).length,
-    excluded: (model.excluded ?? []).length,
-    byKind,
-    excludedByReason,
-    samples: (model.diagnostics ?? []).slice(0, 50),
-    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
-    cache: model.cache?.status ?? "unknown",
-    stale: Boolean(model.cache?.stale)
-  };
-}
 function filterNodes(model, text) {
   const needle = text.trim().toLowerCase();
   if (!needle) {
     return model.nodes.map((node) => node.id);
   }
   return model.nodes.filter((node) => node.id.toLowerCase().includes(needle)).map((node) => node.id);
+}
+
+// ui/strabo-graph-facts.js
+function passportFor(model, id) {
+  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return null;
+  }
+  const edges = model.edges ?? [];
+  const imports = distinctByFile(
+    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
+  );
+  const usedBy = distinctByFile(
+    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
+  );
+  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
+  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
+    metrics.push(
+      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
+      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
+    );
+  } else {
+    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
+  }
+  metrics.push(
+    { label: "Direct imports", value: imports.length, unit: "files" },
+    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
+  );
+  if (typeof node.lines === "number") {
+    metrics.push({ label: "Lines", value: node.lines });
+  }
+  if (typeof node.files === "number") {
+    metrics.push({ label: "Files", value: node.files });
+  }
+  if (typeof node.periphery === "number" && node.periphery > 0) {
+    metrics.push({ label: "Support files", value: node.periphery });
+  }
+  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
+  if (card) {
+    metrics.push(
+      { label: "Lines", value: card.loc },
+      { label: "Layers", value: card.layers.length },
+      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
+      { label: "Depends on units", value: card.dependsOn },
+      { label: "Used by units", value: card.usedBy }
+    );
+    if (card.hotspots !== null) {
+      metrics.push({ label: "Hotspots", value: card.hotspots });
+    }
+  }
+  if (node.shelf) {
+    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
+  }
+  return {
+    id: node.id,
+    kind: node.kind,
+    // The "why grouped" caption a System-view unit carries; absent on file nodes.
+    why: node.why,
+    metrics,
+    imports,
+    usedBy
+  };
+}
+function edgeEntry(id, edge) {
+  return {
+    id,
+    line: edge.evidence?.line,
+    specifier: edge.evidence?.specifier,
+    role: edge.role
+  };
+}
+function distinctByFile(entries) {
+  const byFile = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (entry.role === "declare" || byFile.has(entry.id)) {
+      continue;
+    }
+    byFile.set(entry.id, entry);
+  }
+  return [...byFile.values()];
+}
+function coChangePartnersFor(report, file, limit = 20) {
+  const edges = (report?.edges ?? []).filter(
+    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
+  );
+  return edges.sort(
+    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
+      b2.source === file ? b2.target : b2.source
+    )
+  ).slice(0, limit).map((edge) => ({
+    file: edge.source === file ? edge.target : edge.source,
+    hidden: edge.hidden === true,
+    ratio: edge.ratio,
+    commitsShared: edge.commitsShared ?? edge.commits.length,
+    commits: edge.commits
+  }));
+}
+function unitHoverFacts(model, id) {
+  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
+  if (!card) {
+    return null;
+  }
+  return {
+    title: `${card.ecosystem} package \`${card.name}\``,
+    rows: [
+      `${card.files} files`,
+      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
+      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
+      `why: ${card.manifest ?? card.why}`
+    ]
+  };
+}
+function shelfHoverText(shelf) {
+  if (!shelf) {
+    return "support files";
+  }
+  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
+  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
+  return `${tests}, ${scripts}: folded support`;
+}
+function withUnitHotspots(cards, report) {
+  const list = cards ?? [];
+  const byPrefix = list.map((card) => card.id).sort((a, b2) => b2.length - a.length);
+  const counts = new Map(list.map((card) => [card.id, 0]));
+  for (const spot of report?.hotspots ?? []) {
+    const owner = byPrefix.find(
+      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
+    );
+    if (owner !== void 0) {
+      counts.set(owner, (counts.get(owner) ?? 0) + 1);
+    }
+  }
+  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
 }
 function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
@@ -710,6 +579,151 @@ var RESOLUTION_LABELS = {
   root: "repo root",
   "subpath-import": "package subpath"
 };
+
+// ui/strabo-graph-query.js
+var API_PATH = "/api/strabo";
+function buildGraphQuery(state2, options = {}) {
+  const params = new URLSearchParams();
+  if (state2.repository) {
+    params.set("repository", state2.repository);
+  }
+  if (options.refresh) {
+    params.set("refresh", "1");
+  }
+  if (state2.mode === "system") {
+    params.set("system", "1");
+    if (state2.systemUnit) {
+      params.set("systemUnit", state2.systemUnit);
+      if (state2.showOutside) {
+        params.set("outside", "1");
+        if (state2.unitFile) {
+          params.set("selected", state2.unitFile);
+        }
+        if (state2.expandedUnits?.length) {
+          params.set("expanded", state2.expandedUnits.join(","));
+        }
+      }
+    }
+  } else if (state2.mode === "block") {
+    params.set("blockDepth", String(state2.depth ?? 1));
+    if (state2.prefix) {
+      params.set("blockPrefix", state2.prefix);
+    }
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+function breadcrumb(state2) {
+  if (state2.mode === "system") {
+    const crumbs2 = [{ label: "System", prefix: "" }];
+    if (state2.systemUnit) {
+      crumbs2.push({ label: state2.systemUnitLabel ?? state2.systemUnit, prefix: state2.systemUnit });
+    }
+    return crumbs2;
+  }
+  if (state2.mode !== "block") {
+    return [];
+  }
+  const crumbs = [{ label: "repository", prefix: "" }];
+  const segments = (state2.prefix ?? "").split("/").filter(Boolean);
+  segments.forEach((segment, index) => {
+    crumbs.push({ label: segment, prefix: segments.slice(0, index + 1).join("/") });
+  });
+  return crumbs;
+}
+
+// ui/strabo-graph-summary.js
+function mapCounts(model) {
+  const isBlock = model.prefixLength !== void 0 || model.system === true;
+  const byKey = /* @__PURE__ */ new Map();
+  let tests = 0;
+  let modules = 0;
+  for (const node of model.nodes ?? []) {
+    if (node.kind === "test") {
+      tests += 1;
+    } else {
+      modules += 1;
+    }
+    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
+    byKey.set(key, (byKey.get(key) ?? 0) + 1);
+  }
+  const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
+    label: key,
+    count,
+    // Block ids are whole directories; file ids filter by their directory prefix.
+    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
+  }));
+  return { tests, modules, entries };
+}
+function readingLegend(model, locLens = false) {
+  if (model?.systemUnit) {
+    return [
+      "box = unit frame",
+      "lane = layer",
+      "edge = selected file import",
+      "badge = files in another unit",
+      "tag = support shelf"
+    ];
+  }
+  if (model?.system) {
+    return [
+      "box = build unit",
+      "size = files",
+      "edge = import between units",
+      "support = unit footer"
+    ];
+  }
+  return [
+    locLens ? "size = lines of code" : "size = dependents",
+    "island = directory",
+    "diamond = test",
+    "star = entry"
+  ];
+}
+function shortcutSheet() {
+  return [
+    { keys: "F", action: "Center the selection" },
+    { keys: "I", action: "Show change impact" },
+    { keys: "O", action: "Show the selected file\u2019s links to other units" },
+    { keys: "P", action: "Trace a path between two nodes" },
+    { keys: "B", action: "Toggle directories / files" },
+    { keys: "L", action: "Show a file name under every file" },
+    { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
+    { keys: "C", action: "Show recorded function calls instead of imports" },
+    { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
+    { keys: "S", action: "View the selected file\u2019s source" },
+    { keys: "T", action: "Timeline" },
+    { keys: "N", action: "Branches" },
+    { keys: "R", action: "Review working-tree changes" },
+    { keys: "V", action: "Dependency risk" },
+    { keys: "G", action: "Delegate the selected files" },
+    { keys: "\u2318K / ctrl-K", action: "Filter paths" },
+    { keys: "Esc", action: "Clear the selection or close a panel" },
+    { keys: "?", action: "Show this sheet" },
+    { keys: "hover a node", action: "Report its blast radius" },
+    { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
+  ];
+}
+function summarizeDiagnostics(model) {
+  const byKind = {};
+  for (const diagnostic of model.diagnostics ?? []) {
+    byKind[diagnostic.kind] = (byKind[diagnostic.kind] ?? 0) + 1;
+  }
+  const excludedByReason = {};
+  for (const exclusion of model.excluded ?? []) {
+    excludedByReason[exclusion.reason] = (excludedByReason[exclusion.reason] ?? 0) + 1;
+  }
+  return {
+    diagnostics: (model.diagnostics ?? []).length,
+    excluded: (model.excluded ?? []).length,
+    byKind,
+    excludedByReason,
+    samples: (model.diagnostics ?? []).slice(0, 50),
+    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
+    cache: model.cache?.status ?? "unknown",
+    stale: Boolean(model.cache?.stale)
+  };
+}
 function graphSummary(model) {
   const nodes = (model?.nodes ?? []).length;
   const edges = (model?.edges ?? []).length;
@@ -3921,64 +3935,9 @@ async function launchAgent(agent, { repository, target, prompt, title, dryRun = 
   return body;
 }
 
-// ui/strabo-float.js
-var STORAGE_KEY = "strabo.float.windows.v2";
-var GAP = 12;
-var DEFAULT_WIDTH = 384;
-var HEADER_HEIGHT = 34;
-var MIN_WIDTH = 240;
-var MIN_HEIGHT = 160;
-var DOCK_RAIL_WIDTH = 64;
-var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
-var RAIL_TOP = 64;
-function readStore() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-function writeStore(store2) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store2));
-  } catch {
-  }
-}
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), Math.max(min, max));
-}
-function sanitizeSize(size) {
-  const width = Number(size?.width);
-  const height = Number(size?.height);
-  return {
-    width: Number.isFinite(width) && width >= MIN_WIDTH ? width : null,
-    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
-  };
-}
-function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } = {}) {
-  const sorted = [...occupied].sort((a, b2) => a.top - b2.top);
-  let candidate = startTop;
-  for (const rect of sorted) {
-    if (candidate + height <= rect.top) {
-      break;
-    }
-    candidate = Math.max(candidate, rect.bottom + gap);
-  }
-  return candidate;
-}
-function initFloatingWindows({ dock, panels = [] } = {}) {
-  const store2 = readStore();
-  const controllers = [];
-  let topZ = 60;
-  const persist = () => {
-    const next = {};
-    for (const controller of controllers) {
-      next[controller.key] = controller.snapshot();
-    }
-    writeStore(next);
-  };
-  const syncDockOverflow = () => {
+// ui/strabo-float-dock.js
+function createDockRail({ dock, controllers }) {
+  const syncOverflow = () => {
     if (!dock) return;
     const max = dock.scrollHeight - dock.clientHeight;
     dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
@@ -4020,7 +3979,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
   });
   setMoreOpen(false);
-  const renderDock = () => {
+  const render = () => {
     if (!dock) return;
     const docked = controllers.filter((controller) => controller.docked);
     const inRail = (controller) => controller.pinned || controller.isOpen();
@@ -4039,7 +3998,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     enabled.forEach((chip, index) => {
       chip.tabIndex = index === 0 ? 0 : -1;
     });
-    syncDockOverflow();
+    syncOverflow();
   };
   const railItems = () => [...dock?.children ?? []].filter(
     (item) => (item.classList.contains("dock-chip") || item === moreToggle) && !item.disabled && !item.hidden
@@ -4051,318 +4010,6 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     void chip.offsetWidth;
     chip.classList.add("is-flash");
   };
-  for (const config of panels) {
-    const element2 = config.element;
-    if (!element2) continue;
-    const saved = store2[config.key] ?? {};
-    let size = sanitizeSize(saved.size);
-    const width = size.width ?? config.width ?? DEFAULT_WIDTH;
-    const win = document.createElement("section");
-    win.className = "float-window";
-    win.dataset.panel = config.key;
-    win.hidden = true;
-    win.style.width = `${width}px`;
-    if (size.height) {
-      win.style.height = `${size.height}px`;
-    }
-    const header = document.createElement("header");
-    header.className = "float-header";
-    header.tabIndex = 0;
-    header.title = "Drag to move \xB7 double-click to collapse";
-    const grip = document.createElement("span");
-    grip.className = "float-grip";
-    grip.setAttribute("aria-hidden", "true");
-    grip.textContent = "\u283F";
-    const title = document.createElement("span");
-    title.className = "float-title";
-    title.textContent = config.title ?? config.key;
-    win.setAttribute("role", "dialog");
-    win.setAttribute("aria-label", title.textContent);
-    win.tabIndex = -1;
-    const spacer = document.createElement("span");
-    spacer.className = "float-spacer";
-    const collapseButton = document.createElement("button");
-    collapseButton.type = "button";
-    collapseButton.className = "float-button float-collapse";
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "float-button float-close";
-    closeButton.setAttribute("aria-label", "Close panel");
-    closeButton.title = "Close";
-    closeButton.textContent = "\xD7";
-    const body = document.createElement("div");
-    body.className = "float-body";
-    const resizeHandle = document.createElement("span");
-    resizeHandle.className = "float-resize";
-    resizeHandle.setAttribute("aria-hidden", "true");
-    resizeHandle.title = "Drag to resize";
-    header.append(grip, title, spacer, collapseButton, closeButton);
-    win.append(header, body, resizeHandle);
-    element2.parentNode.insertBefore(win, element2);
-    body.append(element2);
-    const fallbackHeight = config.height ?? 260;
-    let hasPosition = false;
-    const place = (x, y) => {
-      win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-      win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
-      hasPosition = true;
-    };
-    const firstFreeRailTop = () => {
-      const height = win.offsetHeight || fallbackHeight;
-      const occupied = [];
-      for (const other of controllers) {
-        if (other.window === win || other.window.hidden || other.isCollapsed()) {
-          continue;
-        }
-        const rect = other.window.getBoundingClientRect();
-        if (rect.height > 0) {
-          occupied.push(rect);
-        }
-      }
-      occupied.sort((a, b2) => a.top - b2.top);
-      return firstFreeSlotTop(occupied, height);
-    };
-    const placeInRail = () => {
-      const railWidth = win.offsetWidth || width;
-      const height = win.offsetHeight || fallbackHeight;
-      const top = firstFreeRailTop();
-      const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
-      const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
-      win.style.maxHeight = `${available}px`;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
-    };
-    const position = saved.position ?? config.position ?? {};
-    if (config.center) {
-      place(
-        (window.innerWidth - width) / 2,
-        Math.max(56, (window.innerHeight - fallbackHeight) / 2)
-      );
-    } else if (Object.keys(position).length > 0) {
-      const left = typeof position.left === "number" ? position.left : window.innerWidth - width - (typeof position.right === "number" ? position.right : RAIL_RIGHT);
-      const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
-      place(left, top);
-    }
-    const isCollapsed = () => win.classList.contains("is-collapsed");
-    const updateCollapseChrome = () => {
-      const collapsed = isCollapsed();
-      collapseButton.textContent = collapsed ? "+" : "\u2013";
-      collapseButton.title = collapsed ? "Expand" : "Collapse";
-      collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-    };
-    const setCollapsed = (collapsed) => {
-      win.classList.toggle("is-collapsed", collapsed);
-      updateCollapseChrome();
-      persist();
-    };
-    if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
-    updateCollapseChrome();
-    let lastHidden = null;
-    const raise = () => {
-      topZ += 1;
-      win.style.zIndex = String(topZ);
-    };
-    const sync2 = () => {
-      const hidden = element2.hidden === true;
-      win.hidden = hidden;
-      if (!hidden && config.titleFrom) {
-        const heading2 = config.titleFrom(element2);
-        if (heading2) {
-          title.textContent = heading2;
-        }
-      }
-      win.setAttribute("aria-label", title.textContent);
-      if (hidden !== lastHidden) {
-        lastHidden = hidden;
-        renderDock();
-        if (!hidden) {
-          if (!hasPosition) placeInRail();
-          raise();
-          flashChip(config.key);
-        }
-      }
-    };
-    new MutationObserver(sync2).observe(element2, {
-      attributes: true,
-      attributeFilter: ["hidden"],
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
-    const controller = {
-      key: config.key,
-      docked: config.dock !== false,
-      pinned: Boolean(config.pinned),
-      // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
-      pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
-      window: win,
-      element: element2,
-      isOpen: () => !win.hidden,
-      isCollapsed,
-      open() {
-        if (config.canOpen && !config.canOpen()) {
-          config.onBlocked?.();
-          return false;
-        }
-        config.onOpen?.();
-        element2.hidden = false;
-        win.hidden = false;
-        if (!hasPosition) {
-          placeInRail();
-        }
-        sync2();
-        raise();
-        persist();
-        win.focus({ preventScroll: true });
-        return true;
-      },
-      close() {
-        const hadFocus = win.contains(document.activeElement);
-        if (config.onClose) config.onClose();
-        else element2.hidden = true;
-        win.hidden = true;
-        lastHidden = true;
-        renderDock();
-        persist();
-        if (hadFocus) {
-          const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
-          if (chip && !moreMenu.contains(chip)) chip.focus();
-          else moreToggle.focus();
-        }
-      },
-      toggle() {
-        if (win.hidden) {
-          return this.open();
-        } else if (isCollapsed()) {
-          setCollapsed(false);
-          raise();
-          return true;
-        } else {
-          this.close();
-          return true;
-        }
-      },
-      snapshot() {
-        const snapshot = {
-          size: { ...size },
-          collapsed: isCollapsed()
-        };
-        if (hasPosition) {
-          snapshot.position = {
-            left: parseFloat(win.style.left) || 0,
-            top: parseFloat(win.style.top) || 0
-          };
-        }
-        return snapshot;
-      },
-      dockButton() {
-        const button3 = document.createElement("button");
-        button3.type = "button";
-        button3.className = "dock-chip";
-        button3.dataset.panel = config.key;
-        const open = !win.hidden;
-        const canOpen = !config.canOpen || config.canOpen();
-        button3.classList.toggle("active", open);
-        button3.classList.toggle("collapsed", open && isCollapsed());
-        button3.setAttribute("aria-pressed", String(open));
-        button3.textContent = config.dockLabel ?? config.title ?? config.key;
-        button3.dataset.glyph = config.glyph ?? "\u2022";
-        if (!canOpen && !open) {
-          button3.disabled = true;
-          const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
-          button3.title = reason;
-        } else {
-          button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
-        }
-        button3.addEventListener("click", () => controller.toggle());
-        return button3;
-      }
-    };
-    win.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        event.stopPropagation();
-        event.preventDefault();
-        controller.close();
-      }
-    });
-    header.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button") || event.button !== 0) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const startLeft = parseFloat(win.style.left) || 0;
-      const startTop = parseFloat(win.style.top) || 0;
-      header.setPointerCapture(event.pointerId);
-      const move = (moveEvent) => {
-        place(
-          startLeft + (moveEvent.clientX - startX),
-          startTop + (moveEvent.clientY - startY)
-        );
-      };
-      const end = () => {
-        header.removeEventListener("pointermove", move);
-        header.removeEventListener("pointerup", end);
-        header.removeEventListener("pointercancel", end);
-        persist();
-      };
-      header.addEventListener("pointermove", move);
-      header.addEventListener("pointerup", end);
-      header.addEventListener("pointercancel", end);
-      raise();
-      event.preventDefault();
-    });
-    resizeHandle.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const rect = win.getBoundingClientRect();
-      const startWidth = rect.width;
-      const startHeight = rect.height;
-      const left = parseFloat(win.style.left) || 0;
-      const top = parseFloat(win.style.top) || 0;
-      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
-      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
-      resizeHandle.setPointerCapture(event.pointerId);
-      const move = (moveEvent) => {
-        win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
-        win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
-      };
-      const end = () => {
-        resizeHandle.removeEventListener("pointermove", move);
-        resizeHandle.removeEventListener("pointerup", end);
-        resizeHandle.removeEventListener("pointercancel", end);
-        const resized = sanitizeSize({
-          width: parseFloat(win.style.width),
-          height: parseFloat(win.style.height)
-        });
-        size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
-        persist();
-      };
-      resizeHandle.addEventListener("pointermove", move);
-      resizeHandle.addEventListener("pointerup", end);
-      resizeHandle.addEventListener("pointercancel", end);
-      raise();
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    header.addEventListener("dblclick", (event) => {
-      if (event.target.closest("button")) return;
-      setCollapsed(!isCollapsed());
-    });
-    collapseButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setCollapsed(!isCollapsed());
-    });
-    closeButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      controller.close();
-    });
-    win.addEventListener("pointerdown", raise, true);
-    win.addEventListener("contextmenu", raise, true);
-    if (!hasPosition && element2.hidden !== true) {
-      placeInRail();
-    }
-    controllers.push(controller);
-    sync2();
-  }
   dock?.addEventListener("keydown", (event) => {
     if (moreMenu.contains(event.target)) {
       const items = [...moreMenu.querySelectorAll(".dock-chip")].filter((chip) => !chip.disabled);
@@ -4384,24 +4031,416 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     chips[next].focus();
   });
-  dock?.addEventListener("scroll", syncDockOverflow, { passive: true });
+  dock?.addEventListener("scroll", syncOverflow, { passive: true });
   if (dock && typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(syncDockOverflow).observe(dock);
+    new ResizeObserver(syncOverflow).observe(dock);
+  }
+  return { dock, moreMenu, moreToggle, render, railItems, flashChip };
+}
+
+// ui/strabo-float-geometry.js
+var DOCK_RAIL_WIDTH = 64;
+var GAP = 12;
+var DEFAULT_WIDTH = 384;
+var HEADER_HEIGHT = 34;
+var MIN_WIDTH = 240;
+var MIN_HEIGHT = 160;
+var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
+var RAIL_TOP = 64;
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+function sanitizeSize(size) {
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  return {
+    width: Number.isFinite(width) && width >= MIN_WIDTH ? width : null,
+    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
+  };
+}
+function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } = {}) {
+  const sorted = [...occupied].sort((a, b2) => a.top - b2.top);
+  let candidate = startTop;
+  for (const rect of sorted) {
+    if (candidate + height <= rect.top) {
+      break;
+    }
+    candidate = Math.max(candidate, rect.bottom + gap);
+  }
+  return candidate;
+}
+
+// ui/strabo-float-window.js
+function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
+  const element2 = config.element;
+  const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
+  let size = sanitizeSize(saved.size);
+  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
+  const win = document.createElement("section");
+  win.className = "float-window";
+  win.dataset.panel = config.key;
+  win.hidden = true;
+  win.style.width = `${width}px`;
+  if (size.height) {
+    win.style.height = `${size.height}px`;
+  }
+  const header = document.createElement("header");
+  header.className = "float-header";
+  header.tabIndex = 0;
+  header.title = "Drag to move \xB7 double-click to collapse";
+  const grip = document.createElement("span");
+  grip.className = "float-grip";
+  grip.setAttribute("aria-hidden", "true");
+  grip.textContent = "\u283F";
+  const title = document.createElement("span");
+  title.className = "float-title";
+  title.textContent = config.title ?? config.key;
+  win.setAttribute("role", "dialog");
+  win.setAttribute("aria-label", title.textContent);
+  win.tabIndex = -1;
+  const spacer = document.createElement("span");
+  spacer.className = "float-spacer";
+  const collapseButton = document.createElement("button");
+  collapseButton.type = "button";
+  collapseButton.className = "float-button float-collapse";
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "float-button float-close";
+  closeButton.setAttribute("aria-label", "Close panel");
+  closeButton.title = "Close";
+  closeButton.textContent = "\xD7";
+  const body = document.createElement("div");
+  body.className = "float-body";
+  const resizeHandle = document.createElement("span");
+  resizeHandle.className = "float-resize";
+  resizeHandle.setAttribute("aria-hidden", "true");
+  resizeHandle.title = "Drag to resize";
+  header.append(grip, title, spacer, collapseButton, closeButton);
+  win.append(header, body, resizeHandle);
+  element2.parentNode.insertBefore(win, element2);
+  body.append(element2);
+  const fallbackHeight = config.height ?? 260;
+  let hasPosition = false;
+  const place = (x, y) => {
+    win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
+    win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    hasPosition = true;
+  };
+  const firstFreeRailTop = () => {
+    const height = win.offsetHeight || fallbackHeight;
+    const occupied = [];
+    for (const other of controllers) {
+      if (other.window === win || other.window.hidden || other.isCollapsed()) {
+        continue;
+      }
+      const rect = other.window.getBoundingClientRect();
+      if (rect.height > 0) {
+        occupied.push(rect);
+      }
+    }
+    occupied.sort((a, b2) => a.top - b2.top);
+    return firstFreeSlotTop(occupied, height);
+  };
+  const placeInRail = () => {
+    const railWidth = win.offsetWidth || width;
+    const height = win.offsetHeight || fallbackHeight;
+    const top = firstFreeRailTop();
+    const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
+    const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
+    win.style.maxHeight = `${available}px`;
+    place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
+  };
+  const position = saved.position ?? config.position ?? {};
+  if (config.center) {
+    place(
+      (window.innerWidth - width) / 2,
+      Math.max(56, (window.innerHeight - fallbackHeight) / 2)
+    );
+  } else if (Object.keys(position).length > 0) {
+    const left = typeof position.left === "number" ? position.left : window.innerWidth - width - (typeof position.right === "number" ? position.right : RAIL_RIGHT);
+    const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
+    place(left, top);
+  }
+  const isCollapsed = () => win.classList.contains("is-collapsed");
+  const updateCollapseChrome = () => {
+    const collapsed = isCollapsed();
+    collapseButton.textContent = collapsed ? "+" : "\u2013";
+    collapseButton.title = collapsed ? "Expand" : "Collapse";
+    collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
+  };
+  const setCollapsed = (collapsed) => {
+    win.classList.toggle("is-collapsed", collapsed);
+    updateCollapseChrome();
+    persist();
+  };
+  if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
+  updateCollapseChrome();
+  let lastHidden = null;
+  const raise = () => {
+    win.style.zIndex = String(nextZ());
+  };
+  const sync2 = () => {
+    const hidden = element2.hidden === true;
+    win.hidden = hidden;
+    if (!hidden && config.titleFrom) {
+      const heading2 = config.titleFrom(element2);
+      if (heading2) {
+        title.textContent = heading2;
+      }
+    }
+    win.setAttribute("aria-label", title.textContent);
+    if (hidden !== lastHidden) {
+      lastHidden = hidden;
+      renderDock();
+      if (!hidden) {
+        if (!hasPosition) placeInRail();
+        raise();
+        flashChip(config.key);
+      }
+    }
+  };
+  new MutationObserver(sync2).observe(element2, {
+    attributes: true,
+    attributeFilter: ["hidden"],
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+  const controller = {
+    key: config.key,
+    docked: config.dock !== false,
+    pinned: Boolean(config.pinned),
+    // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
+    pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
+    window: win,
+    element: element2,
+    isOpen: () => !win.hidden,
+    isCollapsed,
+    // Bring an already-open window to the top of the stack without the focus shift and
+    // re-placement `open()` performs, for callers that only need it seen (a selection).
+    raise,
+    open() {
+      if (config.canOpen && !config.canOpen()) {
+        config.onBlocked?.();
+        return false;
+      }
+      config.onOpen?.();
+      element2.hidden = false;
+      win.hidden = false;
+      if (!hasPosition) {
+        placeInRail();
+      }
+      sync2();
+      raise();
+      persist();
+      win.focus({ preventScroll: true });
+      return true;
+    },
+    close() {
+      const hadFocus = win.contains(document.activeElement);
+      if (config.onClose) config.onClose();
+      else element2.hidden = true;
+      win.hidden = true;
+      lastHidden = true;
+      renderDock();
+      persist();
+      if (hadFocus) {
+        const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
+        if (chip && !moreMenu.contains(chip)) chip.focus();
+        else moreToggle.focus();
+      }
+    },
+    toggle() {
+      if (win.hidden) {
+        return this.open();
+      } else if (isCollapsed()) {
+        setCollapsed(false);
+        raise();
+        return true;
+      } else {
+        this.close();
+        return true;
+      }
+    },
+    snapshot() {
+      const snapshot = {
+        size: { ...size },
+        collapsed: isCollapsed()
+      };
+      if (hasPosition) {
+        snapshot.position = {
+          left: parseFloat(win.style.left) || 0,
+          top: parseFloat(win.style.top) || 0
+        };
+      }
+      return snapshot;
+    },
+    dockButton() {
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "dock-chip";
+      button3.dataset.panel = config.key;
+      const open = !win.hidden;
+      const canOpen = !config.canOpen || config.canOpen();
+      button3.classList.toggle("active", open);
+      button3.classList.toggle("collapsed", open && isCollapsed());
+      button3.setAttribute("aria-pressed", String(open));
+      button3.textContent = config.dockLabel ?? config.title ?? config.key;
+      button3.dataset.glyph = config.glyph ?? "\u2022";
+      if (!canOpen && !open) {
+        button3.disabled = true;
+        const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
+        button3.title = reason;
+      } else {
+        button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
+      }
+      button3.addEventListener("click", () => controller.toggle());
+      return button3;
+    }
+  };
+  win.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.stopPropagation();
+      event.preventDefault();
+      controller.close();
+    }
+  });
+  header.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button") || event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = parseFloat(win.style.left) || 0;
+    const startTop = parseFloat(win.style.top) || 0;
+    header.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      place(
+        startLeft + (moveEvent.clientX - startX),
+        startTop + (moveEvent.clientY - startY)
+      );
+    };
+    const end = () => {
+      header.removeEventListener("pointermove", move);
+      header.removeEventListener("pointerup", end);
+      header.removeEventListener("pointercancel", end);
+      persist();
+    };
+    header.addEventListener("pointermove", move);
+    header.addEventListener("pointerup", end);
+    header.addEventListener("pointercancel", end);
+    raise();
+    event.preventDefault();
+  });
+  resizeHandle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const rect = win.getBoundingClientRect();
+    const startWidth = rect.width;
+    const startHeight = rect.height;
+    const left = parseFloat(win.style.left) || 0;
+    const top = parseFloat(win.style.top) || 0;
+    const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
+    const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+    resizeHandle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
+      win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
+    };
+    const end = () => {
+      resizeHandle.removeEventListener("pointermove", move);
+      resizeHandle.removeEventListener("pointerup", end);
+      resizeHandle.removeEventListener("pointercancel", end);
+      const resized = sanitizeSize({
+        width: parseFloat(win.style.width),
+        height: parseFloat(win.style.height)
+      });
+      size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
+      persist();
+    };
+    resizeHandle.addEventListener("pointermove", move);
+    resizeHandle.addEventListener("pointerup", end);
+    resizeHandle.addEventListener("pointercancel", end);
+    raise();
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  header.addEventListener("dblclick", (event) => {
+    if (event.target.closest("button")) return;
+    setCollapsed(!isCollapsed());
+  });
+  collapseButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setCollapsed(!isCollapsed());
+  });
+  closeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    controller.close();
+  });
+  win.addEventListener("pointerdown", raise, true);
+  win.addEventListener("contextmenu", raise, true);
+  if (!hasPosition && element2.hidden !== true) {
+    placeInRail();
+  }
+  controllers.push(controller);
+  sync2();
+  return controller;
+}
+
+// ui/strabo-float-store.js
+var STORAGE_KEY = "strabo.float.windows.v2";
+function readStore() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function writeStore(store2) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(store2));
+  } catch {
+  }
+}
+
+// ui/strabo-float.js
+function initFloatingWindows({ dock, panels = [] } = {}) {
+  const store2 = readStore();
+  const controllers = [];
+  let topZ = 60;
+  const nextZ = () => {
+    topZ += 1;
+    return topZ;
+  };
+  const persist = () => {
+    const next = {};
+    for (const controller of controllers) {
+      next[controller.key] = controller.snapshot();
+    }
+    writeStore(next);
+  };
+  const dockRail = createDockRail({ dock, controllers });
+  for (const config of panels) {
+    if (!config.element) continue;
+    const saved = store2[config.key] ?? {};
+    createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
   }
   window.addEventListener("resize", () => {
     for (const controller of controllers) {
       const win = controller.window;
       if (win.hidden) continue;
+      const left = parseFloat(win.style.left) || 0;
+      const top = clamp(parseFloat(win.style.top) || 0, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4));
+      win.style.top = `${top}px`;
+      win.style.maxHeight = `${Math.max(MIN_HEIGHT, window.innerHeight - top - GAP)}px`;
       const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
       const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
-      const left = parseFloat(win.style.left) || 0;
-      const top = parseFloat(win.style.top) || 0;
       win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
       win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
     }
   });
-  renderDock();
-  controllers.refresh = renderDock;
+  dockRail.render();
+  controllers.refresh = dockRail.render;
   return controllers;
 }
 
@@ -4568,12 +4607,13 @@ function initFloatingToolbar(element2, options = {}) {
       overDock = dockHit(moveEvent.clientX, moveEvent.clientY);
       dock?.classList.toggle("is-dock-target", overDock);
     };
-    const end = () => {
+    const end = (endEvent) => {
       grip.removeEventListener("pointermove", move);
       grip.removeEventListener("pointerup", end);
       grip.removeEventListener("pointercancel", end);
       dock?.classList.remove("is-dock-target");
-      if (overDock) dockElement();
+      const dropped = endEvent?.type === "pointerup" && Number.isFinite(endEvent.clientX) ? dockHit(endEvent.clientX, endEvent.clientY) : overDock;
+      if (dropped) dockElement();
       else persist();
     };
     grip.addEventListener("pointermove", move);
@@ -26017,12 +26057,27 @@ function reviewHandlers(data, navigation, onClose = closeReview) {
   return {
     onClose,
     ...navigation,
-    onSelect: (id) => selectNode(id),
-    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+    onSelect: (id) => selectFromReview(id),
+    onOpenDiff: (file, entry) => openReviewDiff(data, file, entry),
     narratorStatus,
     onNarrate: () => narrateReview(data),
     onOpenNarratorSettings: openNarratorSettings
   };
+}
+function selectFromReview(id) {
+  if (store.get().ui.screen !== "graph") {
+    setScreen("graph");
+  }
+  selectNode(id);
+  if (!elements.inspector.hidden) {
+    floatingWindows.find((controller) => controller.key === "inspector")?.raise?.();
+  }
+}
+function openReviewDiff(data, file, entry) {
+  if (store.get().ui.screen !== "graph") {
+    setScreen("graph");
+  }
+  viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status });
 }
 function openReviewScreen() {
   const body = elements.reviewScreenBody;

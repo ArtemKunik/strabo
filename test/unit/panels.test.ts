@@ -1543,3 +1543,36 @@ test('the panel rail shows pinned panels in pin order, lists the rest under More
   assert.deepEqual(railLabels(), ['Legend', 'Source', 'Risk'], 'an open panel joins the rail');
   assert.equal(dock.querySelector('.dock-more'), null, 'More leaves the rail with nothing in it');
 });
+
+test('raise moves an already-open window to the front without toggling it', () => {
+  (globalThis as { MutationObserver?: unknown }).MutationObserver = window.MutationObserver;
+  const dock = container();
+  const host = container();
+  document.body.append(dock, host);
+  const panel = (id: string) => {
+    const element = document.createElement('section');
+    element.id = id;
+    element.hidden = true;
+    host.append(element);
+    return element;
+  };
+  const windows = initFloatingWindows({
+    dock,
+    panels: [
+      { key: 'first', element: panel('first'), title: 'First', dock: false },
+      { key: 'second', element: panel('second'), title: 'Second', dock: false },
+    ],
+  });
+
+  const first = windows.find((controller) => controller.key === 'first')!;
+  const second = windows.find((controller) => controller.key === 'second')!;
+  first.open();
+  second.open();
+  const secondZ = Number(second.window.style.zIndex);
+  assert.ok(Number(first.window.style.zIndex) < secondZ, 'the window opened last is on top');
+
+  first.raise();
+  assert.ok(Number(first.window.style.zIndex) > secondZ, 'raise puts an open window above the rest');
+  assert.equal(first.isOpen(), true, 'raise neither closes nor reopens the window');
+  assert.equal(first.isCollapsed(), false, 'raise does not change the collapsed state');
+});

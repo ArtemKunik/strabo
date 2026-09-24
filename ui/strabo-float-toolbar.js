@@ -230,12 +230,20 @@ export function initFloatingToolbar(element, options = {}) {
       dock?.classList.toggle('is-dock-target', overDock);
     };
 
-    const end = () => {
+    const end = (endEvent) => {
       grip.removeEventListener('pointermove', move);
       grip.removeEventListener('pointerup', end);
       grip.removeEventListener('pointercancel', end);
       dock?.classList.remove('is-dock-target');
-      if (overDock) dockElement();
+      // Decide the drop from the pointer's own final position, not the last move that happened
+      // to arrive: re-parenting the bar on undock can drop a move (and with it the `overDock`
+      // update), so a stale `overDock` from the first move off the dock would re-dock a bar the
+      // user lifted away. A cancel has no usable position, so it keeps the last observed target.
+      const dropped =
+        endEvent?.type === 'pointerup' && Number.isFinite(endEvent.clientX)
+          ? dockHit(endEvent.clientX, endEvent.clientY)
+          : overDock;
+      if (dropped) dockElement();
       else persist();
     };
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float.js';
+import { firstFreeSlotTop, sanitizeSize } from '../../ui/strabo-float-geometry.js';
 import { clampMenuLeft, clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
