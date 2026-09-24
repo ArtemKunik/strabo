@@ -77,7 +77,7 @@ export function createUrlState(app) {
       return;
     }
     app.selectNode(intent.node);
-    await app.openMemberMap(intent.node);
+    await app.memberMap.openMemberMap(intent.node);
   }
 
   return {
