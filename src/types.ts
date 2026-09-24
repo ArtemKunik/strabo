@@ -792,9 +792,23 @@ export interface UnitCard {
   shelf: UnitShelfFact;
   hotspots: number | null;
   testReach: { reached: number; total: number };
+  /** Measured line coverage over the unit's files the report names; null with no report. */
+  coverage: UnitCoverageFact | null;
   dependsOn: number;
   usedBy: number;
   why: string;
+}
+
+/** A unit's measured coverage, summed over the member files the report names. */
+export interface UnitCoverageFact {
+  basis: 'measured';
+  linesHit: number;
+  linesFound: number;
+  /** 0-100, or null when the named files record no line counts. */
+  value: number | null;
+  filesMeasured: number;
+  /** Member files the report does not name: `not in report`, never counted as 0%. */
+  notInReport: number;
 }
 
 /** The deterministic, server-computed presentation model. */

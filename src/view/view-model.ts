@@ -1,8 +1,10 @@
 import { buildAdjacency, computeGraphMetrics, rankHubs } from '../analysis/analysis.ts';
 import { computeTestReachByFile } from '../analysis/coverage.ts';
+import { fileCoverage, type FileCoverage } from '../analysis/file-coverage.ts';
+import { percent, type MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import { buildPositions, buildSystemPositions } from '../analysis/layout.ts';
 import type { SystemReport } from '../analysis/system.ts';
-import type { OutsideLink, UnitCard, UnitShelfFact } from '../types.ts';
+import type { OutsideLink, UnitCard, UnitCoverageFact, UnitShelfFact } from '../types.ts';
 
 import { toPosix } from '../boundary/repository-root.ts';
 import type {
@@ -73,6 +75,7 @@ export function buildSystemViewModel(
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
   sourceGraph?: Graph,
+  measured?: MeasuredCoverageSummary | null,
 ): ViewModel {
   const graph: Graph = {
     nodes: system.units.map((unit) => ({
@@ -143,7 +146,7 @@ export function buildSystemViewModel(
     excluded: [],
     cache,
     system: true,
-    unitCards: buildUnitCards(system, sourceGraph),
+    unitCards: buildUnitCards(system, sourceGraph, measured),
     ...(single ? { systemSingleUnit: single } : {}),
   };
 }
@@ -169,7 +172,11 @@ function singleUnitId(system: SystemReport): string | null {
  * Hotspots are the one exception: the signal count needs the function analysis, so the
  * server leaves it null for the browser to fill.
  */
-function buildUnitCards(system: SystemReport, sourceGraph?: Graph): UnitCard[] {
+function buildUnitCards(
+  system: SystemReport,
+  sourceGraph?: Graph,
+  measured?: MeasuredCoverageSummary | null,
+): UnitCard[] {
   const linesOf = new Map<string, number>();
   const languageOf = new Map<string, string>();
   for (const node of sourceGraph?.nodes ?? []) {
@@ -181,6 +188,7 @@ function buildUnitCards(system: SystemReport, sourceGraph?: Graph): UnitCard[] {
     }
   }
   const reached = sourceGraph ? computeTestReachByFile(sourceGraph) : new Map<string, string[]>();
+  const coverage = sourceGraph && measured?.available ? fileCoverage(sourceGraph, measured) : null;
 
   const membersOf = new Map<string, string[]>();
   const layersOf = new Map<string, { name: string; order: number; files: number }[]>();
@@ -235,11 +243,30 @@ function buildUnitCards(system: SystemReport, sourceGraph?: Graph): UnitCard[] {
       shelf: shelfOf.get(unit.id) ?? { test: 0, script: 0, generated: 0, fixture: 0, total: 0 },
       hotspots: null,
       testReach: { reached: reachedCount, total: members.length },
+      coverage: coverage ? unitCoverage(members, coverage) : null,
       dependsOn: dependsOn.get(unit.id) ?? 0,
       usedBy: usedBy.get(unit.id) ?? 0,
       why: unit.why,
     };
   });
+}
+
+function unitCoverage(members: readonly string[], coverage: Map<string, FileCoverage>): UnitCoverageFact {
+  let linesHit = 0;
+  let linesFound = 0;
+  let filesMeasured = 0;
+  let notInReport = 0;
+  for (const file of members) {
+    const figure = coverage.get(file);
+    if (!figure || figure.basis !== 'measured') {
+      notInReport += 1;
+      continue;
+    }
+    filesMeasured += 1;
+    linesHit += figure.linesHit ?? 0;
+    linesFound += figure.linesFound ?? 0;
+  }
+  return { basis: 'measured', linesHit, linesFound, value: percent(linesHit, linesFound), filesMeasured, notInReport };
 }
 
 export interface SystemUnitViewOptions {
@@ -249,6 +276,8 @@ export interface SystemUnitViewOptions {
   selectedFile?: string;
   /** Target units whose badge is expanded in place with their files. */
   expandedUnits?: string[];
+  /** The repository's measured coverage report, for the unit cards' coverage fact. */
+  measured?: MeasuredCoverageSummary | null;
 }
 
 /**
@@ -477,7 +506,7 @@ export function buildSystemUnitViewModel(
     systemCommunities: unitCommunities,
     outsideLinks,
     expandedUnits: [...expanded],
-    unitCards: buildUnitCards(system, graph),
+    unitCards: buildUnitCards(system, graph, options.measured),
     ...(singleUnitId(system) ? { systemSingleUnit: unitId } : {}),
   };
 }

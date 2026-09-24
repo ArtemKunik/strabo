@@ -670,16 +670,28 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
   }
 
   const untested = report.untested ?? { total: 0, files: [] };
-  container.append(passportSection('Used but no test reaches', untested.total ?? 0));
+  const measured = untested.basis === 'measured';
   container.append(
-    (untested.files ?? []).length === 0
-      ? passportNote('Every used module is reachable from a test, or no test file was identified.')
-      : passportFileList(
-          untested.files.map((file) => ({ file })),
-          handlers,
-          () => '',
+    passportSection(
+      measured ? `Used and under ${untested.threshold}% measured` : 'Used but no test reaches',
+      untested.total ?? 0,
+    ),
+  );
+  const figures = untested.figures ?? (untested.files ?? []).map((file) => ({ file, value: null, stale: null }));
+  container.append(
+    figures.length === 0
+      ? passportNote(
+          measured
+            ? `Every used module the report names is at or above ${untested.threshold}% measured.`
+            : 'Every used module is reachable from a test, or no test file was identified.',
+        )
+      : passportFileList(figures, handlers, (figure) =>
+          figure.value === null ? '' : `measured ${figure.value}%${figure.stale ? ' · stale' : ''}`,
         ),
   );
+  if (measured && untested.notInReport > 0) {
+    container.append(passportNote(`${untested.notInReport} used module(s) not in the coverage report.`));
+  }
 
   if (handlers.onExportReport) {
     const bar = document.createElement('p');

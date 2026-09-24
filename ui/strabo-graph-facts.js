@@ -63,6 +63,16 @@ export function passportFor(model, id) {
       { label: 'Depends on units', value: card.dependsOn },
       { label: 'Used by units', value: card.usedBy },
     );
+    if (card.coverage) {
+      const { value, linesHit, linesFound, notInReport } = card.coverage;
+      metrics.push({
+        label: 'Measured coverage',
+        value: value === null ? 'no line counts' : `${value}% (${linesHit}/${linesFound} lines)`,
+      });
+      if (notInReport > 0) {
+        metrics.push({ label: 'Not in report', value: notInReport });
+      }
+    }
     if (card.hotspots !== null) {
       metrics.push({ label: 'Hotspots', value: card.hotspots });
     }

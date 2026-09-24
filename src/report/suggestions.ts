@@ -43,7 +43,9 @@ function suggestionText(painPoint: PainPoint): string {
     case 'pass-through':
       return `${refs(painPoint.location)} mostly forwards to another module; collapse it into its target or widen its own interface.`;
     case 'untested-reach':
-      return `Add a test that reaches ${refs(painPoint.location)}; ${inputs.dependents ?? 'some'} file(s) depend on it and no test does.`;
+      return typeof inputs.measuredCoverage === 'number'
+        ? `Cover more of ${refs(painPoint.location)} with tests; ${inputs.dependents ?? 'some'} file(s) depend on it and the report measures ${inputs.measuredCoverage}% of its lines.`
+        : `Add a test that reaches ${refs(painPoint.location)}; ${inputs.dependents ?? 'some'} file(s) depend on it and no test does.`;
     case 'hotspot':
       return `Reduce the cost signals in ${refs(painPoint.location)}: ${inputs.signals ?? inputs.signalKinds ?? 'recorded thresholds were crossed'}.`;
     case 'bus-factor':

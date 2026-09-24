@@ -1,7 +1,8 @@
 import type { Graph } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics, relationshipOf } from './analysis.ts';
-import { computeCoverage } from './coverage.ts';
 import { computeCycles } from './cycles.ts';
+import { fileCoverage } from './file-coverage.ts';
+import type { MeasuredCoverageSummary } from './measured-coverage.ts';
 
 /** A language and how many scanned source files carry it. */
 export interface PassportLanguage {
@@ -74,8 +75,35 @@ export interface RepositoryPassport {
   topDirectories: PassportTopDirectory[];
   topFiles: PassportTopFile[];
   cycles: { total: number; largest: PassportCycle[] };
-  untested: { total: number; files: string[] };
+  untested: PassportUntested;
 }
+
+/** A used file's measured figure, as the passport lists it. */
+export interface PassportCoverageFigure {
+  file: string;
+  value: number | null;
+  stale: boolean | null;
+}
+
+/**
+ * Used files (something imports them) that tests leave uncovered. With a measured report
+ * that is "used and under `threshold`% measured", lowest first; without one it is "used but
+ * no test reaches", by reachability. `basis` says which, so the two are never mixed.
+ */
+export interface PassportUntested {
+  basis: 'measured' | 'reachable';
+  /** Measured line-coverage percent a used file must reach; null on the reachable basis. */
+  threshold: number | null;
+  total: number;
+  files: string[];
+  /** Each listed file's figure, in `files` order; `value` is null on the reachable basis. */
+  figures: PassportCoverageFigure[];
+  /** Used files the measured report does not name: `not in report`, never counted as 0%. */
+  notInReport: number;
+}
+
+/** A used file under this measured line coverage is listed as untested. */
+export const PASSPORT_COVERAGE_THRESHOLD = 50;
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   '.ts': 'TypeScript',
@@ -113,8 +141,10 @@ export function computeRepositoryPassport(
   graph: Graph,
   extensionCounts: Record<string, number> = {},
   limit = 10,
+  measured: MeasuredCoverageSummary | null = null,
 ): RepositoryPassport {
-  const metrics = computeGraphMetrics(graph, buildAdjacency(graph));
+  const adjacency = buildAdjacency(graph);
+  const metrics = computeGraphMetrics(graph, adjacency);
   const nodes = graph.nodes;
 
   // Several extensions share one display language (`.js`/`.mjs`/`.cjs` are all
@@ -168,7 +198,7 @@ export function computeRepositoryPassport(
     .slice(0, 5)
     .map((group) => ({ id: group.id, size: group.members.length, members: group.members.slice(0, 12) }));
 
-  const coverage = computeCoverage(graph);
+  const untested = computeUntested(graph, measured, limit, adjacency.backward);
 
   return {
     repository,
@@ -187,10 +217,58 @@ export function computeRepositoryPassport(
     topDirectories: layers,
     topFiles,
     cycles: { total: cycles.length, largest },
-    untested: {
-      total: coverage.unreachedWithDependents.length,
-      files: coverage.unreachedWithDependents.slice(0, limit),
-    },
+    untested,
+  };
+}
+
+/**
+ * Used files that tests leave uncovered, on the measured basis when a report was read and on
+ * reachability otherwise. Shared by the passport and the repository report.
+ */
+export function computeUntested(
+  graph: Graph,
+  measured: MeasuredCoverageSummary | null,
+  limit: number,
+  backward: Map<string, string[]> = buildAdjacency(graph).backward,
+): PassportUntested {
+  const coverage = fileCoverage(graph, measured);
+  // Used: something depends on it. An unreached file with no dependents is an orphan, not
+  // an untested dependency, and a test file is the test.
+  const used = graph.nodes
+    .filter((node) => node.kind !== 'test' && (backward.get(node.id) ?? []).length > 0)
+    .map((node) => node.id);
+
+  if (!measured?.available) {
+    const files = used.filter((file) => !coverage.get(file)?.reached).sort();
+    return {
+      basis: 'reachable',
+      threshold: null,
+      total: files.length,
+      files: files.slice(0, limit),
+      figures: files.slice(0, limit).map((file) => ({ file, value: null, stale: null })),
+      notInReport: 0,
+    };
+  }
+
+  const figures: PassportCoverageFigure[] = [];
+  let notInReport = 0;
+  for (const file of used) {
+    const figure = coverage.get(file);
+    if (!figure || figure.notInReport) {
+      notInReport += 1;
+    } else if (figure.value !== null && figure.value < PASSPORT_COVERAGE_THRESHOLD) {
+      figures.push({ file, value: figure.value, stale: figure.stale });
+    }
+  }
+  figures.sort((a, b) => (a.value ?? 0) - (b.value ?? 0) || a.file.localeCompare(b.file));
+  const listed = figures.slice(0, limit);
+  return {
+    basis: 'measured',
+    threshold: PASSPORT_COVERAGE_THRESHOLD,
+    total: figures.length,
+    files: listed.map((figure) => figure.file),
+    figures: listed,
+    notInReport,
   };
 }
 

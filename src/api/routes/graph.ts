@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { buildBlockViewModel } from '../../analysis/blocks.ts';
+import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
@@ -48,6 +49,12 @@ export function createGraphRouter(config: StraboConfig): Router {
       const systemUnit = asString(request.query.systemUnit);
       if (parseBoolean(request.query.system) || systemUnit) {
         const report = buildSystemReport(repository.root, repository.name, cached.report.graph);
+        // Unit cards sum lines, so per-file staleness (a `git log` per file) is not read here.
+        const measured = await computeMeasuredCoverage(repository.root, cached.report.graph, {
+          reportPaths: config.coverageReports,
+          ceiling: config.scanCeiling ?? config.workspaceRoot,
+          maxStalenessFiles: 0,
+        });
         if (systemUnit) {
           const model = buildSystemUnitViewModel(
             report,
@@ -59,6 +66,7 @@ export function createGraphRouter(config: StraboConfig): Router {
               showOutside: parseBoolean(request.query.outside),
               selectedFile: asString(request.query.selected),
               expandedUnits: asString(request.query.expanded)?.split(',').filter(Boolean),
+              measured,
             },
           );
           if (model) {
@@ -66,7 +74,7 @@ export function createGraphRouter(config: StraboConfig): Router {
             return;
           }
         }
-        response.json(buildSystemViewModel(report, descriptor, cache, cached.report.graph));
+        response.json(buildSystemViewModel(report, descriptor, cache, cached.report.graph, measured));
         return;
       }
 

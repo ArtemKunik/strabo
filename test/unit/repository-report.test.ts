@@ -9,8 +9,10 @@ import express from 'express';
 
 import {
   buildRepositoryReport,
+  computeMeasuredCoverage,
   createStraboRouter,
   renderReportMarkdown,
+  scanRepository,
   suggestionFor,
   type Graph,
   type HotspotReport,
@@ -291,4 +293,26 @@ test('GET /analysis/report serves JSON, Markdown, and HTML from one document', a
   const html = await (await fetch(`${base}/api/strabo/analysis/report?format=html`)).text();
   assert.match(html, /<!doctype html>/);
   assert.match(html, /Strabo repository report/);
+});
+
+test('with a measured report, the untested pain points use measured coverage (U2)', async () => {
+  const fixture = path.resolve(import.meta.dirname, '..', 'fixtures', 'coverage-repo');
+  const { graph } = await scanRepository(fixture);
+  const coverage = await computeMeasuredCoverage(fixture, graph, {
+    modifiedAt: () => '2024-06-01T00:00:00.000Z',
+    lastCommitAt: async () => '2024-01-01T00:00:00.000Z',
+  });
+  const document = buildRepositoryReport({ repository: 'coverage', graph, coverage });
+
+  // zero.ts is reached by a test, so reachability would not flag it; the report says 0%.
+  const point = document.painPoints.find((entry) => entry.id === 'untested:src/zero.ts');
+  assert.ok(point, 'the 0%-measured dependency is a pain point');
+  assert.match(point.summary, /measured 0% line coverage/);
+  assert.equal(point.inputs.measuredCoverage, 0);
+  assert.match(suggestionFor(point).text, /measures 0% of its lines/);
+  assert.equal(document.overview.untested.basis, 'measured');
+
+  // Without a report the same graph has no untested dependency: both files are reached.
+  const reachOnly = buildRepositoryReport({ repository: 'coverage', graph });
+  assert.equal(reachOnly.painPoints.some((entry) => entry.kind === 'untested-reach'), false);
 });

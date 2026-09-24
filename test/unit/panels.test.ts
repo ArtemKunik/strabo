@@ -1136,6 +1136,53 @@ test('renderRepositoryPassport shows graph fingerprint and scan time (T6)', () =
   assert.equal(line!.classList.contains('is-stale'), true);
 });
 
+function passportWithUntested(untested: unknown) {
+  return {
+    repository: 'acme',
+    size: { files: 3, edges: 2, directories: 1, tests: 1, diagnostics: 0, excluded: 0 },
+    languages: [],
+    entryPoints: [],
+    topDirectories: [],
+    topFiles: [],
+    cycles: { total: 0, largest: [] },
+    untested,
+  };
+}
+
+test('renderRepositoryPassport names the measured basis and each file figure (U2)', () => {
+  const target = container();
+  renderRepositoryPassport(
+    target,
+    passportWithUntested({
+      basis: 'measured',
+      threshold: 50,
+      total: 1,
+      files: ['src/zero.ts'],
+      figures: [{ file: 'src/zero.ts', value: 0, stale: true }],
+      notInReport: 2,
+    }),
+    {},
+  );
+  const text = target.textContent ?? '';
+  assert.match(text, /Used and under 50% measured/);
+  assert.doesNotMatch(text, /no test reaches/);
+  assert.match(text, /measured 0% · stale/);
+  assert.match(text, /2 used module\(s\) not in the coverage report/);
+});
+
+test('renderRepositoryPassport keeps the reachability heading without a report (U2)', () => {
+  const target = container();
+  renderRepositoryPassport(
+    target,
+    passportWithUntested({ basis: 'reachable', threshold: null, total: 1, files: ['b.ts'], figures: [{ file: 'b.ts', value: null, stale: null }], notInReport: 0 }),
+    {},
+  );
+  const text = target.textContent ?? '';
+  assert.match(text, /Used but no test reaches/);
+  assert.doesNotMatch(text, /measured/);
+  assert.match(text, /b\.ts/);
+});
+
 test('renderRepositoryPassport offers an export control that passes the chosen format', () => {
   const target = container();
   const formats: string[] = [];

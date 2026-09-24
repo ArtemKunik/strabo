@@ -1,7 +1,7 @@
 import { computeGraphMetrics } from '../analysis/analysis.ts';
-import { computeCoverage } from '../analysis/coverage.ts';
 import { computeCycles } from '../analysis/cycles.ts';
-import { computeRepositoryPassport } from '../analysis/passport.ts';
+import type { MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
+import { computeRepositoryPassport, computeUntested } from '../analysis/passport.ts';
 import type { DependencyAdvisory, Graph, RiskReport } from '../types.ts';
 import type { SmellRule, SmellsReport } from '../analysis/quality.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
@@ -54,11 +54,13 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     inputs.repository,
     graph,
     inputs.extensionCounts ?? {},
+    10,
+    inputs.coverage ?? null,
   );
 
   const painPoints: PainPoint[] = [];
   painPoints.push(...cyclePoints(graph));
-  painPoints.push(...untestedPoints(graph, limits.untested));
+  painPoints.push(...untestedPoints(graph, limits.untested, inputs.coverage ?? null));
 
   if (inputs.smells) {
     painPoints.push(...smellPoints(inputs.smells));
@@ -150,16 +152,22 @@ function cyclePoints(graph: Graph): PainPoint[] {
   }));
 }
 
-function untestedPoints(graph: Graph, limit: number): PainPoint[] {
-  const coverage = computeCoverage(graph);
+function untestedPoints(graph: Graph, limit: number, measured: MeasuredCoverageSummary | null): PainPoint[] {
+  const untested = computeUntested(graph, measured, limit);
   const metrics = computeGraphMetrics(graph);
-  return coverage.unreachedWithDependents.slice(0, limit).map((file) => ({
-    id: `untested:${file}`,
+  return untested.figures.map((figure) => ({
+    id: `untested:${figure.file}`,
     kind: 'untested-reach',
     severity: 'medium',
-    location: [file],
-    summary: 'no test reaches this file, yet other files depend on it',
-    inputs: { dependents: metrics.fanIn.get(file) ?? 0 },
+    location: [figure.file],
+    summary:
+      untested.basis === 'measured'
+        ? `measured ${figure.value}% line coverage, under ${untested.threshold}%, yet other files depend on it${figure.stale ? ' (report is stale for this file)' : ''}`
+        : 'no test reaches this file, yet other files depend on it',
+    inputs: {
+      dependents: metrics.fanIn.get(figure.file) ?? 0,
+      ...(untested.basis === 'measured' ? { measuredCoverage: figure.value ?? 0 } : {}),
+    },
   }));
 }
 

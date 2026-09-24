@@ -448,6 +448,16 @@ function passportFor(model, id) {
       { label: "Depends on units", value: card.dependsOn },
       { label: "Used by units", value: card.usedBy }
     );
+    if (card.coverage) {
+      const { value, linesHit, linesFound, notInReport } = card.coverage;
+      metrics.push({
+        label: "Measured coverage",
+        value: value === null ? "no line counts" : `${value}% (${linesHit}/${linesFound} lines)`
+      });
+      if (notInReport > 0) {
+        metrics.push({ label: "Not in report", value: notInReport });
+      }
+    }
     if (card.hotspots !== null) {
       metrics.push({ label: "Hotspots", value: card.hotspots });
     }
@@ -2657,9 +2667,10 @@ function unitCardElement(card, options = {}) {
   const reach = element("div", "unit-card-reach");
   const hotspots = card.hotspots === null || card.hotspots === void 0 ? "\u2014" : String(card.hotspots);
   const share = card.testReach?.total ? `${Math.round(card.testReach.reached / card.testReach.total * 100)}%` : "0%";
+  const measured = card.coverage?.value ?? null;
   reach.append(
     element("span", "unit-stat", `hotspots ${hotspots}`),
-    element("span", "unit-stat", `test reach ${share}`)
+    element("span", "unit-stat", measured === null ? `test reach ${share}` : `measured ${measured}%`)
   );
   root.append(reach);
   if (card.shelf?.total > 0) {
@@ -6840,14 +6851,26 @@ function renderRepositoryPassport(container, report, handlers = {}) {
     container.append(list);
   }
   const untested = report.untested ?? { total: 0, files: [] };
-  container.append(passportSection("Used but no test reaches", untested.total ?? 0));
+  const measured = untested.basis === "measured";
   container.append(
-    (untested.files ?? []).length === 0 ? passportNote("Every used module is reachable from a test, or no test file was identified.") : passportFileList(
-      untested.files.map((file) => ({ file })),
-      handlers,
-      () => ""
+    passportSection(
+      measured ? `Used and under ${untested.threshold}% measured` : "Used but no test reaches",
+      untested.total ?? 0
     )
   );
+  const figures = untested.figures ?? (untested.files ?? []).map((file) => ({ file, value: null, stale: null }));
+  container.append(
+    figures.length === 0 ? passportNote(
+      measured ? `Every used module the report names is at or above ${untested.threshold}% measured.` : "Every used module is reachable from a test, or no test file was identified."
+    ) : passportFileList(
+      figures,
+      handlers,
+      (figure) => figure.value === null ? "" : `measured ${figure.value}%${figure.stale ? " \xB7 stale" : ""}`
+    )
+  );
+  if (measured && untested.notInReport > 0) {
+    container.append(passportNote(`${untested.notInReport} used module(s) not in the coverage report.`));
+  }
   if (handlers.onExportReport) {
     const bar = document.createElement("p");
     bar.className = "passport-export";

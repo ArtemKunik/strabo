@@ -7,7 +7,13 @@ import { after, test } from 'node:test';
 
 import express from 'express';
 
-import { computeRepositoryPassport, createStraboRouter, detectEntryPoints, scanRepository } from '../../src/index.ts';
+import {
+  computeMeasuredCoverage,
+  computeRepositoryPassport,
+  createStraboRouter,
+  detectEntryPoints,
+  scanRepository,
+} from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
 
@@ -198,6 +204,36 @@ test('computeRepositoryPassport ranks top files by fan-in and reports layers, cy
     ['.', 'a', 'b'],
   );
   assert.ok(passport.untested.files.includes('b/orphan.ts'));
+  assert.equal(passport.untested.basis, 'reachable');
+  assert.equal(passport.untested.threshold, null);
+});
+
+const coverageFixture = path.resolve(import.meta.dirname, '..', 'fixtures', 'coverage-repo');
+
+test('with a measured report, the passport lists used files under the threshold, lowest first', async () => {
+  const { graph, extensionCounts } = await scanRepository(coverageFixture);
+  const measured = await computeMeasuredCoverage(coverageFixture, graph, {
+    modifiedAt: () => '2024-06-01T00:00:00.000Z',
+    lastCommitAt: async () => '2024-01-01T00:00:00.000Z',
+  });
+  const passport = computeRepositoryPassport('coverage', graph, extensionCounts, 10, measured);
+
+  assert.equal(passport.untested.basis, 'measured');
+  assert.equal(passport.untested.threshold, 50);
+  // zero.ts is imported by a test, so reachability calls it reached; the report says 0%.
+  assert.deepEqual(passport.untested.files, ['src/zero.ts']);
+  assert.deepEqual(passport.untested.figures, [{ file: 'src/zero.ts', value: 0, stale: false }]);
+  assert.equal(passport.untested.total, 1);
+  assert.equal(passport.untested.notInReport, 0);
+});
+
+test('without a report the passport says reachable and lists by reachability', async () => {
+  const { graph, extensionCounts } = await scanRepository(coverageFixture);
+  const passport = computeRepositoryPassport('coverage', graph, extensionCounts, 10, null);
+
+  assert.equal(passport.untested.basis, 'reachable');
+  // Both files are imported by a test, so reachability finds nothing untested.
+  assert.deepEqual(passport.untested.files, []);
 });
 
 test('computeRepositoryPassport merges extensions that share a language', () => {

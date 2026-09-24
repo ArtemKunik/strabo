@@ -1,4 +1,5 @@
 import type { DriftReport } from '../analysis/drift.ts';
+import type { MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import type { RepositoryPassport } from '../analysis/passport.ts';
 import type { StructuralDiffResult } from '../analysis/structural-diff.ts';
 import type { ReviewStatus } from '../analysis/review-types.ts';
@@ -153,6 +154,8 @@ export interface RepositoryReportInputs {
   change?: RepositoryChangeSection;
   /** Precomputed by the caller (revision graphs); absent means the drift section was not computed. */
   drift?: DriftReport;
+  /** The repository's measured coverage report; absent or unavailable means reachability. */
+  coverage?: MeasuredCoverageSummary | null;
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }

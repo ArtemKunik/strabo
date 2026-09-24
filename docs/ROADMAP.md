@@ -44,7 +44,7 @@ record is reported as `unavailable`, never invented.
 | 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Planned (J1-J14: access direction, data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
-| 34 | Code coverage that tells | In progress (U0 done; U1-U7 planned: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
+| 34 | Code coverage that tells | In progress (U0 done; U2 partial: helper, passport, unit cards, report; U1, U3-U7 planned: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2122,6 +2122,14 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   report, and the System-view units read it instead of `computeCoverage`. Each keeps the
   reachability figure as a labelled fallback. "Used but no test reaches" becomes
   "used and under n% measured" when a report exists.
+
+  *Partial.* `fileCoverage` (`src/analysis/file-coverage.ts`) is the one source. The
+  repository passport lists "used and under 50% measured" when a report exists, lowest first
+  with each figure, and counts used files `not in report`; the repository report's
+  untested pain points share that list (`computeUntested`); unit cards and their inspector
+  facts show the unit's measured line coverage with reachability kept as the fallback.
+  **Open:** the tier matrix cells and per-tier stats (L11), and the impact and change
+  passports, still read reachability only.
 - **U3 - Honest reachability.** Test reach records its depth: `direct` (a test imports the file)
   or `transitive, n hops`, with the shortest path. The overlay and the passport split the two, and
   "reached only through n or more hops" is its own bucket. "Tests to run" is ordered direct
