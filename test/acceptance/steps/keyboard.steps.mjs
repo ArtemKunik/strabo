@@ -10,17 +10,23 @@ When('I focus the first dock chip', async function () {
     undefined,
     { timeout: 15_000 },
   );
-  await this.page.evaluate(() => document.querySelector('#float-dock .dock-chip')?.focus());
+  // The first enabled chip on the rail; a pinned panel without its context is disabled.
+  await this.page.evaluate(() =>
+    document.querySelector('#float-dock > .dock-chip:not(:disabled)')?.focus(),
+  );
   await this.page.waitForFunction(() =>
     Boolean(document.activeElement?.classList?.contains('dock-chip')),
   );
 });
 
-Then('the dock chip at index {int} has focus', async function (index) {
+/** The rail's keyboard stops, in order: enabled chips on the rail, then "More". */
+Then('the rail item at index {int} has focus', async function (index) {
   await this.page.waitForFunction(
     (position) => {
-      const chips = [...document.querySelectorAll('#float-dock .dock-chip')];
-      return document.activeElement === chips[position];
+      const items = [...document.querySelectorAll('#float-dock > .dock-chip, #float-dock > .dock-more')].filter(
+        (item) => !item.disabled && !item.hidden,
+      );
+      return document.activeElement === items[position];
     },
     index,
     { timeout: 5_000 },

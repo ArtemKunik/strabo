@@ -10,8 +10,26 @@ function reducedMotion() {
   return document.documentElement?.dataset?.reduceMotion === '1';
 }
 
+/**
+ * Rendered pixels the fitted map keeps clear at the top: the canvas toolbar floats there
+ * (10px inset plus its ~46px height), so a fitted map would otherwise start under it.
+ */
+const TOP_CLEARANCE = 64;
+
 export function fit(cy) {
   cy.fit(undefined, 40);
+  // Nudge the map down past the toolbar when there is room below; otherwise fit again with
+  // the larger padding on every side, which costs a little zoom but hides nothing.
+  const box = cy.elements().renderedBoundingBox();
+  const shift = TOP_CLEARANCE - box.y1;
+  if (!(shift > 0)) {
+    return;
+  }
+  if (box.y2 + shift <= cy.height() - 8) {
+    cy.panBy({ x: 0, y: shift });
+  } else {
+    cy.fit(undefined, TOP_CLEARANCE);
+  }
 }
 
 export function focus(cy, idOrPrefix) {

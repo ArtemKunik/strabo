@@ -135,6 +135,24 @@
             </label>
           </div>
         </div>
+        <div class="tb-menu-wrap">
+          <button
+            id="scope-menu-toggle"
+            type="button"
+            class="tb-view-toggle"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="scope-menu"
+            title="Filter the map to tests, modules, or one top-level directory"
+          >
+            <span class="tb-view-key">Scope</span>
+            <span id="scope-summary" class="tb-view-summary"></span>
+            <span class="tb-view-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="scope-menu" class="tb-menu tb-menu-left tb-scope-menu" role="dialog" aria-label="Scope" hidden>
+            <div id="strip" class="strip" aria-label="Tests and components"></div>
+          </div>
+        </div>
         <label class="control control-search">
           <span class="search-wrap">
             <input
@@ -320,6 +338,7 @@
           </div>
         </div>
         <div id="tooltip" class="node-tooltip" hidden></div>
+        <nav id="float-dock" class="float-dock" role="toolbar" aria-orientation="vertical" aria-label="Panels"></nav>
         <div class="zoom-controls" role="group" aria-label="Zoom">
           <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
           <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
@@ -375,8 +394,6 @@
     </main>
 
     <footer id="bottom-bar" class="bottom-bar">
-      <div id="strip" class="strip" aria-label="Tests and components"></div>
-      <div id="float-dock" class="float-dock" role="toolbar" aria-label="Panels"></div>
       <div class="bottom-meta">
         <span id="statusbar-legend" class="bottom-meta-item"></span>
         <span id="status" class="status" role="status"></span>

@@ -42,7 +42,7 @@ record is reported as `unavailable`, never invented.
 | 29 | Reviewing an agent's change | Landed (E1-E3: module, route, CLI, MCP, UI; acceptance scenarios pending) |
 | 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; acceptance scenarios pending) |
 | 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
-| 32 | Screen-scoped chrome | Partial (C1-C4 done: graph controls only on Graph, one header row, View popover, terminal actions in the tab strip; C5-C8 open) |
+| 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1840,34 +1840,34 @@ than being removed. The target layout is the "Strabo chrome cleanup" design canv
 - **C4 - Terminal actions in the tab strip (done).** New shell (`+`), Run (`▾`), and Split (icon)
   sit on the session tab row; the Sessions button is gone, since the tabs list the sessions and
   Ctrl+K opens the switcher.
-- **C5 - Panel rail (open).** Replace the horizontally scrolling bottom dock (about 17 chips)
-  with a vertical icon rail on the right of the Graph screen: a handful of pinned panels, the
-  rest behind a `⋯` list. Panels that cannot open yet (Narrator, Edge, Overlay, Passport,
-  Member map without a selection) stay listed but greyed, not in the rail. The acceptance steps
-  in `panel-dock.feature` address chips by label and need moving with it.
-- **C6 - Remove duplicate dock entries (open).** Settings, Diagnostics, and Shortcuts are in
-  the dock as well as the header or `?`; Review and History are both screens and dock panels.
-  Keep one entry point each. "Passport" (module) and "Repo passport" read as the same word in a
-  narrow dock; name them "Module" and "Repository" or merge them under the rail.
-- **C7 - Scope dropdown for the tests strip (open).** The directory chips (`tests 145`,
-  `modules 238`, …) become a **Scope** popover in the Graph toolbar beside View, freeing the
-  footer for the status line alone. `review-panels.steps.mjs` clicks `#strip .strip-chip` and
-  moves with it.
-- **C8 - Graph tool bar placement (open).** Focus, Impact, Path, Boundaries, and Clear float
-  centred over the top of the canvas as in the design, with zoom bottom-left; confirm the
-  dock-to-footer behaviour still earns its place once the footer is only a status line.
+- **C5 - Panel rail (done).** The bottom dock is a vertical rail on the Graph screen's right
+  edge (`#float-dock` inside `#graph-screen`, so it hides with the graph). Each chip draws an
+  icon from `data-glyph` above its label. `pinned: n` panels (Legend, Passport, Source, Member
+  map, Overlay, Edge) always have a chip, in pin order; a pinned panel without its context stays
+  in place but dimmed and disabled, with the reason as its tooltip. An open unpinned panel joins
+  the rail while open; the rest sit under **More**. Floating windows open just left of the rail.
+- **C6 - Duplicate entries removed (done).** `dock: false` takes Settings, Diagnostics, and
+  Shortcuts out of the rail (the header icons and `?` open them) and Review and Timeline (their
+  screen tabs, the R and T keys, and the canvas `⋯` menu open them). "Repo passport" is now
+  "Repo", so it no longer reads as a second "Passport".
+- **C7 - Scope popover (done).** The tests / modules / directory chips moved from the footer
+  into a **Scope** popover beside View; the button names the active chip ("modules 238"), or
+  "custom" when the path filter matches none. The root directory's chip is dropped: its filter
+  was the same empty filter as "modules", and the shared render key made it replace that chip.
+- **C8 - Canvas toolbar and zoom placement (done).** The canvas toolbar opens centred along the
+  top of the canvas, zoom sits bottom-left, and fit-to-view nudges the map below the toolbar
+  (fitting again with a larger padding when there is no room below). The footer is only a status
+  line; docking the toolbar there still works, and the footer now stacks above the floating
+  windows, so a tall panel no longer covers the status line or a docked toolbar's grip. That
+  covering was why the "docks and floats back out" scenario failed before this phase.
 
-Acceptance: on the Terminal screen no element with `.tb-graph-only`, `#strip`, or `#float-dock`
-is visible, and the header is a single row at 1280 px; opening the repository or View menu
-closes the other. Steps that used `#browse`, `#refresh`, `#detail`, and `#overlay` open their
-menu first (`repository-map.steps.mjs`, `system.steps.mjs`).
-
-Known state, named rather than hidden: when C1-C4 landed, the acceptance suite ran 89 scenarios
-with 8 failing, and every one of the 8 also fails on a clean checkout of `c92af73`: the toolbar
-undock drag, the inspector's Dependencies list, members "not recorded", the narrator endpoint
-host, module-quality percentiles, a folder scan reporting `1 node · 0 edges`, stepping back
-through reviews, and narrator "off" state leaking between scenarios. They are not caused by this
-phase and are tracked with Phase 21 G1's non-blocking acceptance job.
+Acceptance: on the Terminal screen no element with `.tb-graph-only` or `#float-dock` is
+visible, and the header is a single row at 1280 px; opening one header menu closes the others.
+Steps that used `#browse`, `#refresh`, `#detail`, `#overlay`, and `#strip` chips open their menu
+first (`repository-map.steps.mjs`, `system.steps.mjs`, `review-panels.steps.mjs`).
+`panel-dock.feature` checks the rail sits on the graph's right edge clear of the zoom controls,
+`keyboard-access.feature` walks the rail with ArrowDown, and `panels.test.ts` covers pin order,
+the More list, and `dock: false`. With C5-C8, the local acceptance run is 86 of 86 scenarios.
 
 ## Reading route (landed)
 

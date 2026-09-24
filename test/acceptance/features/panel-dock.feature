@@ -26,6 +26,6 @@ Feature: Panel dock
     And the overlay panel reports unreached modules
 
   @layout
-  Scenario: Dock, strip, and zoom controls do not overlap
-    Then the dock does not overlap the tests strip
-    And the zoom controls sit above the dock
+  Scenario: The panel rail runs down the graph's right edge, clear of the zoom controls
+    Then the panel rail sits on the right edge of the graph
+    And the zoom controls do not overlap the panel rail

@@ -126,41 +126,31 @@ function rectsOverlap(a, b) {
   return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 }
 
-Then('the dock does not overlap the tests strip', async function () {
-  const rects = await this.page.evaluate(() => {
-    const rectOf = (selector) => {
-      const element = document.querySelector(selector);
-      if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-    };
-    return { dock: rectOf('#float-dock'), strip: rectOf('#strip') };
-  });
-  assert.ok(rects.dock, 'the dock should be present');
-  assert.ok(rects.strip, 'the tests strip should be present');
-  assert.equal(
-    rectsOverlap(rects.dock, rects.strip),
-    false,
-    'the dock should stack above the tests strip, not paint over it',
-  );
+/** Viewport rects for the given selectors, or null for any that is missing. */
+async function rectsOf(page, selectors) {
+  return page.evaluate((list) => {
+    const out = {};
+    for (const [name, selector] of Object.entries(list)) {
+      const rect = document.querySelector(selector)?.getBoundingClientRect();
+      out[name] = rect ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } : null;
+    }
+    return out;
+  }, selectors);
+}
+
+Then('the panel rail sits on the right edge of the graph', async function () {
+  const rects = await rectsOf(this.page, { rail: '#float-dock', graph: '#graph-screen' });
+  assert.ok(rects.rail, 'the panel rail should be present');
+  assert.ok(rects.graph, 'the graph screen should be present');
+  assert.ok(Math.abs(rects.rail.right - rects.graph.right) <= 1, 'the rail should end at the graph edge');
+  assert.ok(rects.rail.bottom - rects.rail.top > (rects.graph.bottom - rects.graph.top) / 2, 'the rail should run down the edge');
 });
 
-Then('the zoom controls sit above the dock', async function () {
-  const rects = await this.page.evaluate(() => {
-    const rectOf = (selector) => {
-      const element = document.querySelector(selector);
-      if (!element) return null;
-      const rect = element.getBoundingClientRect();
-      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-    };
-    return { dock: rectOf('#float-dock'), zoom: rectOf('.zoom-controls') };
-  });
-  assert.ok(rects.dock, 'the dock should be present');
+Then('the zoom controls do not overlap the panel rail', async function () {
+  const rects = await rectsOf(this.page, { rail: '#float-dock', zoom: '.zoom-controls' });
+  assert.ok(rects.rail, 'the panel rail should be present');
   assert.ok(rects.zoom, 'the zoom controls should be present');
-  assert.ok(
-    rects.zoom.bottom <= rects.dock.top + 2,
-    'the zoom controls should sit above the dock, not under its chips',
-  );
+  assert.equal(rectsOverlap(rects.rail, rects.zoom), false, 'the zoom controls should sit clear of the rail');
 });
 
 /** Where the canvas toolbar currently lives: docked in the footer or floating on the canvas. */

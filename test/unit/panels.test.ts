@@ -48,6 +48,7 @@ const {
 } = await import('../../ui/strabo-panels.js');
 const { createVirtualList } = await import('../../ui/strabo-virtual.js');
 const { initFloatingToolbar } = await import('../../ui/strabo-float-toolbar.js');
+const { initFloatingWindows } = await import('../../ui/strabo-float.js');
 const { hiddenCouplingOverlay, overlayFor } = await import('../../ui/strabo-overlays.js');
 const { buildHiddenCouplingElements } = await import('../../ui/strabo-graph.js');
 
@@ -1504,4 +1505,41 @@ test('buildHiddenCouplingElements draws only hidden pairs and marks them distinc
   // A pair naming a file outside the graph is skipped rather than inventing a node.
   const missing = buildHiddenCouplingElements({ nodes: [{ id: 'src/config.ts' }] }, coChangeReport);
   assert.equal(missing.length, 0);
+});
+
+test('the panel rail shows pinned panels in pin order, lists the rest under More, and skips undocked ones', () => {
+  (globalThis as { MutationObserver?: unknown }).MutationObserver = window.MutationObserver;
+  const dock = container();
+  const host = container();
+  document.body.append(dock, host);
+  const panel = (id: string) => {
+    const element = document.createElement('section');
+    element.id = id;
+    element.hidden = true;
+    host.append(element);
+    return element;
+  };
+  const windows = initFloatingWindows({
+    dock,
+    panels: [
+      { key: 'risk', element: panel('risk'), title: 'Risk', dockLabel: 'Risk', glyph: '⚠' },
+      { key: 'source', element: panel('source'), title: 'Source', dockLabel: 'Source', pinned: 2 },
+      { key: 'legend', element: panel('legend'), title: 'Legend', dockLabel: 'Legend', pinned: 1 },
+      { key: 'settings', element: panel('settings'), title: 'Settings', dock: false },
+    ],
+  });
+
+  const railLabels = () =>
+    [...dock.querySelectorAll(':scope > .dock-chip')].map((chip) => chip.textContent);
+  const moreLabels = () =>
+    [...dock.querySelectorAll('.dock-more-menu .dock-chip')].map((chip) => chip.textContent);
+
+  assert.deepEqual(railLabels(), ['Legend', 'Source'], 'pinned chips, in pin order');
+  assert.deepEqual(moreLabels(), ['Risk'], 'an unpinned panel waits under More');
+  assert.equal(dock.querySelector('[data-panel="settings"]'), null, 'dock: false has no chip');
+  assert.equal(dock.querySelector('[data-panel="risk"]')?.getAttribute('data-glyph'), '⚠');
+
+  windows.find((controller) => controller.key === 'risk')?.open();
+  assert.deepEqual(railLabels(), ['Legend', 'Source', 'Risk'], 'an open panel joins the rail');
+  assert.equal(dock.querySelector('.dock-more'), null, 'More leaves the rail with nothing in it');
 });

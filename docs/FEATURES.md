@@ -60,9 +60,13 @@ Overlay, Edge evidence, Legend, the Module passport, Diagnostics, Member map, Wo
 Blocks, Settings, and Keyboard shortcuts — opens as a **floating window** rather than a
 docked column, so the map keeps the full width. Drag a window by its header to move it,
 double-click the header (or use `–`) to collapse it to its title bar, and close it with `×`.
-The **dock** along the bottom restores any window, showing a solid chip for an open window,
-an outlined chip for a collapsed one, and a plain chip for a closed one. Position and
-collapsed state are remembered per panel in `localStorage`, so a layout survives a reload.
+The **panel rail** down the Graph screen's right edge restores a window: Legend, Passport,
+Source, Member map, Overlay, and Edge are pinned there (dimmed until they have something to
+show), any other open panel joins them while it is open, and the rest are under **More**. A
+highlighted chip is an open window and a dashed one a collapsed window. Settings, Diagnostics,
+and Keyboard shortcuts open from the header and `?`; Review and Timeline from their screen
+tabs, the R and T keys, and the canvas `⋯` menu. Position and collapsed state are remembered
+per panel in `localStorage`, so a layout survives a reload.
 
 A drill-in view carries an in-panel **← Back** that steps down to the view it replaced:
 the Review panel walks back through the reviews shown this session (working tree, then
@@ -317,7 +321,7 @@ endpoint is evidence without a flow, and a call whose method is not recorded joi
 that host and path declares exactly one method. The `/api/strabo/workspace/services` endpoint
 returns the declared endpoints and the joined flows.
 
-The **Workspace** panel (dock entry, or `window.straboTest.workspace()`) renders the recorded
+The **Workspace** panel (the panel rail's **More** list, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the
 cross-repo flows; the service endpoints and service flows; the contracts; and the drift.
 Opening the panel also rings, on the map, the local files the report records on one side of a

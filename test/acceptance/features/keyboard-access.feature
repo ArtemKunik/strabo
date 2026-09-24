@@ -9,11 +9,11 @@ Feature: Keyboard access
     And I open the Strabo UI
 
   @a11y
-  Scenario: The dock chips move with the arrow keys
+  Scenario: The panel rail moves with the arrow keys
     When I close the open panels
     And I focus the first dock chip
-    And I press the key "ArrowRight"
-    Then the dock chip at index 1 has focus
+    And I press the key "ArrowDown"
+    Then the rail item at index 1 has focus
 
   @a11y
   Scenario: A floating window closes on Escape and returns focus to its chip

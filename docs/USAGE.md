@@ -72,7 +72,7 @@ The narrator variables back the opt-in setup described under
 
 ## Choosing a repository
 
-The toolbar's **Choose folder…** dialog browses the filesystem server-side and scans the
+The **Open folder…** dialog (the `⋯` menu beside the repository picker) browses the filesystem server-side and scans the
 folder you pick. A browser cannot hand the server a filesystem path, so the listing is
 served by `GET /api/strabo/browse` and is strictly bounded by `STRABO_SCAN_CEILING`.
 By default the ceiling is the start root, so the dialog only shows that repository; set
@@ -89,7 +89,7 @@ lists them, `POST` remembers a selection, and `DELETE ?root=` forgets one. Every
 still resolved through the scan ceiling, so remembering a path can never widen what Strabo
 may read.
 
-The **Choose folder** dialog browses the filesystem through `GET /api/strabo/browse`, which
+The **Open folder…** dialog browses the filesystem through `GET /api/strabo/browse`, which
 is bounded by the same ceiling. When the dialog reaches the ceiling its **Up** button is
 disabled and a note names the boundary and the `STRABO_SCAN_CEILING` variable that set it,
 so the limit is visible rather than looking like a broken control. The ceiling can also be

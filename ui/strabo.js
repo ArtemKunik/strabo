@@ -3428,6 +3428,37 @@ function bindHeaderPopover(toggle, popover) {
 
 bindHeaderPopover(document.getElementById('repo-menu-toggle'), document.getElementById('repo-menu'));
 bindHeaderPopover(document.getElementById('view-menu-toggle'), document.getElementById('view-menu'));
+bindHeaderPopover(document.getElementById('scope-menu-toggle'), document.getElementById('scope-menu'));
+
+/**
+ * Scope: the tests / modules / directory chips live in a popover. Picking one filters the
+ * map and closes it; the button names the active chip ("modules 238"), or "custom" when the
+ * path filter matches no chip.
+ */
+const scopeSummary = document.getElementById('scope-summary');
+function updateScopeSummary() {
+  if (!scopeSummary || !elements.strip) return;
+  const active = elements.strip.querySelector('.strip-chip[aria-pressed="true"]');
+  scopeSummary.textContent = active ? active.textContent.trim() : 'custom';
+}
+elements.strip?.addEventListener('click', (event) => {
+  if (!event.target.closest?.('.strip-chip')) return;
+  const menu = document.getElementById('scope-menu');
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
+    document.getElementById('scope-menu-toggle')?.setAttribute('aria-expanded', 'false');
+  }
+});
+if (elements.strip) {
+  new MutationObserver(updateScopeSummary).observe(elements.strip, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['aria-pressed'],
+  });
+  updateScopeSummary();
+}
 
 /**
  * The View button names what the popover is set to, e.g. "Files · All tiers · Cycles".
@@ -4137,6 +4168,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.reviewPanel,
       title: 'Review',
       dockLabel: 'Review',
+      dock: false, // Review is a screen tab, and R toggles this panel
       width: 400,
       // The heading's own text, without the dismiss button's `×`.
       titleFrom: (panel) => panel.querySelector('h3')?.firstChild?.textContent?.trim() ?? '',
@@ -4153,6 +4185,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.riskPanel,
       title: 'Dependency risk',
       dockLabel: 'Risk',
+      glyph: '⚠',
       width: 400,
       onOpen: () => {
         if (elements.riskPanel.hidden) toggleRisk();
@@ -4164,6 +4197,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.timelinePanel,
       title: 'Timeline',
       dockLabel: 'Timeline',
+      dock: false, // History is a screen tab, and T toggles this panel
       width: 380,
       onOpen: () => {
         if (elements.timelinePanel.hidden) {
@@ -4181,6 +4215,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.branchesPanel,
       title: 'Branches',
       dockLabel: 'Branches',
+      glyph: '⑂',
       width: 420,
       onOpen: () => {
         if (elements.branchesPanel.hidden) {
@@ -4198,6 +4233,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.narrationPanel,
       title: 'Narrator',
       dockLabel: 'Narrator',
+      glyph: '✦',
       width: 420,
       canOpen: () => elements.narrationPanel.childElementCount > 0,
       blockedTitle: 'Right-click a file or unit and choose Narrate first',
@@ -4213,6 +4249,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.overlayPanel,
       title: 'Overlay',
       dockLabel: 'Overlay',
+      glyph: '◐',
+      pinned: 5,
       width: 360,
       titleFrom: (panel) => (panel.querySelector('h3')?.textContent ?? '').split(' · ')[0].trim(),
       canOpen: () => state.overlay !== 'none',
@@ -4227,6 +4265,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.edgePanel,
       title: 'Edge',
       dockLabel: 'Edge',
+      glyph: '⟷',
+      pinned: 6,
       width: 360,
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       canOpen: () => Boolean(selectedEdgeId),
@@ -4241,6 +4281,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.sourcePanel,
       title: 'Source',
       dockLabel: 'Source',
+      glyph: '‹›',
+      pinned: 3,
       width: 720,
       height: 640,
       canOpen: () => Boolean(sourceView),
@@ -4256,6 +4298,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.legend,
       title: 'Legend',
       dockLabel: 'Legend',
+      glyph: '≡',
+      pinned: 1,
       width: 340,
     },
     {
@@ -4263,6 +4307,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.inspector,
       title: 'Module passport',
       dockLabel: 'Passport',
+      glyph: 'ⓘ',
+      pinned: 2,
       width: 384,
       canOpen: () => Boolean(selected),
       blockedTitle: 'Select a module in the graph to open Passport',
@@ -4278,6 +4324,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.diagnostics,
       title: 'Diagnostics',
       dockLabel: 'Diagnostics',
+      dock: false, // the header's Diagnostics icon opens it
       width: 420,
       titleFrom: (panel) => panel.querySelector('h3')?.textContent?.trim() ?? '',
       onOpen: () => {
@@ -4294,6 +4341,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.settingsPanel,
       title: 'Settings',
       dockLabel: 'Settings',
+      dock: false, // the header's Settings icon opens it
       width: 420,
       onOpen: () => {
         if (elements.settingsPanel.hidden) {
@@ -4313,6 +4361,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.shortcuts,
       title: 'Keyboard shortcuts',
       dockLabel: 'Shortcuts',
+      dock: false, // ? opens it
       width: 320,
       onOpen: () => renderShortcuts(elements.shortcuts),
       onClose: () => {
@@ -4324,6 +4373,8 @@ const floatingWindows = initFloatingWindows({
       element: elements.memberView,
       title: 'Member map',
       dockLabel: 'Member map',
+      glyph: '▦',
+      pinned: 4,
       width: 900,
       height: 700,
       center: true,
@@ -4340,6 +4391,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.workspacePanel,
       title: 'Workspace',
       dockLabel: 'Workspace',
+      glyph: '⧉',
       width: 460,
       onOpen: () => {
         showWorkspace().catch(() => {});
@@ -4350,7 +4402,8 @@ const floatingWindows = initFloatingWindows({
       key: 'passport',
       element: elements.passportPanel,
       title: 'Repository passport',
-      dockLabel: 'Repo passport',
+      dockLabel: 'Repo',
+      glyph: '⌂',
       width: 460,
       onOpen: () => {
         showPassport().catch(() => {});
@@ -4362,6 +4415,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.routePanel,
       title: 'Reading route',
       dockLabel: 'Route',
+      glyph: '➜',
       width: 440,
       onOpen: () => {
         showRoute().catch(() => {});
@@ -4373,6 +4427,7 @@ const floatingWindows = initFloatingWindows({
       element: elements.blocksPanel,
       title: 'Blocks',
       dockLabel: 'Blocks',
+      glyph: '▣',
       width: 560,
       height: 620,
       onOpen: () => showBlocks(),

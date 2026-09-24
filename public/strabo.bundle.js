@@ -3928,8 +3928,9 @@ var DEFAULT_WIDTH = 384;
 var HEADER_HEIGHT = 34;
 var MIN_WIDTH = 240;
 var MIN_HEIGHT = 160;
-var RAIL_RIGHT = GAP;
-var RAIL_TOP = 96;
+var DOCK_RAIL_WIDTH = 64;
+var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
+var RAIL_TOP = 64;
 function readStore() {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
@@ -3979,20 +3980,70 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   };
   const syncDockOverflow = () => {
     if (!dock) return;
-    const max = dock.scrollWidth - dock.clientWidth;
-    dock.classList.toggle("is-overflow-left", dock.scrollLeft > 1);
-    dock.classList.toggle("is-overflow-right", max > 1 && dock.scrollLeft < max - 1);
+    const max = dock.scrollHeight - dock.clientHeight;
+    dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
+    dock.classList.toggle("is-overflow-bottom", max > 1 && dock.scrollTop < max - 1);
   };
+  let moreOpen = false;
+  const moreToggle = document.createElement("button");
+  moreToggle.type = "button";
+  moreToggle.className = "dock-more";
+  moreToggle.dataset.glyph = "\u22EF";
+  moreToggle.textContent = "More";
+  moreToggle.title = "More panels";
+  moreToggle.setAttribute("aria-haspopup", "menu");
+  const moreMenu = document.createElement("div");
+  moreMenu.className = "dock-more-menu";
+  moreMenu.setAttribute("role", "menu");
+  moreMenu.setAttribute("aria-label", "More panels");
+  const setMoreOpen = (open) => {
+    moreOpen = open;
+    moreMenu.hidden = !open;
+    moreToggle.setAttribute("aria-expanded", String(open));
+  };
+  moreToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMoreOpen(!moreOpen);
+    if (moreOpen) moreMenu.querySelector(".dock-chip:not(:disabled)")?.focus();
+  });
+  moreMenu.addEventListener("click", (event) => {
+    if (event.target.closest?.(".dock-chip")) setMoreOpen(false);
+  });
+  moreMenu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setMoreOpen(false);
+      moreToggle.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
+  });
+  setMoreOpen(false);
   const renderDock = () => {
     if (!dock) return;
-    const chips = controllers.map((controller) => controller.dockButton());
-    dock.replaceChildren(...chips);
-    const enabled = chips.filter((chip) => !chip.disabled);
+    const docked = controllers.filter((controller) => controller.docked);
+    const inRail = (controller) => controller.pinned || controller.isOpen();
+    const railOrder = (controller) => controller.pinned ? controller.pinOrder : Infinity;
+    const railChips = docked.filter(inRail).sort((a, b2) => railOrder(a) - railOrder(b2)).map((controller) => controller.dockButton());
+    const moreChips = docked.filter((controller) => !inRail(controller)).map((controller) => {
+      const chip = controller.dockButton();
+      chip.setAttribute("role", "menuitem");
+      return chip;
+    });
+    moreMenu.replaceChildren(...moreChips);
+    moreToggle.hidden = moreChips.length === 0;
+    const tail = moreChips.length ? [moreToggle, moreMenu] : [];
+    dock.replaceChildren(...railChips, ...tail);
+    const enabled = railItems();
     enabled.forEach((chip, index) => {
       chip.tabIndex = index === 0 ? 0 : -1;
     });
     syncDockOverflow();
   };
+  const railItems = () => [...dock?.children ?? []].filter(
+    (item) => (item.classList.contains("dock-chip") || item === moreToggle) && !item.disabled && !item.hidden
+  );
   const flashChip = (key) => {
     const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
     if (!chip) return;
@@ -4139,6 +4190,10 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     const controller = {
       key: config.key,
+      docked: config.dock !== false,
+      pinned: Boolean(config.pinned),
+      // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
+      pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
       window: win,
       element: element2,
       isOpen: () => !win.hidden,
@@ -4169,7 +4224,9 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         renderDock();
         persist();
         if (hadFocus) {
-          dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`)?.focus();
+          const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
+          if (chip && !moreMenu.contains(chip)) chip.focus();
+          else moreToggle.focus();
         }
       },
       toggle() {
@@ -4208,6 +4265,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
         button3.classList.toggle("collapsed", open && isCollapsed());
         button3.setAttribute("aria-pressed", String(open));
         button3.textContent = config.dockLabel ?? config.title ?? config.key;
+        button3.dataset.glyph = config.glyph ?? "\u2022";
         if (!canOpen && !open) {
           button3.disabled = true;
           const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
@@ -4306,7 +4364,16 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     sync2();
   }
   dock?.addEventListener("keydown", (event) => {
-    const chips = [...dock.querySelectorAll(".dock-chip")].filter((chip) => !chip.disabled);
+    if (moreMenu.contains(event.target)) {
+      const items = [...moreMenu.querySelectorAll(".dock-chip")].filter((chip) => !chip.disabled);
+      const target = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
+      if (target !== null) {
+        event.preventDefault();
+        items[target].focus();
+      }
+      return;
+    }
+    const chips = railItems();
     const next = rovingIndex(chips.indexOf(document.activeElement), chips.length, event.key);
     if (next === null) {
       return;
@@ -4318,17 +4385,6 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     chips[next].focus();
   });
   dock?.addEventListener("scroll", syncDockOverflow, { passive: true });
-  dock?.addEventListener(
-    "wheel",
-    (event) => {
-      if (!dock || dock.scrollWidth <= dock.clientWidth) return;
-      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      if (!delta) return;
-      dock.scrollLeft += delta;
-      event.preventDefault();
-    },
-    { passive: false }
-  );
   if (dock && typeof ResizeObserver !== "undefined") {
     new ResizeObserver(syncDockOverflow).observe(dock);
   }
@@ -4409,10 +4465,15 @@ function initFloatingToolbar(element2, options = {}) {
     }
     if (width) element2.style.width = `${width}px`;
   };
-  const containerSize = () => ({
-    boundWidth: floatParent.clientWidth || floatParent.getBoundingClientRect().width,
-    boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height
-  });
+  const containerSize = () => {
+    const rail = floatParent.querySelector?.(":scope > .float-dock");
+    const railWidth = rail?.offsetWidth ?? 0;
+    const width2 = floatParent.clientWidth || floatParent.getBoundingClientRect().width;
+    return {
+      boundWidth: Math.max(0, width2 - railWidth),
+      boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height
+    };
+  };
   const place = (left, top) => {
     const rect = element2.getBoundingClientRect();
     const { boundWidth, boundHeight } = containerSize();
@@ -4426,6 +4487,7 @@ function initFloatingToolbar(element2, options = {}) {
     element2.style.top = `${clamped.top}px`;
     element2.style.bottom = "auto";
     element2.style.right = "auto";
+    element2.style.transform = "none";
     updateMenuDirection();
   };
   const updateMenuDirection = () => {
@@ -4493,6 +4555,10 @@ function initFloatingToolbar(element2, options = {}) {
       if (isDocked()) {
         if (moveEvent.clientY >= dock.getBoundingClientRect().top) return;
         undockElement();
+        try {
+          grip.setPointerCapture(moveEvent.pointerId);
+        } catch {
+        }
       }
       const parentRect = floatParent.getBoundingClientRect();
       place(
@@ -9680,7 +9746,7 @@ function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
       null,
       chip(`tests ${counts.tests}`, ".test"),
       chip(`modules ${counts.modules}`, ""),
-      ...counts.entries.slice(0, 12).map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, "strip-chip strip-dir"))
+      ...counts.entries.filter((entry) => entry.filter !== "").slice(0, 12).map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, "strip-chip strip-dir"))
     )
   );
 }
@@ -11771,8 +11837,19 @@ function renderSettings(container, handlers = {}) {
 function reducedMotion() {
   return document.documentElement?.dataset?.reduceMotion === "1";
 }
+var TOP_CLEARANCE = 64;
 function fit(cy) {
   cy.fit(void 0, 40);
+  const box = cy.elements().renderedBoundingBox();
+  const shift = TOP_CLEARANCE - box.y1;
+  if (!(shift > 0)) {
+    return;
+  }
+  if (box.y2 + shift <= cy.height() - 8) {
+    cy.panBy({ x: 0, y: shift });
+  } else {
+    cy.fit(void 0, TOP_CLEARANCE);
+  }
 }
 function focus(cy, idOrPrefix) {
   const node = cy.getElementById(idOrPrefix);
@@ -25464,6 +25541,31 @@ function bindHeaderPopover(toggle, popover) {
 }
 bindHeaderPopover(document.getElementById("repo-menu-toggle"), document.getElementById("repo-menu"));
 bindHeaderPopover(document.getElementById("view-menu-toggle"), document.getElementById("view-menu"));
+bindHeaderPopover(document.getElementById("scope-menu-toggle"), document.getElementById("scope-menu"));
+var scopeSummary = document.getElementById("scope-summary");
+function updateScopeSummary() {
+  if (!scopeSummary || !elements.strip) return;
+  const active = elements.strip.querySelector('.strip-chip[aria-pressed="true"]');
+  scopeSummary.textContent = active ? active.textContent.trim() : "custom";
+}
+elements.strip?.addEventListener("click", (event) => {
+  if (!event.target.closest?.(".strip-chip")) return;
+  const menu = document.getElementById("scope-menu");
+  if (menu && !menu.hidden) {
+    menu.hidden = true;
+    document.getElementById("scope-menu-toggle")?.setAttribute("aria-expanded", "false");
+  }
+});
+if (elements.strip) {
+  new MutationObserver(updateScopeSummary).observe(elements.strip, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ["aria-pressed"]
+  });
+  updateScopeSummary();
+}
 var viewSummary = document.getElementById("view-summary");
 function updateViewSummary() {
   if (!viewSummary) return;
@@ -26002,6 +26104,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.reviewPanel,
       title: "Review",
       dockLabel: "Review",
+      dock: false,
+      // Review is a screen tab, and R toggles this panel
       width: 400,
       // The heading's own text, without the dismiss button's `×`.
       titleFrom: (panel) => panel.querySelector("h3")?.firstChild?.textContent?.trim() ?? "",
@@ -26018,6 +26122,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.riskPanel,
       title: "Dependency risk",
       dockLabel: "Risk",
+      glyph: "\u26A0",
       width: 400,
       onOpen: () => {
         if (elements.riskPanel.hidden) toggleRisk();
@@ -26029,6 +26134,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.timelinePanel,
       title: "Timeline",
       dockLabel: "Timeline",
+      dock: false,
+      // History is a screen tab, and T toggles this panel
       width: 380,
       onOpen: () => {
         if (elements.timelinePanel.hidden) {
@@ -26046,6 +26153,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.branchesPanel,
       title: "Branches",
       dockLabel: "Branches",
+      glyph: "\u2442",
       width: 420,
       onOpen: () => {
         if (elements.branchesPanel.hidden) {
@@ -26063,6 +26171,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.narrationPanel,
       title: "Narrator",
       dockLabel: "Narrator",
+      glyph: "\u2726",
       width: 420,
       canOpen: () => elements.narrationPanel.childElementCount > 0,
       blockedTitle: "Right-click a file or unit and choose Narrate first",
@@ -26078,6 +26187,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.overlayPanel,
       title: "Overlay",
       dockLabel: "Overlay",
+      glyph: "\u25D0",
+      pinned: 5,
       width: 360,
       titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
       canOpen: () => state.overlay !== "none",
@@ -26092,6 +26203,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.edgePanel,
       title: "Edge",
       dockLabel: "Edge",
+      glyph: "\u27F7",
+      pinned: 6,
       width: 360,
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
       canOpen: () => Boolean(selectedEdgeId),
@@ -26106,6 +26219,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.sourcePanel,
       title: "Source",
       dockLabel: "Source",
+      glyph: "\u2039\u203A",
+      pinned: 3,
       width: 720,
       height: 640,
       canOpen: () => Boolean(sourceView),
@@ -26121,6 +26236,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.legend,
       title: "Legend",
       dockLabel: "Legend",
+      glyph: "\u2261",
+      pinned: 1,
       width: 340
     },
     {
@@ -26128,6 +26245,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.inspector,
       title: "Module passport",
       dockLabel: "Passport",
+      glyph: "\u24D8",
+      pinned: 2,
       width: 384,
       canOpen: () => Boolean(selected),
       blockedTitle: "Select a module in the graph to open Passport",
@@ -26143,6 +26262,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.diagnostics,
       title: "Diagnostics",
       dockLabel: "Diagnostics",
+      dock: false,
+      // the header's Diagnostics icon opens it
       width: 420,
       titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
       onOpen: () => {
@@ -26159,6 +26280,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.settingsPanel,
       title: "Settings",
       dockLabel: "Settings",
+      dock: false,
+      // the header's Settings icon opens it
       width: 420,
       onOpen: () => {
         if (elements.settingsPanel.hidden) {
@@ -26178,6 +26301,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.shortcuts,
       title: "Keyboard shortcuts",
       dockLabel: "Shortcuts",
+      dock: false,
+      // ? opens it
       width: 320,
       onOpen: () => renderShortcuts(elements.shortcuts),
       onClose: () => {
@@ -26189,6 +26314,8 @@ var floatingWindows = initFloatingWindows({
       element: elements.memberView,
       title: "Member map",
       dockLabel: "Member map",
+      glyph: "\u25A6",
+      pinned: 4,
       width: 900,
       height: 700,
       center: true,
@@ -26205,6 +26332,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.workspacePanel,
       title: "Workspace",
       dockLabel: "Workspace",
+      glyph: "\u29C9",
       width: 460,
       onOpen: () => {
         showWorkspace().catch(() => {
@@ -26216,7 +26344,8 @@ var floatingWindows = initFloatingWindows({
       key: "passport",
       element: elements.passportPanel,
       title: "Repository passport",
-      dockLabel: "Repo passport",
+      dockLabel: "Repo",
+      glyph: "\u2302",
       width: 460,
       onOpen: () => {
         showPassport().catch(() => {
@@ -26229,6 +26358,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.routePanel,
       title: "Reading route",
       dockLabel: "Route",
+      glyph: "\u279C",
       width: 440,
       onOpen: () => {
         showRoute().catch(() => {
@@ -26241,6 +26371,7 @@ var floatingWindows = initFloatingWindows({
       element: elements.blocksPanel,
       title: "Blocks",
       dockLabel: "Blocks",
+      glyph: "\u25A3",
       width: 560,
       height: 620,
       onOpen: () => showBlocks(),

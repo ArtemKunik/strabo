@@ -103,10 +103,16 @@ export function initFloatingToolbar(element, options = {}) {
     if (width) element.style.width = `${width}px`;
   };
 
-  const containerSize = () => ({
-    boundWidth: floatParent.clientWidth || floatParent.getBoundingClientRect().width,
-    boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height,
-  });
+  const containerSize = () => {
+    // The panel rail owns the container's right edge; the bar stays clear of it.
+    const rail = floatParent.querySelector?.(':scope > .float-dock');
+    const railWidth = rail?.offsetWidth ?? 0;
+    const width = floatParent.clientWidth || floatParent.getBoundingClientRect().width;
+    return {
+      boundWidth: Math.max(0, width - railWidth),
+      boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height,
+    };
+  };
 
   const place = (left, top) => {
     const rect = element.getBoundingClientRect();
@@ -119,9 +125,11 @@ export function initFloatingToolbar(element, options = {}) {
     });
     element.style.left = `${clamped.left}px`;
     element.style.top = `${clamped.top}px`;
-    // A placed bar uses left/top; clearing bottom/right keeps the two from fighting.
+    // A placed bar uses left/top; clearing bottom/right keeps the two from fighting, and the
+    // centring transform of the default top-centre spot would shift it by half its width.
     element.style.bottom = 'auto';
     element.style.right = 'auto';
+    element.style.transform = 'none';
     updateMenuDirection();
   };
 
@@ -204,6 +212,14 @@ export function initFloatingToolbar(element, options = {}) {
       if (isDocked()) {
         if (moveEvent.clientY >= dock.getBoundingClientRect().top) return;
         undockElement();
+        // Moving the bar back into the canvas re-parents the grip, which drops its pointer
+        // capture; without taking it again the rest of the drag (and its pointerup) is lost
+        // and the bar stays stranded where it was.
+        try {
+          grip.setPointerCapture(moveEvent.pointerId);
+        } catch {
+          // The pointer is already gone; the next pointerdown starts a fresh drag.
+        }
       }
       const parentRect = floatParent.getBoundingClientRect();
       place(

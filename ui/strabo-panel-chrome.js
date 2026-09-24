@@ -186,7 +186,10 @@ export function renderTestsStrip(container, counts, onFilter, activeFilter = '')
       null,
       chip(`tests ${counts.tests}`, '.test'),
       chip(`modules ${counts.modules}`, ''),
+      // The root directory's filter is '' too, which is the whole map: "modules" already
+      // offers that, and a second chip with the same key would replace it on re-render.
       ...counts.entries
+        .filter((entry) => entry.filter !== '')
         .slice(0, 12)
         .map((entry) => chip(`${entry.label} ${entry.count}`, entry.filter, 'strip-chip strip-dir')),
     ),

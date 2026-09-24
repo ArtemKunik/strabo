@@ -727,9 +727,10 @@ body {
 
 /* ------------------------------------------------------------------ Top bar */
 .toolbar {
-  /* Above the floating-panel layer (z-index 50), so the header's menus open over panels. */
+  /* Above the floating-panel layer (50), the panel rail (55), and the canvas toolbar (60),
+     so the header's menus open over all of them. */
   position: relative;
-  z-index: 60;
+  z-index: 70;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -763,18 +764,10 @@ body {
   border-right: none;
 }
 
-/* Graph controls (View, filter, drill-down, tests strip, panel dock) act only on the map, so
-   the other screens do not show them. */
-body.screen-off-graph .tb-graph-only,
-body.screen-off-graph #strip,
-body.screen-off-graph #float-dock {
+/* Graph controls (View, Scope, filter, drill-down) act only on the map, so the other screens
+   do not show them. The panel rail lives inside the graph screen and hides with it. */
+body.screen-off-graph .tb-graph-only {
   display: none !important;
-}
-
-body.screen-off-graph .bottom-bar {
-  min-height: 0;
-  padding-block: 3px;
-  justify-content: flex-end;
 }
 
 .tb-menu-wrap {
@@ -1563,9 +1556,10 @@ body.screen-off-graph .float-window {
 
 .graph-toolbar {
   position: absolute;
-  bottom: 10px;
-  left: 12px;
-  transform: none;
+  /* Opens centred along the top of the canvas; dragging places it by left/top. */
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
   /* Above the floating windows (z-index 50): the canvas actions, including the System
      back-to-units control, must stay clickable even when a panel is dragged over them. */
   z-index: 60;
@@ -1667,8 +1661,10 @@ body.screen-off-graph .float-window {
    panel dock instead of floating over the canvas. */
 .graph-toolbar.is-docked {
   position: relative;
+  top: auto;
   bottom: auto;
   left: auto;
+  transform: none;
   /* Keep its one-row width: the tests strip, panel dock, and status text give way first. */
   flex: 0 0 auto;
   max-width: min(560px, 62vw);
@@ -1819,10 +1815,10 @@ body.screen-off-graph .float-window {
 
 .zoom-controls {
   position: absolute;
-  right: 12px;
-  /* Above the consolidated bottom bar (strip + dock + status) so the buttons are never
-     under the dock chips. */
-  bottom: 64px;
+  /* Bottom-left of the canvas: the panel rail owns the right edge, and the canvas toolbar
+     floats at the top. */
+  left: 12px;
+  bottom: 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1929,25 +1925,32 @@ body.screen-off-graph .float-window {
   }
 }
 
-/* Consolidated bottom bar: one row holding the tests strip, the panel dock, and meta. */
+/* The footer is a thin status line (status, index badge); a docked canvas toolbar joins it.
+   It stacks above the floating-window layer (50): a tall panel reaching the bottom edge
+   would otherwise cover the status line and swallow clicks on a docked toolbar's grip. */
 .bottom-bar {
+  position: relative;
+  z-index: 56;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  min-height: 48px;
-  padding: 6px 14px;
+  min-height: 0;
+  padding: 3px 14px;
   border-top: 1px solid var(--line);
   background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
 }
 
+/* The tests / modules / directory chips, inside the header's Scope popover. */
 .strip {
-  flex: 1 1 auto;
-  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  padding: 4px 2px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  max-width: 360px;
+}
+
+.tb-scope-menu {
+  padding: 10px;
 }
 
 .strip-chip {
@@ -2947,83 +2950,104 @@ body.screen-off-graph .float-window {
   font-style: italic;
 }
 
-/* --------------------------------------------------------- Panel dock */
+/* --------------------------------------------------------- Panel rail */
 /*
- * The dock shares the bottom strip's row, sitting to its right, so it never covers the
- * tests/component chips that occupy the left of that line.
+ * The dock is a vertical rail on the graph screen's right edge: pinned panels, any open
+ * panel, then "More" for the rest. Each chip draws its icon from `data-glyph` above its
+ * label, so the chip's text is still just the label. Floating windows open to its left.
  */
-/* Panel dock: lives in the bottom bar instead of floating above the canvas. */
 .float-dock {
-  flex: 0 1 auto;
+  --rail-width: 64px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  width: var(--rail-width);
+  box-sizing: border-box;
   display: flex;
-  /* One thin row: never wrap onto a second line. Overflow scrolls sideways so the
-     consolidated bottom bar keeps a constant single-row height. */
-  flex-wrap: nowrap;
-  justify-content: flex-start;
-  gap: 4px;
-  min-width: 0;
-  /* Fill the row's spare width before the rail has to scroll, and never exceed it. The
-     tests strip to the left shrinks first, so on a wide window every chip stays visible;
-     only a genuinely narrow window scrolls instead of wrapping to a second row. */
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  /* A chrome scrollbar under the chips read as broken, so hide it. The rail still scrolls
-     by wheel, trackpad, touch, and keyboard, with the edge fades below showing more. */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  overscroll-behavior-x: contain;
-  padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--veiled-surface);
-  backdrop-filter: blur(10px) saturate(1.3);
-  box-shadow: var(--shadow-1);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 4px;
+  border-left: 1px solid var(--line);
+  background: var(--bg-2);
 }
 
-.float-dock::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+.graph-wrap > .graph {
+  right: 64px;
 }
 
-.float-dock:empty {
-  display: none;
-}
-
-/*
- * Edge fades, toggled by strabo-float.js only while there are chips past that edge. The
- * native scrollbar is hidden, so without a fade the clipped chips just look cut off.
- */
-.float-dock.is-overflow-left {
-  -webkit-mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px);
-  mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px);
-}
-
-.float-dock.is-overflow-right {
-  -webkit-mask-image: linear-gradient(to left, transparent, var(--bg-1) 20px);
-  mask-image: linear-gradient(to left, transparent, var(--bg-1) 20px);
-}
-
-.float-dock.is-overflow-left.is-overflow-right {
-  -webkit-mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px, var(--bg-1) calc(100% - 20px), transparent);
-  mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px, var(--bg-1) calc(100% - 20px), transparent);
-}
-
-.dock-chip {
+.dock-chip,
+.dock-more {
   flex: 0 0 auto;
-  padding: 4px 11px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: 8px;
   background: none;
   color: var(--ink-3);
-  font-size: var(--text-sm);
-  white-space: nowrap;
+  font-size: 10.5px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: background 0.14s, color 0.14s, border-color 0.14s;
 }
 
-.dock-chip:hover {
+.dock-chip::before,
+.dock-more::before {
+  content: attr(data-glyph);
+  font-size: 17px;
+  line-height: 1;
+}
+
+.dock-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.dock-chip:hover:not(:disabled),
+.dock-more:hover {
   background: var(--bg-3);
   color: var(--ink-1);
+}
+
+.dock-more {
+  margin-top: auto;
+}
+
+/* "More": the unpinned panels, opening to the left of the rail. */
+.dock-more-menu {
+  position: absolute;
+  right: calc(100% + 6px);
+  bottom: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px;
+  width: 260px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-2);
+}
+
+.dock-more-menu .dock-chip {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.dock-more-menu .dock-chip::before {
+  width: 18px;
+  font-size: 14px;
 }
 
 .dock-chip.active {

@@ -17,9 +17,13 @@ const HEADER_HEIGHT = 34;
 const MIN_WIDTH = 240;
 const MIN_HEIGHT = 160;
 
-/** Right-hand rail defaults: windows open here unless a config positions them. */
-const RAIL_RIGHT = GAP;
-const RAIL_TOP = 96;
+/**
+ * Right-hand rail defaults: windows open here unless a config positions them. The panel
+ * rail (the dock) is a column on the graph's right edge, so windows open just left of it.
+ */
+export const DOCK_RAIL_WIDTH = 64;
+const RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
+const RAIL_TOP = 64;
 
 function readStore() {
   try {
@@ -81,8 +85,11 @@ export function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = 
  * Create one floating window per config and wire a dock chip to each.
  *
  * A config names the panel `element`, a `title`, and optional `position`, `width`,
- * `height`, `center`, `dockLabel`, `titleFrom`, `canOpen`, `blockedTitle`, `onOpen`,
- * `onClose`, and `onBlocked`.
+ * `height`, `center`, `dockLabel`, `glyph`, `pinned`, `dock`, `titleFrom`, `canOpen`,
+ * `blockedTitle`, `onOpen`, `onClose`, and `onBlocked`.
+ * The dock is a vertical rail: `pinned` panels (a number orders them) always have a chip there, an open unpinned
+ * panel joins them while it is open, and the rest sit in the rail's "More" list. `dock:
+ * false` gives a panel no chip at all, for panels the header or a screen already opens.
  * `onClose` should run the app's own teardown so the panel state stays consistent; when
  * omitted the element is simply hidden. When `canOpen()` is false the dock chip is
  * disabled with `blockedTitle` as its tooltip, and `onBlocked` runs if open is
@@ -108,23 +115,83 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
    */
   const syncDockOverflow = () => {
     if (!dock) return;
-    const max = dock.scrollWidth - dock.clientWidth;
-    dock.classList.toggle('is-overflow-left', dock.scrollLeft > 1);
-    dock.classList.toggle('is-overflow-right', max > 1 && dock.scrollLeft < max - 1);
+    const max = dock.scrollHeight - dock.clientHeight;
+    dock.classList.toggle('is-overflow-top', dock.scrollTop > 1);
+    dock.classList.toggle('is-overflow-bottom', max > 1 && dock.scrollTop < max - 1);
   };
+
+  /** The "More" list: every docked panel without a rail chip right now. */
+  let moreOpen = false;
+  const moreToggle = document.createElement('button');
+  moreToggle.type = 'button';
+  moreToggle.className = 'dock-more';
+  moreToggle.dataset.glyph = '⋯';
+  moreToggle.textContent = 'More';
+  moreToggle.title = 'More panels';
+  moreToggle.setAttribute('aria-haspopup', 'menu');
+  const moreMenu = document.createElement('div');
+  moreMenu.className = 'dock-more-menu';
+  moreMenu.setAttribute('role', 'menu');
+  moreMenu.setAttribute('aria-label', 'More panels');
+
+  const setMoreOpen = (open) => {
+    moreOpen = open;
+    moreMenu.hidden = !open;
+    moreToggle.setAttribute('aria-expanded', String(open));
+  };
+  moreToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setMoreOpen(!moreOpen);
+    if (moreOpen) moreMenu.querySelector('.dock-chip:not(:disabled)')?.focus();
+  });
+  moreMenu.addEventListener('click', (event) => {
+    if (event.target.closest?.('.dock-chip')) setMoreOpen(false);
+  });
+  moreMenu.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      setMoreOpen(false);
+      moreToggle.focus();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
+  });
+  setMoreOpen(false);
 
   const renderDock = () => {
     if (!dock) return;
-    const chips = controllers.map((controller) => controller.dockButton());
-    dock.replaceChildren(...chips);
-    // A toolbar is one tab stop: the first enabled chip is tabbable and the arrow keys
-    // move focus between the rest.
-    const enabled = chips.filter((chip) => !chip.disabled);
+    const docked = controllers.filter((controller) => controller.docked);
+    const inRail = (controller) => controller.pinned || controller.isOpen();
+    // Pinned chips keep their pin order; an open unpinned panel follows them.
+    const railOrder = (controller) => (controller.pinned ? controller.pinOrder : Infinity);
+    const railChips = docked
+      .filter(inRail)
+      .sort((a, b) => railOrder(a) - railOrder(b))
+      .map((controller) => controller.dockButton());
+    const moreChips = docked.filter((controller) => !inRail(controller)).map((controller) => {
+      const chip = controller.dockButton();
+      chip.setAttribute('role', 'menuitem');
+      return chip;
+    });
+    moreMenu.replaceChildren(...moreChips);
+    moreToggle.hidden = moreChips.length === 0;
+    const tail = moreChips.length ? [moreToggle, moreMenu] : [];
+    dock.replaceChildren(...railChips, ...tail);
+    // A toolbar is one tab stop: the first enabled rail chip is tabbable and the arrow keys
+    // move focus between the rest, ending on "More".
+    const enabled = railItems();
     enabled.forEach((chip, index) => {
       chip.tabIndex = index === 0 ? 0 : -1;
     });
     syncDockOverflow();
   };
+
+  /** The rail's own keyboard stops: enabled chips on the rail, then the "More" toggle. */
+  const railItems = () =>
+    [...(dock?.children ?? [])].filter(
+      (item) => (item.classList.contains('dock-chip') || item === moreToggle) && !item.disabled && !item.hidden,
+    );
 
   /** Draw attention to the chip that just opened its window, so the panel is found. */
   const flashChip = (key) => {
@@ -325,6 +392,10 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
 
     const controller = {
       key: config.key,
+      docked: config.dock !== false,
+      pinned: Boolean(config.pinned),
+      // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
+      pinOrder: typeof config.pinned === 'number' ? config.pinned : 1000,
       window: win,
       element,
       isOpen: () => !win.hidden,
@@ -357,7 +428,11 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         persist();
         // Return focus to the chip that opened it, so closing does not drop the keyboard.
         if (hadFocus) {
-          dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`)?.focus();
+          // An unpinned panel's chip leaves the rail on close, into the hidden "More" list;
+          // focus lands on "More" instead, which reopens it.
+          const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
+          if (chip && !moreMenu.contains(chip)) chip.focus();
+          else moreToggle.focus();
         }
       },
       toggle() {
@@ -398,6 +473,8 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
         button.classList.toggle('collapsed', open && isCollapsed());
         button.setAttribute('aria-pressed', String(open));
         button.textContent = config.dockLabel ?? config.title ?? config.key;
+        // The icon is drawn from the attribute, so the chip's text stays its plain label.
+        button.dataset.glyph = config.glyph ?? '•';
         if (!canOpen && !open) {
           button.disabled = true;
           const reason =
@@ -516,7 +593,16 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
   // Arrow keys move focus between the dock chips (roving tabindex), Home/End jump to the
   // ends. The dock is a `role="toolbar"`, so this is the expected keyboard contract.
   dock?.addEventListener('keydown', (event) => {
-    const chips = [...dock.querySelectorAll('.dock-chip')].filter((chip) => !chip.disabled);
+    if (moreMenu.contains(event.target)) {
+      const items = [...moreMenu.querySelectorAll('.dock-chip')].filter((chip) => !chip.disabled);
+      const target = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
+      if (target !== null) {
+        event.preventDefault();
+        items[target].focus();
+      }
+      return;
+    }
+    const chips = railItems();
     const next = rovingIndex(chips.indexOf(document.activeElement), chips.length, event.key);
     if (next === null) {
       return;
@@ -528,21 +614,9 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     chips[next].focus();
   });
 
-  // The hidden scrollbar is still reachable: a wheel or trackpad swipe over the rail
-  // scrolls it sideways and the edge fades follow. Observe size changes so the fades
-  // appear the moment the window is narrowed.
+  // The rail scrolls vertically on a short window; the edge fades follow. Observe size
+  // changes so the fades appear the moment the window is shortened.
   dock?.addEventListener('scroll', syncDockOverflow, { passive: true });
-  dock?.addEventListener(
-    'wheel',
-    (event) => {
-      if (!dock || dock.scrollWidth <= dock.clientWidth) return;
-      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      if (!delta) return;
-      dock.scrollLeft += delta;
-      event.preventDefault();
-    },
-    { passive: false },
-  );
   if (dock && typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(syncDockOverflow).observe(dock);
   }

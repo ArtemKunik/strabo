@@ -26,8 +26,12 @@ async function islandDragPoint(page, directory) {
       obstacles.some((o) => x >= o.x1 && x <= o.x2 && y >= o.y1 && y <= o.y2);
     for (let y = box.y + 6; y <= box.y + box.height - 6; y += 5) {
       for (let x = box.x + 6; x <= box.x + box.width - 6; x += 5) {
-        if (!covered(x, y)) {
-          return { x: rect.left + x, y: rect.top + y };
+        // A point under the floating chrome (the canvas toolbar, a panel) is not a press on
+        // the plate, so skip it as well.
+        const pageX = rect.left + x;
+        const pageY = rect.top + y;
+        if (!covered(x, y) && cy.container().contains(document.elementFromPoint(pageX, pageY))) {
+          return { x: pageX, y: pageY };
         }
       }
     }

@@ -33,6 +33,8 @@ When('I toggle boundaries', async function () {
 });
 
 When('I click the tests strip entry for {string}', async function (name) {
+  // The strip lives in the header's Scope popover; picking a chip closes it.
+  await this.page.click('#scope-menu-toggle');
   await this.page.locator(`#strip .strip-chip[data-filter="${name}/"]`).first().click();
   await this.page.waitForFunction(
     (value) => (document.getElementById('filter')?.value ?? '').includes(value),
