@@ -16,6 +16,7 @@ import { API_PATH, reviewOverlay, riskSummary } from './strabo-core.js';
 
 export function createGitController(app) {
   const { store, state, view, elements, request } = app;
+
   let selectedCommitHash = null;
   let selectedBranchName = null;
 

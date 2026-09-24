@@ -16,11 +16,6 @@ export function createFloatingPanels(app) {
     app.floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
   }
 
-  /**
-   * Turn every auxiliary panel into a floating window. The panels keep their ids and
-   * `hidden` semantics; these handlers only supply app-aware open/close so the dock can
-   * restore a panel without desyncing overlay or selection state.
-   */
   app.floatingWindows = initFloatingWindows({
     dock: document.getElementById('float-dock'),
     panels: [

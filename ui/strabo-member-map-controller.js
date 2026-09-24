@@ -8,6 +8,7 @@ import { renderMemberMap } from './strabo-panels.js';
 
 export function createMemberMapController(app) {
   const { store, state, memberUI, elements, request } = app;
+
   let memberTimer = null;
 
   /** Step the Member map back to the Module Passport it was opened from. */

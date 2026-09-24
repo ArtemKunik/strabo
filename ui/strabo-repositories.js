@@ -8,6 +8,7 @@ import { renderFolderList } from './strabo-panels.js';
 
 export function createRepositoryPicker(app) {
   const { state, elements, request } = app;
+
   let browsedFolder = null;
 
   async function loadCatalogue() {
