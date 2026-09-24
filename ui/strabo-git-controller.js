@@ -383,7 +383,7 @@ export function createGitController(app) {
       onOpenDiff: (file, entry) => app.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
       narratorStatus: app.narratorStatus,
       onNarrate: () => app.narration.narrateReview(data),
-      onOpenNarratorSettings: app.openNarratorSettings,
+      onOpenNarratorSettings: app.settings.openNarratorSettings,
     };
   }
 

@@ -106,7 +106,7 @@ export function createMemberMapController(app) {
       // The member map may ask the opt-in narrator to explain the recorded members and data flow.
       narratorStatus: app.narratorStatus,
       onNarrate: () => app.narration.narrateMemberMap(),
-      onOpenNarratorSettings: app.openNarratorSettings,
+      onOpenNarratorSettings: app.settings.openNarratorSettings,
       onStep: (delta) => {
         stopMemberPlay();
         store.set('member', {

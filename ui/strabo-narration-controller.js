@@ -27,7 +27,7 @@ export function createNarrationController(app) {
     return {
       narratorStatus: app.narratorStatus,
       onNarrate: () => narrateFile(result),
-      onOpenNarratorSettings: app.openNarratorSettings,
+      onOpenNarratorSettings: app.settings.openNarratorSettings,
     };
   }
 
@@ -142,7 +142,7 @@ export function createNarrationController(app) {
   async function narrateNode(id) {
     const label = app.current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
     const showPanel = (panelState) => {
-      renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: app.openNarratorSettings });
+      renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: app.settings.openNarratorSettings });
     };
     showPanel({ label, phase: 'loading' });
     app.floatingWindows.find((controller) => controller.key === 'narration')?.open();
