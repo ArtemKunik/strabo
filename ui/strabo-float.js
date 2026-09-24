@@ -102,6 +102,17 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     writeStore(next);
   };
 
+  /**
+   * Fade a dock edge while more chips sit past it. The rail is nowrap and its native
+   * scrollbar is hidden, so without a fade the clipped chips just look cut off.
+   */
+  const syncDockOverflow = () => {
+    if (!dock) return;
+    const max = dock.scrollWidth - dock.clientWidth;
+    dock.classList.toggle('is-overflow-left', dock.scrollLeft > 1);
+    dock.classList.toggle('is-overflow-right', max > 1 && dock.scrollLeft < max - 1);
+  };
+
   const renderDock = () => {
     if (!dock) return;
     const chips = controllers.map((controller) => controller.dockButton());
@@ -112,6 +123,7 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     enabled.forEach((chip, index) => {
       chip.tabIndex = index === 0 ? 0 : -1;
     });
+    syncDockOverflow();
   };
 
   /** Draw attention to the chip that just opened its window, so the panel is found. */
@@ -515,6 +527,25 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     chips[next].focus();
   });
+
+  // The hidden scrollbar is still reachable: a wheel or trackpad swipe over the rail
+  // scrolls it sideways and the edge fades follow. Observe size changes so the fades
+  // appear the moment the window is narrowed.
+  dock?.addEventListener('scroll', syncDockOverflow, { passive: true });
+  dock?.addEventListener(
+    'wheel',
+    (event) => {
+      if (!dock || dock.scrollWidth <= dock.clientWidth) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!delta) return;
+      dock.scrollLeft += delta;
+      event.preventDefault();
+    },
+    { passive: false },
+  );
+  if (dock && typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(syncDockOverflow).observe(dock);
+  }
 
   window.addEventListener('resize', () => {
     for (const controller of controllers) {

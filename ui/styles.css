@@ -2696,10 +2696,23 @@ button.primary {
 .float-dock {
   flex: 0 1 auto;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  /* One thin row: never wrap onto a second line. Overflow scrolls sideways so the
+     consolidated bottom bar keeps a constant single-row height. */
+  flex-wrap: nowrap;
+  justify-content: flex-start;
   gap: 4px;
-  max-width: min(520px, 60vw);
+  min-width: 0;
+  /* Fill the row's spare width before the rail has to scroll, and never exceed it. The
+     tests strip to the left shrinks first, so on a wide window every chip stays visible;
+     only a genuinely narrow window scrolls instead of wrapping to a second row. */
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* A chrome scrollbar under the chips read as broken, so hide it. The rail still scrolls
+     by wheel, trackpad, touch, and keyboard, with the edge fades below showing more. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
   padding: 3px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -2708,11 +2721,36 @@ button.primary {
   box-shadow: var(--shadow-1);
 }
 
+.float-dock::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .float-dock:empty {
   display: none;
 }
 
+/*
+ * Edge fades, toggled by strabo-float.js only while there are chips past that edge. The
+ * native scrollbar is hidden, so without a fade the clipped chips just look cut off.
+ */
+.float-dock.is-overflow-left {
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px);
+  mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px);
+}
+
+.float-dock.is-overflow-right {
+  -webkit-mask-image: linear-gradient(to left, transparent, var(--bg-1) 20px);
+  mask-image: linear-gradient(to left, transparent, var(--bg-1) 20px);
+}
+
+.float-dock.is-overflow-left.is-overflow-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px, var(--bg-1) calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, transparent, var(--bg-1) 20px, var(--bg-1) calc(100% - 20px), transparent);
+}
+
 .dock-chip {
+  flex: 0 0 auto;
   padding: 3px 9px;
   border: 1px solid transparent;
   border-radius: 999px;
