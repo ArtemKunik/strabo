@@ -76,6 +76,7 @@ import { createStore } from './store.js';
 import { initTerminalScreen } from './strabo-terminal.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
 import { createRuntimeReadout } from './strabo-runtime-readout.js';
+import { createUrlState } from './strabo-url-state.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -313,13 +314,15 @@ Object.assign(app, { store, state, memberUI, view, elements, request });
  */
 // <core-actions>
 Object.assign(app, {
-
+  openMemberMap,
+  selectNode,
 });
 // </core-actions>
 
 // <controllers>
 app.prefs = createViewPrefs(app);
 app.runtime = createRuntimeReadout(app);
+app.url = createUrlState(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -1169,88 +1172,12 @@ function closeMemberMap() {
   refreshDock();
 }
 
-/* ------------------------------------------- URL state */
-
-/**
- * Keep the selected repository, detail mode, selected node, and open member map in the URL,
- * so a view can be shared and a reload restores it. The URL mirrors the store; the store is
- * still the source of truth. Writes are synchronous but skip when nothing changed, and the
- * deep link is snapshotted on load because the first scan clears the live selection.
- */
-let urlIntent = null;
-
-function currentUrlParams() {
-  try {
-    return new URL(window.location.href).searchParams;
-  } catch {
-    return new URLSearchParams();
-  }
-}
-
-function syncUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const set = (key, value) => {
-      if (value) {
-        url.searchParams.set(key, value);
-      } else {
-        url.searchParams.delete(key);
-      }
-    };
-    set('repository', state.repository ?? '');
-    set('mode', state.mode === 'file' ? 'file' : state.mode === 'system' ? 'system' : '');
-    set('unit', state.mode === 'system' ? state.systemUnit ?? '' : '');
-    set('outside', state.mode === 'system' && state.showOutside ? '1' : '');
-    set('node', store.get().ui.node ?? '');
-    set('panel', store.get().ui.memberOpen ? 'member-map' : '');
-    if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
-      window.history.replaceState(null, '', url);
-    }
-  } catch {
-    // A blocked history API only costs the deep link.
-  }
-}
-
-/** Apply the URL's repository and mode, and remember the panel/node for after the scan. */
-function applyUrl() {
-  const params = currentUrlParams();
-  urlIntent = { node: params.get('node'), panel: params.get('panel') };
-  const repository = params.get('repository');
-  if (repository) {
-    state.repository = repository;
-  }
-  const mode = params.get('mode');
-  if (mode === 'file' || mode === 'block' || mode === 'system') {
-    state.mode = mode;
-    elements.detail.value = mode;
-  }
-  // A System deep link may name the open unit and the outside-links toggle.
-  state.systemUnit = mode === 'system' ? params.get('unit') : null;
-  state.systemUnitLabel = state.systemUnit;
-  state.showOutside = mode === 'system' && params.get('outside') === '1';
-  return params;
-}
-
-/** Reopen the member map the deep link named, once the graph it refers to is loaded. */
-async function restoreUrlPanel() {
-  const intent = urlIntent;
-  urlIntent = null;
-  if (!intent || intent.panel !== 'member-map' || !intent.node) {
-    return;
-  }
-  if (!app.current || !(app.current.nodes ?? []).some((entry) => entry.id === intent.node)) {
-    return;
-  }
-  selectNode(intent.node);
-  await openMemberMap(intent.node);
-}
-
 // One subscription decides what a change redraws; handlers no longer call a render by hand.
 store.subscribe((_, changed) => {
   if (changed.member) {
     renderMemberMapView();
   }
-  syncUrl();
+  app.url.syncUrl();
 });
 
 document.addEventListener('keydown', (event) => {
@@ -4361,7 +4288,7 @@ loadCatalogue()
     // The graph default is the fallback: a URL mode or a per-repository pref overrides it.
     state.mode = app.clientPrefs.defaultDetail;
     elements.detail.value = app.clientPrefs.defaultDetail;
-    applyUrl();
+    app.url.applyUrl();
     if (
       state.repository &&
       [...elements.repository.options].some((option) => option.value === state.repository)
@@ -4372,7 +4299,7 @@ loadCatalogue()
     app.prefs.applyViewPrefs();
     return scan();
   })
-  .then(() => restoreUrlPanel())
+  .then(() => app.url.restoreUrlPanel())
   .then(() => {
     // A deep link that opened the member map is explicit intent; do not cover it.
     if (elements.memberView.hidden) {
