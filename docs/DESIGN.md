@@ -150,7 +150,9 @@ owns, with the declared type (`DECIMAL(10, 2)`, `INT[]`). Columns come from
 `CREATE TABLE` and `ALTER TABLE ... ADD COLUMN`, so a migration that only adds columns
 still shows them. SQL has no access modifiers (visibility reads `n/a`) and no methods that
 read or write columns, so the data-flow panels are unavailable and **cohesion is reported
-as unavailable** rather than scored, in file health and in the change passport. View
+as unavailable** rather than scored, in file health and in the change passport. The same
+rule covers any language: a type with fields but no methods has no behavior that could wire
+them, so cohesion is unavailable (with the reason) rather than an incohesive `0`. View
 columns and functions are not extracted: a select list declares no types, and the grammar
 drops most `plpgsql` function bodies to error recovery, so only an arbitrary subset would
 appear.

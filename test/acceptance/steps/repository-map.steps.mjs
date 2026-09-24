@@ -544,3 +544,55 @@ Then('every island label names a drawn directory', async function () {
     assert.ok(matches, `label ${label} matches no drawn directory in ${names.join(', ')}`);
   }
 });
+
+/* ------------------------------------------------------- Review and History tabs */
+
+When('I open the {string} screen tab', async function (name) {
+  const id = name.toLowerCase() === 'review' ? 'screen-tab-review' : 'screen-tab-history';
+  await this.page.click(`#${id}`);
+});
+
+Then('the {string} tab is the active screen', async function (name) {
+  const id = name.toLowerCase() === 'review' ? 'screen-tab-review' : 'screen-tab-history';
+  await this.page.waitForFunction(
+    (tabId) => document.getElementById(tabId)?.getAttribute('aria-selected') === 'true',
+    id,
+    { timeout: 15_000 },
+  );
+  const screen = await this.page.evaluate(() => window.straboTest?.screen?.());
+  assert.equal(screen, name.toLowerCase());
+});
+
+When('the Review screen shows the working-tree change set', async function () {
+  await this.page.waitForFunction(
+    () => /file\(s\)/.test(document.getElementById('review-screen-body')?.textContent ?? ''),
+    undefined,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the Review screen lists the reviewed file {string}', async function (path) {
+  const body = (await this.page.textContent('#review-screen-body')) ?? '';
+  assert.match(body, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+Then('the History screen lists recorded changes', async function () {
+  await this.page.waitForFunction(
+    () => document.querySelectorAll('#history-screen-body .commit').length > 0,
+    undefined,
+    { timeout: 20_000 },
+  );
+});
+
+When('I leave the screen tab with Escape', async function () {
+  await this.page.keyboard.press('Escape');
+  await this.page.waitForFunction(() => window.straboTest?.screen?.() === 'graph', undefined, {
+    timeout: 10_000,
+  });
+});
+
+Then('the Graph tab is the active screen', async function () {
+  const selected = await this.page.getAttribute('#screen-tab-graph', 'aria-selected');
+  assert.equal(selected, 'true');
+  assert.equal(await this.page.evaluate(() => window.straboTest?.screen?.()), 'graph');
+});

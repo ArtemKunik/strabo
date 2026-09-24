@@ -78,8 +78,140 @@ export function encodeHostMessage(message: HostMessage): string {
   return `${JSON.stringify(message)}\n`;
 }
 
+/** Serialise one request to a single framed line. */
+export function encodeHostRequest(request: HostRequest): string {
+  return `${JSON.stringify(request)}\n`;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function asNonNegativeInt(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function asPositiveInt(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function parseCreateOptions(raw: unknown): CreateSessionOptions {
+  const record = asRecord(raw) ?? {};
+  const options: CreateSessionOptions = {};
+  const kind = record.kind;
+  if (kind === 'shell' || kind === 'agent' || kind === 'task' || kind === 'watch') {
+    options.kind = kind;
+  }
+  for (const key of ['repo', 'cwd', 'title', 'preset'] as const) {
+    const value = asString(record[key]);
+    if (value !== null) {
+      options[key] = value;
+    }
+  }
+  if (Array.isArray(record.argv) && record.argv.every((entry) => typeof entry === 'string')) {
+    options.argv = record.argv as string[];
+  }
+  const origin = asRecord(record.origin);
+  if (origin) {
+    const parsedOrigin: CreateSessionOptions['origin'] = {};
+    for (const key of ['node', 'commit', 'review'] as const) {
+      const value = asString(origin[key]);
+      if (value !== null) {
+        parsedOrigin[key] = value;
+      }
+    }
+    if (Object.keys(parsedOrigin).length > 0) {
+      options.origin = parsedOrigin;
+    }
+  }
+  return options;
+}
+
+/**
+ * Parse one frame into a {@link HostRequest}, or null when it is not a request this protocol
+ * defines. Lenient in the same way as {@link parseHostMessage}: a malformed or unknown frame
+ * is dropped rather than thrown, so one bad line cannot take down the daemon.
+ */
+export function parseHostRequest(line: string): HostRequest | null {
+  const trimmed = line.trim();
+  if (trimmed === '') {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  const message = asRecord(parsed);
+  if (!message) {
+    return null;
+  }
+  const id = asNonNegativeInt(message.id);
+  const method = asString(message.method);
+  if (id === null || method === null) {
+    return null;
+  }
+  switch (method) {
+    case 'auth': {
+      const token = asString(message.token);
+      const version = asNonNegativeInt(message.version);
+      return token !== null && version !== null ? { id, method: 'auth', token, version } : null;
+    }
+    case 'ping':
+      return { id, method: 'ping' };
+    case 'list':
+      return { id, method: 'list' };
+    case 'create':
+      return { id, method: 'create', options: parseCreateOptions(message.options) };
+    case 'rename': {
+      const sessionId = asString(message.sessionId);
+      const title = asString(message.title);
+      return sessionId !== null && title !== null ? { id, method: 'rename', sessionId, title } : null;
+    }
+    case 'kill': {
+      const sessionId = asString(message.sessionId);
+      return sessionId !== null ? { id, method: 'kill', sessionId } : null;
+    }
+    case 'backlog': {
+      const sessionId = asString(message.sessionId);
+      const fromSeq = asNonNegativeInt(message.fromSeq);
+      return sessionId !== null && fromSeq !== null ? { id, method: 'backlog', sessionId, fromSeq } : null;
+    }
+    case 'write': {
+      const sessionId = asString(message.sessionId);
+      const data = asString(message.data);
+      return sessionId !== null && data !== null ? { id, method: 'write', sessionId, data } : null;
+    }
+    case 'resize': {
+      const sessionId = asString(message.sessionId);
+      const cols = asPositiveInt(message.cols);
+      const rows = asPositiveInt(message.rows);
+      return sessionId !== null && cols !== null && rows !== null
+        ? { id, method: 'resize', sessionId, cols, rows }
+        : null;
+    }
+    case 'subscribe': {
+      const sessionId = asString(message.sessionId);
+      if (sessionId === null) {
+        return null;
+      }
+      const fromSeq = asNonNegativeInt(message.fromSeq);
+      return fromSeq === null ? { id, method: 'subscribe', sessionId } : { id, method: 'subscribe', sessionId, fromSeq };
+    }
+    case 'unsubscribe': {
+      const sessionId = asString(message.sessionId);
+      return sessionId !== null ? { id, method: 'unsubscribe', sessionId } : null;
+    }
+    case 'stop':
+      return { id, method: 'stop' };
+    default:
+      return null;
+  }
 }
 
 /**

@@ -186,8 +186,8 @@ The review panel's **Change passport** adds each changed file's cohesion before 
 the change. Cohesion comes from the recorded member wiring, which needs only the file's own
 content, so it is read from the baseline revision with `git show <base>:<path>` — HEAD for
 the working tree, the first parent for a commit — and re-extracted for the reviewed copy. A
-file whose language has no extractor, is new, or was deleted names the missing side rather
-than showing a fabricated score.
+file whose language has no extractor, is new, was deleted, or records fields but no methods
+names the missing side rather than showing a fabricated score.
 
 ## Source viewer
 
@@ -439,6 +439,28 @@ The **Run presets** menu lists commands derived from the repository's own manife
 the manifest that declared it. Presets are computed server-side per repository, so the menu
 names what the checkout actually supports rather than a fixed list.
 
+### Driving the map from the shell
+
+Every session starts with a `strabo` command on its `PATH` and `STRABO_REPO` set. Running it
+prints a marker the browser intercepts, so a script, a test run, or an agent can move the map
+from inside the terminal:
+
+```sh
+strabo focus src/analysis/impact.ts   # select and centre a node
+strabo open src/server.ts 42          # open the Source viewer at a line
+strabo highlight src/a.ts src/b.ts    # highlight a set of nodes
+strabo review HEAD                    # open the review for a commit
+strabo note "tests passed"            # toast a message
+strabo screen graph                   # switch screens
+```
+
+Path arguments are made repository-relative against `STRABO_REPO`, so an absolute path a tool
+reports still matches a node id. The marker never appears in the terminal: it is stripped from
+the output stream before it reaches the screen and from the replay buffer. The verbs are a
+fixed, read-only set enforced on both sides — a directive can select a node, open a file the
+Source viewer already allows, highlight, open a review, toast, or switch screens, and nothing
+else.
+
 ### Session persistence (opt-in daemon)
 
 By default the PTYs live in the server process, so a restart takes the sessions with it.
@@ -452,6 +474,24 @@ client's cursor, so only what was missed is sent rather than a fresh shell. The 
 by default: an embedded host, or a machine without the native `node-pty` build, should not
 spawn a background process. When the daemon cannot be reached the server falls back to the
 in-process registry, so the terminal still works rather than failing.
+
+## Review and History tabs
+
+Two top-level tabs beside **Graph** and **Terminal** give the two Git surfaces a full-screen home
+of their own, the same evidence the floating panels show but at the full width of the workspace:
+
+- **Review** (the `R` shortcut, the **Review changes** toolbar action, or the tab) shows the
+  pending working-tree change set — or the commit or branch this session last opened — using the
+  same Git review the floating panel renders. **Pending** returns to the working-tree review and
+  **Refresh** recomputes the review currently shown. Selecting a file jumps to it on the map and
+  **Diff** opens it in the Source viewer, exactly as in the panel.
+- **History** (the `T` shortcut, the **Timeline** toolbar action, or the tab) shows the recorded
+  commits and the architecture-drift chart using the same timeline the floating panel renders.
+  Selecting a commit opens its review in the Review tab.
+
+The floating panels are unchanged and keep working on the map; the tabs read the review and
+history the app already loaded, so switching tabs never triggers a second Git pass. **Escape**
+returns from either tab to the map.
 
 ### Agent sessions
 

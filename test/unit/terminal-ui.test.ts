@@ -25,6 +25,7 @@ import {
   orderSessions,
   sessionTabLabel,
   tabBadge,
+  tabLabels,
 } from '../../ui/strabo-terminal-tabs.js';
 import { findCitations } from '../../ui/strabo-terminal-linkify.js';
 import {
@@ -368,4 +369,18 @@ test('loadPresets fetches through API_PATH and surfaces an error on failure', as
     loadPresets('demo', { fetchImpl: async () => ({ ok: false, status: 503 }) }),
     /Presets unavailable \(503\)/,
   );
+});
+
+test('tabLabels disambiguates duplicate names with an ordinal', () => {
+  const sessions = [
+    { id: 'a', title: 'AssistantApplication', kind: 'shell' },
+    { id: 'b', title: 'AssistantApplication', kind: 'shell' },
+    { id: 'c', title: 'npm test', kind: 'task' },
+    { id: 'd', title: 'AssistantApplication', kind: 'shell' },
+  ];
+  const labels = tabLabels(sessions);
+  assert.equal(labels.get('a'), 'AssistantApplication 1');
+  assert.equal(labels.get('b'), 'AssistantApplication 2');
+  assert.equal(labels.get('c'), 'npm test');
+  assert.equal(labels.get('d'), 'AssistantApplication 3');
 });

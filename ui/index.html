@@ -23,6 +23,28 @@
         <button id="screen-tab-terminal" type="button" class="screen-tab" role="tab" aria-selected="false" aria-controls="terminal-screen">
           Terminal
         </button>
+        <button
+          id="screen-tab-review"
+          type="button"
+          class="screen-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="review-screen"
+          title="Review the pending change set (R)"
+        >
+          Review
+        </button>
+        <button
+          id="screen-tab-history"
+          type="button"
+          class="screen-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="history-screen"
+          title="Read the recorded Git history (T)"
+        >
+          History
+        </button>
       </div>
       <div class="tb-group tb-repo-group" role="group" aria-label="Repository">
         <label class="control">
@@ -270,6 +292,25 @@
           <div id="terminal-panes" class="terminal-panes"></div>
         </div>
       </section>
+      <section id="review-screen" class="git-screen screen" aria-label="Review change set" hidden>
+        <div class="git-screen-toolbar" role="toolbar" aria-label="Review actions">
+          <span class="git-screen-title">Review change set</span>
+          <span class="tb-spacer"></span>
+          <button id="review-screen-pending" type="button" title="Review staged, unstaged, and untracked changes">
+            Pending
+          </button>
+          <button id="review-screen-refresh" type="button" title="Recompute the current review">Refresh</button>
+        </div>
+        <div id="review-screen-body" class="git-screen-body" role="tabpanel" aria-label="Change set review"></div>
+      </section>
+      <section id="history-screen" class="git-screen screen" aria-label="Git history" hidden>
+        <div class="git-screen-toolbar" role="toolbar" aria-label="History actions">
+          <span class="git-screen-title">Git history</span>
+          <span class="tb-spacer"></span>
+          <button id="history-screen-refresh" type="button" title="Reload the recorded history">Refresh</button>
+        </div>
+        <div id="history-screen-body" class="git-screen-body" role="tabpanel" aria-label="Recorded Git history"></div>
+      </section>
       <div id="float-layer" class="float-layer">
         <div id="overlay-panel" class="overlay-panel" hidden></div>
         <div id="edge-panel" class="overlay-panel edge-panel" hidden></div>
@@ -285,6 +326,7 @@
         <section id="workspace-panel" class="workspace-panel" aria-label="Workspace" hidden></section>
         <section id="passport-panel" class="passport-panel" aria-label="Repository passport" hidden></section>
         <section id="route-panel" class="route-panel" aria-label="Reading route" hidden></section>
+        <section id="blocks-panel" class="blocks-panel" aria-label="Blocks" hidden></section>
         <aside id="diagnostics" class="diagnostics" aria-label="Scan diagnostics" hidden></aside>
         <section id="settings-panel" class="settings-panel" aria-label="Settings" hidden></section>
         <section id="shortcuts" class="shortcuts" aria-label="Keyboard shortcuts" hidden></section>

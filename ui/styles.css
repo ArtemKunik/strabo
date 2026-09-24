@@ -951,6 +951,46 @@ button.primary {
   min-height: 0;
 }
 
+/* ------------------------------------------------------------------ Git screens */
+/*
+ * Review and History share the terminal screen's full-height shape: a fixed toolbar above a
+ * scrollable body. While a screen replaces the graph its floating windows are hidden
+ * (body.screen-off-graph), so a panel opened earlier can never draw over the screen shown.
+ */
+.git-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--bg-1);
+}
+
+.git-screen-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background-color: var(--bg-2);
+}
+
+.git-screen-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.git-screen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+body.screen-off-graph .float-window {
+  display: none;
+}
+
 .graph-wrap {
   position: relative;
   background-color: var(--bg-1);
@@ -5151,4 +5191,190 @@ table.change-metrics td:first-child .link {
 
 .route-step-narrative {
   margin: 4px 0 8px;
+}
+
+/* ------------------------------------------------------------------ Blocks (brick assembly) */
+/*
+ * The Lego-style view: every recorded node is a brick, every recorded edge a snap. Status
+ * rides on shape as well as hue — a cycle is dashed, a detached brick dotted, the
+ * load-bearing brick double-ringed — so the two read apart without relying on colour (R6).
+ * Hue is otherwise reserved: the accent is hover/focus/selection, never a status (R7).
+ */
+.blocks-head {
+  margin-bottom: 8px;
+}
+
+.blocks-summary {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.blocks-stage {
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background-color: var(--bg-1);
+}
+
+.blocks-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 200px;
+}
+
+.blocks-snap {
+  fill: none;
+  stroke: var(--graph-edge);
+  stroke-width: 1.4;
+}
+
+.brick {
+  cursor: pointer;
+  outline: none;
+}
+
+.brick-rect {
+  fill: var(--bg-3);
+  stroke: var(--line);
+  stroke-width: 1.2;
+}
+
+.brick-stud {
+  fill: var(--node-fill);
+}
+
+.brick-label {
+  fill: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  pointer-events: none;
+}
+
+.brick:hover .brick-rect,
+.brick:focus-visible .brick-rect,
+.brick.is-selected .brick-rect {
+  stroke: var(--accent);
+}
+
+.brick.is-selected .brick-rect {
+  stroke-width: 2.5;
+}
+
+.brick.is-selected .brick-stud {
+  fill: var(--accent);
+}
+
+.brick.keystone .brick-rect {
+  stroke: var(--ink-1);
+  stroke-width: 2;
+}
+
+.brick.tangled .brick-rect {
+  stroke: var(--status-serious);
+  stroke-width: 2;
+  stroke-dasharray: 5 2;
+}
+
+.brick.detached .brick-rect {
+  stroke: var(--ink-3);
+  stroke-width: 1.6;
+  stroke-dasharray: 1 3;
+  stroke-linecap: round;
+}
+
+.blocks-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--ink-3);
+}
+
+.blocks-legend-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.blocks-swatch {
+  width: 16px;
+  height: 10px;
+  border: 1.4px solid var(--line);
+  border-radius: 3px;
+  background-color: var(--bg-3);
+}
+
+.blocks-swatch.keystone {
+  border-color: var(--ink-1);
+  border-width: 2px;
+}
+
+.blocks-swatch.tangled {
+  border-color: var(--status-serious);
+  border-style: dashed;
+}
+
+.blocks-swatch.detached {
+  border-color: var(--ink-3);
+  border-style: dotted;
+}
+
+.blocks-notes {
+  margin-top: 8px;
+}
+
+.blocks-notes h4 {
+  margin: 0 0 4px;
+  font-size: var(--text-sm);
+}
+
+.blocks-notes ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.blocks-note {
+  padding: 4px 8px;
+  border-left: 3px solid var(--line);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+  background-color: var(--wash);
+}
+
+.blocks-note strong {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+
+.blocks-note p {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.blocks-note.tangled {
+  border-left-color: var(--status-serious);
+}
+
+.blocks-note.keystone {
+  border-left-color: var(--ink-1);
+}
+
+.blocks-note.detached {
+  border-left-color: var(--ink-3);
+}
+
+.blocks-clear {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--ink-3);
 }

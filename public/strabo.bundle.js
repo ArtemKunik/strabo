@@ -1602,17 +1602,19 @@ function totalMembers(memberMap, key) {
   return (memberMap?.types ?? []).reduce((sum, type) => sum + (type[key] ?? []).length, 0);
 }
 function memberMapSteps(memberMap, context2 = {}) {
-  const primary = (memberMap?.types ?? [])[0] ?? null;
+  const types = memberMap?.types ?? [];
+  const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, "fields");
   const methods = totalMembers(memberMap, "methods");
   const flow = memberMap?.dataFlow;
   const consumers = context2.consumers ?? null;
+  const subject = types.length > 1 ? `This file (${types.length} types) contains` : `${primary?.name ?? "This file"} contains`;
   const wiring2 = flow?.available === false ? "No field-to-behavior wiring was recorded in the scan." : `${(flow?.transforms ?? []).length} transform(s) read and write state across ${(flow?.resources ?? []).length} shared field(s).`;
   return [
     {
       key: "fingerprint",
       label: "fingerprint",
-      caption: `${primary?.name ?? "This file"} contains ${fields} field(s) and ${methods} behavior(s).`
+      caption: `${subject} ${fields} field(s) and ${methods} behavior(s).`
     },
     {
       key: "members",
@@ -3912,6 +3914,12 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     }
     writeStore(next);
   };
+  const syncDockOverflow = () => {
+    if (!dock) return;
+    const max = dock.scrollWidth - dock.clientWidth;
+    dock.classList.toggle("is-overflow-left", dock.scrollLeft > 1);
+    dock.classList.toggle("is-overflow-right", max > 1 && dock.scrollLeft < max - 1);
+  };
   const renderDock = () => {
     if (!dock) return;
     const chips = controllers.map((controller) => controller.dockButton());
@@ -3920,6 +3928,7 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     enabled.forEach((chip, index) => {
       chip.tabIndex = index === 0 ? 0 : -1;
     });
+    syncDockOverflow();
   };
   const flashChip = (key) => {
     const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
@@ -4245,6 +4254,21 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     });
     chips[next].focus();
   });
+  dock?.addEventListener("scroll", syncDockOverflow, { passive: true });
+  dock?.addEventListener(
+    "wheel",
+    (event) => {
+      if (!dock || dock.scrollWidth <= dock.clientWidth) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!delta) return;
+      dock.scrollLeft += delta;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  if (dock && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(syncDockOverflow).observe(dock);
+  }
   window.addEventListener("resize", () => {
     for (const controller of controllers) {
       const win = controller.window;
@@ -10420,6 +10444,441 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
       { id: "narrate-tour", label: "Narrate tour" }
     );
   }
+}
+
+// ui/strabo-lego.js
+var MAX_FOOTPRINT = 8;
+var MAX_STUDS = 8;
+function labelOf(node) {
+  if (node.label) {
+    return node.label;
+  }
+  const id = String(node.id ?? "");
+  const slash = Math.max(id.lastIndexOf("/"), id.lastIndexOf("\\"));
+  return slash === -1 ? id : id.slice(slash + 1) || id;
+}
+function massOf(node) {
+  for (const key of ["files", "size", "loc", "lines"]) {
+    const value = Number(node[key]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return 1;
+}
+function stronglyConnected(ids, adjacency2) {
+  const index = /* @__PURE__ */ new Map();
+  const low = /* @__PURE__ */ new Map();
+  const onStack = /* @__PURE__ */ new Set();
+  const stack = [];
+  const components = [];
+  let counter = 0;
+  const walk = (id) => {
+    index.set(id, counter);
+    low.set(id, counter);
+    counter += 1;
+    stack.push(id);
+    onStack.add(id);
+    for (const next of adjacency2.get(id) ?? []) {
+      if (!index.has(next)) {
+        walk(next);
+        low.set(id, Math.min(low.get(id), low.get(next)));
+      } else if (onStack.has(next)) {
+        low.set(id, Math.min(low.get(id), index.get(next)));
+      }
+    }
+    if (low.get(id) === index.get(id)) {
+      const component = [];
+      let member;
+      do {
+        member = stack.pop();
+        onStack.delete(member);
+        component.push(member);
+      } while (member !== id);
+      components.push(component);
+    }
+  };
+  for (const id of ids) {
+    if (!index.has(id)) {
+      walk(id);
+    }
+  }
+  return components;
+}
+function buildBrickAssembly(nodes = [], edges = []) {
+  const present = (nodes ?? []).filter((node) => node && node.id !== void 0);
+  const ids = present.map((node) => String(node.id));
+  const idSet = new Set(ids);
+  const byId = new Map(present.map((node) => [String(node.id), node]));
+  const snaps = [];
+  const snapIndex = /* @__PURE__ */ new Map();
+  for (const edge of edges ?? []) {
+    const from = String(edge?.source);
+    const to = String(edge?.target);
+    if (from === to || !idSet.has(from) || !idSet.has(to)) {
+      continue;
+    }
+    const weight = Number(edge.weight) > 1 ? Number(edge.weight) : 1;
+    const key = `${from}\0${to}`;
+    if (snapIndex.has(key)) {
+      const existing = snaps[snapIndex.get(key)];
+      existing.weight = Math.max(existing.weight, weight);
+      continue;
+    }
+    snapIndex.set(key, snaps.length);
+    snaps.push({ from, to, weight });
+  }
+  const restsOn = new Map(ids.map((id) => [id, /* @__PURE__ */ new Set()]));
+  const carried = new Map(ids.map((id) => [id, /* @__PURE__ */ new Set()]));
+  for (const snap of snaps) {
+    restsOn.get(snap.from).add(snap.to);
+    carried.get(snap.to).add(snap.from);
+  }
+  const components = stronglyConnected(ids, restsOn);
+  const componentOf = /* @__PURE__ */ new Map();
+  components.forEach((members, position) => {
+    for (const id of members) {
+      componentOf.set(id, position);
+    }
+  });
+  const cyclic = new Set(
+    components.filter((members) => members.length > 1).flatMap((members) => members)
+  );
+  const down = components.map(() => /* @__PURE__ */ new Set());
+  for (const snap of snaps) {
+    const from = componentOf.get(snap.from);
+    const to = componentOf.get(snap.to);
+    if (from !== to) {
+      down[from].add(to);
+    }
+  }
+  const depthMemo = /* @__PURE__ */ new Map();
+  const depth = (component) => {
+    if (depthMemo.has(component)) {
+      return depthMemo.get(component);
+    }
+    let best = 0;
+    for (const next of down[component]) {
+      best = Math.max(best, depth(next) + 1);
+    }
+    depthMemo.set(component, best);
+    return best;
+  };
+  const topples = (id) => {
+    const seenIds = /* @__PURE__ */ new Set();
+    const queue = [...carried.get(id)];
+    while (queue.length > 0) {
+      const current2 = queue.shift();
+      if (seenIds.has(current2)) {
+        continue;
+      }
+      seenIds.add(current2);
+      for (const next of carried.get(current2) ?? []) {
+        queue.push(next);
+      }
+    }
+    return seenIds.size;
+  };
+  const bricks = ids.map((id) => {
+    const node = byId.get(id);
+    const mass = massOf(node);
+    const studs = Math.min(MAX_STUDS, carried.get(id).size);
+    return {
+      id,
+      label: labelOf(node),
+      kind: node.kind ?? "module",
+      layer: depth(componentOf.get(id)),
+      footprint: Math.min(MAX_FOOTPRINT, Math.max(1, Math.round(Math.sqrt(mass)))),
+      studs,
+      restsOn: restsOn.get(id).size,
+      carried: carried.get(id).size,
+      topples: topples(id),
+      cyclic: cyclic.has(id),
+      detached: restsOn.get(id).size === 0 && carried.get(id).size === 0,
+      dependencies: [...restsOn.get(id)].sort(),
+      dependents: [...carried.get(id)].sort()
+    };
+  });
+  const loadThreshold = Math.max(3, Math.ceil((bricks.length - 1) / 2));
+  const maxTopples = bricks.reduce((max, brick) => Math.max(max, brick.topples), 0);
+  for (const brick of bricks) {
+    brick.status = brick.cyclic ? "tangled" : brick.detached ? "detached" : brick.topples === maxTopples && brick.topples >= loadThreshold ? "keystone" : "plain";
+  }
+  const maxLayer = bricks.reduce((max, brick) => Math.max(max, brick.layer), 0);
+  const layers = [];
+  for (let layer = 0; layer <= maxLayer; layer += 1) {
+    layers.push(
+      bricks.filter((brick) => brick.layer === layer).map((brick) => brick.id).sort()
+    );
+  }
+  return {
+    available: bricks.length > 0,
+    bricks,
+    snaps,
+    layers,
+    suggestions: assemblySuggestions(bricks, snaps, components),
+    stats: {
+      bricks: bricks.length,
+      snaps: snaps.length,
+      studs: bricks.reduce((total, brick) => total + brick.studs, 0),
+      cycles: components.filter((members) => members.length > 1).length,
+      detached: bricks.filter((brick) => brick.detached).length,
+      maxLayer
+    }
+  };
+}
+function assemblySuggestions(bricks, snaps, components) {
+  const byId = new Map(bricks.map((brick) => [brick.id, brick]));
+  const nameOf = (id) => byId.get(id)?.label ?? id;
+  const suggestions = [];
+  for (const members of components) {
+    if (members.length < 2) {
+      continue;
+    }
+    const inside = new Set(members);
+    const edgeCount = snaps.filter((snap) => inside.has(snap.from) && inside.has(snap.to)).length;
+    const names = members.map(nameOf).sort();
+    suggestions.push({
+      kind: "tangled",
+      bricks: members.slice().sort(),
+      title: `Untangle ${members.length} bricks`,
+      detail: `${listNames(names)} import each other (${edgeCount} recorded edge${edgeCount === 1 ? "" : "s"}); the stack cannot hold a cycle.`
+    });
+  }
+  const keystones = bricks.filter((brick) => brick.status === "keystone");
+  if (keystones.length > 0) {
+    const lead = keystones.reduce((worst, brick) => brick.topples > worst.topples ? brick : worst);
+    suggestions.push({
+      kind: "keystone",
+      bricks: keystones.map((brick) => brick.id),
+      title: `Protect ${lead.label}`,
+      detail: `${listNames(keystones.map((brick) => brick.label).sort())} carry the most load; removing ${lead.label} topples ${lead.topples} brick${lead.topples === 1 ? "" : "s"}.`
+    });
+  }
+  const detached = bricks.filter((brick) => brick.detached);
+  if (detached.length > 0) {
+    suggestions.push({
+      kind: "detached",
+      bricks: detached.map((brick) => brick.id),
+      title: `${detached.length} detached brick${detached.length === 1 ? "" : "s"}`,
+      detail: `${listNames(detached.map((brick) => brick.label).sort())} have no recorded import in either direction.`
+    });
+  }
+  return suggestions;
+}
+function listNames(names) {
+  if (names.length <= 1) {
+    return names[0] ?? "";
+  }
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+function layoutAssembly(assembly, options = {}) {
+  const {
+    brickWidth = 26,
+    brickHeight = 16,
+    studHeight = 6,
+    gapX = 8,
+    gapY = 18,
+    padding = 18
+  } = options;
+  const rowHeight = brickHeight + studHeight + gapY;
+  const brickById = new Map((assembly?.bricks ?? []).map((brick) => [brick.id, brick]));
+  const layers = assembly?.layers ?? [];
+  const maxLayer = Math.max(0, layers.length - 1);
+  const rowWidths = layers.map(
+    (row) => row.reduce((total, id) => total + (brickById.get(id)?.footprint ?? 1) * brickWidth + gapX, 0) - (row.length > 0 ? gapX : 0)
+  );
+  const widest = Math.max(0, ...rowWidths);
+  const placed = [];
+  layers.forEach((row, layer) => {
+    const y = padding + (maxLayer - layer) * rowHeight;
+    let x = padding + Math.max(0, (widest - rowWidths[layer]) / 2);
+    for (const id of row) {
+      const brick = brickById.get(id);
+      if (!brick) {
+        continue;
+      }
+      const w = brick.footprint * brickWidth;
+      placed.push({ ...brick, x, y, w, h: brickHeight, studHeight });
+      x += w + gapX;
+    }
+  });
+  const byId = new Map(placed.map((brick) => [brick.id, brick]));
+  const snaps = (assembly?.snaps ?? []).map((snap) => {
+    const from = byId.get(snap.from);
+    const to = byId.get(snap.to);
+    if (!from || !to) {
+      return null;
+    }
+    return {
+      ...snap,
+      x1: from.x + from.w / 2,
+      y1: from.y + from.h,
+      x2: to.x + to.w / 2,
+      y2: to.y
+    };
+  }).filter(Boolean);
+  const width = padding * 2 + widest;
+  const height = padding * 2 + Math.max(1, layers.length) * rowHeight - gapY;
+  return { bricks: placed, snaps, width, height };
+}
+function assemblySummary(assembly) {
+  if (!assembly?.available) {
+    return "No bricks to assemble.";
+  }
+  const { bricks, snaps, cycles, detached } = assembly.stats;
+  const parts = [`${bricks} brick${bricks === 1 ? "" : "s"}`, `${snaps} snap${snaps === 1 ? "" : "s"}`];
+  parts.push(cycles === 0 ? "no cycles" : `${cycles} cycle${cycles === 1 ? "" : "s"}`);
+  if (detached > 0) {
+    parts.push(`${detached} detached`);
+  }
+  return parts.join(" \xB7 ");
+}
+
+// ui/strabo-panel-blocks.js
+var LEGEND = [
+  ["plain", "plain brick"],
+  ["keystone", "load-bearing (double ring)"],
+  ["tangled", "dependency cycle (dashed)"],
+  ["detached", "no recorded import (dotted)"]
+];
+function fitLabel2(label, width) {
+  const max = Math.max(3, Math.floor((width - 8) / 6.2));
+  return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
+}
+function brickGroup(brick, options) {
+  const selected2 = options.selected === brick.id;
+  const group = svgElement("g", {
+    class: `brick ${brick.status}${selected2 ? " is-selected" : ""}`,
+    transform: `translate(${brick.x},${brick.y})`,
+    tabindex: "0",
+    role: "button",
+    "aria-label": `${brick.label}: ${brick.status}, ${brick.studs} stud(s), rests on ${brick.restsOn} brick(s)`
+  });
+  group.dataset.brick = brick.id;
+  const studs = Math.max(1, Math.min(brick.studs, Math.max(1, Math.round(brick.w / 10))));
+  for (let index = 1; index <= studs; index += 1) {
+    group.append(
+      svgElement("circle", {
+        class: "brick-stud",
+        cx: (brick.w * index / (studs + 1)).toFixed(1),
+        cy: "-1",
+        r: "3"
+      })
+    );
+  }
+  group.append(svgElement("rect", { class: "brick-rect", width: brick.w, height: brick.h, rx: "5" }));
+  const text = svgElement("text", {
+    class: "brick-label",
+    x: (brick.w / 2).toFixed(1),
+    y: String(brick.h - 5),
+    "text-anchor": "middle"
+  });
+  text.textContent = fitLabel2(brick.label, brick.w);
+  group.append(text);
+  const title = svgElement("title", {});
+  title.textContent = `${brick.label} (${brick.kind}) \xB7 layer ${brick.layer} \xB7 studs ${brick.studs} \xB7 rests on ${brick.restsOn} \xB7 topples ${brick.topples}`;
+  group.append(title);
+  if (typeof options.onOpen === "function") {
+    group.addEventListener("click", (event) => {
+      event.stopPropagation();
+      options.onOpen(brick.id);
+    });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        options.onOpen(brick.id);
+      }
+    });
+  }
+  return group;
+}
+function assemblySvg(layout, options) {
+  const svg = svgElement("svg", {
+    viewBox: `0 0 ${layout.width} ${layout.height}`,
+    class: "blocks-svg",
+    role: "img",
+    "aria-label": `Brick assembly: ${layout.bricks.length} bricks, ${layout.snaps.length} recorded snaps`
+  });
+  svg.dataset.role = "blocks-svg";
+  const snapLayer = svgElement("g", { class: "blocks-snaps" });
+  for (const snap of layout.snaps) {
+    const path = svgElement("path", {
+      class: "blocks-snap",
+      d: `M ${snap.x1.toFixed(1)} ${snap.y1.toFixed(1)} C ${snap.x1.toFixed(1)} ${(snap.y1 + 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${(snap.y2 - 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${snap.y2.toFixed(1)}`
+    });
+    snapLayer.append(path);
+  }
+  svg.append(snapLayer);
+  const brickLayer = svgElement("g", { class: "blocks-bricks" });
+  for (const brick of layout.bricks) {
+    brickLayer.append(brickGroup(brick, options));
+  }
+  svg.append(brickLayer);
+  if (typeof options.onClear === "function") {
+    svg.addEventListener("click", () => options.onClear());
+  }
+  return svg;
+}
+function renderBlocks(container, assembly, options = {}) {
+  container.replaceChildren();
+  container.dataset.role = "blocks";
+  const head = document.createElement("header");
+  head.className = "blocks-head";
+  const summary = document.createElement("p");
+  summary.className = "blocks-summary";
+  summary.dataset.role = "blocks-summary";
+  summary.textContent = assemblySummary(assembly);
+  head.append(summary);
+  container.append(head);
+  if (!assembly?.available) {
+    container.append(unavailableNote("No map is drawn yet, so there are no bricks to assemble."));
+    return;
+  }
+  const stage = document.createElement("div");
+  stage.className = "blocks-stage";
+  stage.append(assemblySvg(layoutAssembly(assembly), options));
+  container.append(stage);
+  const legend = document.createElement("ul");
+  legend.className = "blocks-legend";
+  for (const [status, label] of LEGEND) {
+    const item = document.createElement("li");
+    item.className = `blocks-legend-row ${status}`;
+    const swatch = document.createElement("span");
+    swatch.className = `blocks-swatch ${status}`;
+    swatch.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.textContent = label;
+    item.append(swatch, text);
+    legend.append(item);
+  }
+  container.append(legend);
+  const notes = document.createElement("section");
+  notes.className = "blocks-notes";
+  const title = document.createElement("h4");
+  title.textContent = "Assembly notes";
+  notes.append(title);
+  if ((assembly.suggestions ?? []).length === 0) {
+    const clear = document.createElement("p");
+    clear.className = "blocks-clear";
+    clear.textContent = "Every brick connects to the stack, and no cycle was recorded.";
+    notes.append(clear);
+  } else {
+    const list = document.createElement("ul");
+    for (const suggestion of assembly.suggestions) {
+      const item = document.createElement("li");
+      item.className = `blocks-note ${suggestion.kind}`;
+      item.dataset.kind = suggestion.kind;
+      const strong = document.createElement("strong");
+      strong.textContent = suggestion.title;
+      const detail = document.createElement("p");
+      detail.textContent = suggestion.detail;
+      item.append(strong, detail);
+      list.append(item);
+    }
+    notes.append(list);
+  }
+  container.append(notes);
 }
 
 // ui/strabo-commit.js
@@ -20796,6 +21255,27 @@ function sessionTabLabel(meta) {
   }
   return KIND_LABELS[meta?.kind] ?? "Session";
 }
+function tabLabels(sessions) {
+  const list = sessions ?? [];
+  const totals = /* @__PURE__ */ new Map();
+  for (const session of list) {
+    const base = sessionTabLabel(session);
+    totals.set(base, (totals.get(base) ?? 0) + 1);
+  }
+  const seen = /* @__PURE__ */ new Map();
+  const labels = /* @__PURE__ */ new Map();
+  for (const session of list) {
+    const base = sessionTabLabel(session);
+    if ((totals.get(base) ?? 0) > 1) {
+      const index = (seen.get(base) ?? 0) + 1;
+      seen.set(base, index);
+      labels.set(session.id, `${base} ${index}`);
+    } else {
+      labels.set(session.id, base);
+    }
+  }
+  return labels;
+}
 function tabBadge(meta) {
   if (meta?.status === "exited") {
     const code = meta.exitCode;
@@ -20856,7 +21336,7 @@ function digitSessionId(order, key) {
   }
   return (order ?? [])[index - 1] ?? null;
 }
-function tabButton(session, active, handlers) {
+function tabButton(session, active, handlers, label = sessionTabLabel(session)) {
   const button3 = document.createElement("div");
   button3.className = "terminal-tab";
   button3.dataset.sessionId = session.id;
@@ -20871,20 +21351,20 @@ function tabButton(session, active, handlers) {
   const dot = document.createElement("span");
   dot.className = `terminal-tab-badge ${badge.className}`;
   dot.setAttribute("aria-hidden", "true");
-  const label = document.createElement("span");
-  label.className = "terminal-tab-label";
-  label.textContent = sessionTabLabel(session);
+  const labelElement = document.createElement("span");
+  labelElement.className = "terminal-tab-label";
+  labelElement.textContent = label;
   const close = document.createElement("button");
   close.type = "button";
   close.className = "terminal-tab-close";
-  close.setAttribute("aria-label", `Close ${sessionTabLabel(session)}`);
+  close.setAttribute("aria-label", `Close ${label}`);
   close.title = "Close session";
   close.textContent = "\xD7";
   close.addEventListener("click", (event) => {
     event.stopPropagation();
     handlers.onClose?.(session.id);
   });
-  button3.append(dot, label, close);
+  button3.append(dot, labelElement, close);
   button3.addEventListener("click", () => handlers.onSelect?.(session.id));
   button3.addEventListener("dragstart", (event) => {
     event.dataTransfer?.setData("text/plain", session.id);
@@ -20911,7 +21391,10 @@ function renderTabs(container, sessions, activeId, handlers = {}) {
   if (!container) {
     return;
   }
-  const buttons = (sessions ?? []).map((session) => tabButton(session, session.id === activeId, handlers));
+  const labels = tabLabels(sessions);
+  const buttons = (sessions ?? []).map(
+    (session) => tabButton(session, session.id === activeId, handlers, labels.get(session.id))
+  );
   container.replaceChildren(...buttons);
   container.onkeydown = (event) => {
     const items = [...container.querySelectorAll(".terminal-tab")];
@@ -21235,6 +21718,59 @@ function openPresetMenu(anchor, { presets = [], onPick } = {}) {
   });
 }
 
+// ui/strabo-terminal-control.js
+var CONTROL_PREFIX = "::strabo::";
+var VERBS = /* @__PURE__ */ new Set(["focus", "open", "highlight", "review", "note", "screen"]);
+var MAX_ARGS = 64;
+var MAX_ARG_LENGTH = 4096;
+var MAX_HOLD = 8192;
+function parseControlLine(line) {
+  const trimmed = typeof line === "string" ? line.replace(/\r$/, "").trim() : "";
+  if (!trimmed.startsWith(CONTROL_PREFIX)) {
+    return null;
+  }
+  const rest = trimmed.slice(CONTROL_PREFIX.length).trim();
+  if (!rest) {
+    return null;
+  }
+  const [verb, ...args] = rest.split(/\s+/);
+  if (!VERBS.has(verb)) {
+    return null;
+  }
+  return { verb, args: args.slice(0, MAX_ARGS).map((arg) => arg.slice(0, MAX_ARG_LENGTH)) };
+}
+function couldBeMarker(partial) {
+  if (partial.length === 0 || partial.length > MAX_HOLD) {
+    return false;
+  }
+  if (partial.startsWith(CONTROL_PREFIX)) {
+    return true;
+  }
+  return partial.length < CONTROL_PREFIX.length && CONTROL_PREFIX.startsWith(partial);
+}
+function extractControl(carry, chunk) {
+  const combined = `${carry ?? ""}${chunk ?? ""}`;
+  const lines = combined.split("\n");
+  const partial = lines.pop() ?? "";
+  const directives = [];
+  let text = "";
+  for (const line of lines) {
+    if (line.replace(/\r$/, "").trim().startsWith(CONTROL_PREFIX)) {
+      const directive = parseControlLine(line);
+      if (directive) {
+        directives.push(directive);
+      }
+      continue;
+    }
+    text += `${line}
+`;
+  }
+  if (couldBeMarker(partial)) {
+    return { text, directives, carry: partial };
+  }
+  return { text: text + partial, directives, carry: "" };
+}
+
 // ui/strabo-terminal.js
 var LAYOUT_PREFIX = "strabo.terminal.layout.";
 var BUFFER_LIMIT = 256 * 1024;
@@ -21288,6 +21824,7 @@ function initTerminalScreen(container, hooks = {}) {
   const metas = /* @__PURE__ */ new Map();
   const views = /* @__PURE__ */ new Map();
   const buffers = /* @__PURE__ */ new Map();
+  const controlCarry = /* @__PURE__ */ new Map();
   const savedMeta = /* @__PURE__ */ new Map();
   const attachedSessions = /* @__PURE__ */ new Set();
   const wantedSessions = /* @__PURE__ */ new Set();
@@ -21493,17 +22030,25 @@ function initTerminalScreen(container, hooks = {}) {
     }
   }
   function onOutput(id, data, reset = false) {
+    const carry = reset ? "" : controlCarry.get(id) ?? "";
+    const { text, directives, carry: next } = extractControl(carry, data);
+    controlCarry.set(id, next);
     if (reset) {
-      buffers.set(id, data.slice(-BUFFER_LIMIT));
+      buffers.set(id, text.slice(-BUFFER_LIMIT));
       const view2 = views.get(id);
       if (view2) {
         view2.term.reset();
-        view2.term.write(data);
+        view2.term.write(text);
       }
-      return;
+    } else {
+      buffers.set(id, ((buffers.get(id) ?? "") + text).slice(-BUFFER_LIMIT));
+      if (text) {
+        views.get(id)?.term.write(text);
+      }
     }
-    buffers.set(id, ((buffers.get(id) ?? "") + data).slice(-BUFFER_LIMIT));
-    views.get(id)?.term.write(data);
+    for (const directive of directives) {
+      hooks.onControl?.(directive, id);
+    }
   }
   function onTitle(id, title) {
     const meta = metas.get(id);
@@ -21541,13 +22086,6 @@ function initTerminalScreen(container, hooks = {}) {
     term.open(surface);
     term.onData((data) => mux.sendInput(meta.id, data));
     term.onResize(({ cols, rows }) => mux.resize(meta.id, cols, rows));
-    if (typeof term.onTitleChange === "function") {
-      term.onTitleChange((title) => {
-        if (title) {
-          renameSession(meta.id, title);
-        }
-      });
-    }
     registerCitationLinks(term, { openSourceAt: (file, line) => hooks.openSourceAt?.(file, line) });
     const view2 = { id: meta.id, meta, term, fit: fit2, surface };
     views.set(meta.id, view2);
@@ -21563,17 +22101,6 @@ function initTerminalScreen(container, hooks = {}) {
     }
     attachedSessions.add(id);
     mux.attach(id);
-  }
-  function renameSession(id, title) {
-    const meta = metas.get(id);
-    if (meta?.title === title) {
-      return;
-    }
-    if (meta) {
-      metas.set(id, { ...meta, title });
-    }
-    mux.rename(id, title);
-    render();
   }
   function activeSessionId() {
     return findPane(layout, activePaneId)?.sessionId ?? null;
@@ -22303,12 +22830,22 @@ var elements = {
   workspacePanel: document.getElementById("workspace-panel"),
   passportPanel: document.getElementById("passport-panel"),
   routePanel: document.getElementById("route-panel"),
+  blocksPanel: document.getElementById("blocks-panel"),
   sourcePanel: document.getElementById("source-panel"),
   screenTabGraph: document.getElementById("screen-tab-graph"),
   screenTabTerminal: document.getElementById("screen-tab-terminal"),
+  screenTabReview: document.getElementById("screen-tab-review"),
+  screenTabHistory: document.getElementById("screen-tab-history"),
   graphScreen: document.getElementById("graph-screen"),
   terminalScreen: document.getElementById("terminal-screen"),
-  terminalContainer: document.getElementById("terminal-container")
+  terminalContainer: document.getElementById("terminal-container"),
+  reviewScreen: document.getElementById("review-screen"),
+  reviewScreenBody: document.getElementById("review-screen-body"),
+  reviewScreenRefresh: document.getElementById("review-screen-refresh"),
+  reviewScreenPending: document.getElementById("review-screen-pending"),
+  historyScreen: document.getElementById("history-screen"),
+  historyScreenBody: document.getElementById("history-screen-body"),
+  historyScreenRefresh: document.getElementById("history-screen-refresh")
 };
 var memberData = null;
 var memberTimer = null;
@@ -23070,7 +23607,14 @@ store.subscribe((_2, changed) => {
 });
 document.addEventListener("keydown", (event) => {
   const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "");
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+  const screen = store.get().ui.screen;
+  const onGraph = screen === "graph";
+  if (event.key === "Escape" && (screen === "review" || screen === "history") && !inField) {
+    event.preventDefault();
+    setScreen("graph");
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && onGraph) {
     event.preventDefault();
     elements.filter.focus();
     elements.filter.select();
@@ -23130,7 +23674,7 @@ document.addEventListener("keydown", (event) => {
     toggleShortcuts();
     return;
   }
-  if (inField || !elements.memberView.hidden) return;
+  if (inField || !elements.memberView.hidden || !onGraph) return;
   const key = event.key.toLowerCase();
   if (key === "f" && selected) focus(view.cy, selected);
   else if (key === "i") elements.tbImpact.click();
@@ -23311,15 +23855,10 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
   const overlay2 = reviewOverlay(data);
   view.overlay(overlay2.classes);
   elements.reviewPanel.hidden = false;
-  renderReview(elements.reviewPanel, data, {
-    onClose: closeReview,
-    ...navigation,
-    onSelect: (id) => selectNode(id),
-    onOpenDiff: (file, entry2) => viewDiff(file, reviewDiffSpec(data, entry2), { status: entry2.status }),
-    narratorStatus,
-    onNarrate: () => narrateReview(data),
-    onOpenNarratorSettings: openNarratorSettings
-  });
+  renderReview(elements.reviewPanel, data, reviewHandlers(data, navigation));
+  if (store.get().ui.screen === "review") {
+    renderReview(elements.reviewScreenBody, data, reviewHandlers(data, navigation, () => setScreen("graph")));
+  }
   const label = branchName ?? (commit ? commit.shortHash : "working tree");
   elements.status.textContent = `Review ${label}: ${overlay2.summary}`;
 }
@@ -23552,6 +24091,15 @@ async function showWorkspace() {
     note3.textContent = error.message;
     elements.workspacePanel.append(note3);
   }
+  refreshDock();
+}
+function showBlocks() {
+  const assembly = buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []);
+  renderBlocks(elements.blocksPanel, assembly, {
+    selected,
+    onOpen: (id) => selectNode(id)
+  });
+  elements.blocksPanel.hidden = false;
   refreshDock();
 }
 var workspaceReport = null;
@@ -24247,6 +24795,64 @@ function revealSourceLine(attempt = 0) {
   }
   if (attempt < 20) {
     setTimeout(() => revealSourceLine(attempt + 1), 50);
+  }
+}
+function isMappedNode(id) {
+  return Boolean(id) && (current?.nodes ?? []).some((candidate) => candidate.id === id);
+}
+function handleTerminalControl(directive) {
+  const verb = directive?.verb;
+  const args = Array.isArray(directive?.args) ? directive.args : [];
+  switch (verb) {
+    case "focus": {
+      const id = args[0];
+      if (isMappedNode(id)) {
+        setScreen("graph");
+        selectNode(id);
+      }
+      return;
+    }
+    case "open": {
+      const file = args[0];
+      const line = Number.parseInt(args[1] ?? "", 10);
+      if (file) {
+        openSourceAt(file, Number.isInteger(line) ? line : null);
+      }
+      return;
+    }
+    case "highlight": {
+      const ids = args.filter(isMappedNode);
+      if (ids.length > 0) {
+        setScreen("graph");
+        view.highlight(ids);
+      }
+      return;
+    }
+    case "review": {
+      setScreen("graph");
+      const ref = args[0];
+      const pending = ref ? showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref }) : showReview("");
+      Promise.resolve(pending).catch((error) => {
+        showToast(`Review failed (${error.message}).`);
+      });
+      return;
+    }
+    case "note": {
+      const message = args.join(" ").trim();
+      if (message) {
+        showToast(message);
+      }
+      return;
+    }
+    case "screen": {
+      const target = args[0];
+      if (target === "graph" || target === "terminal") {
+        setScreen(target);
+      }
+      return;
+    }
+    default:
+      return;
   }
 }
 function reviewDiffSpec(result, file) {
@@ -24947,7 +25553,8 @@ terminalScreen = initTerminalScreen(elements.terminalContainer, {
   toast: terminalToast,
   onSessionsChanged: updateTerminalBadge,
   resolveRepository,
-  closeTerminal: () => setScreen("graph")
+  closeTerminal: () => setScreen("graph"),
+  onControl: handleTerminalControl
 });
 setDelegateSessionOpener((sessionId) => {
   setScreen("terminal");
@@ -24956,19 +25563,116 @@ setDelegateSessionOpener((sessionId) => {
 function setScreen(screen) {
   store.set("ui", { screen });
   const showTerminal = screen === "terminal";
-  elements.graphScreen.hidden = showTerminal;
+  const showReview2 = screen === "review";
+  const showHistory = screen === "history";
+  const showGraph = !showTerminal && !showReview2 && !showHistory;
+  elements.graphScreen.hidden = !showGraph;
   elements.terminalScreen.hidden = !showTerminal;
+  if (elements.reviewScreen) elements.reviewScreen.hidden = !showReview2;
+  if (elements.historyScreen) elements.historyScreen.hidden = !showHistory;
+  document.body.classList.toggle("screen-off-graph", !showGraph);
   if (elements.graphToolbar?.classList.contains("is-docked")) {
-    elements.graphToolbar.hidden = showTerminal;
+    elements.graphToolbar.hidden = !showGraph;
   }
-  elements.screenTabGraph.setAttribute("aria-selected", String(!showTerminal));
+  elements.screenTabGraph.setAttribute("aria-selected", String(showGraph));
   elements.screenTabTerminal.setAttribute("aria-selected", String(showTerminal));
+  elements.screenTabReview?.setAttribute("aria-selected", String(showReview2));
+  elements.screenTabHistory?.setAttribute("aria-selected", String(showHistory));
   if (showTerminal) {
     terminalScreen.activate();
+  } else if (showReview2) {
+    openReviewScreen();
+  } else if (showHistory) {
+    openHistoryScreen();
   }
 }
 elements.screenTabGraph.addEventListener("click", () => setScreen("graph"));
 elements.screenTabTerminal.addEventListener("click", () => setScreen("terminal"));
+elements.screenTabReview?.addEventListener("click", () => setScreen("review"));
+elements.screenTabHistory?.addEventListener("click", () => setScreen("history"));
+function reviewHandlers(data, navigation, onClose = closeReview) {
+  return {
+    onClose,
+    ...navigation,
+    onSelect: (id) => selectNode(id),
+    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+    narratorStatus,
+    onNarrate: () => narrateReview(data),
+    onOpenNarratorSettings: openNarratorSettings
+  };
+}
+function openReviewScreen() {
+  const body = elements.reviewScreenBody;
+  if (!body) {
+    return;
+  }
+  if (!currentReview) {
+    body.replaceChildren();
+    const note3 = document.createElement("p");
+    note3.className = "evidence";
+    note3.textContent = "Reviewing the working tree\u2026";
+    body.append(note3);
+    showReview("").catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+    return;
+  }
+  const navigation = { canGoBack: reviewHistory.length > 0, onBack: reviewBack };
+  renderReview(body, currentReview, reviewHandlers(currentReview, navigation, () => setScreen("graph")));
+  if (currentReview.available !== false) {
+    const label = currentReviewRequest?.branchName ?? (currentReviewRequest?.commit ? currentReviewRequest.commit.shortHash : "working tree");
+    elements.status.textContent = `Review ${label}`;
+  }
+}
+function refreshReviewScreen() {
+  const request2 = currentReviewRequest ?? { query: "", commit: null, branchName: null };
+  showReview(request2.query, request2.commit, request2.branchName, { fromHistory: true }).catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+}
+elements.reviewScreenPending?.addEventListener("click", () => {
+  showReview("").catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+elements.reviewScreenRefresh?.addEventListener("click", refreshReviewScreen);
+elements.historyScreenRefresh?.addEventListener("click", () => {
+  loadTimelineScreen().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+async function loadTimelineScreen() {
+  const body = elements.historyScreenBody;
+  if (!body) {
+    return;
+  }
+  body.replaceChildren();
+  const note3 = document.createElement("p");
+  note3.className = "evidence";
+  note3.textContent = "Loading recorded history\u2026";
+  body.append(note3);
+  const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
+  const driftQuery = state.repository ? `?limit=20&repository=${encodeURIComponent(state.repository)}` : "?limit=20";
+  const [result, history, drift] = await Promise.all([
+    request(`/analysis/timeline${query}`),
+    request(`/analysis/change-metrics/history${query}`).catch(() => null),
+    request(`/analysis/drift${driftQuery}`).catch(() => null)
+  ]);
+  renderTimeline(body, result, (commit) => {
+    selectCommit(commit).catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  }, {
+    selectedHash: selectedCommitHash,
+    metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+    drift
+  });
+}
+function openHistoryScreen() {
+  loadTimelineScreen().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+}
 var floatingWindows = initFloatingWindows({
   dock: document.getElementById("float-dock"),
   panels: [
@@ -25210,6 +25914,18 @@ var floatingWindows = initFloatingWindows({
         });
       },
       onClose: () => closeRoute()
+    },
+    {
+      key: "blocks",
+      element: elements.blocksPanel,
+      title: "Blocks",
+      dockLabel: "Blocks",
+      width: 560,
+      height: 620,
+      onOpen: () => showBlocks(),
+      onClose: () => {
+        elements.blocksPanel.hidden = true;
+      }
     }
   ]
 });
@@ -25255,7 +25971,13 @@ if (window.STRABO_TEST) {
     resetIslandLayout: resetMapLayout,
     workspace: () => showWorkspace(),
     passport: () => showPassport(),
-    route: (file) => showRoute(file)
+    route: (file) => showRoute(file),
+    blocks: () => showBlocks(),
+    brickAssembly: () => buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []),
+    setScreen,
+    screen: () => store.get().ui.screen,
+    openReviewScreen,
+    openHistoryScreen
   };
 }
 fetchNarratorStatus().then((status) => {

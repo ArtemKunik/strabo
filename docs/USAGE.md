@@ -168,3 +168,11 @@ are ignored while typing in a field:
 | `Ctrl+Shift+T` | Open the Terminal and start a new shell. |
 | `Ctrl+Shift+W` | Close the active session. |
 | `Ctrl+Shift+R` | Open the Terminal's run-presets menu. |
+
+## Review and History
+
+The **Review** and **History** tabs (beside **Graph** and **Terminal**) open the pending change
+set and the recorded Git history as full-screen views; the
+[Review and History tabs](./FEATURES.md#review-and-history-tabs) detail lives in FEATURES.md.
+They show the same evidence as the floating Review and Timeline panels, read from what the app
+already loaded. **Escape** returns either tab to the map.

@@ -45,6 +45,7 @@ import {
 import { openSessionSwitcher } from './strabo-terminal-switcher.js';
 import { registerCitationLinks } from './strabo-terminal-linkify.js';
 import { loadPresets, openPresetMenu, presetId, presetLabel } from './strabo-terminal-presets.js';
+import { extractControl } from './strabo-terminal-control.js';
 
 const LAYOUT_PREFIX = 'strabo.terminal.layout.';
 const BUFFER_LIMIT = 256 * 1024;
@@ -104,6 +105,8 @@ export function initTerminalScreen(container, hooks = {}) {
   const views = new Map();
   /** Output replay buffer by session id, so a new pane can seed from history. */
   const buffers = new Map();
+  /** Per-session carry for a control marker split across output chunks. */
+  const controlCarry = new Map();
   /** Saved titles/kinds for restored sessions, until the server confirms them. */
   const savedMeta = new Map();
   const attachedSessions = new Set();
@@ -353,19 +356,29 @@ export function initTerminalScreen(container, hooks = {}) {
   }
 
   function onOutput(id, data, reset = false) {
+    // Pull `::strabo::` control markers out before the output is shown or buffered, so the
+    // directive drives the map instead of appearing in the terminal (and replay stays clean).
+    const carry = reset ? '' : (controlCarry.get(id) ?? '');
+    const { text, directives, carry: next } = extractControl(carry, data);
+    controlCarry.set(id, next);
     if (reset) {
       // A reconnect replay from zero: clear first so the redraw is not a duplicate, then
       // replace the replay buffer with the authoritative slice.
-      buffers.set(id, data.slice(-BUFFER_LIMIT));
+      buffers.set(id, text.slice(-BUFFER_LIMIT));
       const view = views.get(id);
       if (view) {
         view.term.reset();
-        view.term.write(data);
+        view.term.write(text);
       }
-      return;
+    } else {
+      buffers.set(id, ((buffers.get(id) ?? '') + text).slice(-BUFFER_LIMIT));
+      if (text) {
+        views.get(id)?.term.write(text);
+      }
     }
-    buffers.set(id, ((buffers.get(id) ?? '') + data).slice(-BUFFER_LIMIT));
-    views.get(id)?.term.write(data);
+    for (const directive of directives) {
+      hooks.onControl?.(directive, id);
+    }
   }
 
   function onTitle(id, title) {
@@ -410,13 +423,9 @@ export function initTerminalScreen(container, hooks = {}) {
 
     term.onData((data) => mux.sendInput(meta.id, data));
     term.onResize(({ cols, rows }) => mux.resize(meta.id, cols, rows));
-    if (typeof term.onTitleChange === 'function') {
-      term.onTitleChange((title) => {
-        if (title) {
-          renameSession(meta.id, title);
-        }
-      });
-    }
+    // Tab names come only from the server's `title` event, which normalises OSC noise
+    // (paths, shell names) before it reaches here. xterm's own onTitleChange would re-apply
+    // the raw title and undo that.
     registerCitationLinks(term, { openSourceAt: (file, line) => hooks.openSourceAt?.(file, line) });
 
     const view = { id: meta.id, meta, term, fit, surface };
@@ -434,18 +443,6 @@ export function initTerminalScreen(container, hooks = {}) {
     }
     attachedSessions.add(id);
     mux.attach(id);
-  }
-
-  function renameSession(id, title) {
-    const meta = metas.get(id);
-    if (meta?.title === title) {
-      return;
-    }
-    if (meta) {
-      metas.set(id, { ...meta, title });
-    }
-    mux.rename(id, title);
-    render();
   }
 
   /* --------------------------------------------------------------- rendering */

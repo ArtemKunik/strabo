@@ -432,8 +432,9 @@ async function measureContent(file: string, content: string): Promise<MeasuredCo
         // Overloads share a name; their complexity is summed under it.
         functions[id] = (functions[id] ?? 0) + fn.metrics.decisionPoints;
       }
-      const cohesion =
-        extractor.tracksAccess === false ? null : computeMemberCohesion(result.symbols, result.accesses ?? []).value;
+      // The model reports cohesion unavailable when a language records members but no methods
+      // to wire them (SQL columns, a data-only class), so no `tracksAccess` guard is needed.
+      const cohesion = computeMemberCohesion(result.symbols, result.accesses ?? []).value;
       measured = {
         measures: {
           lines,

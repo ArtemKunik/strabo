@@ -191,6 +191,14 @@ export function computeMemberCohesion(symbols: CodeSymbol[], accesses: MemberAcc
     return { value: null, detail: 'no members recorded' };
   }
 
+  // Cohesion joins methods to the fields they touch. With no methods there is nothing that
+  // could wire two fields together, so every field is trivially its own cluster and the LCOM
+  // proxy returns 0 — a verdict, not evidence. A data-only type is therefore unavailable,
+  // matching the SQL guard in src/api/routes/analysis.ts rather than scoring it as incohesive.
+  if (methods.size === 0) {
+    return { value: null, detail: `${fields.size} field(s) recorded, but no methods wire them` };
+  }
+
   const adjacency = new Map<string, Set<string>>();
   const ensure = (key: string): Set<string> => {
     const existing = adjacency.get(key);

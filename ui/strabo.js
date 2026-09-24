@@ -53,6 +53,8 @@ import {
   routeSteps,
   writeRouteProgress,
 } from './strabo-route.js';
+import { renderBlocks } from './strabo-panel-blocks.js';
+import { buildBrickAssembly } from './strabo-lego.js';
 import { tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
@@ -392,12 +394,22 @@ const elements = {
   workspacePanel: document.getElementById('workspace-panel'),
   passportPanel: document.getElementById('passport-panel'),
   routePanel: document.getElementById('route-panel'),
+  blocksPanel: document.getElementById('blocks-panel'),
   sourcePanel: document.getElementById('source-panel'),
   screenTabGraph: document.getElementById('screen-tab-graph'),
   screenTabTerminal: document.getElementById('screen-tab-terminal'),
+  screenTabReview: document.getElementById('screen-tab-review'),
+  screenTabHistory: document.getElementById('screen-tab-history'),
   graphScreen: document.getElementById('graph-screen'),
   terminalScreen: document.getElementById('terminal-screen'),
   terminalContainer: document.getElementById('terminal-container'),
+  reviewScreen: document.getElementById('review-screen'),
+  reviewScreenBody: document.getElementById('review-screen-body'),
+  reviewScreenRefresh: document.getElementById('review-screen-refresh'),
+  reviewScreenPending: document.getElementById('review-screen-pending'),
+  historyScreen: document.getElementById('history-screen'),
+  historyScreenBody: document.getElementById('history-screen-body'),
+  historyScreenRefresh: document.getElementById('history-screen-refresh'),
 };
 
 /** `memberData` holds the last loaded member-map payload; `memberUI` is the store slice. */
@@ -1366,7 +1378,16 @@ store.subscribe((_, changed) => {
 
 document.addEventListener('keydown', (event) => {
   const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+  const screen = store.get().ui.screen;
+  const onGraph = screen === 'graph';
+  // Escape leaves a full-screen Review or History tab and returns to the map. The Terminal
+  // screen keeps Escape for its own widgets (switcher, menus).
+  if (event.key === 'Escape' && (screen === 'review' || screen === 'history') && !inField) {
+    event.preventDefault();
+    setScreen('graph');
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && onGraph) {
     event.preventDefault();
     elements.filter.focus();
     elements.filter.select();
@@ -1433,7 +1454,7 @@ document.addEventListener('keydown', (event) => {
     toggleShortcuts();
     return;
   }
-  if (inField || !elements.memberView.hidden) return;
+  if (inField || !elements.memberView.hidden || !onGraph) return;
   const key = event.key.toLowerCase();
   if (key === 'f' && selected) focus(view.cy, selected);
   else if (key === 'i') elements.tbImpact.click();
@@ -1660,15 +1681,12 @@ async function showReview(query, commit = null, branchName = null, { fromHistory
   const overlay = reviewOverlay(data);
   view.overlay(overlay.classes);
   elements.reviewPanel.hidden = false;
-  renderReview(elements.reviewPanel, data, {
-    onClose: closeReview,
-    ...navigation,
-    onSelect: (id) => selectNode(id),
-    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
-    narratorStatus,
-    onNarrate: () => narrateReview(data),
-    onOpenNarratorSettings: openNarratorSettings,
-  });
+  renderReview(elements.reviewPanel, data, reviewHandlers(data, navigation));
+  // The full-screen Review tab mirrors the panel's evidence, so re-render it too when it is
+  // the active screen; otherwise the tab would show the review it had before this one.
+  if (store.get().ui.screen === 'review') {
+    renderReview(elements.reviewScreenBody, data, reviewHandlers(data, navigation, () => setScreen('graph')));
+  }
   const label = branchName ?? (commit ? commit.shortHash : 'working tree');
   elements.status.textContent = `Review ${label}: ${overlay.summary}`;
 }
@@ -1964,6 +1982,23 @@ async function showWorkspace() {
     note.textContent = error.message;
     elements.workspacePanel.append(note);
   }
+  refreshDock();
+}
+
+/**
+ * Open the Blocks window and assemble the map already on screen into bricks.
+ *
+ * The assembly reads `current` — the model the canvas is drawing — so it always describes
+ * exactly what is on the map, at whatever detail level (directories, files, or System units).
+ * Nothing is fetched: a map with no nodes reports that there is nothing to assemble.
+ */
+function showBlocks() {
+  const assembly = buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []);
+  renderBlocks(elements.blocksPanel, assembly, {
+    selected,
+    onOpen: (id) => selectNode(id),
+  });
+  elements.blocksPanel.hidden = false;
   refreshDock();
 }
 
@@ -2864,6 +2899,75 @@ function revealSourceLine(attempt = 0) {
   }
 }
 
+/** Whether an id names a node on the current map, so a control directive cannot point elsewhere. */
+function isMappedNode(id) {
+  return Boolean(id) && (current?.nodes ?? []).some((candidate) => candidate.id === id);
+}
+
+/**
+ * The Terminal's `onControl` hook: a `::strabo::` marker printed by the `strabo` shim on a
+ * session's PATH becomes a read-only map action. The verbs are a fixed set and anything
+ * unknown is ignored; node and file arguments are matched against the current map, so a
+ * directive can never reach a path the source viewer would not already allow.
+ */
+function handleTerminalControl(directive) {
+  const verb = directive?.verb;
+  const args = Array.isArray(directive?.args) ? directive.args : [];
+  switch (verb) {
+    case 'focus': {
+      const id = args[0];
+      if (isMappedNode(id)) {
+        setScreen('graph');
+        selectNode(id);
+      }
+      return;
+    }
+    case 'open': {
+      const file = args[0];
+      const line = Number.parseInt(args[1] ?? '', 10);
+      if (file) {
+        openSourceAt(file, Number.isInteger(line) ? line : null);
+      }
+      return;
+    }
+    case 'highlight': {
+      const ids = args.filter(isMappedNode);
+      if (ids.length > 0) {
+        setScreen('graph');
+        view.highlight(ids);
+      }
+      return;
+    }
+    case 'review': {
+      setScreen('graph');
+      const ref = args[0];
+      const pending = ref
+        ? showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref })
+        : showReview('');
+      Promise.resolve(pending).catch((error) => {
+        showToast(`Review failed (${error.message}).`);
+      });
+      return;
+    }
+    case 'note': {
+      const message = args.join(' ').trim();
+      if (message) {
+        showToast(message);
+      }
+      return;
+    }
+    case 'screen': {
+      const target = args[0];
+      if (target === 'graph' || target === 'terminal') {
+        setScreen(target);
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
+
 /** Which two sides a review row's change is between. */
 function reviewDiffSpec(result, file) {
   if (result?.kind === 'commit' && result.ref) {
@@ -3712,6 +3816,7 @@ terminalScreen = initTerminalScreen(elements.terminalContainer, {
   onSessionsChanged: updateTerminalBadge,
   resolveRepository,
   closeTerminal: () => setScreen('graph'),
+  onControl: handleTerminalControl,
 });
 
 // A delegated run is created server-side; this is how its session reaches the screen.
@@ -3723,22 +3828,156 @@ setDelegateSessionOpener((sessionId) => {
 function setScreen(screen) {
   store.set('ui', { screen });
   const showTerminal = screen === 'terminal';
-  elements.graphScreen.hidden = showTerminal;
+  const showReview = screen === 'review';
+  const showHistory = screen === 'history';
+  const showGraph = !showTerminal && !showReview && !showHistory;
+  elements.graphScreen.hidden = !showGraph;
   elements.terminalScreen.hidden = !showTerminal;
+  if (elements.reviewScreen) elements.reviewScreen.hidden = !showReview;
+  if (elements.historyScreen) elements.historyScreen.hidden = !showHistory;
+  // Floating panels are position-fixed and live outside the graph screen, so hiding the graph
+  // does not hide them: without this they sit on top of the Terminal, Review, and History
+  // screens. The class hides them with the graph and reveals them again on return.
+  document.body.classList.toggle('screen-off-graph', !showGraph);
   // A docked toolbar lives in the footer, outside the graph screen, so it does not hide with
   // the canvas. Mirror the screen state onto it while it is docked.
   if (elements.graphToolbar?.classList.contains('is-docked')) {
-    elements.graphToolbar.hidden = showTerminal;
+    elements.graphToolbar.hidden = !showGraph;
   }
-  elements.screenTabGraph.setAttribute('aria-selected', String(!showTerminal));
+  elements.screenTabGraph.setAttribute('aria-selected', String(showGraph));
   elements.screenTabTerminal.setAttribute('aria-selected', String(showTerminal));
+  elements.screenTabReview?.setAttribute('aria-selected', String(showReview));
+  elements.screenTabHistory?.setAttribute('aria-selected', String(showHistory));
   if (showTerminal) {
     terminalScreen.activate();
+  } else if (showReview) {
+    openReviewScreen();
+  } else if (showHistory) {
+    openHistoryScreen();
   }
 }
 
 elements.screenTabGraph.addEventListener('click', () => setScreen('graph'));
 elements.screenTabTerminal.addEventListener('click', () => setScreen('terminal'));
+elements.screenTabReview?.addEventListener('click', () => setScreen('review'));
+elements.screenTabHistory?.addEventListener('click', () => setScreen('history'));
+
+/**
+ * The handler set a review render needs, shared by the floating Review panel and the
+ * full-screen Review tab so the same evidence and actions appear in both.
+ *
+ * `onClose` differs by surface: the floating panel hides itself, while the full-screen tab
+ * returns to the graph (there is no panel to hide).
+ */
+function reviewHandlers(data, navigation, onClose = closeReview) {
+  return {
+    onClose,
+    ...navigation,
+    onSelect: (id) => selectNode(id),
+    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+    narratorStatus,
+    onNarrate: () => narrateReview(data),
+    onOpenNarratorSettings: openNarratorSettings,
+  };
+}
+
+/**
+ * The full-screen Review tab: show the working-tree change set, or the review this session
+ * last opened (a commit or branch), rendered at the full width of the workspace.
+ *
+ * The floating Review panel owns the request; this simply re-renders whatever it already
+ * loaded into the wider body, so switching tabs never triggers a second Git pass. With
+ * nothing reviewed yet it starts the working-tree review.
+ */
+function openReviewScreen() {
+  const body = elements.reviewScreenBody;
+  if (!body) {
+    return;
+  }
+  if (!currentReview) {
+    body.replaceChildren();
+    const note = document.createElement('p');
+    note.className = 'evidence';
+    note.textContent = 'Reviewing the working tree…';
+    body.append(note);
+    showReview('').catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+    return;
+  }
+  const navigation = { canGoBack: reviewHistory.length > 0, onBack: reviewBack };
+  renderReview(body, currentReview, reviewHandlers(currentReview, navigation, () => setScreen('graph')));
+  if (currentReview.available !== false) {
+    const label = currentReviewRequest?.branchName
+      ?? (currentReviewRequest?.commit ? currentReviewRequest.commit.shortHash : 'working tree');
+    elements.status.textContent = `Review ${label}`;
+  }
+}
+
+/** Recompute the change set currently shown in the full-screen Review tab. */
+function refreshReviewScreen() {
+  const request = currentReviewRequest ?? { query: '', commit: null, branchName: null };
+  showReview(request.query, request.commit, request.branchName, { fromHistory: true }).catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+}
+
+elements.reviewScreenPending?.addEventListener('click', () => {
+  showReview('').catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+elements.reviewScreenRefresh?.addEventListener('click', refreshReviewScreen);
+elements.historyScreenRefresh?.addEventListener('click', () => {
+  loadTimelineScreen().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+});
+
+/**
+ * The full-screen History tab: the recorded commits and the architecture-drift chart,
+ * rendered at full width and kept separate from the floating Timeline panel so opening the
+ * tab never triggers a second history pass for the same repository.
+ */
+async function loadTimelineScreen() {
+  const body = elements.historyScreenBody;
+  if (!body) {
+    return;
+  }
+  body.replaceChildren();
+  const note = document.createElement('p');
+  note.className = 'evidence';
+  note.textContent = 'Loading recorded history…';
+  body.append(note);
+  const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+  const driftQuery = state.repository
+    ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
+    : '?limit=20';
+  const [result, history, drift] = await Promise.all([
+    request(`/analysis/timeline${query}`),
+    request(`/analysis/change-metrics/history${query}`).catch(() => null),
+    request(`/analysis/drift${driftQuery}`).catch(() => null),
+  ]);
+  renderTimeline(body, result, (commit) => {
+    selectCommit(commit).catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  }, {
+    selectedHash: selectedCommitHash,
+    metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+    drift,
+  });
+}
+
+/**
+ * Opening the History tab loads the recorded commits and the drift chart into the screen.
+ * The server caches each commit's measured metrics on disk, so a repeat visit is fast.
+ */
+function openHistoryScreen() {
+  loadTimelineScreen().catch((error) => {
+    elements.status.textContent = `Error: ${error.message}`;
+  });
+}
 
 /**
  * Turn every auxiliary panel into a floating window. The panels keep their ids and
@@ -3984,6 +4223,18 @@ const floatingWindows = initFloatingWindows({
       },
       onClose: () => closeRoute(),
     },
+    {
+      key: 'blocks',
+      element: elements.blocksPanel,
+      title: 'Blocks',
+      dockLabel: 'Blocks',
+      width: 560,
+      height: 620,
+      onOpen: () => showBlocks(),
+      onClose: () => {
+        elements.blocksPanel.hidden = true;
+      },
+    },
   ],
 });
 
@@ -4041,6 +4292,12 @@ if (window.STRABO_TEST) {
     workspace: () => showWorkspace(),
     passport: () => showPassport(),
     route: (file) => showRoute(file),
+    blocks: () => showBlocks(),
+    brickAssembly: () => buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []),
+    setScreen,
+    screen: () => store.get().ui.screen,
+    openReviewScreen,
+    openHistoryScreen,
   };
 }
 

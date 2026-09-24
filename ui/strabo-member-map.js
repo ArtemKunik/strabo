@@ -21,11 +21,19 @@ function totalMembers(memberMap, key) {
  * when the caller has no graph for the file.
  */
 export function memberMapSteps(memberMap, context = {}) {
-  const primary = (memberMap?.types ?? [])[0] ?? null;
+  const types = memberMap?.types ?? [];
+  const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, 'fields');
   const methods = totalMembers(memberMap, 'methods');
   const flow = memberMap?.dataFlow;
   const consumers = context.consumers ?? null;
+
+  // One type is named; several are attributed to the file, because the totals span every
+  // type and naming only the first would claim its siblings' members (a real miscount).
+  const subject =
+    types.length > 1
+      ? `This file (${types.length} types) contains`
+      : `${primary?.name ?? 'This file'} contains`;
 
   const wiring =
     flow?.available === false
@@ -36,7 +44,7 @@ export function memberMapSteps(memberMap, context = {}) {
     {
       key: 'fingerprint',
       label: 'fingerprint',
-      caption: `${primary?.name ?? 'This file'} contains ${fields} field(s) and ${methods} behavior(s).`,
+      caption: `${subject} ${fields} field(s) and ${methods} behavior(s).`,
     },
     {
       key: 'members',

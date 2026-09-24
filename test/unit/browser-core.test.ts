@@ -845,6 +845,20 @@ test('memberMapSteps produces the five flow steps with derived captions', () => 
   assert.equal(steps[4].caption, '3 repository consumer(s) import this file.');
 });
 
+test('memberMapSteps attributes a multi-type file to the file, never to its first type', () => {
+  // Regression: RiffStep.kt held RiffNote (2 fields) and RiffStep (1 field), and the caption
+  // claimed "RiffNote contains 3 field(s)" — the first type wearing its siblings' members.
+  const multi = {
+    ...memberMap,
+    types: [
+      { ...memberMap.types[0], name: 'RiffNote' },
+      { name: 'RiffStep', visibility: 'public', line: 8, fields: [{ name: 'notes', visibility: 'public', line: 9, reads: 0, writes: 0 }], methods: [] },
+    ],
+  };
+  const steps = memberMapSteps(multi, {});
+  assert.equal(steps[0].caption, 'This file (2 types) contains 4 field(s) and 3 behavior(s).');
+});
+
 test('memberMapSteps reports missing wiring and consumers instead of inventing them', () => {
   const steps = memberMapSteps(
     { available: true, types: memberMap.types, dataFlow: { available: false, reason: 'no-field-access' } },

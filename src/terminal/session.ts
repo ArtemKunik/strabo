@@ -77,6 +77,62 @@ function scanTitles(text: string): { titles: string[]; tail: string } {
   return { titles, tail: tail.length > OSC_TAIL_LIMIT ? '' : tail };
 }
 
+/**
+ * Console titles that name a shell rather than a task. A tab gains nothing from "Windows
+ * PowerShell" or "cmd.exe", so these are dropped and the session keeps its assigned name.
+ */
+const SHELL_TITLE_NOISE = new Set([
+  'windows powershell',
+  'command prompt',
+  'powershell',
+  'pwsh',
+  'cmd',
+  'cmd.exe',
+  'bash',
+  'zsh',
+  'sh',
+  'fish',
+  'nu',
+  '-bash',
+  '-zsh',
+  '-sh',
+  'node',
+  'python',
+  'python3',
+]);
+
+function isPathLikeTitle(value: string): boolean {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith('\\\\') || /^\/(?:[^/]|$)/.test(value);
+}
+
+/**
+ * Turn an OSC 0/2 title into a tab-worthy name, or null when it is noise.
+ *
+ * Shells and the Windows console routinely set the title to a full executable or directory
+ * path — `C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe`, or the current
+ * directory — or to a bare shell name. Showing either as a tab is worse than showing the
+ * session's own name, so a path-like or shell-name title is rejected and the caller keeps the
+ * assigned title. Anything else is kept, whitespace-collapsed and capped.
+ */
+export function normalizeOscTitle(raw: string): string | null {
+  const collapsed = raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!collapsed) {
+    return null;
+  }
+  const withoutPrefix = collapsed.replace(/^administrator:\s*/i, '').trim();
+  const candidate = withoutPrefix || collapsed;
+  if (isPathLikeTitle(candidate)) {
+    return null;
+  }
+  if (SHELL_TITLE_NOISE.has(candidate.toLowerCase())) {
+    return null;
+  }
+  if (!candidate.includes(' ') && /\.(exe|com|bat|cmd|ps1)$/i.test(candidate)) {
+    return null;
+  }
+  return candidate.slice(0, 80);
+}
+
 export interface CreatePtySessionParams {
   meta: SessionMeta;
   argv?: string[];
@@ -172,9 +228,16 @@ class PtySession implements TerminalSession {
     this.oscTail = tail;
     this.meta.seq = seq;
     this.meta.lastActivity = new Date().toISOString();
-    for (const listener of [...this.titleListeners]) {
-      for (const title of titles) {
-        listener(title);
+    for (const title of titles) {
+      const clean = normalizeOscTitle(title);
+      if (!clean) {
+        continue;
+      }
+      // Update the shared meta too, so `list()`/`sessions` broadcasts carry the same clean
+      // title the `title` event announced instead of reverting the tab to its default.
+      this.meta.title = clean;
+      for (const listener of [...this.titleListeners]) {
+        listener(clean);
       }
     }
     for (const listener of [...this.dataListeners]) {

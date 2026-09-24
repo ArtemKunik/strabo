@@ -439,8 +439,12 @@ test('file health reports cohesion unavailable, with the reason, instead of scor
   const { symbols } = await extractSqlSymbols('orders.sql', 'CREATE TABLE orders (id INT, total INT, note TEXT);');
   const graph = { nodes: [], edges: [], diagnostics: [], excluded: [] };
 
-  const scored = computeFileHealth(graph, 'orders.sql', symbols, []);
-  assert.equal(scored.axes.find((axis) => axis.key === 'cohesion')?.value, 0, 'the unguarded score is misleading');
+  const unguarded = computeFileHealth(graph, 'orders.sql', symbols, []);
+  assert.equal(
+    unguarded.axes.find((axis) => axis.key === 'cohesion')?.value,
+    null,
+    'a data-only type is unavailable, not scored 0',
+  );
 
   const guarded = computeFileHealth(graph, 'orders.sql', symbols, [], 'not measured: sql members have no methods');
   const cohesion = guarded.axes.find((axis) => axis.key === 'cohesion');

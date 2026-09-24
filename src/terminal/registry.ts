@@ -13,6 +13,7 @@ import type {
 import { TERMINAL_LIMITS } from './protocol.ts';
 import { listPresets, type TerminalPreset } from './presets.ts';
 import { createPtySession, type PtySpawner } from './session.ts';
+import { withTerminalShimPath } from './shim.ts';
 
 export interface SessionManagerOptions {
   /** Injected PTY factory for tests; the default lazily imports `node-pty`. */
@@ -174,6 +175,8 @@ function buildEnv(id: string, repo: string, extra: Record<string, string> | unde
   }
   env.STRABO_SESSION_ID = id;
   env.STRABO_REPO = repo;
+  // Put the `strabo` control shim on PATH so a session can drive the map from the shell.
+  withTerminalShimPath(env);
   return env;
 }
 
@@ -192,7 +195,7 @@ export function getSessionManager(config: StraboConfig): SessionManager {
     manager = config.terminalDaemon
       ? createHostSessionManager(config, {
           fallback: () => createSessionManager(config),
-          onLog: (message) => config.serverLog?.(message),
+          onLog: (message: string) => config.serverLog?.(message),
         })
       : createSessionManager(config);
     process.once('exit', () => manager?.shutdown());

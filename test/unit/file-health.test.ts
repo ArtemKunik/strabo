@@ -73,7 +73,9 @@ test('cohesion is derived from member wiring, and an unconnected field lowers it
 
   const fieldsOnly = symbols.filter((entry) => entry.kind === 'field');
   const noMethods = computeFileHealth(graph, 'src/a.ts', fieldsOnly, []);
-  assert.equal(axisValue(noMethods, 'cohesion'), 0);
+  const noMethodCohesion = noMethods.axes.find((axis) => axis.key === 'cohesion');
+  assert.equal(noMethodCohesion?.value, null, 'a data-only type is unavailable, not scored 0');
+  assert.match(noMethodCohesion?.detail ?? '', /no methods wire them/);
 });
 
 test('cohesion is unavailable when no members were recorded', () => {

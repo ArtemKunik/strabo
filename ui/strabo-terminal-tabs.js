@@ -26,6 +26,33 @@ export function sessionTabLabel(meta) {
 }
 
 /**
+ * Display labels for a whole strip, disambiguating duplicates with an ordinal. Several shells
+ * that fall back to the repository name (because their OSC title was rejected as noise) would
+ * otherwise read the same, so the second becomes "name 2", the third "name 3".
+ */
+export function tabLabels(sessions) {
+  const list = sessions ?? [];
+  const totals = new Map();
+  for (const session of list) {
+    const base = sessionTabLabel(session);
+    totals.set(base, (totals.get(base) ?? 0) + 1);
+  }
+  const seen = new Map();
+  const labels = new Map();
+  for (const session of list) {
+    const base = sessionTabLabel(session);
+    if ((totals.get(base) ?? 0) > 1) {
+      const index = (seen.get(base) ?? 0) + 1;
+      seen.set(base, index);
+      labels.set(session.id, `${base} ${index}`);
+    } else {
+      labels.set(session.id, base);
+    }
+  }
+  return labels;
+}
+
+/**
  * The status badge for a tab. Running shells get a quiet dot; a watch session pulses; an
  * exited session is named, and a non-zero code is called out as an error rather than hidden.
  */
@@ -98,7 +125,7 @@ export function digitSessionId(order, key) {
   return (order ?? [])[index - 1] ?? null;
 }
 
-function tabButton(session, active, handlers) {
+function tabButton(session, active, handlers, label = sessionTabLabel(session)) {
   // A div rather than a button: the close control is itself a button, and a button may not
   // contain another. The roving tabindex keeps it keyboard-reachable like a button.
   const button = document.createElement('div');
@@ -117,14 +144,14 @@ function tabButton(session, active, handlers) {
   dot.className = `terminal-tab-badge ${badge.className}`;
   dot.setAttribute('aria-hidden', 'true');
 
-  const label = document.createElement('span');
-  label.className = 'terminal-tab-label';
-  label.textContent = sessionTabLabel(session);
+  const labelElement = document.createElement('span');
+  labelElement.className = 'terminal-tab-label';
+  labelElement.textContent = label;
 
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'terminal-tab-close';
-  close.setAttribute('aria-label', `Close ${sessionTabLabel(session)}`);
+  close.setAttribute('aria-label', `Close ${label}`);
   close.title = 'Close session';
   close.textContent = '×';
   close.addEventListener('click', (event) => {
@@ -132,7 +159,7 @@ function tabButton(session, active, handlers) {
     handlers.onClose?.(session.id);
   });
 
-  button.append(dot, label, close);
+  button.append(dot, labelElement, close);
   button.addEventListener('click', () => handlers.onSelect?.(session.id));
   button.addEventListener('dragstart', (event) => {
     event.dataTransfer?.setData('text/plain', session.id);
@@ -164,7 +191,10 @@ export function renderTabs(container, sessions, activeId, handlers = {}) {
   if (!container) {
     return;
   }
-  const buttons = (sessions ?? []).map((session) => tabButton(session, session.id === activeId, handlers));
+  const labels = tabLabels(sessions);
+  const buttons = (sessions ?? []).map((session) =>
+    tabButton(session, session.id === activeId, handlers, labels.get(session.id)),
+  );
   container.replaceChildren(...buttons);
   container.onkeydown = (event) => {
     const items = [...container.querySelectorAll('.terminal-tab')];
