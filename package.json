@@ -1,6 +1,6 @@
 {
-  "name": "strabo",
-  "version": "0.0.0",
+  "name": "strabo-map",
+  "version": "0.1.0",
   "description": "Turn a local source repository into an interactive map of its files, dependencies, and change impact.",
   "keywords": [
     "repository",
@@ -11,7 +11,14 @@
   ],
   "author": "Artem Kunyk",
   "license": "MIT",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArtemKunik/strabo.git"
+  },
+  "homepage": "https://github.com/ArtemKunik/strabo#readme",
+  "bugs": {
+    "url": "https://github.com/ArtemKunik/strabo/issues"
+  },
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -59,10 +66,12 @@
     "@xterm/xterm": "^6.0.0",
     "cytoscape": "^3.30.4",
     "express": "^5.1.0",
-    "node-pty": "^1.1.0",
     "web-tree-sitter": "^0.27.0",
     "ws": "^8.21.3",
     "yaml": "^2.9.1"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   },
   "peerDependencies": {
     "pg": "^8.11.0"

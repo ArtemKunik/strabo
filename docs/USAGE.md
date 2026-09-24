@@ -6,7 +6,18 @@ internals and limits live in [DESIGN.md](./DESIGN.md).
 
 ## Install and run
 
-Requires Node 22+ and npm. From the repository root:
+Requires Node 22+. The quickest route is the npm package, `strabo-map`, which installs the
+`strabo` command:
+
+```sh
+npx strabo-map /path/to/repo
+npm install -g strabo-map && strabo /path/to/repo
+```
+
+The Terminal screen needs the optional native module `node-pty`. An install that could not
+build it still maps, reviews, and reports; only the Terminal names the missing module.
+
+To run from a clone of this repository instead:
 
 ```sh
 npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
