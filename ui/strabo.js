@@ -61,6 +61,7 @@ import { createSettingsController } from './strabo-settings-controller.js';
 import { createRepositoryPanels } from './strabo-repo-panels.js';
 import { createLensController } from './strabo-lens-controller.js';
 import { createRepositoryPicker } from './strabo-repositories.js';
+import { createSystemUnits } from './strabo-system-units.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -301,6 +302,7 @@ app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
+app.units = createSystemUnits(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -338,7 +340,7 @@ async function scan({ refresh = false } = {}) {
       !state.systemAutoOpened
     ) {
       state.systemAutoOpened = true;
-      openUnit(model.systemSingleUnit);
+      app.units.openUnit(model.systemSingleUnit);
       return;
     }
     const restoreFile = state.mode === 'system' ? state.unitFile : null;
@@ -375,15 +377,15 @@ async function scan({ refresh = false } = {}) {
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === 'system') {
-        if (!prefix) closeUnit();
+        if (!prefix) app.units.closeUnit();
         return;
       }
       state.prefix = prefix;
       scan();
     });
-    updateOutsideButton();
+    app.units.updateOutsideButton();
     applyModeChrome();
-    updateUnitsButton();
+    app.units.updateUnitsButton();
     app.lenses.updateEdgeKindButton();
     app.lenses.updateCoChangeButton();
     app.lenses.updateLabelsButton();
@@ -394,7 +396,7 @@ async function scan({ refresh = false } = {}) {
     void freshness.refresh({ repository: state.repository });
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
-    updateSystemNote(model);
+    app.units.updateSystemNote(model);
     view.resize();
     fit(view.cy);
     if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
@@ -573,8 +575,8 @@ function selectNode(id) {
     ...(app.current?.systemUnit
       ? {
           outsideShown: state.showOutside,
-          onShowOutside: () => toggleOutsideLinks(),
-          onExpandUnit: (unit) => toggleExpandedUnit(unit),
+          onShowOutside: () => app.units.toggleOutsideLinks(),
+          onExpandUnit: (unit) => app.units.toggleExpandedUnit(unit),
         }
       : {}),
   });
@@ -750,7 +752,7 @@ document.addEventListener('keydown', (event) => {
     }
     // Escape inside an open unit goes back to the L0 unit map.
     if (state.mode === 'system' && state.systemUnit && !inField) {
-      closeUnit();
+      app.units.closeUnit();
       return;
     }
     if (!inField) clearSelection();
@@ -761,7 +763,7 @@ document.addEventListener('keydown', (event) => {
     if (node && !node.systemUnit) {
       // Enter opens the focused unit, matching a double-click.
       event.preventDefault();
-      openUnit(app.selected);
+      app.units.openUnit(app.selected);
       return;
     }
   }
@@ -775,7 +777,7 @@ document.addEventListener('keydown', (event) => {
   if (key === 'f' && app.selected) focus(view.cy, app.selected);
   else if (key === 'i') elements.tbImpact.click();
   else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
-  else if (key === 'u' && state.mode === 'system' && state.systemUnit) closeUnit();
+  else if (key === 'u' && state.mode === 'system' && state.systemUnit) app.units.closeUnit();
   else if (key === 'p') elements.tbPath.click();
   else if (key === 'b') elements.tbBoundaries.click();
   else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
@@ -848,98 +850,6 @@ function onSelect(id) {
   selectNode(id);
 }
 
-/** Open one build unit in System mode, showing its files inside their layers. */
-function openUnit(id) {
-  if (state.mode !== 'system') {
-    return;
-  }
-  const node = app.current?.nodes.find((candidate) => candidate.id === id);
-  state.systemUnit = id;
-  state.systemUnitLabel = node?.label ?? id;
-  state.unitFile = null;
-  state.showOutside = false;
-  state.expandedUnits = [];
-  scan();
-}
-
-/** Leave a unit back to the L0 unit map. */
-function closeUnit() {
-  state.systemUnit = null;
-  state.systemUnitLabel = null;
-  state.unitFile = null;
-  state.showOutside = false;
-  state.expandedUnits = [];
-  scan();
-}
-
-/**
- * Draw or hide the selected file's cross-unit links (L17).
- *
- * Nothing crosses the unit frame until this is asked for; the choice is part of the deep
- * link and is refetched with the selected file so the links end at their target unit boxes.
- */
-function toggleOutsideLinks() {
-  if (state.mode !== 'system' || !state.systemUnit) {
-    return;
-  }
-  if (!state.unitFile) {
-    elements.hover.textContent = 'Select a file inside the unit before showing outside links.';
-    return;
-  }
-  state.showOutside = !state.showOutside;
-  state.expandedUnits = [];
-  updateOutsideButton();
-  scan();
-}
-
-/** Expand or fold a target unit's badge, revealing the files it holds in place. */
-function toggleExpandedUnit(id) {
-  const set = new Set(state.expandedUnits ?? []);
-  if (set.has(id)) {
-    set.delete(id);
-  } else {
-    set.add(id);
-  }
-  state.expandedUnits = [...set].sort();
-  scan();
-}
-
-/** The L19 note: a one-unit repository says why it skipped the L0 unit map. */
-function updateSystemNote(model) {
-  if (!elements.systemNote) {
-    return;
-  }
-  const single = Boolean(model?.system && model.systemUnit && model.systemSingleUnit === model.systemUnit);
-  elements.systemNote.hidden = !single;
-  if (single) {
-    elements.systemNote.textContent = '1 build unit: showing its layers';
-  }
-}
-
-/** The toolbar action appears only when a unit is open; its pressed state follows the flag. */
-function updateOutsideButton() {
-  if (!elements.tbOutside) {
-    return;
-  }
-  const shown = state.mode === 'system' && Boolean(state.systemUnit);
-  elements.tbOutside.hidden = !shown;
-  elements.tbOutside.classList.toggle('active', state.showOutside);
-  elements.tbOutside.setAttribute('aria-pressed', String(state.showOutside));
-}
-
-/**
- * The explicit way back to the unit map (L20).
- *
- * Esc and the breadcrumb both leave a unit, but neither is visible on the canvas, so a
- * reader who has just opened a unit needs a control that names where it goes.
- */
-function updateUnitsButton() {
-  if (!elements.tbUnits) {
-    return;
-  }
-  elements.tbUnits.hidden = !(state.mode === 'system' && Boolean(state.systemUnit));
-}
-
 /**
  * Centre-selection only has a target once a node is selected. Left enabled with nothing
  * selected it reads as a control that does nothing, so it follows the selection instead.
@@ -976,7 +886,7 @@ function onDrill(id) {
       if (!id.endsWith('#support')) viewSource(id);
       return;
     }
-    openUnit(id);
+    app.units.openUnit(id);
     return;
   }
   if (state.mode === 'block') {
@@ -1328,12 +1238,6 @@ elements.tbFocus.addEventListener('click', () => {
     focus(view.cy, app.selected);
   }
 });
-if (elements.tbOutside) {
-  elements.tbOutside.addEventListener('click', () => toggleOutsideLinks());
-}
-if (elements.tbUnits) {
-  elements.tbUnits.addEventListener('click', () => closeUnit());
-}
 elements.tbPath.addEventListener('click', () => {
   state.pathMode = !state.pathMode;
   state.pathFrom = null;
@@ -2362,10 +2266,10 @@ if (window.STRABO_TEST) {
     state,
     select: selectNode,
     drill: onDrill,
-    openUnit,
-    closeUnit,
-    toggleOutsideLinks,
-    toggleExpandedUnit,
+    openUnit: app.units.openUnit,
+    closeUnit: app.units.closeUnit,
+    toggleOutsideLinks: app.units.toggleOutsideLinks,
+    toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,
     selectEdge,
     model: () => app.current,
