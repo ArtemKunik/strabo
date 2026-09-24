@@ -1,3 +1,4 @@
+import { resolveExecutable } from './executable.ts';
 import type { BacklogSlice, SessionMeta, TerminalSession } from './protocol.ts';
 import { TERMINAL_LIMITS } from './protocol.ts';
 
@@ -30,7 +31,9 @@ export type PtySpawner = (
 
 async function defaultSpawner(file: string, args: string[], options: PtySpawnOptions): Promise<PtyProcess> {
   const pty = await import('node-pty');
-  return pty.spawn(file, args, {
+  // ConPTY does not search PATH; resolve the command first so a bare `opencode`, `claude`,
+  // or `npm` launches the same way it would from a shell.
+  return pty.spawn(resolveExecutable(file, options.env), args, {
     name: 'xterm-color',
     cols: options.cols,
     rows: options.rows,
