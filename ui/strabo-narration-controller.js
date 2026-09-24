@@ -203,7 +203,7 @@ export function createNarrationController(app) {
   async function narrateRouteStep(step) {
     return postNarration(
       ROUTE_STEP_INSTRUCTION,
-      buildRouteStepEvidence(step, app.currentRouteSummary()),
+      buildRouteStepEvidence(step, app.panels.currentRouteSummary()),
     );
   }
 
