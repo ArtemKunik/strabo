@@ -55,6 +55,7 @@
     "start": "node bin/strabo.js",
     "dev": "node --watch src/cli.ts",
     "test": "node --test \"test/unit/**/*.test.ts\"",
+    "test:coverage": "node -e \"require('fs').mkdirSync('coverage', { recursive: true })\" && node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info \"test/unit/**/*.test.ts\"",
     "test:pack": "node scripts/verify-package.mjs",
     "bench": "node scripts/bench.mjs",
     "acceptance": "npm run build && node scripts/prepare-acceptance.mjs && cucumber-js --config test/acceptance/cucumber.mjs",

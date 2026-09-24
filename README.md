@@ -114,6 +114,7 @@ read-only boundary are in [docs/MCP.md](docs/MCP.md).
 
 ```sh
 npm test              # unit tests (Node's built-in runner, no browser)
+npm run test:coverage # unit tests plus coverage/lcov.info, which Strabo reads on itself
 npm run acceptance:install   # once: download Chromium
 npm run acceptance    # Cucumber + Playwright, writes an HTML report with screenshots
 npm run test:pack     # release readiness: pack, install in a clean consumer, run shipped code

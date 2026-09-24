@@ -44,7 +44,7 @@ record is reported as `unavailable`, never invented.
 | 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Planned (J1-J14: access direction, data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
-| 34 | Code coverage that tells | Planned (U0-U7: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
+| 34 | Code coverage that tells | In progress (U0 done; U1-U7 planned: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2104,7 +2104,7 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
 
 ### Slices
 
-- **U0 - Dogfood.** Add `npm run test:coverage`
+- **U0 - Dogfood.** *Done.* Add `npm run test:coverage`
   (`node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`,
   alongside the default reporter) and add `coverage/` to `.gitignore`. Strabo on itself then has
   a measured report to show. This is also the acceptance fixture for the slices below.
