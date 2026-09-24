@@ -112,7 +112,7 @@ export function createSelectionController(app) {
     if (!app.current?.system) {
       loadMembers(id);
     }
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /** Fetch members, functions, and the impact passport for the selected file; all on demand. */
@@ -194,7 +194,7 @@ export function createSelectionController(app) {
     elements.inspector.hidden = true;
     view.clearGroupSelection();
     updateFocusButton();
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
@@ -239,7 +239,7 @@ export function createSelectionController(app) {
       view.clearEdge();
       app.selectedEdgeId = null;
       renderEdgeEvidence(elements.edgePanel, null);
-      app.refreshDock();
+      app.windows.refreshDock();
       return;
     }
     app.selectedEdgeId = edgeId;
@@ -254,13 +254,13 @@ export function createSelectionController(app) {
         view.clearEdge();
         app.selectedEdgeId = null;
         renderEdgeEvidence(elements.edgePanel, null);
-        app.refreshDock();
+        app.windows.refreshDock();
       },
     });
     if (evidence) {
       elements.hover.textContent = `${evidence.source} → ${evidence.target} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
     }
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   function onSelect(id) {

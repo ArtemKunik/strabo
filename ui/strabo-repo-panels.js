@@ -47,7 +47,7 @@ export function createRepositoryPanels(app) {
       note.textContent = error.message;
       elements.workspacePanel.append(note);
     }
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
@@ -64,7 +64,7 @@ export function createRepositoryPanels(app) {
       onOpen: (id) => app.selection.selectNode(id),
     });
     elements.blocksPanel.hidden = false;
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /** The report and the compatibility tools' state; the tools re-render after each action. */
@@ -151,7 +151,7 @@ export function createRepositoryPanels(app) {
   function closeWorkspace() {
     elements.workspacePanel.hidden = true;
     view.crossRepo(null);
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
@@ -177,12 +177,12 @@ export function createRepositoryPanels(app) {
       note.textContent = error.message;
       elements.passportPanel.append(note);
     }
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   function closePassport() {
     elements.passportPanel.hidden = true;
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
@@ -262,7 +262,7 @@ export function createRepositoryPanels(app) {
         onRetry: () => showRoute(preferredFile),
       });
     }
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   function renderRouteView() {
@@ -311,7 +311,7 @@ export function createRepositoryPanels(app) {
 
   function closeRoute() {
     elements.routePanel.hidden = true;
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**

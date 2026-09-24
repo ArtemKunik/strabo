@@ -58,7 +58,7 @@ export function createMemberMapController(app) {
     // controller raises the window above the passport and lands focus in it. Setting the
     // `hidden` attribute alone let the window appear behind the passport, silently.
     app.floatingWindows.find((controller) => controller.key === 'member')?.open();
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   function memberStepCount() {
@@ -170,7 +170,7 @@ export function createMemberMapController(app) {
     elements.memberView.hidden = true;
     memberUI.dim = false;
     store.set('ui', { memberOpen: false });
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   return {

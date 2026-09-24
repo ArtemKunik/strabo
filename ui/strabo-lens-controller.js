@@ -87,7 +87,7 @@ export function createLensController(app) {
     view.overlay(null);
     view.setHiddenCoupling(null, false);
     renderOverlayPanel(elements.overlayPanel, '', null);
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
@@ -99,7 +99,7 @@ export function createLensController(app) {
     if (kind === 'none') {
       view.overlay(null);
       renderOverlayPanel(elements.overlayPanel, '', null);
-      app.refreshDock();
+      app.windows.refreshDock();
       return;
     }
     const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
@@ -132,7 +132,7 @@ export function createLensController(app) {
       onSelect: (id) => app.selection.selectNode(id),
       ...(actions.length > 0 ? { actions } : {}),
     });
-    app.refreshDock();
+    app.windows.refreshDock();
   }
 
   /**
