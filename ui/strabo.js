@@ -14,7 +14,7 @@ import { API_PATH, buildAgentPrompt, buildGraphQuery, coChangePartnersFor, edgeE
 import { createView } from './strabo-view.js';
 import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
 import { createFrameSampler } from './strabo-perf.js';
-import { readIslandLayout, writeIslandLayout } from './strabo-island-layout.js';
+import { writeIslandLayout } from './strabo-island-layout.js';
 import { closeContextMenu, copyText, launchAgent, setDelegateSessionOpener, showContextMenu, showPromptReview, showToast } from './strabo-delegate.js';
 import { initFloatingWindows } from './strabo-float.js';
 import { clampMenuLeft, initFloatingToolbar } from './strabo-float-toolbar.js';
@@ -75,6 +75,7 @@ import { crossRepoNodeIds } from './strabo-workspace.js';
 import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 import { initTerminalScreen } from './strabo-terminal.js';
+import { createViewPrefs } from './strabo-view-prefs.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -159,122 +160,6 @@ const store = createStore({
 });
 const state = store.get().view;
 const memberUI = store.get().member;
-
-/* ------------------------------------------- Persisted view preferences */
-
-/**
- * View settings (detail mode, review overlay, filter) persist per repository
- * in localStorage, so a reload or revisit restores the exact view. The key is
- * the repository root; unknown values are ignored rather than applied.
- */
-const VIEW_PREFS_PREFIX = 'strabo.view.';
-let prefsSaveTimer = null;
-
-function viewPrefsKey(repository) {
-  return `${VIEW_PREFS_PREFIX}${repository ?? 'default'}`;
-}
-
-function readViewPrefs(repository) {
-  try {
-    const raw = window.localStorage.getItem(viewPrefsKey(repository));
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return null;
-    }
-    const prefs = {};
-    if (parsed.mode === 'block' || parsed.mode === 'file' || parsed.mode === 'system') {
-      prefs.mode = parsed.mode;
-    }
-    if (typeof parsed.overlay === 'string' && parsed.overlay !== '') {
-      prefs.overlay = parsed.overlay;
-    }
-    if (typeof parsed.filter === 'string' && parsed.filter !== '') {
-      prefs.filter = parsed.filter.slice(0, 200);
-    }
-    if (parsed.edgeKind === 'calls' || parsed.edgeKind === 'imports') {
-      prefs.edgeKind = parsed.edgeKind;
-    }
-    if (parsed.coChange === true) {
-      prefs.coChange = true;
-    }
-    if (parsed.locLens === true) {
-      prefs.locLens = true;
-    }
-    return prefs;
-  } catch {
-    return null;
-  }
-}
-
-function writeViewPrefs() {
-  try {
-    window.localStorage.setItem(
-      viewPrefsKey(state.repository),
-      JSON.stringify({
-        mode: state.mode,
-        overlay: state.overlay,
-        filter: state.filter,
-        edgeKind: state.edgeKind,
-        coChange: state.coChange,
-        locLens: state.locLens,
-      }),
-    );
-  } catch {
-    // Storage unavailable (private mode, quota): the app simply doesn't persist.
-  }
-}
-
-function schedulePrefsSave() {
-  if (prefsSaveTimer) {
-    clearTimeout(prefsSaveTimer);
-  }
-  prefsSaveTimer = setTimeout(() => {
-    prefsSaveTimer = null;
-    writeViewPrefs();
-  }, 300);
-}
-
-/** Apply saved settings for the current repository; call before the first scan. */
-function applyViewPrefs() {
-  // The island arrangement is per repository too, and applies even when no view prefs exist.
-  view.setIslandOffsets(readIslandLayout(state.repository));
-  const prefs = readViewPrefs(state.repository);
-  if (!prefs) {
-    return;
-  }
-  if (prefs.mode) {
-    state.mode = prefs.mode;
-    elements.detail.value = prefs.mode;
-  }
-  if (prefs.filter) {
-    state.filter = prefs.filter;
-    elements.filter.value = prefs.filter;
-  }
-  if (prefs.overlay && [...elements.overlay.options].some((option) => option.value === prefs.overlay)) {
-    state.overlay = prefs.overlay;
-    elements.overlay.value = prefs.overlay;
-    // File-mode overlays need file mode (same rule as the change handler).
-    if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== 'file') {
-      state.mode = 'file';
-      elements.detail.value = 'file';
-    }
-  }
-  // The calls lens only reads edges in file mode.
-  if (prefs.edgeKind === 'calls' && state.mode === 'file') {
-    state.edgeKind = 'calls';
-  }
-  // The co-change lens is remembered, but its report is only fetched when file mode draws it.
-  if (prefs.coChange) {
-    state.coChange = true;
-  }
-  // The large-file lens needs a line count, which only file nodes carry.
-  if (prefs.locLens) {
-    state.locLens = true;
-  }
-}
 
 const view = createView(document.getElementById('graph'));
 
@@ -479,7 +364,14 @@ Object.assign(app, { store, state, memberUI, view, elements, request });
  * Feature controllers. Each takes `app`, reads shared state from it, and reaches other
  * features through it (`app.git.showReview(…)`) at call time, so creation order is free.
  */
+// <core-actions>
+Object.assign(app, {
+
+});
+// </core-actions>
+
 // <controllers>
+app.prefs = createViewPrefs(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -2498,7 +2390,7 @@ function openFolderDialog() {
 
 /** Point the app at a chosen repository, remembering it as the active one. */
 async function useRepository(path) {
-  writeViewPrefs();
+  app.prefs.writeViewPrefs();
   state.repository = path;
   state.prefix = '';
   state.filter = '';
@@ -2512,7 +2404,7 @@ async function useRepository(path) {
     elements.status.textContent = `Error: ${error.message}`;
     return;
   }
-  applyViewPrefs();
+  app.prefs.applyViewPrefs();
   scan();
 }
 
@@ -2639,7 +2531,7 @@ function toggleEdgeKind() {
   state.edgeKind = state.edgeKind === 'calls' ? 'imports' : 'calls';
   updateEdgeKindButton();
   applyEdgeKindLens();
-  schedulePrefsSave();
+  app.prefs.schedulePrefsSave();
 }
 
 /** The calls button only appears in file mode; its pressed state follows the lens. */
@@ -2666,7 +2558,7 @@ let coChangeRepository = null;
 async function toggleCoChange() {
   state.coChange = !state.coChange;
   updateCoChangeButton();
-  schedulePrefsSave();
+  app.prefs.schedulePrefsSave();
   if (!state.coChange) {
     view.setCoChange(null, false);
     return;
@@ -2727,7 +2619,7 @@ function toggleLocLens() {
   }
   state.locLens = !state.locLens;
   applyLocLens();
-  schedulePrefsSave();
+  app.prefs.schedulePrefsSave();
 }
 
 /** The large-file button appears in file mode; its pressed state follows the lens. */
@@ -3052,13 +2944,13 @@ elements.repository.addEventListener('change', () => {
     return;
   }
   // Save outgoing view settings before switching, then restore the new repo's.
-  writeViewPrefs();
+  app.prefs.writeViewPrefs();
   state.repository = root;
   state.prefix = '';
   state.filter = '';
   elements.filter.value = '';
   elements.forget.disabled = false;
-  applyViewPrefs();
+  app.prefs.applyViewPrefs();
   rememberRepository(root)
     .then(() => scan())
     .catch((error) => {
@@ -3082,7 +2974,7 @@ elements.detail.addEventListener('change', () => {
     state.showOutside = false;
     state.expandedUnits = [];
   }
-  writeViewPrefs();
+  app.prefs.writeViewPrefs();
   scan();
 });
 if (elements.tier) {
@@ -3092,7 +2984,7 @@ if (elements.tier) {
     if (state.tier !== 'off' && state.mode !== 'file') {
       state.mode = 'file';
       elements.detail.value = 'file';
-      writeViewPrefs();
+      app.prefs.writeViewPrefs();
       scan();
       return;
     }
@@ -3103,7 +2995,7 @@ elements.refresh.addEventListener('click', () => scan({ refresh: true }));
 elements.overlay.addEventListener('change', () => {
   state.overlay = elements.overlay.value;
   if (state.overlay === 'none') {
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
     applyOverlay();
     return;
   }
@@ -3112,25 +3004,25 @@ elements.overlay.addEventListener('change', () => {
   if (needsFileMode && state.mode !== 'file') {
     state.mode = 'file';
     elements.detail.value = 'file';
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
     scan();
     return;
   }
-  writeViewPrefs();
+  app.prefs.writeViewPrefs();
   applyOverlay();
 });
 elements.filter.addEventListener('input', () => {
   dismissHint();
   state.filter = elements.filter.value;
   applyFilterToView();
-  schedulePrefsSave();
+  app.prefs.schedulePrefsSave();
 });
 if (elements.filterClear) {
   elements.filterClear.addEventListener('click', () => {
     state.filter = '';
     elements.filter.value = '';
     applyFilterToView();
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
     elements.filter.focus();
   });
 }
@@ -3139,7 +3031,7 @@ if (elements.graphEmptyClear) {
     state.filter = '';
     elements.filter.value = '';
     applyFilterToView();
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
   });
 }
 if (elements.zoomIn) elements.zoomIn.addEventListener('click', () => zoomIn(view.cy));
@@ -4529,7 +4421,7 @@ loadCatalogue()
       elements.repository.value = state.repository;
       elements.forget.disabled = false;
     }
-    applyViewPrefs();
+    app.prefs.applyViewPrefs();
     return scan();
   })
   .then(() => restoreUrlPanel())
