@@ -309,7 +309,7 @@ export function createGitController(app) {
     elements.riskPanel.hidden = false;
     renderRisk(elements.riskPanel, report, {
       onClose: closeRisk,
-      onSelect: (id) => app.selectNode(id),
+      onSelect: (id) => app.selection.selectNode(id),
     });
     elements.status.textContent = riskSummary(report);
   }
@@ -379,7 +379,7 @@ export function createGitController(app) {
     return {
       onClose,
       ...navigation,
-      onSelect: (id) => app.selectNode(id),
+      onSelect: (id) => app.selection.selectNode(id),
       onOpenDiff: (file, entry) => app.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
       narratorStatus: app.narratorStatus,
       onNarrate: () => app.narration.narrateReview(data),

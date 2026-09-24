@@ -111,7 +111,7 @@ export function createSourceViewer(app) {
     app.setScreen('graph');
     const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === target);
     if (node) {
-      app.selectNode(node.id);
+      app.selection.selectNode(node.id);
     }
     const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
     viewSource(node?.id ?? target, { line: lineNumber });

@@ -76,7 +76,7 @@ export function createUrlState(app) {
     if (!app.current || !(app.current.nodes ?? []).some((entry) => entry.id === intent.node)) {
       return;
     }
-    app.selectNode(intent.node);
+    app.selection.selectNode(intent.node);
     await app.memberMap.openMemberMap(intent.node);
   }
 

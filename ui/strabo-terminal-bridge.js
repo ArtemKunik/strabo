@@ -28,7 +28,7 @@ export function createTerminalBridge(app) {
         const id = args[0];
         if (isMappedNode(id)) {
           app.setScreen('graph');
-          app.selectNode(id);
+          app.selection.selectNode(id);
         }
         return;
       }

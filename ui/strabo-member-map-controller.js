@@ -16,7 +16,7 @@ export function createMemberMapController(app) {
     const file = app.memberData?.file;
     closeMemberMap();
     if (file) {
-      app.selectNode(file);
+      app.selection.selectNode(file);
     }
   }
 

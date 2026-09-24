@@ -61,7 +61,7 @@ export function createRepositoryPanels(app) {
     const assembly = buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []);
     renderBlocks(elements.blocksPanel, assembly, {
       selected: app.selected,
-      onOpen: (id) => app.selectNode(id),
+      onOpen: (id) => app.selection.selectNode(id),
     });
     elements.blocksPanel.hidden = false;
     app.refreshDock();
@@ -165,7 +165,7 @@ export function createRepositoryPanels(app) {
     try {
       const report = await app.request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
       renderRepositoryPassport(elements.passportPanel, report, {
-        onSelect: (id) => app.selectNode(id),
+        onSelect: (id) => app.selection.selectNode(id),
         onOpenRoute: () => showRoute(),
         onExportReport: (format) => exportRepositoryReport(format),
         onClose: closePassport,
@@ -301,7 +301,7 @@ export function createRepositoryPanels(app) {
       elements.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
       return;
     }
-    app.selectNode(file);
+    app.selection.selectNode(file);
   }
 
   /** The summary of the route the panel is showing, for the narrator. */

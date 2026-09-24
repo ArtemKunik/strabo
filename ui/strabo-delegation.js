@@ -352,7 +352,7 @@ export function createDelegation(app) {
   }
 
   view.onContext((target, originalEvent) => {
-    app.hideTooltip();
+    app.selection.hideTooltip();
     const x = originalEvent?.clientX ?? window.innerWidth / 2;
     const y = originalEvent?.clientY ?? window.innerHeight / 2;
     // Right-clicking a node that's part of the current multi-selection acts on the whole
@@ -391,7 +391,7 @@ export function createDelegation(app) {
     const selection = window.getSelection?.()?.toString().trim() ?? '';
     event.preventDefault();
     closeContextMenu();
-    app.hideTooltip();
+    app.selection.hideTooltip();
     const resolved = resolveDomDelegateTarget(event.target);
     openDelegateMenu(withSelection(resolved, selection), event.clientX, event.clientY);
   });

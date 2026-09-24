@@ -129,7 +129,7 @@ export function createLensController(app) {
     renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
       kind,
       onClose: clearOverlay,
-      onSelect: (id) => app.selectNode(id),
+      onSelect: (id) => app.selection.selectNode(id),
       ...(actions.length > 0 ? { actions } : {}),
     });
     app.refreshDock();
