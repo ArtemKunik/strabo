@@ -124,7 +124,7 @@ export function createTerminalBridge(app) {
   }
 
   app.terminalScreen = initTerminalScreen(elements.terminalContainer, {
-    openSourceAt: app.source.openSourceAt,
+    openSourceAt: (file, line) => app.source.openSourceAt(file, line),
     toast: terminalToast,
     onSessionsChanged: updateTerminalBadge,
     resolveRepository,
@@ -137,6 +137,4 @@ export function createTerminalBridge(app) {
     app.setScreen('terminal');
     return app.terminalScreen?.openSession?.(sessionId);
   });
-
-  return {};
 }

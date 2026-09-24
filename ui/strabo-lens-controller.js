@@ -18,7 +18,7 @@ import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-
 import { openCommitDialog } from './strabo-commit.js';
 
 export function createLensController(app) {
-  const { state, view, elements } = app;
+  const { state, view, elements, request } = app;
 
   /**
    * The tier lens: colour the file map by tier, and optionally keep one tier.
@@ -69,7 +69,7 @@ export function createLensController(app) {
     if (!coChangeReport || coChangeRepository !== repository) {
       try {
         const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
-        coChangeReport = await app.request(`/analysis/co-change${query}`);
+        coChangeReport = await request(`/analysis/co-change${query}`);
         coChangeRepository = repository;
       } catch (error) {
         return { available: false, detail: error.message };
@@ -103,7 +103,7 @@ export function createLensController(app) {
       return;
     }
     const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-    const data = await app.request(`${OVERLAY_ENDPOINTS[kind]}${query}`);
+    const data = await request(`${OVERLAY_ENDPOINTS[kind]}${query}`);
     if (generation !== undefined && generation !== app.scanGeneration) {
       return;
     }
@@ -151,7 +151,7 @@ export function createLensController(app) {
     }
     try {
       const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-      const report = await app.request(`/analysis/functions${query}`);
+      const report = await request(`/analysis/functions${query}`);
       if (generation !== app.scanGeneration || app.current?.repository?.root !== repository) {
         return;
       }
@@ -212,7 +212,6 @@ export function createLensController(app) {
 
   /** The co-change report, fetched once per repository when the lens is first turned on. */
   let coChangeReport = null;
-
   let coChangeRepository = null;
 
   /**
@@ -234,7 +233,7 @@ export function createLensController(app) {
     if (!coChangeReport || coChangeRepository !== repository) {
       try {
         const query = repository ? `?repository=${encodeURIComponent(repository)}` : '';
-        coChangeReport = await app.request(`/analysis/co-change${query}`);
+        coChangeReport = await request(`/analysis/co-change${query}`);
         coChangeRepository = repository;
       } catch (error) {
         state.coChange = false;

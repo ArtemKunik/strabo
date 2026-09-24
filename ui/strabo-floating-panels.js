@@ -11,8 +11,7 @@ import { initFloatingToolbar } from './strabo-float-toolbar.js';
 export function createFloatingPanels(app) {
   const { state, view, elements } = app;
 
-  /** Show the keyboard cheat-sheet in its own floating window. Declared with `function` so
-   * the key handler above can call it before `floatingWindows` is assigned. */
+  /** Show the keyboard cheat-sheet in its own floating window. */
   function toggleShortcuts() {
     app.floatingWindows?.find?.((controller) => controller.key === 'shortcuts')?.toggle();
   }

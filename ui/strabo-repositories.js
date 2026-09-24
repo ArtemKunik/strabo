@@ -7,12 +7,11 @@ import { API_PATH, folderLocation } from './strabo-core.js';
 import { renderFolderList } from './strabo-panels.js';
 
 export function createRepositoryPicker(app) {
-  const { state, elements } = app;
-
+  const { state, elements, request } = app;
   let browsedFolder = null;
 
   async function loadCatalogue() {
-    const catalogue = await app.request('/repositories');
+    const catalogue = await request('/repositories');
     renderRepositoryOptions(catalogue.repositories, catalogue.active);
   }
 
@@ -58,7 +57,7 @@ export function createRepositoryPicker(app) {
   /** Folder selection is a server-side browse bounded by the configured scan ceiling. */
   async function loadFolder(path) {
     const query = path ? `?path=${encodeURIComponent(path)}` : '';
-    const result = await app.request(`/browse${query}`);
+    const result = await request(`/browse${query}`);
     browsedFolder = result;
     const location = folderLocation(result);
     elements.folderPath.textContent = result.path;
@@ -92,7 +91,7 @@ export function createRepositoryPicker(app) {
 
     try {
       await rememberRepository(path);
-      const catalogue = await app.request('/repositories');
+      const catalogue = await request('/repositories');
       renderRepositoryOptions(catalogue.repositories, path);
     } catch (error) {
       elements.status.textContent = `Error: ${error.message}`;
@@ -115,7 +114,7 @@ export function createRepositoryPicker(app) {
       elements.status.textContent = 'Error: could not forget the repository.';
       return;
     }
-    const catalogue = await app.request('/repositories');
+    const catalogue = await request('/repositories');
     renderRepositoryOptions(catalogue.repositories, catalogue.active);
     if (state.repository !== root) {
       app.scan();

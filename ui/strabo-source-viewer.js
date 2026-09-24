@@ -6,7 +6,7 @@
 import { renderSource } from './strabo-panels.js';
 
 export function createSourceViewer(app) {
-  const { state, elements } = app;
+  const { state, elements, request } = app;
 
   /** The viewer's current target: the file, the two sides, and what has been fetched. */
   let sourceView = null;
@@ -54,13 +54,13 @@ export function createSourceViewer(app) {
         for (const [key, value] of Object.entries(target.diffSpec ?? {})) {
           query.set(key, String(value));
         }
-        const body = await app.request(`/diff?${query.toString()}`);
+        const body = await request(`/diff?${query.toString()}`);
         if (sourceView !== target) return;
         if (body.available === false) target.error = body.detail ?? body.reason;
         else target.diff = body.diff;
       } else {
         if (target.ref) query.set('ref', target.ref);
-        const body = await app.request(`/source?${query.toString()}`);
+        const body = await request(`/source?${query.toString()}`);
         if (sourceView !== target) return;
         target.content = body.content;
       }

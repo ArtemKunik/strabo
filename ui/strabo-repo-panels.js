@@ -18,11 +18,10 @@ import {
 } from './strabo-route.js';
 
 export function createRepositoryPanels(app) {
-  const { state, view, elements } = app;
+  const { state, view, elements, request } = app;
 
   /** The reading route the panel is showing, and the step it is on, so a step can focus the map. */
   let currentRoute = null;
-
   let routeIndex = 0;
 
   /**
@@ -34,8 +33,8 @@ export function createRepositoryPanels(app) {
   async function showWorkspace() {
     elements.workspacePanel.hidden = false;
     try {
-      workspaceReport = await app.request('/workspace');
-      workspaceTools.databases = await app.request('/workspace/databases').catch(() => null);
+      workspaceReport = await request('/workspace');
+      workspaceTools.databases = await request('/workspace/databases').catch(() => null);
       renderWorkspaceView();
       // Ring the files on this map that the report records on one side of a cross-repo flow.
       view.crossRepo(crossRepoNodeIds(workspaceReport, (app.current?.nodes ?? []).map((node) => node.id)));
@@ -92,10 +91,10 @@ export function createRepositoryPanels(app) {
         workspaceTools.base = value;
       },
       onCompat: () => runWorkspaceTool('comparing revisions', async () => {
-        workspaceTools.compat = await app.request(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
+        workspaceTools.compat = await request(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
       }),
       onPreflight: () => runWorkspaceTool('building preflight queries', async () => {
-        workspaceTools.preflight = await app.request(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
+        workspaceTools.preflight = await request(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || 'HEAD')}`);
       }),
       onConfirmRun: (name) => {
         workspaceTools.confirming = name;
@@ -111,11 +110,11 @@ export function createRepositoryPanels(app) {
           database: name,
           base: workspaceTools.base || 'HEAD',
         });
-        workspaceTools.databases = await app.request('/workspace/databases').catch(() => workspaceTools.databases);
+        workspaceTools.databases = await request('/workspace/databases').catch(() => workspaceTools.databases);
       }),
       onLive: (name) => runWorkspaceTool('reading the live schema', async () => {
         workspaceTools.live = await postWorkspace('/workspace/live/schema', { database: name });
-        workspaceTools.databases = await app.request('/workspace/databases').catch(() => workspaceTools.databases);
+        workspaceTools.databases = await request('/workspace/databases').catch(() => workspaceTools.databases);
       }),
     });
   }
@@ -163,7 +162,7 @@ export function createRepositoryPanels(app) {
   async function showPassport() {
     elements.passportPanel.hidden = false;
     try {
-      const report = await app.request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+      const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
       renderRepositoryPassport(elements.passportPanel, report, {
         onSelect: (id) => app.selection.selectNode(id),
         onOpenRoute: () => showRoute(),
@@ -246,7 +245,7 @@ export function createRepositoryPanels(app) {
   async function showRoute(preferredFile) {
     elements.routePanel.hidden = false;
     try {
-      const report = await app.request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+      const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
       currentRoute = report;
       await app.narration.ensureNarratorStatus();
       const steps = routeSteps(report);

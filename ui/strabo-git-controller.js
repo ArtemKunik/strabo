@@ -15,10 +15,8 @@ import {
 import { API_PATH, reviewOverlay, riskSummary } from './strabo-core.js';
 
 export function createGitController(app) {
-  const { store, state, view, elements } = app;
-
+  const { store, state, view, elements, request } = app;
   let selectedCommitHash = null;
-
   let selectedBranchName = null;
 
   /** The base the Branches panel compares with; null lets the server pick the trunk. */
@@ -41,7 +39,7 @@ export function createGitController(app) {
     }
     elements.timelinePanel.hidden = false;
     const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-    const result = await app.request(`/analysis/timeline${query}`);
+    const result = await request(`/analysis/timeline${query}`);
     const driftQuery = state.repository
       ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
       : '?limit=20';
@@ -66,8 +64,8 @@ export function createGitController(app) {
     // uncached commits are measured on the server, so the timeline is usable first and the
     // badges and chart fill in when they are ready.
     const [history, drift] = await Promise.all([
-      app.request(`/analysis/change-metrics/history${query}`).catch(() => null),
-      app.request(`/analysis/drift${driftQuery}`).catch(() => null),
+      request(`/analysis/change-metrics/history${query}`).catch(() => null),
+      request(`/analysis/drift${driftQuery}`).catch(() => null),
     ]);
     if (!elements.timelinePanel.hidden && (history?.available || drift !== null)) {
       draw(
@@ -96,7 +94,7 @@ export function createGitController(app) {
     if (state.repository) params.set('repository', state.repository);
     if (branchBase) params.set('base', branchBase);
     const query = params.toString() ? `?${params}` : '';
-    const result = await app.request(`/analysis/branches${query}`);
+    const result = await request(`/analysis/branches${query}`);
     if (result?.available && result.base) branchBase = result.base.name;
     renderBranches(elements.branchesPanel, result, {
       selected: selectedBranchName,
@@ -203,7 +201,7 @@ export function createGitController(app) {
     renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
     let data;
     try {
-      data = await app.request(`/analysis/review${query}${repository}`);
+      data = await request(`/analysis/review${query}${repository}`);
     } catch (error) {
       if (ticket === reviewTicket) {
         renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
@@ -224,7 +222,7 @@ export function createGitController(app) {
     // structural events. The document is the one `strabo report` prints.
     if (commit) {
       try {
-        data.structural = await app.request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+        data.structural = await request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
       } catch (error) {
         data.structural = { available: false, reason: 'git-error', detail: error.message };
       }
@@ -304,7 +302,7 @@ export function createGitController(app) {
    */
   async function showRisk() {
     const repository = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-    const report = await app.request(`/analysis/risk${repository}`);
+    const report = await request(`/analysis/risk${repository}`);
     closeReview();
     elements.riskPanel.hidden = false;
     renderRisk(elements.riskPanel, report, {
@@ -462,9 +460,9 @@ export function createGitController(app) {
       ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
       : '?limit=20';
     const [result, history, drift] = await Promise.all([
-      app.request(`/analysis/timeline${query}`),
-      app.request(`/analysis/change-metrics/history${query}`).catch(() => null),
-      app.request(`/analysis/drift${driftQuery}`).catch(() => null),
+      request(`/analysis/timeline${query}`),
+      request(`/analysis/change-metrics/history${query}`).catch(() => null),
+      request(`/analysis/drift${driftQuery}`).catch(() => null),
     ]);
     renderTimeline(body, result, (commit) => {
       selectCommit(commit).catch((error) => {

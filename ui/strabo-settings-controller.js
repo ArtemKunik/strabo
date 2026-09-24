@@ -8,13 +8,11 @@ import { showToast } from './strabo-delegate.js';
 import { API_PATH } from './strabo-core.js';
 
 export function createSettingsController(app) {
-  const { state, elements } = app;
+  const { state, elements, request } = app;
 
   /** Server settings from `/settings`, or null while loading. */
   let serverSettings = null;
-
   let settingsStatus = '';
-
   let settingsStatusError = false;
 
   /** Transient Narrator-section UI state (key mode, fetched models, last test result). */
@@ -113,7 +111,7 @@ export function createSettingsController(app) {
   /** Re-read `/settings` so the Narrator section reflects a server change. */
   async function refreshNarratorSettings() {
     try {
-      serverSettings = await app.request('/settings');
+      serverSettings = await request('/settings');
     } catch {
       // Keep the previous view; a failed refresh is not worth an error banner.
     }
@@ -202,7 +200,7 @@ export function createSettingsController(app) {
     settingsStatusError = false;
     renderSettingsView();
     try {
-      serverSettings = await app.request('/settings');
+      serverSettings = await request('/settings');
       // Presets arrive with the narrator status; fetch once if the Functions tab never did.
       if (app.narratorPresets.length === 0) {
         app.narratorStatus = await app.narration.fetchNarratorStatus();

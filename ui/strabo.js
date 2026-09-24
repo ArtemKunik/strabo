@@ -1,10 +1,10 @@
 /**
- * Strabo browser controller.
+ * Strabo browser controller: the composition root.
  *
- * Owns user intent: repository and layer selection, block/file detail level, filters,
- * selection, drill-down, and navigation. Delegates rendering to strabo-view, inspector
- * and panels to strabo-panels, neighbourhood and path operations to strabo-selection,
- * and viewport operations to strabo-viewport.
+ * Owns the shared state (the store, the graph model, the selection) on one `app` object,
+ * the scan that loads and draws the map, the filter, and the screen tabs. Every feature
+ * (selection, lenses, Git panels, settings, delegation, ...) is a controller module that
+ * takes `app` and is created here; rendering stays in strabo-view and strabo-panels.
  *
  * The UI calls only Strabo APIs and renders empty, loading, error, diagnostics,
  * catalogue, layout, evidence, and drill-down states without host globals.
@@ -25,6 +25,7 @@ import { buildBrickAssembly } from './strabo-lego.js';
 import { applyAppearance, readSettings, watchSystemPreferences } from './strabo-settings.js';
 import { fit, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
+import { queryElements } from './strabo-elements.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
 import { createRuntimeReadout } from './strabo-runtime-readout.js';
 import { createUrlState } from './strabo-url-state.js';
@@ -152,94 +153,7 @@ function applyClientPrefs() {
 
 applyClientPrefs();
 
-const elements = {
-  repository: document.getElementById('repository'),
-  browse: document.getElementById('browse'),
-  detail: document.getElementById('detail'),
-  refresh: document.getElementById('refresh'),
-  filter: document.getElementById('filter'),
-  filterClear: document.getElementById('filter-clear'),
-  filterCount: document.getElementById('filter-count'),
-  overlay: document.getElementById('overlay'),
-  tier: document.getElementById('tier'),
-  overlayPanel: document.getElementById('overlay-panel'),
-  edgePanel: document.getElementById('edge-panel'),
-  reviewPanel: document.getElementById('review-panel'),
-  riskPanel: document.getElementById('risk-panel'),
-  diagnosticsToggle: document.getElementById('diagnostics-toggle'),
-  diagnosticsBadge: document.getElementById('diagnostics-badge'),
-  diagnostics: document.getElementById('diagnostics'),
-  legend: document.getElementById('legend'),
-  breadcrumb: document.getElementById('breadcrumb'),
-  status: document.getElementById('status'),
-  freshness: document.getElementById('freshness'),
-  inspector: document.getElementById('inspector'),
-  strip: document.getElementById('strip'),
-  hover: document.getElementById('hover'),
-  systemNote: document.getElementById('system-note'),
-  tooltip: document.getElementById('tooltip'),
-  graphEmpty: document.getElementById('graph-empty'),
-  graphEmptyClear: document.getElementById('graph-empty-clear'),
-  graphLoading: document.getElementById('graph-loading'),
-  zoomIn: document.getElementById('zoom-in'),
-  zoomOut: document.getElementById('zoom-out'),
-  zoomFit: document.getElementById('zoom-fit'),
-  tbFocus: document.getElementById('tb-focus'),
-  tbImpact: document.getElementById('tb-impact'),
-  tbOutside: document.getElementById('tb-outside'),
-  tbUnits: document.getElementById('tb-units'),
-  tbPath: document.getElementById('tb-path'),
-  tbBoundaries: document.getElementById('tb-boundaries'),
-  tbCalls: document.getElementById('tb-calls'),
-  tbCoChange: document.getElementById('tb-cochange'),
-  tbLabels: document.getElementById('tb-labels'),
-  tbLoc: document.getElementById('tb-loc'),
-  tbTimeline: document.getElementById('tb-timeline'),
-  tbReview: document.getElementById('tb-review'),
-  tbRisk: document.getElementById('tb-risk'),
-  tbBranches: document.getElementById('tb-branches'),
-  tbClear: document.getElementById('tb-clear'),
-  tbOverflow: document.getElementById('tb-overflow'),
-  tbOverflowMenu: document.getElementById('tb-overflow-menu'),
-  graphToolbar: document.querySelector('.graph-toolbar'),
-  groupCount: document.getElementById('group-count'),
-  tbDelegateGroup: document.getElementById('tb-delegate-group'),
-  timelinePanel: document.getElementById('timeline-panel'),
-  branchesPanel: document.getElementById('branches-panel'),
-  narrationPanel: document.getElementById('narration-panel'),
-  folderDialog: document.getElementById('folder-dialog'),
-  folderPath: document.getElementById('folder-path'),
-  folderNote: document.getElementById('folder-note'),
-  folderList: document.getElementById('folder-list'),
-  folderUp: document.getElementById('folder-up'),
-  folderUse: document.getElementById('folder-use'),
-  folderCancel: document.getElementById('folder-cancel'),
-  forget: document.getElementById('forget'),
-  memberView: document.getElementById('member-view'),
-  graphHint: document.getElementById('graph-hint'),
-  shortcuts: document.getElementById('shortcuts'),
-  settingsToggle: document.getElementById('settings-toggle'),
-  settingsPanel: document.getElementById('settings-panel'),
-  workspacePanel: document.getElementById('workspace-panel'),
-  passportPanel: document.getElementById('passport-panel'),
-  routePanel: document.getElementById('route-panel'),
-  blocksPanel: document.getElementById('blocks-panel'),
-  sourcePanel: document.getElementById('source-panel'),
-  screenTabGraph: document.getElementById('screen-tab-graph'),
-  screenTabTerminal: document.getElementById('screen-tab-terminal'),
-  screenTabReview: document.getElementById('screen-tab-review'),
-  screenTabHistory: document.getElementById('screen-tab-history'),
-  graphScreen: document.getElementById('graph-screen'),
-  terminalScreen: document.getElementById('terminal-screen'),
-  terminalContainer: document.getElementById('terminal-container'),
-  reviewScreen: document.getElementById('review-screen'),
-  reviewScreenBody: document.getElementById('review-screen-body'),
-  reviewScreenRefresh: document.getElementById('review-screen-refresh'),
-  reviewScreenPending: document.getElementById('review-screen-pending'),
-  historyScreen: document.getElementById('history-screen'),
-  historyScreenBody: document.getElementById('history-screen-body'),
-  historyScreenRefresh: document.getElementById('history-screen-refresh'),
-};
+const elements = queryElements();
 
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
@@ -252,22 +166,21 @@ async function request(path) {
 
 Object.assign(app, { store, state, memberUI, view, elements, request });
 
-/*
- * Feature controllers. Each takes `app`, reads shared state from it, and reaches other
- * features through it (`app.git.showReview(…)`) at call time, so creation order is free.
- */
-// <core-actions>
+// The core actions the feature controllers call back into.
 Object.assign(app, {
   applyClientPrefs,
   applyFilterToView,
   dismissHint,
-  request,
   scan,
   setScreen,
 });
-// </core-actions>
 
-// <controllers>
+/*
+ * Feature controllers. Each takes `app`, reads shared state from it, and reaches other
+ * features through it (`app.git.showReview(…)`) when an event fires, never while it is
+ * being created, so this order only decides the order listeners are registered in.
+ */
+bindKeyboardShortcuts(app);
 app.prefs = createViewPrefs(app);
 app.runtime = createRuntimeReadout(app);
 app.url = createUrlState(app);
@@ -280,13 +193,11 @@ app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
 app.source = createSourceViewer(app);
-app.terminal = createTerminalBridge(app);
+createTerminalBridge(app);
 app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
-app.keyboard = bindKeyboardShortcuts(app);
-// </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
 const freshness = createFreshnessBadge(elements.freshness, {
@@ -508,6 +419,7 @@ function applyStripFilter(filter) {
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
 }
+
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
   state.prefix = '';

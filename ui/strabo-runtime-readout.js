@@ -17,9 +17,7 @@ export function createRuntimeReadout(app) {
    * repaint" signal behind the viewport fast paths.
    */
   const frameSampler = createFrameSampler(window);
-
   let runtimeBase = '';
-
   let runtimeTimer = 0;
 
   function runtimeSuffix() {

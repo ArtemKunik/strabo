@@ -12,13 +12,7 @@ import { FILE_MODE_OVERLAYS } from './strabo-overlays.js';
 export function createViewPrefs(app) {
   const { state, view, elements } = app;
 
-  /**
-   * View settings (detail mode, review overlay, filter) persist per repository
-   * in localStorage, so a reload or revisit restores the exact view. The key is
-   * the repository root; unknown values are ignored rather than applied.
-   */
   const VIEW_PREFS_PREFIX = 'strabo.view.';
-
   let prefsSaveTimer = null;
 
   function viewPrefsKey(repository) {

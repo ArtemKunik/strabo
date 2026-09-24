@@ -7,8 +7,7 @@ import { memberMapSteps, passportFor } from './strabo-core.js';
 import { renderMemberMap } from './strabo-panels.js';
 
 export function createMemberMapController(app) {
-  const { store, state, memberUI, elements } = app;
-
+  const { store, state, memberUI, elements, request } = app;
   let memberTimer = null;
 
   /** Step the Member map back to the Module Passport it was opened from. */
@@ -26,15 +25,15 @@ export function createMemberMapController(app) {
     if (state.repository) {
       params.set('repository', state.repository);
     }
-    const result = await app.request(`/symbols?${params.toString()}`);
+    const result = await request(`/symbols?${params.toString()}`);
     const healthParams = new URLSearchParams({ file: id });
     if (state.repository) {
       healthParams.set('repository', state.repository);
     }
-    let health = await app.request(`/analysis/file-health?${healthParams.toString()}`).catch(() => null);
+    let health = await request(`/analysis/file-health?${healthParams.toString()}`).catch(() => null);
     if (!health) {
       const healthQuery = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
-      health = await app.request(`/analysis/architecture-health${healthQuery}`).catch(() => null);
+      health = await request(`/analysis/architecture-health${healthQuery}`).catch(() => null);
     }
     const passport = passportFor(app.current, id);
     app.memberData = {

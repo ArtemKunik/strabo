@@ -20,7 +20,7 @@ import {
 import { renderNarrationPanel } from './strabo-panels.js';
 
 export function createNarrationController(app) {
-  const { state, elements } = app;
+  const { state, elements, request } = app;
 
   /** Handlers that let the Functions tab ask the opt-in narrator about the recorded evidence. */
   function functionsHandlers(result) {
@@ -155,7 +155,7 @@ export function createNarrationController(app) {
         if (state.repository) {
           params.set('repository', state.repository);
         }
-        const result = await app.request(`/symbols?${params.toString()}`);
+        const result = await request(`/symbols?${params.toString()}`);
         const passport = passportFor(app.current, id);
         reply = await postNarration(
           MEMBER_NARRATION_INSTRUCTION,
