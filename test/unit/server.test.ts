@@ -13,9 +13,14 @@ import { createStraboServer } from '../../src/index.ts';
 import { createRepositoryStore } from '../../src/index.ts';
 import type { StraboConfig } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
+import { ensureChangeRepo } from '../acceptance/support/git-fixture.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');
+
+// The co-change endpoint reads a Git-backed fixture. It lives under a gitignored path, so a
+// clean checkout does not have it: build it here rather than relying on an acceptance run.
+ensureChangeRepo(path.join(fixtures, 'change-repo'));
 const config: StraboConfig = {
   workspaceRoot: path.join(fixtures, 'block-repo'),
   scanCeiling: fixtures,

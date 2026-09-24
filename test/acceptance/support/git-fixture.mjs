@@ -8,8 +8,7 @@ import path from 'node:path';
  * It lives under `test/fixtures/timeline-repo`, which is gitignored by the outer
  * repository, so committing and then dirtying files here never touches Strabo's own tree.
  */
-export function ensureTimelineRepo() {
-  const root = path.resolve('test/fixtures/timeline-repo');
+export function ensureTimelineRepo(root = path.resolve('test/fixtures/timeline-repo')) {
   fs.mkdirSync(path.join(root, 'src'), { recursive: true });
   fs.writeFileSync(path.join(root, 'src', 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");
   fs.writeFileSync(path.join(root, 'src', 'b.ts'), 'export const b = 1;\n');
@@ -57,8 +56,7 @@ export function ensureTimelineRepo() {
  * `value`, joining them (cohesion 100). It lives under `test/fixtures/change-repo`, which is
  * gitignored, so the nested repository never touches Strabo's own tree.
  */
-export function ensureChangeRepo() {
-  const root = path.resolve('test/fixtures/change-repo');
+export function ensureChangeRepo(root = path.resolve('test/fixtures/change-repo')) {
   const file = path.join(root, 'src', 'main', 'kotlin', 'com', 'acme', 'app', 'Counter.kt');
   fs.mkdirSync(path.dirname(file), { recursive: true });
 

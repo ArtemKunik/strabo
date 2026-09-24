@@ -10,6 +10,9 @@ dist/
 
 # Test / coverage output
 coverage/
+# ...except the committed fixture report the coverage unit tests read.
+!test/fixtures/coverage-repo/coverage/
+!test/fixtures/coverage-repo/coverage/**
 test/acceptance/reports/
 # Vendored parser grammars are generated from tree-sitter-wasm by `npm run vendor:parsers`
 parsers/vendor/
