@@ -17,7 +17,13 @@ function tempFile(): string {
 
 test('remember adds a repository and makes the most recent active', () => {
   const file = tempFile();
-  const store = createRepositoryStore({ file });
+  // A ticking clock: two calls inside one millisecond would tie on the wall clock and fall
+  // back to name order, which made this test flaky on fast CI runners.
+  let tick = 0;
+  const store = createRepositoryStore({
+    file,
+    now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)),
+  });
 
   assert.deepEqual(store.list(), []);
   store.remember('/repos/alpha');
