@@ -17,7 +17,6 @@ import {
   edgeEvidenceFor,
   fileWebUrl,
   filterNodes,
-  folderLocation,
   graphSummary,
   mapCounts,
   passportFor,
@@ -36,7 +35,6 @@ import {
   renderChangesWith,
   renderDiagnostics,
   renderEdgeEvidence,
-  renderFolderList,
   renderFunctions,
   renderImpactPassport,
   renderInspector,
@@ -62,6 +60,7 @@ import { createGitController } from './strabo-git-controller.js';
 import { createSettingsController } from './strabo-settings-controller.js';
 import { createRepositoryPanels } from './strabo-repo-panels.js';
 import { createLensController } from './strabo-lens-controller.js';
+import { createRepositoryPicker } from './strabo-repositories.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -264,8 +263,6 @@ let passportHistory = [];
 /** True while Back is re-selecting, so the step it makes is not itself pushed. */
 let passportGoingBack = false;
 
-let browsedFolder = null;
-
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
   if (!response.ok) {
@@ -284,7 +281,6 @@ Object.assign(app, { store, state, memberUI, view, elements, request });
 // <core-actions>
 Object.assign(app, {
   applyClientPrefs,
-  loadCatalogue,
   refreshDock,
   request,
   scan,
@@ -304,6 +300,7 @@ app.git = createGitController(app);
 app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
 app.lenses = createLensController(app);
+app.repos = createRepositoryPicker(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -312,50 +309,6 @@ const freshness = createFreshnessBadge(elements.freshness, {
   onRebuild: () => scan({ refresh: true }),
   repository: () => state.repository,
 });
-
-async function loadCatalogue() {
-  const catalogue = await request('/repositories');
-  renderRepositoryOptions(catalogue.repositories, catalogue.active);
-}
-
-/** Rebuild the repository selector from the known list, selecting the active one. */
-function renderRepositoryOptions(repositories, active) {
-  elements.repository.replaceChildren(
-    ...repositories.map((entry) => {
-      const option = document.createElement('option');
-      option.value = entry.root;
-      option.textContent = entry.name;
-      return option;
-    }),
-  );
-  if (repositories.length === 0) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'No repositories';
-    option.disabled = true;
-    elements.repository.append(option);
-  }
-  const chosen = active ?? repositories[0]?.root ?? null;
-  if (chosen) {
-    elements.repository.value = chosen;
-  }
-  state.repository = elements.repository.value || null;
-  elements.forget.disabled = !state.repository;
-}
-
-/** Remember a repository server-side so it is offered again after a restart. */
-async function rememberRepository(root) {
-  const response = await fetch(`${API_PATH}/repositories`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ root }),
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error ?? `Could not remember ${root}`);
-  }
-  return response.json();
-}
 
 /**
  * Refresh adds `refresh=1` — a server cache bypass, not merely a repaint. Every async
@@ -895,73 +848,6 @@ function onSelect(id) {
   selectNode(id);
 }
 
-/** Folder selection is a server-side browse bounded by the configured scan ceiling. */
-async function loadFolder(path) {
-  const query = path ? `?path=${encodeURIComponent(path)}` : '';
-  const result = await request(`/browse${query}`);
-  browsedFolder = result;
-  const location = folderLocation(result);
-  elements.folderPath.textContent = result.path;
-  elements.folderNote.textContent = location.note;
-  elements.folderNote.classList.toggle('at-ceiling', location.atCeiling);
-  elements.folderUp.disabled = location.atCeiling;
-  elements.folderUp.title = location.upLabel;
-  elements.folderUp.dataset.parent = result.parent ?? '';
-  renderFolderList(elements.folderList, result, (next) => {
-    loadFolder(next).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  });
-}
-
-function openFolderDialog() {
-  browsedFolder = null;
-  elements.folderDialog.showModal();
-  loadFolder(state.repository ?? undefined).catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-}
-
-/** Point the app at a chosen repository, remembering it as the active one. */
-async function useRepository(path) {
-  app.prefs.writeViewPrefs();
-  state.repository = path;
-  state.prefix = '';
-  state.filter = '';
-  elements.filter.value = '';
-
-  try {
-    await rememberRepository(path);
-    const catalogue = await request('/repositories');
-    renderRepositoryOptions(catalogue.repositories, path);
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-    return;
-  }
-  app.prefs.applyViewPrefs();
-  scan();
-}
-
-/** Forget the selected repository; it stays usable until the page reloads. */
-async function forgetRepository() {
-  const root = state.repository;
-  if (!root) {
-    return;
-  }
-  const response = await fetch(`${API_PATH}/repositories?root=${encodeURIComponent(root)}`, {
-    method: 'DELETE',
-  });
-  if (!response.ok) {
-    elements.status.textContent = 'Error: could not forget the repository.';
-    return;
-  }
-  const catalogue = await request('/repositories');
-  renderRepositoryOptions(catalogue.repositories, catalogue.active);
-  if (state.repository !== root) {
-    scan();
-  }
-}
-
 /** Open one build unit in System mode, showing its files inside their layers. */
 function openUnit(id) {
   if (state.mode !== 'system') {
@@ -1320,31 +1206,6 @@ function handleTerminalControl(directive) {
       return;
   }
 }
-
-elements.repository.addEventListener('change', () => {
-  const root = elements.repository.value;
-  if (!root) {
-    return;
-  }
-  // Save outgoing view settings before switching, then restore the new repo's.
-  app.prefs.writeViewPrefs();
-  state.repository = root;
-  state.prefix = '';
-  state.filter = '';
-  elements.filter.value = '';
-  elements.forget.disabled = false;
-  app.prefs.applyViewPrefs();
-  rememberRepository(root)
-    .then(() => scan())
-    .catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-});
-elements.forget.addEventListener('click', () => {
-  forgetRepository().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
 elements.detail.addEventListener('change', () => {
   state.mode = elements.detail.value;
   state.prefix = '';
@@ -1394,25 +1255,7 @@ elements.diagnosticsToggle.addEventListener('click', () => {
   if (hidden) app.runtime.startRuntimeReadout();
   else app.runtime.stopRuntimeReadout();
 });
-elements.browse.addEventListener('click', openFolderDialog);
 document.getElementById('graph')?.addEventListener('pointerdown', dismissHint, { capture: true });
-elements.folderCancel.addEventListener('click', () => elements.folderDialog.close());
-elements.folderUp.addEventListener('click', () => {
-  const parent = elements.folderUp.dataset.parent;
-  if (parent) {
-    loadFolder(parent).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }
-});
-elements.folderUse.addEventListener('click', () => {
-  if (browsedFolder) {
-    elements.folderDialog.close();
-    useRepository(browsedFolder.path).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }
-});
 
 function showTooltip(id, clientX, clientY) {
   if (!elements.tooltip || !app.current) return;
@@ -2559,7 +2402,7 @@ app.narration.fetchNarratorStatus().then((status) => {
   app.narratorStatus ??= status;
 });
 
-loadCatalogue()
+app.repos.loadCatalogue()
   .then(() => {
     // The graph default is the fallback: a URL mode or a per-repository pref overrides it.
     state.mode = app.clientPrefs.defaultDetail;

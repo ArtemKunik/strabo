@@ -137,7 +137,7 @@ export function createSettingsController(app) {
     }
     renderSettingsView();
     // The repository picker filters against the ceiling; refresh it so a change shows there.
-    app.loadCatalogue().catch(() => {});
+    app.repos.loadCatalogue().catch(() => {});
     return saved;
   }
 
