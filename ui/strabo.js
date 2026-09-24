@@ -13,7 +13,6 @@
 import { API_PATH, buildGraphQuery, filterNodes, graphSummary, mapCounts } from './strabo-core.js';
 import { createView } from './strabo-view.js';
 import { writeIslandLayout } from './strabo-island-layout.js';
-import { showToast } from './strabo-delegate.js';
 import { createFreshnessBadge } from './strabo-freshness.js';
 import {
   renderBreadcrumb,
@@ -24,7 +23,7 @@ import {
 } from './strabo-panels.js';
 import { buildBrickAssembly } from './strabo-lego.js';
 import { applyAppearance, readSettings, watchSystemPreferences } from './strabo-settings.js';
-import { fit, focus, zoomIn, zoomOut } from './strabo-viewport.js';
+import { fit, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
 import { createRuntimeReadout } from './strabo-runtime-readout.js';
@@ -43,6 +42,7 @@ import { createChromeMenus } from './strabo-chrome-menus.js';
 import { createDelegation } from './strabo-delegation.js';
 import { createSelectionController } from './strabo-selection-controller.js';
 import { createFloatingPanels } from './strabo-floating-panels.js';
+import { bindKeyboardShortcuts } from './strabo-keyboard.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -285,6 +285,7 @@ app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
+app.keyboard = bindKeyboardShortcuts(app);
 // </controllers>
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
@@ -489,104 +490,6 @@ store.subscribe((_, changed) => {
     app.memberMap.renderMemberMapView();
   }
   app.url.syncUrl();
-});
-
-document.addEventListener('keydown', (event) => {
-  const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '');
-  const screen = store.get().ui.screen;
-  const onGraph = screen === 'graph';
-  // Escape leaves a full-screen Review or History tab and returns to the map. The Terminal
-  // screen keeps Escape for its own widgets (switcher, menus).
-  if (event.key === 'Escape' && (screen === 'review' || screen === 'history') && !inField) {
-    event.preventDefault();
-    setScreen('graph');
-    return;
-  }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k' && onGraph) {
-    event.preventDefault();
-    elements.filter.focus();
-    elements.filter.select();
-    return;
-  }
-  // Screen-level shortcuts. The terminal screen owns its own Ctrl+K and tab keys; these
-  // only cover opening a shell, closing the active session, and the run presets, and stay
-  // out of the way while any field (including the terminal's own input) has focus.
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
-    const screenKey = event.key.toLowerCase();
-    if (screenKey === 't') {
-      event.preventDefault();
-      setScreen('terminal');
-      app.terminalScreen?.newSession?.({ kind: 'shell' })?.catch((error) => {
-        showToast(`Could not open a shell (${error.message}).`);
-      });
-      return;
-    }
-    if (screenKey === 'w') {
-      event.preventDefault();
-      // Closing the active tab is the screen's call; a screen without the extension no-ops.
-      app.terminalScreen?.closeActiveSession?.();
-      return;
-    }
-    if (screenKey === 'r') {
-      event.preventDefault();
-      setScreen('terminal');
-      // The presets menu lives in the screen; if it exposes no opener, the screen is still shown.
-      app.terminalScreen?.openPresetMenu?.();
-      return;
-    }
-  }
-  if (event.key === 'Escape') {
-    app.menus.closeOverflowMenu();
-    if (!elements.memberView.hidden) {
-      app.memberMap.closeMemberMap();
-      return;
-    }
-    if (state.filter && !inField) {
-      state.filter = '';
-      elements.filter.value = '';
-      applyFilterToView();
-      return;
-    }
-    // Escape inside an open unit goes back to the L0 unit map.
-    if (state.mode === 'system' && state.systemUnit && !inField) {
-      app.units.closeUnit();
-      return;
-    }
-    if (!inField) app.selection.clearSelection();
-    return;
-  }
-  if (event.key === 'Enter' && !inField && state.mode === 'system' && app.selected) {
-    const node = app.current?.nodes.find((candidate) => candidate.id === app.selected);
-    if (node && !node.systemUnit) {
-      // Enter opens the focused unit, matching a double-click.
-      event.preventDefault();
-      app.units.openUnit(app.selected);
-      return;
-    }
-  }
-  if (event.key === '?' && !inField) {
-    event.preventDefault();
-    app.windows.toggleShortcuts();
-    return;
-  }
-  if (inField || !elements.memberView.hidden || !onGraph) return;
-  const key = event.key.toLowerCase();
-  if (key === 'f' && app.selected) focus(view.cy, app.selected);
-  else if (key === 'i') elements.tbImpact.click();
-  else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
-  else if (key === 'u' && state.mode === 'system' && state.systemUnit) app.units.closeUnit();
-  else if (key === 'p') elements.tbPath.click();
-  else if (key === 'b') elements.tbBoundaries.click();
-  else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
-  else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
-  else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();
-  else if (key === 'z' && state.mode === 'file') elements.tbLoc?.click();
-  else if (key === 's' && app.selected && app.selection.isFileNode(app.selected)) app.source.viewSource(app.selected);
-  else if (key === 't') elements.tbTimeline.click();
-  else if (key === 'r') elements.tbReview.click();
-  else if (key === 'v') elements.tbRisk.click();
-  else if (key === 'n') elements.tbBranches.click();
-  else if (key === 'g' && app.groupSelection.length >= 2) elements.tbDelegateGroup.click();
 });
 
 function applyStripFilter(filter) {
