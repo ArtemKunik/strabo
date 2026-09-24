@@ -28,15 +28,15 @@ export function createSettingsController(app) {
     app.clientPrefs = { ...app.clientPrefs, [key]: value };
     writeSettings(app.clientPrefs);
     app.applyClientPrefs();
-    app.updateLabelsButton();
+    app.lenses.updateLabelsButton();
     // The large-file lens reads the threshold, so re-apply it when that preference changes.
     if (key === 'locThreshold') {
-      app.applyLocLens();
+      app.lenses.applyLocLens();
     }
     renderSettingsView();
     // The commit action is drawn by the impact overlay, so re-render it when it toggles.
     if (key === 'commitEnabled' && state.overlay === 'impact') {
-      app.applyOverlay();
+      app.lenses.applyOverlay();
     }
   }
 
