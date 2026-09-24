@@ -85,7 +85,7 @@ export function createMemberMapController(app) {
       },
       onNight: () => store.set('member', { dim: !memberUI.dim }),
       onCompare: () => {
-        app.toggleTimeline().catch((error) => {
+        app.git.toggleTimeline().catch((error) => {
           elements.status.textContent = `Error: ${error.message}`;
         });
       },
