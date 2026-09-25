@@ -70,6 +70,20 @@ Then('the detail selector shows {string}', async function (value) {
   assert.equal(selected, value);
 });
 
+When('I switch the tier lens to {string}', async function (value) {
+  await selectViewOption(this.page, '#tier', value);
+  await this.page.waitForFunction(
+    (expected) => window.straboTest?.state.tier === expected,
+    value,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the tier selector shows {string}', async function (value) {
+  const selected = await this.page.inputValue('#tier');
+  assert.equal(selected, value);
+});
+
 When('I double-click the {string} node', async function (id) {
   const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
   await this.clickNode(id, {

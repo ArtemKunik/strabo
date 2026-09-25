@@ -44,6 +44,13 @@ Feature: Map legibility
     Then the detail level is "file"
     And the detail selector shows "file"
 
+  @prefs
+  Scenario: The tier lens survives a reload
+    When I switch the tier lens to "all"
+    And I reload the Strabo UI
+    Then the tier selector shows "all"
+    And the detail selector shows "file"
+
   @renderer
   Scenario: The status bar names the renderer that is actually drawing
     Then the status bar names the renderer the map is drawing with

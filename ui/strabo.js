@@ -55,7 +55,7 @@ import {
 } from './strabo-route.js';
 import { renderBlocks } from './strabo-panel-blocks.js';
 import { buildBrickAssembly } from './strabo-lego.js';
-import { tierDirectionClasses } from './strabo-tiers.js';
+import { TIER_ORDER, tierDirectionClasses } from './strabo-tiers.js';
 import {
   GROUP_NAMING_INSTRUCTION,
   MEMBER_NARRATION_INSTRUCTION,
@@ -178,6 +178,9 @@ function readViewPrefs(repository) {
     if (parsed.edgeKind === 'calls' || parsed.edgeKind === 'imports') {
       prefs.edgeKind = parsed.edgeKind;
     }
+    if (parsed.tier === 'all' || TIER_ORDER.includes(parsed.tier)) {
+      prefs.tier = parsed.tier;
+    }
     if (parsed.coChange === true) {
       prefs.coChange = true;
     }
@@ -201,6 +204,7 @@ function writeViewPrefs() {
         edgeKind: state.edgeKind,
         coChange: state.coChange,
         locLens: state.locLens,
+        tier: state.tier,
       }),
     );
   } catch {
@@ -239,6 +243,15 @@ function applyViewPrefs() {
     elements.overlay.value = prefs.overlay;
     // File-mode overlays need file mode (same rule as the change handler).
     if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== 'file') {
+      state.mode = 'file';
+      elements.detail.value = 'file';
+    }
+  }
+  // The tier lens colours files, so it needs file mode (same rule as the change handler).
+  if (prefs.tier && elements.tier) {
+    state.tier = prefs.tier;
+    elements.tier.value = prefs.tier;
+    if (state.mode !== 'file') {
       state.mode = 'file';
       elements.detail.value = 'file';
     }
@@ -3102,6 +3115,7 @@ if (elements.tier) {
       scan();
       return;
     }
+    writeViewPrefs();
     applyTierLens();
   });
 }

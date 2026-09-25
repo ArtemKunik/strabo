@@ -23099,6 +23099,9 @@ function readViewPrefs(repository) {
     if (parsed.edgeKind === "calls" || parsed.edgeKind === "imports") {
       prefs.edgeKind = parsed.edgeKind;
     }
+    if (parsed.tier === "all" || TIER_ORDER.includes(parsed.tier)) {
+      prefs.tier = parsed.tier;
+    }
     if (parsed.coChange === true) {
       prefs.coChange = true;
     }
@@ -23120,7 +23123,8 @@ function writeViewPrefs() {
         filter: state.filter,
         edgeKind: state.edgeKind,
         coChange: state.coChange,
-        locLens: state.locLens
+        locLens: state.locLens,
+        tier: state.tier
       })
     );
   } catch {
@@ -23153,6 +23157,14 @@ function applyViewPrefs() {
     state.overlay = prefs.overlay;
     elements.overlay.value = prefs.overlay;
     if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== "file") {
+      state.mode = "file";
+      elements.detail.value = "file";
+    }
+  }
+  if (prefs.tier && elements.tier) {
+    state.tier = prefs.tier;
+    elements.tier.value = prefs.tier;
+    if (state.mode !== "file") {
       state.mode = "file";
       elements.detail.value = "file";
     }
@@ -25413,6 +25425,7 @@ if (elements.tier) {
       scan();
       return;
     }
+    writeViewPrefs();
     applyTierLens();
   });
 }
