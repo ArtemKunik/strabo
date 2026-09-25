@@ -4,6 +4,7 @@ import path from 'node:path';
 import type {
   CodeDataUse,
   ContractDefinition,
+  DataAccess,
   PublishedCoordinate,
   SchemaSnapshot,
   ServiceCall,
@@ -135,7 +136,7 @@ function readStore(file: string): StoreFile {
         endpoints: entry.endpoints,
         calls: entry.calls,
         schema: isSchema(entry.schema) ? entry.schema : null,
-        dataUses: Array.isArray(entry.dataUses) ? entry.dataUses : [],
+        dataUses: Array.isArray(entry.dataUses) ? entry.dataUses.map(normalizeDataUseAccess) : [],
       };
     }
     return { version: WORKSPACE_CACHE_VERSION, entries };
@@ -154,6 +155,17 @@ function writeStore(file: string, store: StoreFile): void {
   } catch {
     // Persistence is best-effort and must never fail an analysis.
   }
+}
+
+const ACCESS_VALUES = new Set<DataAccess>(['read', 'write', 'ddl', 'unknown']);
+
+/**
+ * A cached data use from before `access` existed has no recorded direction, so it reads as
+ * `unknown`. This keeps an old cache valid instead of discarding it, and never invents one.
+ */
+function normalizeDataUseAccess(use: CodeDataUse): CodeDataUse {
+  const access = (use as { access?: unknown }).access;
+  return ACCESS_VALUES.has(access as DataAccess) ? use : { ...use, access: 'unknown' };
 }
 
 function isCoordinate(value: unknown): value is PublishedCoordinate {

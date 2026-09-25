@@ -129,9 +129,9 @@ CREATE UNIQUE INDEX idx_name ON users (name);`,
   ]);
 
   const uses: CodeDataUse[] = [
-    { repository: 'api', file: 'src/repo.ts', line: 10, table: 'users', columns: ['id', 'email', 'legacy'], evidence: 'string-literal SQL (INSERT)', confidence: 'strong' },
-    { repository: 'api', file: 'src/repo.ts', line: 20, table: 'users', columns: ['email'], evidence: 'string-literal SQL (UPDATE)', confidence: 'strong' },
-    { repository: 'api', file: 'src/audit.ts', line: 4, table: 'audit', columns: [], evidence: 'string-literal SQL (INSERT)', confidence: 'strong' },
+    { repository: 'api', file: 'src/repo.ts', line: 10, table: 'users', columns: ['id', 'email', 'legacy'], evidence: 'string-literal SQL (INSERT)', confidence: 'strong', access: 'write' },
+    { repository: 'api', file: 'src/repo.ts', line: 20, table: 'users', columns: ['email'], evidence: 'string-literal SQL (UPDATE)', confidence: 'strong', access: 'write' },
+    { repository: 'api', file: 'src/audit.ts', line: 4, table: 'audit', columns: [], evidence: 'string-literal SQL (INSERT)', confidence: 'strong', access: 'write' },
   ];
 
   const changes = diffSchemas(base, head, uses);

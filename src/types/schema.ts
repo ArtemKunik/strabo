@@ -76,6 +76,9 @@ export interface SchemaSnapshot {
   capturedAt?: string;
 }
 
+/** What a piece of code does with a table: reads it, writes it, changes its shape, or is not recorded. */
+export type DataAccess = 'read' | 'write' | 'ddl' | 'unknown';
+
 /** One place source code names a data table, with the columns it names there. */
 export interface CodeDataUse {
   repository: string;
@@ -89,6 +92,8 @@ export interface CodeDataUse {
   evidence: string;
   /** `strong` for a statement shape or a mapping declaration, `weak` for a bare SELECT literal. */
   confidence: 'strong' | 'weak';
+  /** What the code does with the table; `unknown` when the scan cannot tell read from write. */
+  access: DataAccess;
 }
 
 /** Code that names a table or column no SQL file in the workspace declares. */
