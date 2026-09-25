@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>strabo-o4 — architecture drift</title>
+<style>body{margin:0;padding:32px;background:#10141a;color:#eef3fa;font-family:ui-sans-serif,system-ui,sans-serif}h1{font-size:20px;margin:0 0 4px}.stamp{color:#8da0b5;font-size:13px;margin:0 0 20px}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#eef3fa}.drift-chart{display:block;width:100%;height:auto;background:#10141a;border:1px solid #55697f;border-radius:8px}.drift-legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin:16px 0;padding:0;list-style:none}.drift-legend-item{display:flex;gap:8px;align-items:baseline;font-size:13px;color:#c8d2e0}.drift-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:2px}.drift-legend-scale{color:#8da0b5}.notes{color:#8da0b5;font-size:13px;line-height:1.5}.unavailable{color:#fab219;font-size:14px}</style>
+</head>
+<body data-revision="91d5b417eb10a13a769bd8d04dd1ae3cc3775036" data-generated-at="2026-09-25T17:50:54.980Z">
+<h1>strabo-o4 — architecture drift</h1>
+<p class="stamp">revision <code>91d5b417eb10a13a769bd8d04dd1ae3cc3775036</code> · built <time datetime="2026-09-25T17:50:54.980Z">2026-09-25T17:50:54.980Z</time></p>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 320" role="img" aria-label="Architecture drift over 8 revisions" class="drift-chart" data-role="drift-chart">
+<line x1="40" y1="280" x2="920" y2="280" stroke="#55697f" stroke-width="1"/>
+<g data-series="cycles">
+<polyline points="40.00,160.00 165.71,160.00 291.43,160.00 417.14,160.00 542.86,160.00 668.57,160.00 794.29,160.00 920.00,160.00" fill="none" stroke="#3987e5" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<g data-series="largest-cycle">
+<polyline points="40.00,160.00 165.71,160.00 291.43,160.00 417.14,160.00 542.86,160.00 668.57,160.00 794.29,160.00 920.00,160.00" fill="none" stroke="#d95926" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<g data-series="modules">
+<polyline points="40.00,280.00 165.71,280.00 291.43,280.00 417.14,264.00 542.86,192.00 668.57,192.00 794.29,192.00 920.00,40.00" fill="none" stroke="#199e70" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<g data-series="largest-module">
+<polyline points="40.00,280.00 165.71,280.00 291.43,280.00 417.14,256.00 542.86,40.00 668.57,40.00 794.29,40.00 920.00,40.00" fill="none" stroke="#8da0b5" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<g data-series="edges">
+<polyline points="40.00,280.00 165.71,253.75 291.43,253.75 417.14,216.25 542.86,171.25 668.57,171.25 794.29,171.25 920.00,40.00" fill="none" stroke="#8da0b5" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<g data-series="largest-blast-radius">
+<polyline points="40.00,280.00 165.71,280.00 291.43,280.00 417.14,256.00 542.86,40.00 668.57,40.00 794.29,40.00 920.00,40.00" fill="none" stroke="#8da0b5" stroke-width="2" vector-effect="non-scaling-stroke"/>
+</g>
+<text x="40" y="296" fill="#8da0b5" font-size="11">67cca78 · 2026-09-24T21:39:32+02:00</text>
+<text x="920" y="296" text-anchor="end" fill="#8da0b5" font-size="11">91d5b41 · 2026-09-25T16:40:03+02:00</text>
+</svg>
+<ul class="drift-legend" data-role="drift-legend">
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#3987e5" aria-hidden="true"></span><span>Cycles: 2 → 2</span> <span class="drift-legend-scale">(scale 2–2)</span></li>
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#d95926" aria-hidden="true"></span><span>Largest cycle: 2 → 2</span> <span class="drift-legend-scale">(scale 2–2)</span></li>
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#199e70" aria-hidden="true"></span><span>Modules: 405 → 435</span> <span class="drift-legend-scale">(scale 405–435)</span></li>
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#8da0b5" aria-hidden="true"></span><span>Largest module: 163 → 173</span> <span class="drift-legend-scale">(scale 163–173)</span></li>
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#8da0b5" aria-hidden="true"></span><span>Dependency edges: 3858 → 3986</span> <span class="drift-legend-scale">(scale 3858–3986)</span></li>
+<li class="drift-legend-item"><span class="drift-legend-swatch" style="background:#8da0b5" aria-hidden="true"></span><span>Largest blast radius: 177 → 187</span> <span class="drift-legend-scale">(scale 177–187)</span></li>
+</ul>
+<p class="notes">8 revisions measured, newest first in the report; the chart draws oldest first. 6 of 8 measures recorded. Each line is scaled to its own range, and the legend carries the real values.</p>
+<p class="notes" data-role="drift-missing">Not recorded for these revisions: Hidden coupling share, Tier violations.</p>
+</body>
+</html>

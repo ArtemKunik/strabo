@@ -479,6 +479,19 @@ export { selectViewModel } from './export/select-view.ts';
 export type { ExportViewMode, SelectViewModelOptions } from './export/select-view.ts';
 export { exportSite } from './export/site.ts';
 export type { SiteExportOptions, SitePage } from './export/site.ts';
+export {
+  buildDriftChart,
+  driftSeriesColour,
+  recordedDriftSeries,
+  renderDriftArtifact,
+} from './export/drift-artifact.ts';
+export type {
+  DriftArtifactMeta,
+  DriftChartModel,
+  DriftChartOptions,
+  DriftChartPoint,
+  DriftChartSeries,
+} from './export/drift-artifact.ts';
 
 export { computeFreshness, revisionFromFingerprint } from './status.ts';
 export type { Freshness } from './status.ts';

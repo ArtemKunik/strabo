@@ -1,12 +1,21 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 
+import { collectDrift } from '../analysis/drift.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { describeRepository } from '../repository.ts';
+import { renderDriftArtifact } from './drift-artifact.ts';
 import { exportGraph } from './graph-export.ts';
 import { selectViewModel } from './select-view.ts';
 import { renderViewModelSvg } from './svg.ts';
+
+const run = promisify(execFile);
+
+/** Revisions charted per demo repository; enough to show drift without an unbounded scan. */
+const SITE_DRIFT_LIMIT = 8;
 
 export interface SiteExportOptions {
   workspaceRoot: string;
@@ -22,6 +31,8 @@ export interface SitePage {
   revision: string | null;
   nodes: number;
   edges: number;
+  /** Whether a drift chart with recorded measures was written for this repository. */
+  drift: boolean;
 }
 
 export async function exportSite(options: SiteExportOptions): Promise<SitePage[]> {
@@ -48,6 +59,20 @@ export async function exportSite(options: SiteExportOptions): Promise<SitePage[]
     const model = selectViewModel({ root: repository.root, descriptor, cached, view: 'system' });
     const svg = renderViewModelSvg(model, { title: descriptor.name, generatedAt });
     const revision = cached.fingerprint?.split(':')[0] ?? null;
+
+    // Drift needs the repository's own commit history, so a directory nested inside a larger
+    // worktree is reported unavailable rather than charting the enclosing repository.
+    const root = path.resolve(repository.root);
+    const drift = (await gitWorktreeRoot(root)) === root
+      ? await collectDrift(root, descriptor.name, { limit: SITE_DRIFT_LIMIT })
+      : null;
+    const driftHtml = renderDriftArtifact(drift, {
+      revision,
+      generatedAt,
+      repository: descriptor.name,
+      reason: 'not-a-repository-root',
+    });
+
     const json = exportGraph(cached.report.graph, {
       format: 'json',
       fingerprint: cached.fingerprint,
@@ -61,6 +86,7 @@ export async function exportSite(options: SiteExportOptions): Promise<SitePage[]
       generatedAt,
     });
 
+    fs.writeFileSync(path.join(directory, 'drift.html'), driftHtml);
     fs.writeFileSync(path.join(directory, 'map.svg'), svg);
     fs.writeFileSync(path.join(directory, 'map.json'), json);
     fs.writeFileSync(path.join(directory, 'map.mmd'), mermaid);
@@ -75,6 +101,7 @@ export async function exportSite(options: SiteExportOptions): Promise<SitePage[]
       revision,
       nodes: cached.report.graph.nodes.length,
       edges: cached.report.graph.edges.length,
+      drift: drift !== null && drift.available,
     });
   }
 
@@ -100,7 +127,7 @@ function renderRepositoryPage(
 <header>
 <h1>${escapeHtml(name)}</h1>
 <p class="meta">indexed at ${escapeHtml(revision ?? 'no revision')} · generated ${escapeHtml(generatedAt)}</p>
-<div class="links"><a href="map.json">JSON</a><a href="map.mmd">Mermaid</a><a href="map.svg">SVG</a><a href="../">All repositories</a></div>
+<div class="links"><a href="drift.html">Drift</a><a href="map.json">JSON</a><a href="map.mmd">Mermaid</a><a href="map.svg">SVG</a><a href="../">All repositories</a></div>
 </header>
 ${svg}
 </body>
@@ -112,7 +139,7 @@ function renderIndexPage(pages: SitePage[], generatedAt: string): string {
   const items = pages
     .map(
       (page) =>
-        `<li><a href="${escapeHtml(page.slug)}/index.html">${escapeHtml(page.name)}</a> <span>${page.nodes} nodes · ${page.edges} edges · ${escapeHtml(page.revision ?? 'no revision')}</span></li>`,
+        `<li><a href="${escapeHtml(page.slug)}/index.html">${escapeHtml(page.name)}</a> <span>${page.nodes} nodes · ${page.edges} edges · ${escapeHtml(page.revision ?? 'no revision')}${page.drift ? ' · drift' : ''}</span></li>`,
     )
     .join('\n');
   return `<!doctype html>
@@ -132,6 +159,17 @@ ${items}
 </body>
 </html>
 `;
+}
+
+/** The worktree root git resolves for `root`, or `null` when `root` is not in a worktree. */
+async function gitWorktreeRoot(root: string): Promise<string | null> {
+  try {
+    const { stdout } = await run('git', ['rev-parse', '--show-toplevel'], { cwd: root });
+    const toplevel = stdout.trim();
+    return toplevel ? path.resolve(toplevel) : null;
+  } catch {
+    return null;
+  }
 }
 
 function slugify(value: string): string {
