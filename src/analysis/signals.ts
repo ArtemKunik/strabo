@@ -46,7 +46,7 @@ export const CHANGE_RISK_THRESHOLDS = {
   touchedComplexity: SIGNAL_THRESHOLDS.highComplexity,
   /** Importers whose recorded specifier names a changed symbol. */
   recordedReferences: 5,
-  /** Share of the change and its references no test reaches, 0-1. */
+  /** Share of the change and its references under threshold measured, else not test-reached. */
   untestedShare: 1,
 } as const;
 

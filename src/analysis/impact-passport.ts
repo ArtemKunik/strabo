@@ -2,8 +2,16 @@ import type { Graph } from '../types.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
 import type { CodeSymbol, FunctionCall } from '../scan/languages/symbols.ts';
 import { buildAdjacency, reachableSize } from './analysis.ts';
-import { computeCoverage, computeTestReachByFile } from './coverage.ts';
+import { computeTestReachByFile } from './coverage.ts';
+import {
+  fileCoverage,
+  isUntested,
+  summariseFileCoverage,
+  UNDER_COVERED_THRESHOLD,
+  type FileCoverage,
+} from './file-coverage.ts';
 import { buildFunctions, type FunctionEntry } from './functions.ts';
+import type { MeasuredCoverageSummary } from './measured-coverage.ts';
 import { contentAtRevision, readWorkingFile } from './git-content.ts';
 import { FUNCTION_SIGNAL_LABELS, type FunctionSignal } from './signals.ts';
 import type {
@@ -186,6 +194,10 @@ export interface BuildPassportInput {
   impact: TieredImpact | null;
   testsToRun: readonly string[];
   untestedDependents: readonly string[];
+  /** How `untestedDependents` was decided; defaults to the reachability fallback. */
+  untestedBasis?: 'measured' | 'reachable';
+  /** This file's own coverage from one source; omitted for a hand-built card. */
+  coverage?: FileCoverage | null;
   note?: string;
 }
 
@@ -215,6 +227,8 @@ export function buildFileImpactPassport(input: BuildPassportInput): FileImpactPa
     impact: input.impact,
     testsToRun: [...input.testsToRun],
     untestedDependents: [...input.untestedDependents],
+    untestedBasis: input.untestedBasis ?? 'reachable',
+    coverage: input.coverage ?? null,
     ...(input.note ? { note: input.note } : {}),
   };
 }
@@ -369,16 +383,25 @@ export function snapshotFor(
 }
 
 /** The current-state passport for one file, independent of any change. */
-export async function computeFileImpactPassport(root: string, graph: Graph, file: string): Promise<FileImpactPassport> {
+export async function computeFileImpactPassport(
+  root: string,
+  graph: Graph,
+  file: string,
+  measured: MeasuredCoverageSummary | null = null,
+): Promise<FileImpactPassport> {
   const { forward, backward } = buildAdjacency(graph, { includeReExports: true });
   // Only this file's blast radius is needed, so it is one traversal rather than the whole
   // graph's transitive metric map.
   const snapshot = snapshotFor(file, forward, backward, new Map([[file, reachableSize(file, backward)]]));
 
-  const coverage = computeCoverage(graph);
-  const reached = new Set([...coverage.reached, ...coverage.testFiles]);
+  // One coverage source: the report when it names a file, otherwise the labelled reach fallback.
+  const coverage = fileCoverage(graph, measured);
+  const basis: 'measured' | 'reachable' = measured?.available ? 'measured' : 'reachable';
   const testsToRun = computeTestReachByFile(graph).get(file) ?? [];
-  const untestedDependents = (backward.get(file) ?? []).filter((dependent) => !reached.has(dependent)).sort();
+  const untestedDependents = (backward.get(file) ?? [])
+    .filter((dependent) => isUntested(coverage.get(dependent), basis, UNDER_COVERED_THRESHOLD))
+    .sort();
+  const fileCoverageFigure = coverage.get(file) ?? null;
 
   const extractor = symbolExtractorFor(file);
   if (!extractor) {
@@ -393,6 +416,8 @@ export async function computeFileImpactPassport(root: string, graph: Graph, file
       impact: null,
       testsToRun,
       untestedDependents,
+      untestedBasis: basis,
+      coverage: fileCoverageFigure,
       note: 'no symbol extractor for this language',
     });
   }
@@ -420,6 +445,8 @@ export async function computeFileImpactPassport(root: string, graph: Graph, file
     impact: null,
     testsToRun,
     untestedDependents,
+    untestedBasis: basis,
+    coverage: fileCoverageFigure,
     ...(note ? { note } : {}),
   });
 }
@@ -542,6 +569,18 @@ export function rollUpImpactPassports(
     .map((entry) => ({ kind: entry.kind, label: entry.label, detail: entry.count > 1 ? `${entry.detail} · ${entry.count} files` : entry.detail }))
     .sort((a, b) => rank(a.kind) - rank(b.kind));
 
+  // The changed files' own coverage figures, summed from the same helper the cards carry, so
+  // a roll-up names its measured/reachable basis and the report age rather than a bare count.
+  const coverageByFile = new Map<string, FileCoverage>();
+  for (const file of files) {
+    if (file.coverage) {
+      coverageByFile.set(file.path, file.coverage);
+    }
+  }
+  const coverage = coverageByFile.size > 0
+    ? summariseFileCoverage([...coverageByFile.keys()], coverageByFile)
+    : null;
+
   const totals: ImpactTotals = {
     files: files.length,
     risk: worstRisk ? { score: worstRisk.score, band: worstRisk.band } : null,
@@ -560,6 +599,7 @@ export function rollUpImpactPassports(
       .slice(0, MAX_MOST_COMPLEX),
     functionsUnchanged,
     classesUnchanged,
+    coverage,
   };
 
   return { scope, baseline, files: [...files], totals, capped };

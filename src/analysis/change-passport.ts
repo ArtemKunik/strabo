@@ -3,8 +3,15 @@ import { promisify } from 'node:util';
 
 import type { Graph } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
-import { computeCoverage, computeTestReachByFile } from './coverage.ts';
+import { computeTestReachByFile } from './coverage.ts';
+import {
+  fileCoverage,
+  isUntested,
+  UNDER_COVERED_THRESHOLD,
+  type FileCoverage,
+} from './file-coverage.ts';
 import { contentAtRevision, readWorkingFile } from './git-content.ts';
+import type { MeasuredCoverageSummary } from './measured-coverage.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
 import type { SymbolExtraction } from '../scan/languages/symbols.ts';
 import { computeMemberCohesion } from './file-health.ts';
@@ -32,6 +39,7 @@ export async function computeChangePassport(
   baseline: string | null,
   graph: Graph,
   structural?: Pick<StructuralDiff, 'edgesAdded' | 'edgesRemoved'>,
+  measuredCoverage: MeasuredCoverageSummary | null = null,
 ): Promise<ChangePassport> {
   const safeBaseline = baseline && isSafeRevision(baseline) ? baseline : null;
   const measured = files.slice(0, MAX_FILES);
@@ -39,11 +47,12 @@ export async function computeChangePassport(
   const traversal = buildAdjacency(graph, { includeReExports: true });
   const { forward, backward } = traversal;
   const graphMetrics = computeGraphMetrics(graph, traversal);
-  const coverage = computeCoverage(graph);
-  const reached = new Set([...coverage.reached, ...coverage.testFiles]);
+  // One coverage source: the report when it names a file, otherwise the labelled reach fallback.
+  const coverage = fileCoverage(graph, measuredCoverage);
+  const basis: 'measured' | 'reachable' = measuredCoverage?.available ? 'measured' : 'reachable';
   const testsByFile = computeTestReachByFile(graph);
   for (const file of measured) {
-    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, reached, structural));
+    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, coverage, basis, structural));
   }
   return { files: changes, baseline: safeBaseline, capped: files.length > measured.length };
 }
@@ -57,7 +66,8 @@ async function cohesionChange(
   backward: ReadonlyMap<string, string[]>,
   blastRadius: ReadonlyMap<string, number>,
   testsByFile: Map<string, string[]>,
-  reached: Set<string>,
+  coverage: ReadonlyMap<string, FileCoverage>,
+  basis: 'measured' | 'reachable',
   structural?: Pick<StructuralDiff, 'edgesAdded' | 'edgesRemoved'>,
 ): Promise<CohesionChange> {
   const base: Pick<CohesionChange, 'path' | 'status' | 'previousPath'> = {
@@ -68,13 +78,15 @@ async function cohesionChange(
   const snapshot = snapshotFor(file.path, forward, backward, blastRadius);
   const edgesAdded = edgesTouching(structural?.edgesAdded, file);
   const edgesRemoved = edgesTouching(structural?.edgesRemoved, file);
+  const fileCoverageFigure = coverage.get(file.path) ?? null;
 
-  // Which tests to run, and which dependents no test reaches, are answered for every file,
-  // even one whose language has no extractor.
+  // Which tests to run, and which dependents are under-covered or unreached, are answered for
+  // every file, even one whose language has no extractor. `isUntested` reads the measured
+  // figure when the report names the dependent and the labelled reach fallback otherwise.
   const testsToRun = testsByFile.get(file.path) ?? [];
-  const untestedDependents = (backward.get(file.path) ?? [])
-    .filter((dependent) => !reached.has(dependent))
-    .sort();
+  const isUntestedDependent = (dependent: string): boolean =>
+    isUntested(coverage.get(dependent), basis, UNDER_COVERED_THRESHOLD);
+  const untestedDependents = (backward.get(file.path) ?? []).filter(isUntestedDependent).sort();
 
   const emptyPassport = (note: string) =>
     buildFileImpactPassport({
@@ -87,15 +99,17 @@ async function cohesionChange(
       impact: null,
       testsToRun,
       untestedDependents,
+      untestedBasis: basis,
+      coverage: fileCoverageFigure,
       note,
     });
 
   const extractor = symbolExtractorFor(file.path);
   if (!extractor) {
-    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
+    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
   }
   if (extractor.tracksAccess === false) {
-    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, risk: null, impactPassport: emptyPassport('this language records no member access') };
+    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, impactPassport: emptyPassport('this language records no member access') };
   }
 
   const sourcePath = file.previousPath ?? file.path;
@@ -109,7 +123,7 @@ async function cohesionChange(
   const functions = await computeFunctionChanges(extractor, root, file, baseline, beforeExtraction, afterExtraction);
   const publicSurface = computePublicSurfaceDiff(extractor, beforeExtraction, afterExtraction);
   const impact = computeTieredImpact(file.path, file, graph, backward, functions);
-  const risk = computeChangeRisk(file.path, functions, impact, reached);
+  const risk = computeChangeRisk(file.path, functions, impact, isUntestedDependent);
   const note = noteFor({ file, baseline, beforeContent, before, after });
 
   const factsBefore = beforeExtraction === null ? null : functionFacts(sourcePath, beforeExtraction.symbols, beforeExtraction.calls ?? []);
@@ -127,6 +141,8 @@ async function cohesionChange(
     impact,
     testsToRun,
     untestedDependents,
+    untestedBasis: basis,
+    coverage: fileCoverageFigure,
     note,
   });
 
@@ -142,6 +158,8 @@ async function cohesionChange(
     impact,
     testsToRun,
     untestedDependents,
+    untestedBasis: basis,
+    coverage: fileCoverageFigure,
     risk,
     impactPassport,
   };
@@ -194,7 +212,7 @@ function computeChangeRisk(
   filePath: string,
   functions: readonly FunctionChange[],
   impact: TieredImpact | null,
-  reached: ReadonlySet<string>,
+  isUntestedFile: (file: string) => boolean,
 ): ChangeRisk | null {
   const recordedReferences = impact?.definite.length ?? 0;
   if (functions.length === 0 && recordedReferences === 0) {
@@ -207,8 +225,8 @@ function computeChangeRisk(
     touchedComplexity += fn.decisionPointsAfter ?? fn.decisionPointsBefore ?? 0;
   }
   const candidates = [filePath, ...(impact?.definite ?? [])];
-  const reachedCount = candidates.filter((candidate) => reached.has(candidate)).length;
-  const untestedShare = candidates.length === 0 ? 1 : (candidates.length - reachedCount) / candidates.length;
+  const untestedCount = candidates.filter(isUntestedFile).length;
+  const untestedShare = candidates.length === 0 ? 1 : untestedCount / candidates.length;
 
   const signals: ChangeRiskSignal[] = [
     riskSignal('lines-touched', linesTouched, CHANGE_RISK_THRESHOLDS.linesTouched),

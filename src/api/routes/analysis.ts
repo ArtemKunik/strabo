@@ -341,7 +341,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
-      response.json(buildTierReport(repository.root, repository.name, cached.report.graph));
+      // The matrix cells and per-tier stats read the measured report when one exists, else
+      // the labelled reach fallback; the report is read once here, never inside the analysis.
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      response.json(buildTierReport(repository.root, repository.name, cached.report.graph, measured));
     } catch (error) {
       sendError(response, error);
     }
@@ -615,8 +618,11 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         // The passport reads the after side from the working tree, so it is only honest
         // when the branch is what is checked out.
         const edges = review.branch.checkedOut ? await structuralEdges(review.branch.mergeBase) : undefined;
+        const measured = review.branch.checkedOut
+          ? await measuredCoverage(repository, cached.report.graph, review.files.map((file) => file.path))
+          : null;
         const cohesion = review.branch.checkedOut
-          ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph, edges)
+          ? await computeChangePassport(repository.root, review.files, review.branch.mergeBase, cached.report.graph, edges, measured)
           : undefined;
         const metrics = await computeRangeMetrics(repository.root, review.branch.mergeBase, review.branch.tipHash);
         const provenance = await graphProvenance(repository.root, cached);
@@ -654,7 +660,8 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       // the first parent for a commit (which `^` names for a merge and fails on the root).
       const baseline = base ? `${base}^` : 'HEAD';
       const edges = await structuralEdges(baseline);
-      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph, edges);
+      const measured = await measuredCoverage(repository, cached.report.graph, review.files.map((file) => file.path));
+      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph, edges, measured);
       const metrics = base
         ? await computeCommitMetrics(repository.root, base)
         : await computeWorkingTreeMetrics(repository.root, review.files);
@@ -701,8 +708,9 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         return;
       }
       const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph, [file]);
       response.json({
-        ...(await computeFileImpactPassport(repository.root, cached.report.graph, file)),
+        ...(await computeFileImpactPassport(repository.root, cached.report.graph, file, measured)),
         provenance: await graphProvenance(repository.root, cached),
       });
     } catch (error) {

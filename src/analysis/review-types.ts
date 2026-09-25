@@ -1,3 +1,5 @@
+import type { FileCoverage, FileCoverageAggregate } from './file-coverage.ts';
+
 /**
  * Review data shapes shared by the review and change-passport analyses.
  *
@@ -153,7 +155,7 @@ export interface ChangeRisk {
     touchedComplexity: number;
     /** Importers whose recorded specifier names a changed symbol. */
     recordedReferences: number;
-    /** Share of the change and its recorded references that no test reaches. */
+    /** Share of the change and its references under threshold measured, else not test-reached. */
     untestedShare: number;
   };
 }
@@ -178,7 +180,7 @@ export interface ImpactRisk {
     blastRadius: number;
     /** Recorded function signals in the reviewed state. */
     signals: number;
-    /** Share of direct dependents no test reaches, 0-1. */
+    /** Share of direct dependents under threshold measured, else that no test reaches, 0-1. */
     untestedShare: number;
     directImporters: number;
   };
@@ -280,6 +282,10 @@ export interface FileImpactPassport {
   impact: TieredImpact | null;
   testsToRun: string[];
   untestedDependents: string[];
+  /** How `untestedDependents` was decided: measured under threshold, or no test reaches. */
+  untestedBasis?: 'measured' | 'reachable';
+  /** This file's own coverage, measured when the report names it, else the reach fallback. */
+  coverage?: FileCoverage | null;
   note?: string;
   /** The graph this card was computed from, when the serializer attached it. */
   provenance?: GraphProvenance;
@@ -305,6 +311,11 @@ export interface ImpactTotals {
   mostComplex: ImpactFunction[];
   functionsUnchanged: number;
   classesUnchanged: number;
+  /**
+   * The changed files' coverage summed over one source: measured when a report named them,
+   * else graph reach. Null for a hand-built roll-up that carried no figures.
+   */
+  coverage?: FileCoverageAggregate | null;
 }
 
 /** A passport at one of three scopes: one file, a change set, or a whole revision. */
@@ -351,6 +362,10 @@ export interface CohesionChange {
   testsToRun: string[];
   /** Direct dependents that no test reaches. */
   untestedDependents: string[];
+  /** How `untestedDependents` was decided: measured under threshold, or no test reaches. */
+  untestedBasis: 'measured' | 'reachable';
+  /** This file's own coverage, measured when the report names it, else the reach fallback. */
+  coverage: FileCoverage | null;
   /** The pending-change risk, or null when nothing measurable was touched. */
   risk: ChangeRisk | null;
   /**

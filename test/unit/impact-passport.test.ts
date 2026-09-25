@@ -11,6 +11,7 @@ import {
   buildFileImpactPassport,
   computeFileImpactPassport,
   computeGraphMetrics,
+  computeMeasuredCoverage,
   computeRisk,
   fingerprint,
   functionFacts,
@@ -293,6 +294,32 @@ test('computeFileImpactPassport reports the current snapshot against HEAD', asyn
   assert.equal(card.mostComplex[0]?.name, 'save');
   assert.equal(card.mostComplex[0]?.delta, 1);
   assert.ok(card.coherence && card.coherence.changedSymbols >= 1);
+});
+
+test('computeFileImpactPassport reports a test-imported 0% file as measured 0% (U2)', async () => {
+  const fixture = path.join(fixturesRoot, 'coverage-repo');
+  const report = await scanRepository(fixture);
+  const measured = await computeMeasuredCoverage(fixture, report.graph, {
+    modifiedAt: () => '2024-06-01T00:00:00.000Z',
+    lastCommitAt: async () => '2024-01-01T00:00:00.000Z',
+  });
+
+  const card = await computeFileImpactPassport(fixture, report.graph, 'src/zero.ts', measured);
+  assert.equal(card.coverage?.basis, 'measured');
+  assert.equal(card.coverage?.value, 0, 'measured 0%, not the reachable fallback');
+  assert.equal(card.untestedBasis, 'measured');
+  assert.equal(typeof card.coverage?.reportAgeMs, 'number', 'the report age is named');
+
+  const set = rollUpImpactPassports(report.graph, [card], 'file', null, false);
+  assert.equal(set.totals.coverage?.basis, 'measured');
+  assert.equal(set.totals.coverage?.value, 0);
+
+  // With no report the figure is the labelled reach fallback, and the file is reached.
+  const fallback = await computeFileImpactPassport(fixture, report.graph, 'src/zero.ts');
+  assert.equal(fallback.coverage?.basis, 'reachable');
+  assert.equal(fallback.coverage?.value, null);
+  assert.equal(fallback.coverage?.reached, true);
+  assert.equal(fallback.untestedBasis, 'reachable');
 });
 
 test('graphProvenance carries fingerprint, scan time, and a working-tree staleness check', async () => {

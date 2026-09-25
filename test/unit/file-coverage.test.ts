@@ -3,7 +3,12 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { computeMeasuredCoverage, fileCoverage, scanRepository } from '../../src/index.ts';
+import {
+  computeMeasuredCoverage,
+  fileCoverage,
+  scanRepository,
+  summariseFileCoverage,
+} from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -95,4 +100,47 @@ test('fileCoverage: the reachability fallback matches test reach', async () => {
   assert.equal(byFile.get('src/half.ts')?.reached, true);
   // A test file counts as reached: it is the test.
   assert.equal(byFile.get('src/half.test.ts')?.reached, true);
+});
+
+test('fileCoverage: each figure carries the report age (U2)', async () => {
+  const graph = await loadGraph();
+  const measured = await computeMeasuredCoverage(fixture, graph, freshDates);
+  const byFile = fileCoverage(graph, measured);
+
+  assert.equal(byFile.get('src/zero.ts')?.reportModified, '2024-06-01T00:00:00.000Z');
+  assert.equal(typeof byFile.get('src/zero.ts')?.reportAgeMs, 'number');
+  // With no report, the age is unrecorded, never a stand-in date.
+  assert.equal(fileCoverage(graph, null).get('src/zero.ts')?.reportModified, null);
+  assert.equal(fileCoverage(graph, null).get('src/zero.ts')?.reportAgeMs, null);
+});
+
+test('summariseFileCoverage sums one basis and keeps not-in-report apart from 0% (U2)', async () => {
+  const graph = await loadGraph();
+  const measured = await computeMeasuredCoverage(fixture, graph, freshDates);
+  const byFile = fileCoverage(graph, measured);
+
+  const aggregate = summariseFileCoverage(['src/zero.ts', 'src/half.ts', 'src/zero.test.ts'], byFile);
+  assert.equal(aggregate.basis, 'measured');
+  assert.equal(aggregate.files, 3);
+  assert.equal(aggregate.filesMeasured, 2);
+  assert.equal(aggregate.notInReport, 1, 'zero.test.ts is named by no report, not counted as 0%');
+  assert.equal(aggregate.linesFound, 6);
+  assert.equal(aggregate.linesHit, 3);
+  assert.equal(aggregate.value, 50);
+  assert.equal(aggregate.reached, 3);
+  assert.equal(aggregate.reportAgeMs !== null, true);
+});
+
+test('summariseFileCoverage falls back to reachability with no report (U2)', async () => {
+  const graph = await loadGraph(noReportFixture);
+  const measured = await computeMeasuredCoverage(noReportFixture, graph);
+  assert.equal(measured.available, false);
+
+  const first = graph.nodes[0]?.id;
+  assert.ok(first, 'the fixture has a file to summarise');
+  const aggregate = summariseFileCoverage([first], fileCoverage(graph, measured));
+  assert.equal(aggregate.basis, 'reachable');
+  assert.equal(aggregate.value, null);
+  assert.equal(aggregate.reportAgeMs, null);
+  assert.equal(aggregate.notInReport, 0);
 });
