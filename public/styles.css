@@ -91,76 +91,6 @@
 }
 
 /*
- * Light theme. Only the tokens change: every component is written against them, so the
- * surfaces, ink, borders, and canvas colours all flip together. `color-scheme` makes the
- * native controls (selects, scrollbars, form fields) follow too, which CSS cannot paint.
- */
-:root[data-theme='light'] {
-  color-scheme: light;
-  --bg-0: #e6eaf1;
-  --bg-1: #f3f5f9;
-  --bg-2: #ffffff;
-  --bg-3: #e8ecf3;
-  --ink-1: #131a24;
-  --ink-2: #38445a;
-  --ink-3: #64728a;
-  --line: #d6dde7;
-  --line-soft: #e5eaf1;
-  --accent: #3b6fe0;
-  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
-  --accent-ink: #1d47a0;
-  --on-accent: #ffffff;
-  --on-warning: #111111;
-  --focus-ring: var(--accent);
-  --status-good: #1f9e7c;
-  --status-warning: #b9741a;
-  --status-serious: #b5562a;
-  --status-critical: #d23b3b;
-  --syntax-keyword: #7b3fc4;
-  --syntax-string: #2b7a3d;
-  --syntax-number: #a94e14;
-  --syntax-type: #0f6a88;
-  --syntax-function: #2456b3;
-  --syntax-meta: #83630c;
-  --node-fill: #5b6b7d;
-  --node-line: rgba(20, 40, 70, 0.32);
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-other: #66748a;
-  /* Tier hues hold on the light surfaces at the same values as the dark theme. */
-  --tier-frontend: #b63596;
-  --tier-api: #3092a6;
-  --tier-domain: #7659cf;
-  --tier-data: #309141;
-  --tier-integration: #a64e30;
-  --tier-infra: #a68930;
-  --tier-build: #4969ca;
-  --tier-tests: #b83a5c;
-  --wash: rgba(20, 40, 70, 0.05);
-  --hairline: rgba(20, 40, 70, 0.16);
-  --veil: rgba(243, 245, 249, 0.72);
-  --veiled-surface: rgba(255, 255, 255, 0.9);
-  --island-fill: var(--wash);
-  --island-line: var(--hairline);
-  --shadow-1: 0 1px 2px rgba(30, 45, 70, 0.08), 0 10px 30px rgba(30, 45, 70, 0.12);
-  --shadow-2: 0 2px 6px rgba(30, 45, 70, 0.1), 0 18px 50px rgba(30, 45, 70, 0.18);
-  --graph-grid: rgba(20, 40, 70, 0.10);
-  --graph-ink: #1b2530;
-  --graph-ink-outline: #f4f6fa;
-  --graph-edge: #9aa9bb;
-  --graph-edge-accent: #3b6fe0;
-  --graph-edge-selected: #3b6fe0;
-  --graph-hub: #3b6fe0;
-  --graph-selected: #16202c;
-  --graph-changed: var(--status-critical);
-  --graph-affected: var(--status-warning);
-  --graph-cycle: var(--status-serious);
-  --graph-unreached: var(--ink-3);
-  --input-bg: #ffffff;
-}
-
-/*
  * Nord: arctic blue-grey surfaces.
  *
  * A full token set, like the light theme: only the tokens change, so the chrome, the
@@ -513,6 +443,76 @@
   --graph-cycle: var(--status-serious);
   --graph-unreached: var(--ink-3);
   --input-bg: #22231e;
+}
+
+/*
+ * Light theme. Only the tokens change: every component is written against them, so the
+ * surfaces, ink, borders, and canvas colours all flip together. `color-scheme` makes the
+ * native controls (selects, scrollbars, form fields) follow too, which CSS cannot paint.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-0: #e6eaf1;
+  --bg-1: #f3f5f9;
+  --bg-2: #ffffff;
+  --bg-3: #e8ecf3;
+  --ink-1: #131a24;
+  --ink-2: #38445a;
+  --ink-3: #64728a;
+  --line: #d6dde7;
+  --line-soft: #e5eaf1;
+  --accent: #3b6fe0;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-ink: #1d47a0;
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  --focus-ring: var(--accent);
+  --status-good: #1f9e7c;
+  --status-warning: #b9741a;
+  --status-serious: #b5562a;
+  --status-critical: #d23b3b;
+  --syntax-keyword: #7b3fc4;
+  --syntax-string: #2b7a3d;
+  --syntax-number: #a94e14;
+  --syntax-type: #0f6a88;
+  --syntax-function: #2456b3;
+  --syntax-meta: #83630c;
+  --node-fill: #5b6b7d;
+  --node-line: rgba(20, 40, 70, 0.32);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #66748a;
+  /* Tier hues hold on the light surfaces at the same values as the dark theme. */
+  --tier-frontend: #b63596;
+  --tier-api: #3092a6;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #a68930;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
+  --wash: rgba(20, 40, 70, 0.05);
+  --hairline: rgba(20, 40, 70, 0.16);
+  --veil: rgba(243, 245, 249, 0.72);
+  --veiled-surface: rgba(255, 255, 255, 0.9);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(30, 45, 70, 0.08), 0 10px 30px rgba(30, 45, 70, 0.12);
+  --shadow-2: 0 2px 6px rgba(30, 45, 70, 0.1), 0 18px 50px rgba(30, 45, 70, 0.18);
+  --graph-grid: rgba(20, 40, 70, 0.10);
+  --graph-ink: #1b2530;
+  --graph-ink-outline: #f4f6fa;
+  --graph-edge: #9aa9bb;
+  --graph-edge-accent: #3b6fe0;
+  --graph-edge-selected: #3b6fe0;
+  --graph-hub: #3b6fe0;
+  --graph-selected: #16202c;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #ffffff;
 }
 
 /*
@@ -898,13 +898,6 @@ body[data-mode="file"] #tb-calls {
   color: var(--accent);
   font-size: 16px;
   text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 75%, transparent);
-}
-
-.brand-sub {
-  color: var(--ink-3);
-  font-size: var(--text-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 /* Folded into the toolbar: the drill-down breadcrumb no longer spends its own row. */
@@ -2112,21 +2105,6 @@ body.screen-off-graph .float-window {
   font-size: 11px;
 }
 
-.function-list {
-  margin: 4px 0 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.function-entry {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px 8px;
-}
-
 .function-name {
   font-weight: 600;
 }
@@ -2530,6 +2508,41 @@ body.screen-off-graph .float-window {
   color: var(--ink-3);
   font-size: 12px;
   margin: 0 0 8px;
+}
+
+.passport-start {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+
+.passport-start h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.passport-job {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.passport-job:hover,
+.passport-job:focus-visible {
+  border-color: var(--accent);
+}
+
+.passport-job span {
+  color: var(--ink-3);
+  font-size: 12px;
 }
 
 .passport-section-heading {

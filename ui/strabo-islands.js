@@ -12,7 +12,7 @@
  * projects them with the viewport's own pan and zoom.
  */
 
-import { diameter } from './strabo-graph.js';
+import { diameter } from './strabo-graph-sizing.js';
 
 /** Gap between the outermost node edge and the plate, in model units. */
 export const ISLAND_PADDING = 26;

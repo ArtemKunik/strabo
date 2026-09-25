@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { diffElements, diffGraph } from '../../ui/strabo-graph.js';
+import { diffElements, diffGraph } from '../../ui/strabo-graph-diff.js';
 
 const node = (id, overrides = {}) => ({
   group: 'nodes',

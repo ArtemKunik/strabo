@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 
-import { classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses } from '../../src/index.ts';
+import { classifyLicenseExpression, isDeniedLicense, parseDeniedLicenses, scanRepository } from '../../src/index.ts';
 import {
   findManifestFiles,
   parseCargoLock,
@@ -474,4 +474,29 @@ test('computeRiskReport does not report platform, local, or builtin imports as u
   const report = await computeRiskReport(root, graph, { online: false });
   // Only the genuinely undeclared ones remain: `tokio` and `retrofit2` have no manifest entry.
   assert.deepEqual(report.inventory.undeclared, ['retrofit2', 'tokio']);
+});
+
+test('an import-looking line inside a generated template is not an undeclared package', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'app', version: '1.0.0' }));
+  fs.writeFileSync(
+    path.join(root, 'package-lock.json'),
+    JSON.stringify({ lockfileVersion: 3, packages: { '': { name: 'app' } } }),
+  );
+  fs.mkdirSync(path.join(root, 'scripts'));
+  fs.writeFileSync(
+    path.join(root, 'scripts', 'generate.mjs'),
+    [
+      'const generated = `',
+      "import { main } from 'app';",
+      '`;',
+      'process.stdout.write(generated);',
+      '',
+    ].join('\n'),
+  );
+
+  const { graph } = await scanRepository(root);
+  const report = await computeRiskReport(root, graph, { online: false });
+
+  assert.deepEqual(report.inventory.undeclared, []);
 });

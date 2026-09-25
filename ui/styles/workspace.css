@@ -1,0 +1,217 @@
+.workspace-summary {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.workspace-repositories,
+.workspace-flows,
+.workspace-contracts,
+.workspace-drift {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.workspace-row {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-name {
+  font-weight: 600;
+}
+
+.workspace-detail {
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* compatibility, preflight and live database. Every status carries its word, never hue alone. */
+.workspace-tools {
+  margin-top: 12px;
+}
+
+.workspace-tools-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 4px 0 8px;
+}
+
+.workspace-tools-form input {
+  min-width: 14ch;
+}
+
+.workspace-group {
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.workspace-error {
+  color: var(--status-critical);
+  font-style: normal;
+}
+
+.workspace-compat,
+.workspace-preflight,
+.workspace-preflight-skipped,
+.workspace-live-drift,
+.workspace-runs {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.compat-badge {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compat-breaking,
+.preflight-violations {
+  border-color: var(--status-critical);
+  border-style: solid;
+}
+
+.compat-conditional,
+.preflight-error {
+  border-color: var(--status-warning);
+  border-style: dashed;
+}
+
+.compat-safe,
+.preflight-ok {
+  border-color: var(--status-good);
+  border-style: dotted;
+}
+
+.workspace-sql {
+  margin: 4px 0 0;
+  padding: 6px;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+
+.workspace-database {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.workspace-consent {
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.workspace-script-link {
+  font-size: 11px;
+}
+
+.passport-panel {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.passport-summary {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.passport-start {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+
+.passport-start h4 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.passport-job {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.passport-job:hover,
+.passport-job:focus-visible {
+  border-color: var(--accent);
+}
+
+.passport-job span {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.passport-section-heading {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.passport-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.passport-list li {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.passport-list .link {
+  text-align: left;
+  word-break: break-all;
+}
+
+.passport-list .evidence {
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.data-flow {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.flow-panel {
+  margin-bottom: 4px;
+}
+
+.data-flow .caveat {
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-style: italic;
+}
+

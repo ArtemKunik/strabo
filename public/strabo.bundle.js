@@ -2,11 +2,11 @@
 
 // ui/strabo-a11y.js
 var ROVING_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
-function rovingIndex(current2, count, key, { wrap = true } = {}) {
+function rovingIndex(current, count, key, { wrap = true } = {}) {
   if (!ROVING_KEYS.includes(key) || count <= 0) {
     return null;
   }
-  const index = Number.isInteger(current2) && current2 >= 0 && current2 < count ? current2 : 0;
+  const index = Number.isInteger(current) && current >= 0 && current < count ? current : 0;
   switch (key) {
     case "ArrowRight":
     case "ArrowDown":
@@ -95,29 +95,7 @@ function createVirtualList({
   };
 }
 
-// ui/strabo-graph.js
-var API_PATH = "/api/strabo";
-var MIN_DIAMETER = 22;
-var MAX_DIAMETER = 62;
-var MAX_LOC_DIAMETER = 74;
-var MIN_UNIT_DIAMETER = 48;
-var MAX_UNIT_DIAMETER = 130;
-var MIN_SHELF_DIAMETER = 26;
-var MAX_SHELF_DIAMETER = 64;
-var SHAPES = {
-  module: "round-rectangle",
-  test: "diamond",
-  entry: "star",
-  service: "hexagon",
-  topic: "ellipse",
-  queue: "rectangle",
-  table: "barrel",
-  entity: "round-tag",
-  schema: "round-diamond",
-  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
-  unit: "round-rectangle",
-  shelf: "rectangle"
-};
+// ui/strabo-graph-ids.js
 function hash(value) {
   let result = 0;
   for (let index = 0; index < value.length; index += 1) {
@@ -130,208 +108,15 @@ function topLevelDirectory(id) {
   const slash = value.indexOf("/");
   return slash === -1 ? "." : value.slice(0, slash);
 }
-function passportFor(model, id) {
-  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
-  if (!node) {
-    return null;
-  }
-  const edges = model.edges ?? [];
-  const imports = distinctByFile(
-    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
-  );
-  const usedBy = distinctByFile(
-    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
-  );
-  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
-  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
-    metrics.push(
-      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
-      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
-    );
-  } else {
-    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
-  }
-  metrics.push(
-    { label: "Direct imports", value: imports.length, unit: "files" },
-    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
-  );
-  if (typeof node.lines === "number") {
-    metrics.push({ label: "Lines", value: node.lines });
-  }
-  if (typeof node.files === "number") {
-    metrics.push({ label: "Files", value: node.files });
-  }
-  if (typeof node.periphery === "number" && node.periphery > 0) {
-    metrics.push({ label: "Support files", value: node.periphery });
-  }
-  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
-  if (card) {
-    metrics.push(
-      { label: "Lines", value: card.loc },
-      { label: "Layers", value: card.layers.length },
-      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
-      { label: "Depends on units", value: card.dependsOn },
-      { label: "Used by units", value: card.usedBy }
-    );
-    if (card.hotspots !== null) {
-      metrics.push({ label: "Hotspots", value: card.hotspots });
-    }
-  }
-  if (node.shelf) {
-    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
-  }
-  return {
-    id: node.id,
-    kind: node.kind,
-    // The "why grouped" caption a System-view unit carries; absent on file nodes.
-    why: node.why,
-    metrics,
-    imports,
-    usedBy
-  };
-}
-function edgeEntry(id, edge) {
-  return {
-    id,
-    line: edge.evidence?.line,
-    specifier: edge.evidence?.specifier,
-    role: edge.role
-  };
-}
-function distinctByFile(entries) {
-  const byFile = /* @__PURE__ */ new Map();
-  for (const entry of entries) {
-    if (entry.role === "declare" || byFile.has(entry.id)) {
-      continue;
-    }
-    byFile.set(entry.id, entry);
-  }
-  return [...byFile.values()];
-}
-function coChangePartnersFor(report, file, limit = 20) {
-  const edges = (report?.edges ?? []).filter(
-    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
-  );
-  return edges.sort(
-    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
-      b2.source === file ? b2.target : b2.source
-    )
-  ).slice(0, limit).map((edge) => ({
-    file: edge.source === file ? edge.target : edge.source,
-    hidden: edge.hidden === true,
-    ratio: edge.ratio,
-    commitsShared: edge.commitsShared ?? edge.commits.length,
-    commits: edge.commits
-  }));
-}
-function mapCounts(model) {
-  const isBlock = model.prefixLength !== void 0 || model.system === true;
-  const byKey = /* @__PURE__ */ new Map();
-  let tests = 0;
-  let modules = 0;
-  for (const node of model.nodes ?? []) {
-    if (node.kind === "test") {
-      tests += 1;
-    } else {
-      modules += 1;
-    }
-    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
-    byKey.set(key, (byKey.get(key) ?? 0) + 1);
-  }
-  const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
-    label: key,
-    count,
-    // Block ids are whole directories; file ids filter by their directory prefix.
-    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
-  }));
-  return { tests, modules, entries };
-}
-function readingLegend(model, locLens = false) {
-  if (model?.systemUnit) {
-    return [
-      "box = unit frame",
-      "lane = layer",
-      "edge = selected file import",
-      "badge = files in another unit",
-      "tag = support shelf"
-    ];
-  }
-  if (model?.system) {
-    return [
-      "box = build unit",
-      "size = files",
-      "edge = import between units",
-      "support = unit footer"
-    ];
-  }
-  return [
-    locLens ? "size = lines of code" : "size = dependents",
-    "island = directory",
-    "diamond = test",
-    "star = entry"
-  ];
-}
-function shortcutSheet() {
-  return [
-    { keys: "F", action: "Center the selection" },
-    { keys: "I", action: "Show change impact" },
-    { keys: "O", action: "Show the selected file\u2019s links to other units" },
-    { keys: "P", action: "Trace a path between two nodes" },
-    { keys: "B", action: "Toggle directories / files" },
-    { keys: "L", action: "Show a file name under every file" },
-    { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
-    { keys: "C", action: "Show recorded function calls instead of imports" },
-    { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
-    { keys: "S", action: "View the selected file\u2019s source" },
-    { keys: "T", action: "Timeline" },
-    { keys: "N", action: "Branches" },
-    { keys: "R", action: "Review working-tree changes" },
-    { keys: "V", action: "Dependency risk" },
-    { keys: "G", action: "Delegate the selected files" },
-    { keys: "\u2318K / ctrl-K", action: "Filter paths" },
-    { keys: "Esc", action: "Clear the selection or close a panel" },
-    { keys: "?", action: "Show this sheet" },
-    { keys: "hover a node", action: "Report its blast radius" },
-    { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
-  ];
-}
-function unitHoverFacts(model, id) {
-  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
-  if (!card) {
-    return null;
-  }
-  return {
-    title: `${card.ecosystem} package \`${card.name}\``,
-    rows: [
-      `${card.files} files`,
-      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
-      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
-      `why: ${card.manifest ?? card.why}`
-    ]
-  };
-}
-function shelfHoverText(shelf) {
-  if (!shelf) {
-    return "support files";
-  }
-  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
-  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
-  return `${tests}, ${scripts}: folded support`;
-}
-function withUnitHotspots(cards, report) {
-  const list = cards ?? [];
-  const byPrefix = list.map((card) => card.id).sort((a, b2) => b2.length - a.length);
-  const counts = new Map(list.map((card) => [card.id, 0]));
-  for (const spot of report?.hotspots ?? []) {
-    const owner = byPrefix.find(
-      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
-    );
-    if (owner !== void 0) {
-      counts.set(owner, (counts.get(owner) ?? 0) + 1);
-    }
-  }
-  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
-}
+
+// ui/strabo-graph-sizing.js
+var MIN_DIAMETER = 22;
+var MAX_DIAMETER = 62;
+var MAX_LOC_DIAMETER = 74;
+var MIN_UNIT_DIAMETER = 48;
+var MAX_UNIT_DIAMETER = 130;
+var MIN_SHELF_DIAMETER = 26;
+var MAX_SHELF_DIAMETER = 64;
 function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
@@ -357,37 +142,22 @@ function nodeDiameter(node) {
   if (node?.kind === "shelf") return shelfDiameter(node.files);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
-function buildGraphQuery(state2, options = {}) {
-  const params = new URLSearchParams();
-  if (state2.repository) {
-    params.set("repository", state2.repository);
-  }
-  if (options.refresh) {
-    params.set("refresh", "1");
-  }
-  if (state2.mode === "system") {
-    params.set("system", "1");
-    if (state2.systemUnit) {
-      params.set("systemUnit", state2.systemUnit);
-      if (state2.showOutside) {
-        params.set("outside", "1");
-        if (state2.unitFile) {
-          params.set("selected", state2.unitFile);
-        }
-        if (state2.expandedUnits?.length) {
-          params.set("expanded", state2.expandedUnits.join(","));
-        }
-      }
-    }
-  } else if (state2.mode === "block") {
-    params.set("blockDepth", String(state2.depth ?? 1));
-    if (state2.prefix) {
-      params.set("blockPrefix", state2.prefix);
-    }
-  }
-  const query = params.toString();
-  return query ? `?${query}` : "";
-}
+
+// ui/strabo-graph-elements.js
+var SHAPES = {
+  module: "round-rectangle",
+  test: "diamond",
+  entry: "star",
+  service: "hexagon",
+  topic: "ellipse",
+  queue: "rectangle",
+  table: "barrel",
+  entity: "round-tag",
+  schema: "round-diamond",
+  // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
+  unit: "round-rectangle",
+  shelf: "rectangle"
+};
 function ambiguousFileIds(model) {
   const byName = /* @__PURE__ */ new Map();
   for (const node of model.nodes ?? []) {
@@ -534,6 +304,8 @@ function buildHiddenCouplingElements(model, report, startIndex = 0) {
 function positionOf(position) {
   return position ? { x: position.x, y: position.y } : { x: 0, y: 0 };
 }
+
+// ui/strabo-graph-diff.js
 function diffElements(previous = [], next = []) {
   const before = new Map(previous.map((element2) => [element2.data.id, element2]));
   const added = [];
@@ -565,6 +337,8 @@ function elementSignature(element2) {
     position: element2.position ?? null
   });
 }
+
+// ui/strabo-graph-traversal.js
 function adjacency(model) {
   const forward = /* @__PURE__ */ new Map();
   const backward = /* @__PURE__ */ new Map();
@@ -588,8 +362,8 @@ function neighbourhood(model, id, depth = 1) {
   let frontier = [id];
   for (let step = 0; step < depth; step += 1) {
     const next = [];
-    for (const current2 of frontier) {
-      for (const neighbour of [...forward.get(current2) ?? [], ...backward.get(current2) ?? []]) {
+    for (const current of frontier) {
+      for (const neighbour of [...forward.get(current) ?? [], ...backward.get(current) ?? []]) {
         if (!seen.has(neighbour)) {
           seen.add(neighbour);
           next.push(neighbour);
@@ -605,60 +379,22 @@ function findPath(model, from, to, maxHops = 12) {
   const queue = [{ id: from, path: [from] }];
   const visited = /* @__PURE__ */ new Set([from]);
   while (queue.length > 0) {
-    const current2 = queue.shift();
-    if (current2.id === to) {
-      return current2.path;
+    const current = queue.shift();
+    if (current.id === to) {
+      return current.path;
     }
-    if (current2.path.length > maxHops) {
+    if (current.path.length > maxHops) {
       continue;
     }
-    for (const neighbour of forward.get(current2.id) ?? []) {
+    for (const neighbour of forward.get(current.id) ?? []) {
       if (visited.has(neighbour)) {
         continue;
       }
       visited.add(neighbour);
-      queue.push({ id: neighbour, path: [...current2.path, neighbour] });
+      queue.push({ id: neighbour, path: [...current.path, neighbour] });
     }
   }
   return null;
-}
-function breadcrumb(state2) {
-  if (state2.mode === "system") {
-    const crumbs2 = [{ label: "System", prefix: "" }];
-    if (state2.systemUnit) {
-      crumbs2.push({ label: state2.systemUnitLabel ?? state2.systemUnit, prefix: state2.systemUnit });
-    }
-    return crumbs2;
-  }
-  if (state2.mode !== "block") {
-    return [];
-  }
-  const crumbs = [{ label: "repository", prefix: "" }];
-  const segments = (state2.prefix ?? "").split("/").filter(Boolean);
-  segments.forEach((segment, index) => {
-    crumbs.push({ label: segment, prefix: segments.slice(0, index + 1).join("/") });
-  });
-  return crumbs;
-}
-function summarizeDiagnostics(model) {
-  const byKind = {};
-  for (const diagnostic of model.diagnostics ?? []) {
-    byKind[diagnostic.kind] = (byKind[diagnostic.kind] ?? 0) + 1;
-  }
-  const excludedByReason = {};
-  for (const exclusion of model.excluded ?? []) {
-    excludedByReason[exclusion.reason] = (excludedByReason[exclusion.reason] ?? 0) + 1;
-  }
-  return {
-    diagnostics: (model.diagnostics ?? []).length,
-    excluded: (model.excluded ?? []).length,
-    byKind,
-    excludedByReason,
-    samples: (model.diagnostics ?? []).slice(0, 50),
-    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
-    cache: model.cache?.status ?? "unknown",
-    stale: Boolean(model.cache?.stale)
-  };
 }
 function filterNodes(model, text) {
   const needle = text.trim().toLowerCase();
@@ -666,6 +402,149 @@ function filterNodes(model, text) {
     return model.nodes.map((node) => node.id);
   }
   return model.nodes.filter((node) => node.id.toLowerCase().includes(needle)).map((node) => node.id);
+}
+
+// ui/strabo-graph-facts.js
+function passportFor(model, id) {
+  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return null;
+  }
+  const edges = model.edges ?? [];
+  const imports = distinctByFile(
+    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
+  );
+  const usedBy = distinctByFile(
+    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
+  );
+  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
+  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
+    metrics.push(
+      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
+      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
+    );
+  } else {
+    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
+  }
+  metrics.push(
+    { label: "Direct imports", value: imports.length, unit: "files" },
+    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
+  );
+  if (typeof node.lines === "number") {
+    metrics.push({ label: "Lines", value: node.lines });
+  }
+  if (typeof node.files === "number") {
+    metrics.push({ label: "Files", value: node.files });
+  }
+  if (typeof node.periphery === "number" && node.periphery > 0) {
+    metrics.push({ label: "Support files", value: node.periphery });
+  }
+  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
+  if (card) {
+    metrics.push(
+      { label: "Lines", value: card.loc },
+      { label: "Layers", value: card.layers.length },
+      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
+      { label: "Depends on units", value: card.dependsOn },
+      { label: "Used by units", value: card.usedBy }
+    );
+    if (card.coverage) {
+      const { value, linesHit, linesFound, notInReport } = card.coverage;
+      metrics.push({
+        label: "Measured coverage",
+        value: value === null ? "no line counts" : `${value}% (${linesHit}/${linesFound} lines)`
+      });
+      if (notInReport > 0) {
+        metrics.push({ label: "Not in report", value: notInReport });
+      }
+    }
+    if (card.hotspots !== null) {
+      metrics.push({ label: "Hotspots", value: card.hotspots });
+    }
+  }
+  if (node.shelf) {
+    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
+  }
+  return {
+    id: node.id,
+    kind: node.kind,
+    // The "why grouped" caption a System-view unit carries; absent on file nodes.
+    why: node.why,
+    metrics,
+    imports,
+    usedBy
+  };
+}
+function edgeEntry(id, edge) {
+  return {
+    id,
+    line: edge.evidence?.line,
+    specifier: edge.evidence?.specifier,
+    role: edge.role
+  };
+}
+function distinctByFile(entries) {
+  const byFile = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (entry.role === "declare" || byFile.has(entry.id)) {
+      continue;
+    }
+    byFile.set(entry.id, entry);
+  }
+  return [...byFile.values()];
+}
+function coChangePartnersFor(report, file, limit = 20) {
+  const edges = (report?.edges ?? []).filter(
+    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
+  );
+  return edges.sort(
+    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
+      b2.source === file ? b2.target : b2.source
+    )
+  ).slice(0, limit).map((edge) => ({
+    file: edge.source === file ? edge.target : edge.source,
+    hidden: edge.hidden === true,
+    ratio: edge.ratio,
+    commitsShared: edge.commitsShared ?? edge.commits.length,
+    commits: edge.commits
+  }));
+}
+function unitHoverFacts(model, id) {
+  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
+  if (!card) {
+    return null;
+  }
+  return {
+    title: `${card.ecosystem} package \`${card.name}\``,
+    rows: [
+      `${card.files} files`,
+      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
+      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
+      `why: ${card.manifest ?? card.why}`
+    ]
+  };
+}
+function shelfHoverText(shelf) {
+  if (!shelf) {
+    return "support files";
+  }
+  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
+  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
+  return `${tests}, ${scripts}: folded support`;
+}
+function withUnitHotspots(cards, report) {
+  const list = cards ?? [];
+  const byPrefix = list.map((card) => card.id).sort((a, b2) => b2.length - a.length);
+  const counts = new Map(list.map((card) => [card.id, 0]));
+  for (const spot of report?.hotspots ?? []) {
+    const owner = byPrefix.find(
+      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
+    );
+    if (owner !== void 0) {
+      counts.set(owner, (counts.get(owner) ?? 0) + 1);
+    }
+  }
+  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
 }
 function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
@@ -710,6 +589,151 @@ var RESOLUTION_LABELS = {
   root: "repo root",
   "subpath-import": "package subpath"
 };
+
+// ui/strabo-graph-query.js
+var API_PATH = "/api/strabo";
+function buildGraphQuery(state2, options = {}) {
+  const params = new URLSearchParams();
+  if (state2.repository) {
+    params.set("repository", state2.repository);
+  }
+  if (options.refresh) {
+    params.set("refresh", "1");
+  }
+  if (state2.mode === "system") {
+    params.set("system", "1");
+    if (state2.systemUnit) {
+      params.set("systemUnit", state2.systemUnit);
+      if (state2.showOutside) {
+        params.set("outside", "1");
+        if (state2.unitFile) {
+          params.set("selected", state2.unitFile);
+        }
+        if (state2.expandedUnits?.length) {
+          params.set("expanded", state2.expandedUnits.join(","));
+        }
+      }
+    }
+  } else if (state2.mode === "block") {
+    params.set("blockDepth", String(state2.depth ?? 1));
+    if (state2.prefix) {
+      params.set("blockPrefix", state2.prefix);
+    }
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+function breadcrumb(state2) {
+  if (state2.mode === "system") {
+    const crumbs2 = [{ label: "System", prefix: "" }];
+    if (state2.systemUnit) {
+      crumbs2.push({ label: state2.systemUnitLabel ?? state2.systemUnit, prefix: state2.systemUnit });
+    }
+    return crumbs2;
+  }
+  if (state2.mode !== "block") {
+    return [];
+  }
+  const crumbs = [{ label: "repository", prefix: "" }];
+  const segments = (state2.prefix ?? "").split("/").filter(Boolean);
+  segments.forEach((segment, index) => {
+    crumbs.push({ label: segment, prefix: segments.slice(0, index + 1).join("/") });
+  });
+  return crumbs;
+}
+
+// ui/strabo-graph-summary.js
+function mapCounts(model) {
+  const isBlock = model.prefixLength !== void 0 || model.system === true;
+  const byKey = /* @__PURE__ */ new Map();
+  let tests = 0;
+  let modules = 0;
+  for (const node of model.nodes ?? []) {
+    if (node.kind === "test") {
+      tests += 1;
+    } else {
+      modules += 1;
+    }
+    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
+    byKey.set(key, (byKey.get(key) ?? 0) + 1);
+  }
+  const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
+    label: key,
+    count,
+    // Block ids are whole directories; file ids filter by their directory prefix.
+    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
+  }));
+  return { tests, modules, entries };
+}
+function readingLegend(model, locLens = false) {
+  if (model?.systemUnit) {
+    return [
+      "box = unit frame",
+      "lane = layer",
+      "edge = selected file import",
+      "badge = files in another unit",
+      "tag = support shelf"
+    ];
+  }
+  if (model?.system) {
+    return [
+      "box = build unit",
+      "size = files",
+      "edge = import between units",
+      "support = unit footer"
+    ];
+  }
+  return [
+    locLens ? "size = lines of code" : "size = dependents",
+    "island = directory",
+    "diamond = test",
+    "star = entry"
+  ];
+}
+function shortcutSheet() {
+  return [
+    { keys: "F", action: "Center the selection" },
+    { keys: "I", action: "Show change impact" },
+    { keys: "O", action: "Show the selected file\u2019s links to other units" },
+    { keys: "P", action: "Trace a path between two nodes" },
+    { keys: "B", action: "Toggle directories / files" },
+    { keys: "L", action: "Show a file name under every file" },
+    { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
+    { keys: "C", action: "Show recorded function calls instead of imports" },
+    { keys: "H", action: "Show co-change coupling (commits that changed files together)" },
+    { keys: "S", action: "View the selected file\u2019s source" },
+    { keys: "T", action: "Timeline" },
+    { keys: "N", action: "Branches" },
+    { keys: "R", action: "Review working-tree changes" },
+    { keys: "V", action: "Dependency risk" },
+    { keys: "G", action: "Delegate the selected files" },
+    { keys: "\u2318K / ctrl-K", action: "Filter paths" },
+    { keys: "Esc", action: "Clear the selection or close a panel" },
+    { keys: "?", action: "Show this sheet" },
+    { keys: "hover a node", action: "Report its blast radius" },
+    { keys: "\u2318/ctrl-click, shift-drag", action: "Select a group" }
+  ];
+}
+function summarizeDiagnostics(model) {
+  const byKind = {};
+  for (const diagnostic of model.diagnostics ?? []) {
+    byKind[diagnostic.kind] = (byKind[diagnostic.kind] ?? 0) + 1;
+  }
+  const excludedByReason = {};
+  for (const exclusion of model.excluded ?? []) {
+    excludedByReason[exclusion.reason] = (excludedByReason[exclusion.reason] ?? 0) + 1;
+  }
+  return {
+    diagnostics: (model.diagnostics ?? []).length,
+    excluded: (model.excluded ?? []).length,
+    byKind,
+    excludedByReason,
+    samples: (model.diagnostics ?? []).slice(0, 50),
+    // Runtime vocabulary the header no longer carries; shown in the Diagnostics panel.
+    cache: model.cache?.status ?? "unknown",
+    stale: Boolean(model.cache?.stale)
+  };
+}
 function graphSummary(model) {
   const nodes = (model?.nodes ?? []).length;
   const edges = (model?.edges ?? []).length;
@@ -1252,6 +1276,31 @@ function coverageCaption(coverage) {
 }
 
 // ui/strabo-overlays.js
+var OVERLAY_TITLES = {
+  impact: "Change impact",
+  cycles: "Cycles",
+  "test-reach": "Test reach",
+  architecture: "Architecture health",
+  hotspots: "Function hotspots",
+  "module-depth": "Module depth",
+  ownership: "Ownership",
+  smells: "Smells",
+  "hidden-coupling": "Hidden coupling (co-change, no import path)",
+  "declared-rules": "Declared rules"
+};
+var OVERLAY_ENDPOINTS = {
+  impact: "/analysis/impact",
+  cycles: "/analysis/cycles",
+  "test-reach": "/analysis/test-reach",
+  architecture: "/analysis/architecture-health",
+  hotspots: "/analysis/functions",
+  "module-depth": "/analysis/module-depth",
+  ownership: "/analysis/ownership",
+  smells: "/analysis/smells",
+  "hidden-coupling": "/analysis/co-change",
+  "declared-rules": "/analysis/rules"
+};
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules"];
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -1968,7 +2017,7 @@ function createIslandLayer(container, handlers = {}) {
   let lastViewport = { pan: { x: 0, y: 0 }, zoom: 1 };
   let layerShift = { x: 0, y: 0 };
   let drag = null;
-  function hideTooltip2() {
+  function hideTooltip() {
     if (!tooltip.hidden) {
       tooltip.hidden = true;
     }
@@ -1990,7 +2039,7 @@ function createIslandLayer(container, handlers = {}) {
     container.classList.toggle("island-grab", Boolean(over) && !overNode);
     const hit = islandHit(boxes, x, y);
     if (!hit) {
-      hideTooltip2();
+      hideTooltip();
       return;
     }
     tooltip.textContent = islandTooltipText(hit);
@@ -2017,7 +2066,7 @@ function createIslandLayer(container, handlers = {}) {
         clientY: event.clientY,
         moved: false
       };
-      hideTooltip2();
+      hideTooltip();
       container.classList.remove("island-grab");
       setDragging(true);
     },
@@ -2049,7 +2098,7 @@ function createIslandLayer(container, handlers = {}) {
   });
   container.addEventListener("pointerleave", () => {
     if (!drag) {
-      hideTooltip2();
+      hideTooltip();
       container.classList.remove("island-grab");
     }
   });
@@ -2060,7 +2109,7 @@ function createIslandLayer(container, handlers = {}) {
     },
     /** Draw `islands` (model coordinates) under the given viewport transform. */
     paint(islands, viewport) {
-      hideTooltip2();
+      hideTooltip();
       lastViewport = viewport;
       const projected = islands.map((island) => projectIsland(island, viewport));
       const shift = uniformIslandShift(boxes, islands, projected);
@@ -2643,9 +2692,10 @@ function unitCardElement(card, options = {}) {
   const reach = element("div", "unit-card-reach");
   const hotspots = card.hotspots === null || card.hotspots === void 0 ? "\u2014" : String(card.hotspots);
   const share = card.testReach?.total ? `${Math.round(card.testReach.reached / card.testReach.total * 100)}%` : "0%";
+  const measured = card.coverage?.value ?? null;
   reach.append(
     element("span", "unit-stat", `hotspots ${hotspots}`),
-    element("span", "unit-stat", `test reach ${share}`)
+    element("span", "unit-stat", measured === null ? `test reach ${share}` : `measured ${measured}%`)
   );
   root.append(reach);
   if (card.shelf?.total > 0) {
@@ -3190,7 +3240,7 @@ function createView(container) {
   let renderedElements = { nodes: [], edges: [] };
   let nodeGrid = null;
   let edgeKind = "imports";
-  let coChangeReport2 = null;
+  let coChangeReport = null;
   let coChangeOn = false;
   let hiddenCouplingReport = null;
   let hiddenCouplingOn = false;
@@ -3199,10 +3249,10 @@ function createView(container) {
       return;
     }
     islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
-    if (coChangeOn && coChangeReport2) {
+    if (coChangeOn && coChangeReport) {
       islandModel = {
         ...islandModel,
-        edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport2)]
+        edges: [...islandModel.edges, ...buildCoChangeElements(islandModel, coChangeReport)]
       };
     }
     if (hiddenCouplingOn && hiddenCouplingReport) {
@@ -3498,7 +3548,7 @@ function createView(container) {
      * is fetched separately so the default map never pays for a history pass.
      */
     setCoChange(report, on2 = true) {
-      coChangeReport2 = report;
+      coChangeReport = report;
       coChangeOn = on2 === true && report !== null;
       renderModel();
     },
@@ -3664,957 +3714,6 @@ function writeIslandLayout(repository, offsets, storage = globalThis.localStorag
   } catch {
   }
   return normalized;
-}
-
-// ui/strabo-delegate.js
-var menuElement = null;
-var toastStack = null;
-var promptDialog = null;
-var promptDialogResolve = null;
-var sessionOpener = null;
-function setDelegateSessionOpener(opener) {
-  sessionOpener = typeof opener === "function" ? opener : null;
-}
-var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
-function ensureMenu() {
-  if (!menuElement) {
-    menuElement = document.createElement("div");
-    menuElement.id = "agent-menu";
-    menuElement.className = "agent-menu";
-    menuElement.setAttribute("role", "menu");
-    menuElement.hidden = true;
-    document.body.append(menuElement);
-  }
-  return menuElement;
-}
-function ensureToasts() {
-  if (!toastStack) {
-    toastStack = document.createElement("div");
-    toastStack.id = "toast-stack";
-    toastStack.className = "toast-stack";
-    toastStack.setAttribute("aria-live", "polite");
-    document.body.append(toastStack);
-  }
-  return toastStack;
-}
-function closeContextMenu() {
-  if (menuElement) {
-    menuElement.hidden = true;
-    menuElement.replaceChildren();
-  }
-}
-function showContextMenu({ x, y, title, items }) {
-  const menu = ensureMenu();
-  menu.replaceChildren();
-  if (title) {
-    const header = document.createElement("div");
-    header.className = "agent-menu-title";
-    header.textContent = title;
-    menu.append(header);
-  }
-  for (const item of items ?? []) {
-    if (item.separator) {
-      const sep = document.createElement("div");
-      sep.className = "agent-menu-sep";
-      sep.setAttribute("aria-hidden", "true");
-      menu.append(sep);
-      continue;
-    }
-    const button3 = document.createElement("button");
-    button3.type = "button";
-    button3.className = "agent-menu-item";
-    button3.setAttribute("role", "menuitem");
-    if (item.title) {
-      button3.title = item.title;
-    }
-    const label = document.createElement("span");
-    label.textContent = item.label;
-    button3.append(label);
-    if (item.hint) {
-      const hint = document.createElement("span");
-      hint.className = "agent-menu-hint";
-      hint.textContent = item.hint;
-      button3.append(hint);
-    }
-    if (typeof item.action === "function") {
-      button3.addEventListener("click", () => {
-        closeContextMenu();
-        item.action();
-      });
-    } else {
-      button3.disabled = true;
-    }
-    menu.append(button3);
-  }
-  menu.hidden = false;
-  const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
-  const first = menu.querySelector(".agent-menu-item:not(:disabled)");
-  first?.focus();
-  const onPointerDown = (event) => {
-    if (!menu.contains(event.target)) {
-      cleanup();
-    }
-  };
-  const onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      cleanup();
-    }
-  };
-  const onScroll = () => cleanup();
-  function cleanup() {
-    closeContextMenu();
-    document.removeEventListener("pointerdown", onPointerDown, true);
-    document.removeEventListener("keydown", onKeyDown, true);
-    window.removeEventListener("resize", onScroll);
-    document.removeEventListener("scroll", onScroll, true);
-  }
-  setTimeout(() => {
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("resize", onScroll);
-    document.addEventListener("scroll", onScroll, true);
-  }, 0);
-  return cleanup;
-}
-function showToast(message, action = null, { timeout = 6e3 } = {}) {
-  const stack = ensureToasts();
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.setAttribute("role", "status");
-  const text = document.createElement("span");
-  text.textContent = message;
-  toast.append(text);
-  if (action) {
-    const button3 = document.createElement("button");
-    button3.type = "button";
-    button3.className = "toast-action";
-    button3.textContent = action.label;
-    button3.addEventListener("click", () => {
-      action.onClick?.();
-      toast.remove();
-    });
-    toast.append(button3);
-  }
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "toast-dismiss";
-  dismiss.setAttribute("aria-label", "Dismiss notification");
-  dismiss.textContent = "\xD7";
-  dismiss.addEventListener("click", () => toast.remove());
-  toast.append(dismiss);
-  stack.append(toast);
-  setTimeout(() => toast.remove(), timeout);
-  return toast;
-}
-async function copyText(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  document.body.append(area);
-  area.select();
-  document.execCommand("copy");
-  area.remove();
-}
-function settlePromptReview(value) {
-  const resolve = promptDialogResolve;
-  promptDialogResolve = null;
-  resolve?.(value);
-}
-function ensurePromptDialog() {
-  if (promptDialog) {
-    return promptDialog;
-  }
-  const dialog2 = document.createElement("dialog");
-  dialog2.id = "prompt-dialog";
-  dialog2.className = "dialog prompt-dialog";
-  dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
-  const header = document.createElement("header");
-  header.className = "dialog-header";
-  const heading2 = document.createElement("strong");
-  heading2.className = "prompt-dialog-title";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "dialog-close";
-  close.setAttribute("aria-label", "Close");
-  close.textContent = "\xD7";
-  close.addEventListener("click", () => dialog2.close());
-  header.append(heading2, close);
-  const target = document.createElement("p");
-  target.className = "dialog-path prompt-dialog-target";
-  const text = document.createElement("textarea");
-  text.className = "prompt-dialog-text";
-  text.spellcheck = false;
-  text.setAttribute("aria-label", "Task prompt");
-  const footer = document.createElement("footer");
-  footer.className = "dialog-footer";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.textContent = "Copy";
-  copy.addEventListener("click", async () => {
-    await copyText(text.value);
-    copy.textContent = "Copied";
-    setTimeout(() => {
-      copy.textContent = "Copy";
-    }, 1500);
-  });
-  const actions = document.createElement("span");
-  actions.className = "dialog-footer-actions";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => dialog2.close());
-  const send = document.createElement("button");
-  send.type = "button";
-  send.className = "primary prompt-dialog-send";
-  send.addEventListener("click", () => {
-    const reviewed = text.value;
-    settlePromptReview(reviewed);
-    dialog2.close();
-  });
-  actions.append(cancel, send);
-  footer.append(copy, actions);
-  dialog2.append(header, target, text, footer);
-  dialog2.addEventListener("close", () => settlePromptReview(null));
-  document.body.append(dialog2);
-  promptDialog = dialog2;
-  return dialog2;
-}
-function showPromptReview({ agent, title, prompt }) {
-  const dialog2 = ensurePromptDialog();
-  settlePromptReview(null);
-  const agentName = AGENT_LABELS[agent] ?? agent;
-  dialog2.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
-  dialog2.querySelector(".prompt-dialog-target").textContent = title;
-  const text = dialog2.querySelector(".prompt-dialog-text");
-  text.value = prompt;
-  dialog2.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
-  const pending = new Promise((resolve) => {
-    promptDialogResolve = resolve;
-  });
-  if (!dialog2.open) {
-    dialog2.showModal();
-  }
-  text.focus();
-  text.setSelectionRange(text.value.length, text.value.length);
-  return pending;
-}
-async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
-  const response = await fetch(`${API_PATH}/delegate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent, repository, target, prompt, title, ...dryRun ? { dryRun: true } : {} })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Delegate failed (${response.status})`);
-  }
-  if (body.sessionId && sessionOpener) {
-    sessionOpener(body.sessionId, body);
-  }
-  return body;
-}
-
-// ui/strabo-float.js
-var STORAGE_KEY = "strabo.float.windows.v2";
-var GAP = 12;
-var DEFAULT_WIDTH = 384;
-var HEADER_HEIGHT = 34;
-var MIN_WIDTH = 240;
-var MIN_HEIGHT = 160;
-var DOCK_RAIL_WIDTH = 64;
-var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP;
-var RAIL_TOP = 64;
-function readStore() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-function writeStore(store2) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store2));
-  } catch {
-  }
-}
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), Math.max(min, max));
-}
-function sanitizeSize(size) {
-  const width = Number(size?.width);
-  const height = Number(size?.height);
-  return {
-    width: Number.isFinite(width) && width >= MIN_WIDTH ? width : null,
-    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
-  };
-}
-function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP } = {}) {
-  const sorted = [...occupied].sort((a, b2) => a.top - b2.top);
-  let candidate = startTop;
-  for (const rect of sorted) {
-    if (candidate + height <= rect.top) {
-      break;
-    }
-    candidate = Math.max(candidate, rect.bottom + gap);
-  }
-  return candidate;
-}
-function initFloatingWindows({ dock, panels = [] } = {}) {
-  const store2 = readStore();
-  const controllers = [];
-  let topZ = 60;
-  const persist = () => {
-    const next = {};
-    for (const controller of controllers) {
-      next[controller.key] = controller.snapshot();
-    }
-    writeStore(next);
-  };
-  const syncDockOverflow = () => {
-    if (!dock) return;
-    const max = dock.scrollHeight - dock.clientHeight;
-    dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
-    dock.classList.toggle("is-overflow-bottom", max > 1 && dock.scrollTop < max - 1);
-  };
-  let moreOpen = false;
-  const moreToggle = document.createElement("button");
-  moreToggle.type = "button";
-  moreToggle.className = "dock-more";
-  moreToggle.dataset.glyph = "\u22EF";
-  moreToggle.textContent = "More";
-  moreToggle.title = "More panels";
-  moreToggle.setAttribute("aria-haspopup", "menu");
-  const moreMenu = document.createElement("div");
-  moreMenu.className = "dock-more-menu";
-  moreMenu.setAttribute("role", "menu");
-  moreMenu.setAttribute("aria-label", "More panels");
-  const setMoreOpen = (open) => {
-    moreOpen = open;
-    moreMenu.hidden = !open;
-    moreToggle.setAttribute("aria-expanded", String(open));
-  };
-  moreToggle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    setMoreOpen(!moreOpen);
-    if (moreOpen) moreMenu.querySelector(".dock-chip:not(:disabled)")?.focus();
-  });
-  moreMenu.addEventListener("click", (event) => {
-    if (event.target.closest?.(".dock-chip")) setMoreOpen(false);
-  });
-  moreMenu.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      setMoreOpen(false);
-      moreToggle.focus();
-    }
-  });
-  document.addEventListener("click", (event) => {
-    if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
-  });
-  setMoreOpen(false);
-  const renderDock = () => {
-    if (!dock) return;
-    const docked = controllers.filter((controller) => controller.docked);
-    const inRail = (controller) => controller.pinned || controller.isOpen();
-    const railOrder = (controller) => controller.pinned ? controller.pinOrder : Infinity;
-    const railChips = docked.filter(inRail).sort((a, b2) => railOrder(a) - railOrder(b2)).map((controller) => controller.dockButton());
-    const moreChips = docked.filter((controller) => !inRail(controller)).map((controller) => {
-      const chip = controller.dockButton();
-      chip.setAttribute("role", "menuitem");
-      return chip;
-    });
-    moreMenu.replaceChildren(...moreChips);
-    moreToggle.hidden = moreChips.length === 0;
-    const tail = moreChips.length ? [moreToggle, moreMenu] : [];
-    dock.replaceChildren(...railChips, ...tail);
-    const enabled = railItems();
-    enabled.forEach((chip, index) => {
-      chip.tabIndex = index === 0 ? 0 : -1;
-    });
-    syncDockOverflow();
-  };
-  const railItems = () => [...dock?.children ?? []].filter(
-    (item) => (item.classList.contains("dock-chip") || item === moreToggle) && !item.disabled && !item.hidden
-  );
-  const flashChip = (key) => {
-    const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
-    if (!chip) return;
-    chip.classList.remove("is-flash");
-    void chip.offsetWidth;
-    chip.classList.add("is-flash");
-  };
-  for (const config of panels) {
-    const element2 = config.element;
-    if (!element2) continue;
-    const saved = store2[config.key] ?? {};
-    let size = sanitizeSize(saved.size);
-    const width = size.width ?? config.width ?? DEFAULT_WIDTH;
-    const win = document.createElement("section");
-    win.className = "float-window";
-    win.dataset.panel = config.key;
-    win.hidden = true;
-    win.style.width = `${width}px`;
-    if (size.height) {
-      win.style.height = `${size.height}px`;
-    }
-    const header = document.createElement("header");
-    header.className = "float-header";
-    header.tabIndex = 0;
-    header.title = "Drag to move \xB7 double-click to collapse";
-    const grip = document.createElement("span");
-    grip.className = "float-grip";
-    grip.setAttribute("aria-hidden", "true");
-    grip.textContent = "\u283F";
-    const title = document.createElement("span");
-    title.className = "float-title";
-    title.textContent = config.title ?? config.key;
-    win.setAttribute("role", "dialog");
-    win.setAttribute("aria-label", title.textContent);
-    win.tabIndex = -1;
-    const spacer = document.createElement("span");
-    spacer.className = "float-spacer";
-    const collapseButton = document.createElement("button");
-    collapseButton.type = "button";
-    collapseButton.className = "float-button float-collapse";
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "float-button float-close";
-    closeButton.setAttribute("aria-label", "Close panel");
-    closeButton.title = "Close";
-    closeButton.textContent = "\xD7";
-    const body = document.createElement("div");
-    body.className = "float-body";
-    const resizeHandle = document.createElement("span");
-    resizeHandle.className = "float-resize";
-    resizeHandle.setAttribute("aria-hidden", "true");
-    resizeHandle.title = "Drag to resize";
-    header.append(grip, title, spacer, collapseButton, closeButton);
-    win.append(header, body, resizeHandle);
-    element2.parentNode.insertBefore(win, element2);
-    body.append(element2);
-    const fallbackHeight = config.height ?? 260;
-    let hasPosition = false;
-    const place = (x, y) => {
-      win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-      win.style.top = `${clamp(y, 0, Math.max(0, window.innerHeight - HEADER_HEIGHT - 4))}px`;
-      hasPosition = true;
-    };
-    const firstFreeRailTop = () => {
-      const height = win.offsetHeight || fallbackHeight;
-      const occupied = [];
-      for (const other of controllers) {
-        if (other.window === win || other.window.hidden || other.isCollapsed()) {
-          continue;
-        }
-        const rect = other.window.getBoundingClientRect();
-        if (rect.height > 0) {
-          occupied.push(rect);
-        }
-      }
-      occupied.sort((a, b2) => a.top - b2.top);
-      return firstFreeSlotTop(occupied, height);
-    };
-    const placeInRail = () => {
-      const railWidth = win.offsetWidth || width;
-      const height = win.offsetHeight || fallbackHeight;
-      const top = firstFreeRailTop();
-      const placedTop = top + height <= window.innerHeight ? top : RAIL_TOP;
-      const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
-      win.style.maxHeight = `${available}px`;
-      place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
-    };
-    const position = saved.position ?? config.position ?? {};
-    if (config.center) {
-      place(
-        (window.innerWidth - width) / 2,
-        Math.max(56, (window.innerHeight - fallbackHeight) / 2)
-      );
-    } else if (Object.keys(position).length > 0) {
-      const left = typeof position.left === "number" ? position.left : window.innerWidth - width - (typeof position.right === "number" ? position.right : RAIL_RIGHT);
-      const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
-      place(left, top);
-    }
-    const isCollapsed = () => win.classList.contains("is-collapsed");
-    const updateCollapseChrome = () => {
-      const collapsed = isCollapsed();
-      collapseButton.textContent = collapsed ? "+" : "\u2013";
-      collapseButton.title = collapsed ? "Expand" : "Collapse";
-      collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-    };
-    const setCollapsed = (collapsed) => {
-      win.classList.toggle("is-collapsed", collapsed);
-      updateCollapseChrome();
-      persist();
-    };
-    if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
-    updateCollapseChrome();
-    let lastHidden = null;
-    const raise = () => {
-      topZ += 1;
-      win.style.zIndex = String(topZ);
-    };
-    const sync2 = () => {
-      const hidden = element2.hidden === true;
-      win.hidden = hidden;
-      if (!hidden && config.titleFrom) {
-        const heading2 = config.titleFrom(element2);
-        if (heading2) {
-          title.textContent = heading2;
-        }
-      }
-      win.setAttribute("aria-label", title.textContent);
-      if (hidden !== lastHidden) {
-        lastHidden = hidden;
-        renderDock();
-        if (!hidden) {
-          if (!hasPosition) placeInRail();
-          raise();
-          flashChip(config.key);
-        }
-      }
-    };
-    new MutationObserver(sync2).observe(element2, {
-      attributes: true,
-      attributeFilter: ["hidden"],
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
-    const controller = {
-      key: config.key,
-      docked: config.dock !== false,
-      pinned: Boolean(config.pinned),
-      // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
-      pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
-      window: win,
-      element: element2,
-      isOpen: () => !win.hidden,
-      isCollapsed,
-      open() {
-        if (config.canOpen && !config.canOpen()) {
-          config.onBlocked?.();
-          return false;
-        }
-        config.onOpen?.();
-        element2.hidden = false;
-        win.hidden = false;
-        if (!hasPosition) {
-          placeInRail();
-        }
-        sync2();
-        raise();
-        persist();
-        win.focus({ preventScroll: true });
-        return true;
-      },
-      close() {
-        const hadFocus = win.contains(document.activeElement);
-        if (config.onClose) config.onClose();
-        else element2.hidden = true;
-        win.hidden = true;
-        lastHidden = true;
-        renderDock();
-        persist();
-        if (hadFocus) {
-          const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
-          if (chip && !moreMenu.contains(chip)) chip.focus();
-          else moreToggle.focus();
-        }
-      },
-      toggle() {
-        if (win.hidden) {
-          return this.open();
-        } else if (isCollapsed()) {
-          setCollapsed(false);
-          raise();
-          return true;
-        } else {
-          this.close();
-          return true;
-        }
-      },
-      snapshot() {
-        const snapshot = {
-          size: { ...size },
-          collapsed: isCollapsed()
-        };
-        if (hasPosition) {
-          snapshot.position = {
-            left: parseFloat(win.style.left) || 0,
-            top: parseFloat(win.style.top) || 0
-          };
-        }
-        return snapshot;
-      },
-      dockButton() {
-        const button3 = document.createElement("button");
-        button3.type = "button";
-        button3.className = "dock-chip";
-        button3.dataset.panel = config.key;
-        const open = !win.hidden;
-        const canOpen = !config.canOpen || config.canOpen();
-        button3.classList.toggle("active", open);
-        button3.classList.toggle("collapsed", open && isCollapsed());
-        button3.setAttribute("aria-pressed", String(open));
-        button3.textContent = config.dockLabel ?? config.title ?? config.key;
-        button3.dataset.glyph = config.glyph ?? "\u2022";
-        if (!canOpen && !open) {
-          button3.disabled = true;
-          const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
-          button3.title = reason;
-        } else {
-          button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
-        }
-        button3.addEventListener("click", () => controller.toggle());
-        return button3;
-      }
-    };
-    win.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        event.stopPropagation();
-        event.preventDefault();
-        controller.close();
-      }
-    });
-    header.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button") || event.button !== 0) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const startLeft = parseFloat(win.style.left) || 0;
-      const startTop = parseFloat(win.style.top) || 0;
-      header.setPointerCapture(event.pointerId);
-      const move = (moveEvent) => {
-        place(
-          startLeft + (moveEvent.clientX - startX),
-          startTop + (moveEvent.clientY - startY)
-        );
-      };
-      const end = () => {
-        header.removeEventListener("pointermove", move);
-        header.removeEventListener("pointerup", end);
-        header.removeEventListener("pointercancel", end);
-        persist();
-      };
-      header.addEventListener("pointermove", move);
-      header.addEventListener("pointerup", end);
-      header.addEventListener("pointercancel", end);
-      raise();
-      event.preventDefault();
-    });
-    resizeHandle.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      const startX = event.clientX;
-      const startY = event.clientY;
-      const rect = win.getBoundingClientRect();
-      const startWidth = rect.width;
-      const startHeight = rect.height;
-      const left = parseFloat(win.style.left) || 0;
-      const top = parseFloat(win.style.top) || 0;
-      const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
-      const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
-      resizeHandle.setPointerCapture(event.pointerId);
-      const move = (moveEvent) => {
-        win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;
-        win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
-      };
-      const end = () => {
-        resizeHandle.removeEventListener("pointermove", move);
-        resizeHandle.removeEventListener("pointerup", end);
-        resizeHandle.removeEventListener("pointercancel", end);
-        const resized = sanitizeSize({
-          width: parseFloat(win.style.width),
-          height: parseFloat(win.style.height)
-        });
-        size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
-        persist();
-      };
-      resizeHandle.addEventListener("pointermove", move);
-      resizeHandle.addEventListener("pointerup", end);
-      resizeHandle.addEventListener("pointercancel", end);
-      raise();
-      event.preventDefault();
-      event.stopPropagation();
-    });
-    header.addEventListener("dblclick", (event) => {
-      if (event.target.closest("button")) return;
-      setCollapsed(!isCollapsed());
-    });
-    collapseButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setCollapsed(!isCollapsed());
-    });
-    closeButton.addEventListener("click", (event) => {
-      event.stopPropagation();
-      controller.close();
-    });
-    win.addEventListener("pointerdown", raise, true);
-    win.addEventListener("contextmenu", raise, true);
-    if (!hasPosition && element2.hidden !== true) {
-      placeInRail();
-    }
-    controllers.push(controller);
-    sync2();
-  }
-  dock?.addEventListener("keydown", (event) => {
-    if (moreMenu.contains(event.target)) {
-      const items = [...moreMenu.querySelectorAll(".dock-chip")].filter((chip) => !chip.disabled);
-      const target = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
-      if (target !== null) {
-        event.preventDefault();
-        items[target].focus();
-      }
-      return;
-    }
-    const chips = railItems();
-    const next = rovingIndex(chips.indexOf(document.activeElement), chips.length, event.key);
-    if (next === null) {
-      return;
-    }
-    event.preventDefault();
-    chips.forEach((chip, index) => {
-      chip.tabIndex = index === next ? 0 : -1;
-    });
-    chips[next].focus();
-  });
-  dock?.addEventListener("scroll", syncDockOverflow, { passive: true });
-  if (dock && typeof ResizeObserver !== "undefined") {
-    new ResizeObserver(syncDockOverflow).observe(dock);
-  }
-  window.addEventListener("resize", () => {
-    for (const controller of controllers) {
-      const win = controller.window;
-      if (win.hidden) continue;
-      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
-      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
-      const left = parseFloat(win.style.left) || 0;
-      const top = parseFloat(win.style.top) || 0;
-      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
-      win.style.top = `${clamp(top, 0, Math.max(0, window.innerHeight - height))}px`;
-    }
-  });
-  renderDock();
-  controllers.refresh = renderDock;
-  return controllers;
-}
-
-// ui/strabo-float-toolbar.js
-var STORAGE_KEY2 = "strabo.float.toolbar.v1";
-var MIN_WIDTH2 = 200;
-var GAP2 = 8;
-var DOCK_REACH = 28;
-function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
-  const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
-  const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
-  return {
-    left: Math.min(Math.max(left, 0), maxLeft),
-    top: Math.min(Math.max(top, 0), maxTop)
-  };
-}
-function clampMenuLeft(anchorRight, menuWidth, viewportWidth, margin = 4) {
-  const wanted = anchorRight - menuWidth;
-  const maxLeft = Math.max(margin, viewportWidth - margin - menuWidth);
-  return Math.min(Math.max(wanted, margin), maxLeft);
-}
-function readStore2(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) ?? "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-function writeStore2(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-  }
-}
-function initFloatingToolbar(element2, options = {}) {
-  if (!element2) return null;
-  const storageKey = options.storageKey ?? STORAGE_KEY2;
-  const minWidth = options.minWidth ?? MIN_WIDTH2;
-  const dock = options.dock ?? null;
-  const dockReach = options.dockReach ?? DOCK_REACH;
-  const floatParent = element2.parentElement ?? document.body;
-  const saved = readStore2(storageKey);
-  const grip = document.createElement("span");
-  grip.className = "tb-grip";
-  grip.setAttribute("aria-hidden", "true");
-  grip.title = "Drag to move the toolbar";
-  grip.textContent = "\u283F";
-  element2.prepend(grip);
-  const resize = document.createElement("span");
-  resize.className = "tb-resize";
-  resize.setAttribute("aria-hidden", "true");
-  resize.title = "Drag to resize";
-  element2.append(resize);
-  let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
-  const isDocked = () => element2.classList.contains("is-docked");
-  const applyWidth = () => {
-    if (isDocked()) {
-      element2.style.width = "";
-      return;
-    }
-    if (width) element2.style.width = `${width}px`;
-  };
-  const containerSize = () => {
-    const rail = floatParent.querySelector?.(":scope > .float-dock");
-    const railWidth = rail?.offsetWidth ?? 0;
-    const width2 = floatParent.clientWidth || floatParent.getBoundingClientRect().width;
-    return {
-      boundWidth: Math.max(0, width2 - railWidth),
-      boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height
-    };
-  };
-  const place = (left, top) => {
-    const rect = element2.getBoundingClientRect();
-    const { boundWidth, boundHeight } = containerSize();
-    const clamped = clampToolbarPosition(left, top, {
-      width: element2.offsetWidth || rect.width,
-      height: element2.offsetHeight || rect.height,
-      boundWidth,
-      boundHeight
-    });
-    element2.style.left = `${clamped.left}px`;
-    element2.style.top = `${clamped.top}px`;
-    element2.style.bottom = "auto";
-    element2.style.right = "auto";
-    element2.style.transform = "none";
-    updateMenuDirection();
-  };
-  const updateMenuDirection = () => {
-    if (isDocked()) {
-      element2.classList.add("opens-up");
-      return;
-    }
-    const rect = element2.getBoundingClientRect();
-    const parentRect = floatParent.getBoundingClientRect();
-    const center = rect.top - parentRect.top + rect.height / 2;
-    const { boundHeight } = containerSize();
-    element2.classList.toggle("opens-up", center > boundHeight / 2);
-  };
-  function persist() {
-    const left = parseFloat(element2.style.left);
-    const top = parseFloat(element2.style.top);
-    writeStore2(storageKey, {
-      docked: isDocked(),
-      left: Number.isFinite(left) ? left : null,
-      top: Number.isFinite(top) ? top : null,
-      width: width ?? null
-    });
-  }
-  function dockElement() {
-    if (!dock || isDocked()) return;
-    element2.classList.add("is-docked");
-    element2.style.left = "";
-    element2.style.top = "";
-    element2.style.bottom = "";
-    element2.style.right = "";
-    const meta = dock.querySelector(".bottom-meta");
-    if (meta) dock.insertBefore(element2, meta);
-    else dock.append(element2);
-    applyWidth();
-    updateMenuDirection();
-    persist();
-  }
-  function undockElement() {
-    if (!isDocked()) return;
-    element2.classList.remove("is-docked");
-    floatParent.append(element2);
-    applyWidth();
-  }
-  if (saved.docked && dock) {
-    dockElement();
-  } else if (Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
-    place(saved.left, saved.top);
-  } else {
-    updateMenuDirection();
-  }
-  applyWidth();
-  grip.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    const rect = element2.getBoundingClientRect();
-    const grabOffsetX = event.clientX - rect.left;
-    const grabOffsetY = event.clientY - rect.top;
-    let overDock = false;
-    grip.setPointerCapture(event.pointerId);
-    const dockHit = (clientX, clientY) => {
-      if (!dock) return false;
-      const bounds = dock.getBoundingClientRect();
-      return clientY >= bounds.top - dockReach && clientX >= bounds.left && clientX <= bounds.right;
-    };
-    const move = (moveEvent) => {
-      if (isDocked()) {
-        if (moveEvent.clientY >= dock.getBoundingClientRect().top) return;
-        undockElement();
-        try {
-          grip.setPointerCapture(moveEvent.pointerId);
-        } catch {
-        }
-      }
-      const parentRect = floatParent.getBoundingClientRect();
-      place(
-        moveEvent.clientX - parentRect.left - grabOffsetX,
-        moveEvent.clientY - parentRect.top - grabOffsetY
-      );
-      overDock = dockHit(moveEvent.clientX, moveEvent.clientY);
-      dock?.classList.toggle("is-dock-target", overDock);
-    };
-    const end = () => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", end);
-      grip.removeEventListener("pointercancel", end);
-      dock?.classList.remove("is-dock-target");
-      if (overDock) dockElement();
-      else persist();
-    };
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", end);
-    grip.addEventListener("pointercancel", end);
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  resize.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || isDocked()) return;
-    const startX = event.clientX;
-    const startWidth = element2.getBoundingClientRect().width;
-    const { boundWidth } = containerSize();
-    const left = parseFloat(element2.style.left);
-    const maxWidth = Math.max(minWidth, boundWidth - (Number.isFinite(left) ? left : 0) - GAP2);
-    resize.setPointerCapture(event.pointerId);
-    const move = (moveEvent) => {
-      width = Math.min(Math.max(startWidth + (moveEvent.clientX - startX), minWidth), maxWidth);
-      applyWidth();
-    };
-    const end = () => {
-      resize.removeEventListener("pointermove", move);
-      resize.removeEventListener("pointerup", end);
-      resize.removeEventListener("pointercancel", end);
-      persist();
-    };
-    resize.addEventListener("pointermove", move);
-    resize.addEventListener("pointerup", end);
-    resize.addEventListener("pointercancel", end);
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  window.addEventListener("resize", () => {
-    if (isDocked()) return;
-    if (Number.isFinite(parseFloat(element2.style.left))) {
-      place(parseFloat(element2.style.left), parseFloat(element2.style.top));
-    } else {
-      updateMenuDirection();
-    }
-  });
-  return { element: element2, grip, resize, dock, isDocked, undock: undockElement };
 }
 
 // ui/strabo-freshness.js
@@ -5324,9 +4423,9 @@ function renderInspector(container, model, id, handlers = {}) {
   const tabSections = [];
   const selectTab = (index, { focus: focus2 = false } = {}) => {
     tabButtons.forEach((button3, position) => {
-      const selected2 = position === index;
-      button3.setAttribute("aria-selected", selected2 ? "true" : "false");
-      button3.tabIndex = selected2 ? 0 : -1;
+      const selected = position === index;
+      button3.setAttribute("aria-selected", selected ? "true" : "false");
+      button3.tabIndex = selected ? 0 : -1;
     });
     tabSections.forEach((section2, position) => {
       section2.hidden = position !== index;
@@ -5701,11 +4800,11 @@ function jumpToFunctionRow(root, name) {
 function wireFunctionRoving(tbody) {
   const names = () => [...tbody.querySelectorAll(".function-name")];
   tbody.addEventListener("keydown", (event) => {
-    const current2 = names().indexOf(document.activeElement);
-    if (current2 === -1) {
+    const current = names().indexOf(document.activeElement);
+    if (current === -1) {
       return;
     }
-    const next = rovingIndex(current2, names().length, event.key);
+    const next = rovingIndex(current, names().length, event.key);
     if (next === null) {
       return;
     }
@@ -5939,8 +5038,8 @@ function renderFunctionTableVirtual(report) {
   });
   list.element.addEventListener("keydown", (event) => {
     const rows = [...list.element.querySelectorAll(".function-row")];
-    const current2 = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
-    const next = rovingIndex(Math.max(0, current2), rows.length, event.key);
+    const current = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
+    const next = rovingIndex(Math.max(0, current), rows.length, event.key);
     if (next === null) {
       return;
     }
@@ -6625,6 +5724,36 @@ function passportPlainList(entries, label) {
   }
   return list;
 }
+function passportStartHere(handlers) {
+  const jobs = [
+    ["onOpenRoute", "open-route", "Learn this codebase", "Read the files in order, starting from the entry points"],
+    ["onReviewChange", "start-review", "Review my change", "What your uncommitted changes reach, and which tests to run"],
+    ["onCheckBranches", "start-branches", "Check a branch before merging", "Ahead and behind, conflicts, and what the branch reaches"]
+  ].filter(([key]) => typeof handlers[key] === "function");
+  if (jobs.length === 0) {
+    return null;
+  }
+  const block = document.createElement("div");
+  block.className = "passport-start";
+  block.dataset.role = "passport-start";
+  const heading2 = document.createElement("h4");
+  heading2.textContent = "Start here";
+  block.append(heading2);
+  for (const [key, id, label, hint] of jobs) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.id = id;
+    button3.className = "passport-job";
+    const name = document.createElement("strong");
+    name.textContent = label;
+    const detail = document.createElement("span");
+    detail.textContent = hint;
+    button3.append(name, detail);
+    button3.addEventListener("click", () => handlers[key]());
+    block.append(button3);
+  }
+  return block;
+}
 function renderRepositoryPassport(container, report, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -6647,6 +5776,10 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   summary.className = "passport-summary";
   summary.textContent = `${size.files ?? 0} files \xB7 ${size.edges ?? 0} edges \xB7 ${size.directories ?? 0} directories \xB7 ${size.tests ?? 0} tests \xB7 ${size.diagnostics ?? 0} diagnostics \xB7 ${size.excluded ?? 0} excluded`;
   container.append(summary);
+  const start = passportStartHere(handlers);
+  if (start) {
+    container.append(start);
+  }
   const languages = report.languages ?? [];
   container.append(passportSection("Languages", languages.length));
   container.append(
@@ -6692,22 +5825,25 @@ function renderRepositoryPassport(container, report, handlers = {}) {
     container.append(list);
   }
   const untested = report.untested ?? { total: 0, files: [] };
-  container.append(passportSection("Used but no test reaches", untested.total ?? 0));
+  const measured = untested.basis === "measured";
   container.append(
-    (untested.files ?? []).length === 0 ? passportNote("Every used module is reachable from a test, or no test file was identified.") : passportFileList(
-      untested.files.map((file) => ({ file })),
-      handlers,
-      () => ""
+    passportSection(
+      measured ? `Used and under ${untested.threshold}% measured` : "Used but no test reaches",
+      untested.total ?? 0
     )
   );
-  if (handlers.onOpenRoute) {
-    const route = document.createElement("button");
-    route.type = "button";
-    route.id = "open-route";
-    route.textContent = "Read next";
-    route.title = "Step through the outward route from the declared entry points";
-    route.addEventListener("click", () => handlers.onOpenRoute());
-    container.append(route);
+  const figures = untested.figures ?? (untested.files ?? []).map((file) => ({ file, value: null, stale: null }));
+  container.append(
+    figures.length === 0 ? passportNote(
+      measured ? `Every used module the report names is at or above ${untested.threshold}% measured.` : "Every used module is reachable from a test, or no test file was identified."
+    ) : passportFileList(
+      figures,
+      handlers,
+      (figure) => figure.value === null ? "" : `measured ${figure.value}%${figure.stale ? " \xB7 stale" : ""}`
+    )
+  );
+  if (measured && untested.notInReport > 0) {
+    container.append(passportNote(`${untested.notInReport} used module(s) not in the coverage report.`));
   }
   if (handlers.onExportReport) {
     const bar = document.createElement("p");
@@ -9460,13 +8596,13 @@ function evidenceProvenanceText(provenance) {
   const scanned = provenance.scannedAt ? ` \xB7 scanned ${String(provenance.scannedAt).slice(0, 19).replace("T", " ")}` : "";
   return provenance.stale === true ? `graph ${short}${scanned} \xB7 stale: the working tree has moved on` : `graph ${short}${scanned}`;
 }
-function edgeEndpoint(id, onSelect2) {
+function edgeEndpoint(id, onSelect) {
   const button3 = document.createElement("button");
   button3.type = "button";
   button3.className = "link";
   button3.textContent = id;
-  if (onSelect2) {
-    button3.addEventListener("click", () => onSelect2(id));
+  if (onSelect) {
+    button3.addEventListener("click", () => onSelect(id));
   }
   return button3;
 }
@@ -9555,7 +8691,7 @@ function renderDriftChart(container, drift) {
   });
   container.append(legend);
 }
-function renderTimeline(container, result, onSelect2, options = {}) {
+function renderTimeline(container, result, onSelect, options = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
   title.textContent = "Timeline";
@@ -9595,7 +8731,7 @@ function renderTimeline(container, result, onSelect2, options = {}) {
     button3.className = "commit";
     button3.dataset.hash = commit.hash;
     button3.textContent = `${commit.shortHash} \xB7 ${commit.subject}`;
-    button3.addEventListener("click", () => onSelect2(commit));
+    button3.addEventListener("click", () => onSelect(commit));
     item.append(button3);
     const meta = document.createElement("span");
     meta.className = "evidence";
@@ -10261,373 +9397,6 @@ function renderDiffBody(body, data) {
   }
 }
 
-// ui/strabo-tier-panel.js
-function headerCell(text) {
-  const cell = document.createElement("th");
-  cell.textContent = text;
-  return cell;
-}
-function numberCell(text, title) {
-  const cell = document.createElement("td");
-  cell.textContent = text;
-  if (title) {
-    cell.title = title;
-  }
-  return cell;
-}
-function renderTierPanel(container, report, filter = "all") {
-  container.replaceChildren();
-  const title = document.createElement("h3");
-  title.textContent = "Tier lens";
-  container.append(title);
-  const note3 = document.createElement("p");
-  note3.className = "overlay-note";
-  note3.textContent = tierSummaryLabel(report);
-  container.append(note3);
-  const rows = tierMatrixRows(report);
-  if (rows.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "unavailable";
-    empty.textContent = "No file was classified into a tier.";
-    container.append(empty);
-    return;
-  }
-  const units = report?.matrix?.units ?? [];
-  const table = document.createElement("table");
-  table.className = "tier-matrix";
-  const head = document.createElement("tr");
-  head.append(headerCell("Tier"));
-  for (const unit of units) {
-    head.append(headerCell(unit === "." ? "/" : unit));
-  }
-  head.append(headerCell("Files"), headerCell("Lines"));
-  table.append(head);
-  for (const row of rows) {
-    const tr2 = document.createElement("tr");
-    tr2.dataset.role = "tier-row";
-    tr2.dataset.tier = row.tier;
-    if (filter !== "all" && filter === row.tier) {
-      tr2.classList.add("is-selected");
-    }
-    const name = document.createElement("th");
-    name.textContent = row.label;
-    tr2.append(name);
-    for (const cell of row.cells) {
-      tr2.append(numberCell(cell.files === 0 ? "\xB7" : String(cell.files), `${cell.lines} line(s)`));
-    }
-    tr2.append(numberCell(String(row.files)), numberCell(String(row.lines)));
-    table.append(tr2);
-  }
-  container.append(table);
-  const shares = document.createElement("p");
-  shares.className = "tier-shares";
-  shares.dataset.role = "tier-shares";
-  shares.textContent = tierPerTierRows(report).map((entry) => `${entry.label} ${entry.shareLabel}`).join(" \xB7 ");
-  container.append(shares);
-  const directionNote = document.createElement("p");
-  directionNote.className = "overlay-note";
-  directionNote.dataset.role = "tier-directions";
-  directionNote.textContent = tierDirectionLabel(report);
-  container.append(directionNote);
-  for (const entry of report?.directions ?? []) {
-    const item = document.createElement("div");
-    item.className = "tier-direction";
-    item.dataset.role = "tier-direction";
-    item.textContent = `${entry.kind === "upward" ? "upward" : "skip-layer"} \xB7 ${entry.source} \u2192 ${entry.target} (L${entry.line})`;
-    container.append(item);
-  }
-  const calls = tierCallSites(report);
-  if (calls.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Calls";
-    container.append(heading2);
-    for (const call of calls.slice(0, 20)) {
-      const item = document.createElement("div");
-      item.className = "tier-call";
-      item.dataset.role = "tier-call";
-      item.textContent = `${call.method ?? "CALL"} ${call.target} \xB7 ${call.file}:${call.line}`;
-      container.append(item);
-    }
-  }
-  const endpoints = tierEndpointSites(report);
-  if (endpoints.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Endpoints";
-    container.append(heading2);
-    for (const endpoint of endpoints.slice(0, 20)) {
-      const item = document.createElement("div");
-      item.className = "tier-endpoint";
-      item.dataset.role = "tier-endpoint";
-      item.textContent = `${endpoint.method} ${endpoint.path} \xB7 ${endpoint.file}`;
-      container.append(item);
-    }
-  }
-  const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
-  if (joined.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Trace";
-    container.append(heading2);
-    for (const entry of joined.slice(0, 20)) {
-      const item = document.createElement("div");
-      item.className = "tier-trace";
-      item.dataset.role = "tier-trace";
-      item.textContent = `${entry.call.file}:${entry.call.line} \u2192 ${entry.endpoint.method} ${entry.endpoint.path} (${entry.endpoint.file})`;
-      container.append(item);
-    }
-  }
-  const tables = tierTables(report);
-  if (tables.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Tables";
-    container.append(heading2);
-    for (const entry of tables.slice(0, 20)) {
-      const item = document.createElement("div");
-      item.className = "tier-table";
-      item.dataset.role = "tier-table";
-      item.textContent = `${entry.table} \xB7 ${entry.count} reference(s)`;
-      container.append(item);
-      const trace = tierTableTrace(report, entry.table);
-      if (trace.length > 0) {
-        const caption = document.createElement("div");
-        caption.className = "tier-table-trace";
-        caption.dataset.role = "tier-table-trace";
-        caption.textContent = trace.map((row) => `${row.file} (${row.tier}${row.unit === "." ? "" : `, ${row.unit}`})`).join(" \xB7 ");
-        container.append(caption);
-      }
-    }
-  }
-}
-
-// ui/strabo-route.js
-var ROUTE_PROGRESS_PREFIX = "strabo.route.progress.";
-function routeProgressKey(repository) {
-  return `${ROUTE_PROGRESS_PREFIX}${repository ?? "default"}`;
-}
-function routeSteps(route) {
-  const steps = [];
-  for (const unit of route?.units ?? []) {
-    for (const step of unit.files ?? []) {
-      steps.push({ ...step, unitName: unit.summary?.name ?? step.unit });
-    }
-  }
-  return steps;
-}
-function routeIndexOf(route, file) {
-  if (!file) {
-    return -1;
-  }
-  return routeSteps(route).findIndex((step) => step.file === file);
-}
-function clampRouteIndex(index, length) {
-  if (!Number.isFinite(index) || length <= 0) {
-    return 0;
-  }
-  return Math.min(Math.max(Math.trunc(index), 0), length - 1);
-}
-function routeStepLabel(step) {
-  if (!step) {
-    return "No file is on the route.";
-  }
-  const reached = step.from ? `reached from ${step.from}` : "entry point";
-  return `${step.file} \xB7 depth ${step.depth} \xB7 ${reached} \xB7 ${step.fanIn} importer(s) \xB7 ${step.tier}`;
-}
-function readRouteProgress(storage, repository) {
-  try {
-    const raw = storage?.getItem(routeProgressKey(repository));
-    if (raw === null || raw === void 0) {
-      return null;
-    }
-    const index = Number.parseInt(raw, 10);
-    return Number.isFinite(index) ? index : null;
-  } catch {
-    return null;
-  }
-}
-function writeRouteProgress(storage, repository, index) {
-  try {
-    storage?.setItem(routeProgressKey(repository), String(index));
-  } catch {
-  }
-}
-function heading(level, text) {
-  const node = document.createElement(level);
-  node.textContent = text;
-  return node;
-}
-function note(text, className = "overlay-note") {
-  const node = document.createElement("p");
-  node.className = className;
-  node.textContent = text;
-  return node;
-}
-function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
-  container.replaceChildren();
-  container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
-  if (!route) {
-    if (state2.error) {
-      container.append(note("The reading route could not be loaded.", "unavailable"));
-      container.append(note(state2.error, "route-error-detail"));
-      if (handlers.onRetry) {
-        const retry = document.createElement("button");
-        retry.type = "button";
-        retry.className = "route-retry";
-        retry.dataset.role = "route-retry";
-        retry.textContent = "Retry";
-        retry.addEventListener("click", () => handlers.onRetry());
-        container.append(retry);
-      }
-    } else {
-      container.append(note("No reading route was recorded for this repository.", "unavailable"));
-    }
-    return;
-  }
-  const steps = routeSteps(route);
-  const index = clampRouteIndex(state2.index ?? 0, steps.length);
-  if (route.truncated) {
-    container.append(note(route.truncated, "route-truncated"));
-  }
-  const controls = document.createElement("div");
-  controls.className = "route-controls";
-  controls.dataset.role = "route-controls";
-  const back = document.createElement("button");
-  back.type = "button";
-  back.className = "route-back";
-  back.textContent = "Previous";
-  back.disabled = index <= 0;
-  back.addEventListener("click", () => handlers.onStep?.(index - 1));
-  const counter = document.createElement("span");
-  counter.className = "route-counter";
-  counter.dataset.role = "route-counter";
-  counter.textContent = steps.length > 0 ? `Step ${index + 1} of ${steps.length}` : "No file is on the route.";
-  const next = document.createElement("button");
-  next.type = "button";
-  next.className = "route-next";
-  next.textContent = "Next";
-  next.disabled = steps.length === 0 || index >= steps.length - 1;
-  next.addEventListener("click", () => handlers.onStep?.(index + 1));
-  const focus2 = document.createElement("button");
-  focus2.type = "button";
-  focus2.className = "route-focus";
-  focus2.dataset.role = "route-focus";
-  focus2.textContent = "Focus on map";
-  focus2.disabled = steps.length === 0;
-  focus2.addEventListener("click", () => {
-    const step = steps[index];
-    if (step) {
-      handlers.onFocus?.(step.file);
-    }
-  });
-  const stepNarrate = handlers.onNarrateStep ? (() => {
-    const button3 = document.createElement("button");
-    button3.type = "button";
-    button3.className = "route-narrate-step";
-    button3.dataset.role = "route-narrate-step";
-    button3.textContent = "Narrate this step";
-    const reason = narratorDisabledReason(state2.narratorStatus);
-    button3.disabled = steps.length === 0 || reason !== null;
-    button3.title = reason ?? "Ask the opt-in narrator to explain the current file";
-    return button3;
-  })() : null;
-  const stepReply = stepNarrate ? document.createElement("div") : null;
-  if (stepReply) {
-    stepReply.className = "narrator-reply route-step-narrative";
-    stepReply.dataset.role = "route-step-narrative";
-    stepNarrate.addEventListener("click", async () => {
-      const step = steps[index];
-      if (!step) {
-        return;
-      }
-      stepNarrate.disabled = true;
-      stepReply.replaceChildren("Asking the narrator\u2026");
-      try {
-        renderNarrativeReply(stepReply, await handlers.onNarrateStep(step));
-      } catch (error) {
-        stepReply.replaceChildren(`Narrator unavailable: ${error.message}`);
-      } finally {
-        stepNarrate.disabled = false;
-      }
-    });
-  }
-  controls.append(back, counter, next, focus2);
-  if (stepNarrate) {
-    controls.append(stepNarrate);
-  }
-  container.append(controls);
-  const current2 = steps[index];
-  const currentCard = document.createElement("p");
-  currentCard.className = "route-current";
-  currentCard.dataset.role = "route-current";
-  currentCard.textContent = routeStepLabel(current2);
-  if (current2) {
-    currentCard.dataset.file = current2.file;
-  }
-  container.append(currentCard);
-  if (stepReply) {
-    container.append(stepReply);
-  }
-  const summary = route.summary ?? {};
-  container.append(
-    note(
-      `${summary.entryPoints ?? 0} entry point(s) \xB7 ${summary.routed ?? 0} routed \xB7 ${summary.unreached ?? 0} no entry point reaches \xB7 ${summary.units ?? 0} unit(s)`,
-      "route-summary"
-    )
-  );
-  for (const unit of route.units ?? []) {
-    const section2 = document.createElement("section");
-    section2.className = "route-unit";
-    section2.dataset.role = "route-unit";
-    section2.dataset.unit = unit.summary?.id ?? "";
-    const unitName = unit.summary?.name ?? unit.summary?.id ?? "unit";
-    section2.append(
-      heading("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
-    );
-    if (unit.summary?.roleEvidence) {
-      section2.append(note(unit.summary.roleEvidence, "route-unit-why"));
-    }
-    for (const step of unit.files ?? []) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "route-step";
-      row.dataset.role = "route-step";
-      row.dataset.file = step.file;
-      if (step.file === current2?.file) {
-        row.classList.add("is-current");
-      }
-      row.textContent = routeStepLabel(step);
-      row.addEventListener("click", () => handlers.onStep?.(routeIndexOf(route, step.file)));
-      section2.append(row);
-    }
-    if ((unit.unreached ?? []).length > 0) {
-      const unreached = document.createElement("details");
-      unreached.className = "route-unreached";
-      unreached.dataset.role = "route-unreached";
-      const count = document.createElement("summary");
-      count.textContent = `${unit.unreached.length} file(s) no entry point reaches`;
-      unreached.append(count);
-      for (const entry of unit.unreached) {
-        const row = document.createElement("div");
-        row.className = "route-unreached-file";
-        row.dataset.file = entry.file;
-        row.textContent = `${entry.file} \xB7 ${entry.fanIn} importer(s) \xB7 ${entry.tier}`;
-        unreached.append(row);
-      }
-      section2.append(unreached);
-    }
-    container.append(section2);
-  }
-  if (handlers.onNarrateTour) {
-    appendNarratorBlock(
-      container,
-      {
-        narratorStatus: state2.narratorStatus,
-        ...handlers.onOpenNarratorSettings ? { onOpenNarratorSettings: handlers.onOpenNarratorSettings } : {},
-        onNarrate: () => handlers.onNarrateTour()
-      },
-      { id: "narrate-tour", label: "Narrate tour" }
-    );
-  }
-}
-
 // ui/strabo-lego.js
 var MAX_FOOTPRINT = 8;
 var MAX_STUDS = 8;
@@ -10750,12 +9519,12 @@ function buildBrickAssembly(nodes = [], edges = []) {
     const seenIds = /* @__PURE__ */ new Set();
     const queue = [...carried.get(id)];
     while (queue.length > 0) {
-      const current2 = queue.shift();
-      if (seenIds.has(current2)) {
+      const current = queue.shift();
+      if (seenIds.has(current)) {
         continue;
       }
-      seenIds.add(current2);
-      for (const next of carried.get(current2) ?? []) {
+      seenIds.add(current);
+      for (const next of carried.get(current) ?? []) {
         queue.push(next);
       }
     }
@@ -10915,329 +9684,6 @@ function assemblySummary(assembly) {
     parts.push(`${detached} detached`);
   }
   return parts.join(" \xB7 ");
-}
-
-// ui/strabo-panel-blocks.js
-var LEGEND = [
-  ["plain", "plain brick"],
-  ["keystone", "load-bearing (double ring)"],
-  ["tangled", "dependency cycle (dashed)"],
-  ["detached", "no recorded import (dotted)"]
-];
-function fitLabel2(label, width) {
-  const max = Math.max(3, Math.floor((width - 8) / 6.2));
-  return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
-}
-function brickGroup(brick, options) {
-  const selected2 = options.selected === brick.id;
-  const group = svgElement("g", {
-    class: `brick ${brick.status}${selected2 ? " is-selected" : ""}`,
-    transform: `translate(${brick.x},${brick.y})`,
-    tabindex: "0",
-    role: "button",
-    "aria-label": `${brick.label}: ${brick.status}, ${brick.studs} stud(s), rests on ${brick.restsOn} brick(s)`
-  });
-  group.dataset.brick = brick.id;
-  const studs = Math.max(1, Math.min(brick.studs, Math.max(1, Math.round(brick.w / 10))));
-  for (let index = 1; index <= studs; index += 1) {
-    group.append(
-      svgElement("circle", {
-        class: "brick-stud",
-        cx: (brick.w * index / (studs + 1)).toFixed(1),
-        cy: "-1",
-        r: "3"
-      })
-    );
-  }
-  group.append(svgElement("rect", { class: "brick-rect", width: brick.w, height: brick.h, rx: "5" }));
-  const text = svgElement("text", {
-    class: "brick-label",
-    x: (brick.w / 2).toFixed(1),
-    y: String(brick.h - 5),
-    "text-anchor": "middle"
-  });
-  text.textContent = fitLabel2(brick.label, brick.w);
-  group.append(text);
-  const title = svgElement("title", {});
-  title.textContent = `${brick.label} (${brick.kind}) \xB7 layer ${brick.layer} \xB7 studs ${brick.studs} \xB7 rests on ${brick.restsOn} \xB7 topples ${brick.topples}`;
-  group.append(title);
-  if (typeof options.onOpen === "function") {
-    group.addEventListener("click", (event) => {
-      event.stopPropagation();
-      options.onOpen(brick.id);
-    });
-    group.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        options.onOpen(brick.id);
-      }
-    });
-  }
-  return group;
-}
-function assemblySvg(layout, options) {
-  const svg = svgElement("svg", {
-    viewBox: `0 0 ${layout.width} ${layout.height}`,
-    class: "blocks-svg",
-    role: "img",
-    "aria-label": `Brick assembly: ${layout.bricks.length} bricks, ${layout.snaps.length} recorded snaps`
-  });
-  svg.dataset.role = "blocks-svg";
-  const snapLayer = svgElement("g", { class: "blocks-snaps" });
-  for (const snap of layout.snaps) {
-    const path = svgElement("path", {
-      class: "blocks-snap",
-      d: `M ${snap.x1.toFixed(1)} ${snap.y1.toFixed(1)} C ${snap.x1.toFixed(1)} ${(snap.y1 + 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${(snap.y2 - 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${snap.y2.toFixed(1)}`
-    });
-    snapLayer.append(path);
-  }
-  svg.append(snapLayer);
-  const brickLayer = svgElement("g", { class: "blocks-bricks" });
-  for (const brick of layout.bricks) {
-    brickLayer.append(brickGroup(brick, options));
-  }
-  svg.append(brickLayer);
-  if (typeof options.onClear === "function") {
-    svg.addEventListener("click", () => options.onClear());
-  }
-  return svg;
-}
-function renderBlocks(container, assembly, options = {}) {
-  container.replaceChildren();
-  container.dataset.role = "blocks";
-  const head = document.createElement("header");
-  head.className = "blocks-head";
-  const summary = document.createElement("p");
-  summary.className = "blocks-summary";
-  summary.dataset.role = "blocks-summary";
-  summary.textContent = assemblySummary(assembly);
-  head.append(summary);
-  container.append(head);
-  if (!assembly?.available) {
-    container.append(unavailableNote("No map is drawn yet, so there are no bricks to assemble."));
-    return;
-  }
-  const stage = document.createElement("div");
-  stage.className = "blocks-stage";
-  stage.append(assemblySvg(layoutAssembly(assembly), options));
-  container.append(stage);
-  const legend = document.createElement("ul");
-  legend.className = "blocks-legend";
-  for (const [status, label] of LEGEND) {
-    const item = document.createElement("li");
-    item.className = `blocks-legend-row ${status}`;
-    const swatch = document.createElement("span");
-    swatch.className = `blocks-swatch ${status}`;
-    swatch.setAttribute("aria-hidden", "true");
-    const text = document.createElement("span");
-    text.textContent = label;
-    item.append(swatch, text);
-    legend.append(item);
-  }
-  container.append(legend);
-  const notes = document.createElement("section");
-  notes.className = "blocks-notes";
-  const title = document.createElement("h4");
-  title.textContent = "Assembly notes";
-  notes.append(title);
-  if ((assembly.suggestions ?? []).length === 0) {
-    const clear = document.createElement("p");
-    clear.className = "blocks-clear";
-    clear.textContent = "Every brick connects to the stack, and no cycle was recorded.";
-    notes.append(clear);
-  } else {
-    const list = document.createElement("ul");
-    for (const suggestion of assembly.suggestions) {
-      const item = document.createElement("li");
-      item.className = `blocks-note ${suggestion.kind}`;
-      item.dataset.kind = suggestion.kind;
-      const strong = document.createElement("strong");
-      strong.textContent = suggestion.title;
-      const detail = document.createElement("p");
-      detail.textContent = suggestion.detail;
-      item.append(strong, detail);
-      list.append(item);
-    }
-    notes.append(list);
-  }
-  container.append(notes);
-}
-
-// ui/strabo-commit.js
-async function requestCommitMessage(repository) {
-  const response = await fetch(`${API_PATH}/narrator/commit-message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(repository ? { repository } : {})
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Could not generate a message (${response.status}).`);
-  }
-  return body;
-}
-async function commitWorkingTree(repository, message, { push = true } = {}) {
-  const response = await fetch(`${API_PATH}/analysis/commit`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, push, ...repository ? { repository } : {} })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Commit failed (${response.status}).`);
-  }
-  return body;
-}
-var dialog = null;
-var context = null;
-function ensureDialog() {
-  if (dialog) {
-    return dialog;
-  }
-  const element2 = document.createElement("dialog");
-  element2.id = "commit-dialog";
-  element2.className = "dialog prompt-dialog commit-dialog";
-  element2.setAttribute("aria-label", "Review the commit message before committing");
-  const header = document.createElement("header");
-  header.className = "dialog-header";
-  const heading2 = document.createElement("strong");
-  heading2.className = "commit-dialog-title";
-  heading2.textContent = "Commit changes";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "dialog-close";
-  close.setAttribute("aria-label", "Close");
-  close.textContent = "\xD7";
-  close.addEventListener("click", () => element2.close());
-  header.append(heading2, close);
-  const target = document.createElement("p");
-  target.className = "dialog-path prompt-dialog-target";
-  const status = document.createElement("p");
-  status.className = "dialog-note commit-status";
-  status.setAttribute("role", "status");
-  const text = document.createElement("textarea");
-  text.className = "prompt-dialog-text commit-message";
-  text.spellcheck = false;
-  text.setAttribute("aria-label", "Commit message");
-  const footer = document.createElement("footer");
-  footer.className = "dialog-footer";
-  const generate = document.createElement("button");
-  generate.type = "button";
-  generate.className = "commit-generate";
-  generate.textContent = "Generate again";
-  generate.addEventListener("click", () => void generateMessage());
-  const pushLabel = document.createElement("label");
-  pushLabel.className = "commit-push";
-  const pushToggle = document.createElement("input");
-  pushToggle.type = "checkbox";
-  pushToggle.checked = true;
-  pushToggle.className = "commit-push-toggle";
-  pushLabel.append(pushToggle, document.createTextNode("Push after commit"));
-  const left = document.createElement("span");
-  left.className = "commit-footer-left";
-  left.append(generate, pushLabel);
-  const actions = document.createElement("span");
-  actions.className = "dialog-footer-actions";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => element2.close());
-  const confirm2 = document.createElement("button");
-  confirm2.type = "button";
-  confirm2.className = "primary commit-confirm";
-  confirm2.textContent = "Commit & push";
-  confirm2.addEventListener("click", () => void submit());
-  actions.append(cancel, confirm2);
-  footer.append(left, actions);
-  element2.append(header, target, status, text, footer);
-  document.body.append(element2);
-  dialog = element2;
-  return element2;
-}
-async function generateMessage() {
-  if (!dialog || !context) {
-    return;
-  }
-  const text = dialog.querySelector(".commit-message");
-  const status = dialog.querySelector(".commit-status");
-  const generate = dialog.querySelector(".commit-generate");
-  const confirm2 = dialog.querySelector(".commit-confirm");
-  generate.disabled = true;
-  confirm2.disabled = true;
-  status.classList.remove("is-error");
-  status.textContent = "Generating a message with the narrator\u2026";
-  try {
-    const result = await requestCommitMessage(context.repository);
-    if (result?.available && typeof result.message === "string" && result.message.trim() !== "") {
-      text.value = result.message.trim();
-      const model = result.model ?? "the narrator";
-      status.textContent = `Generated by ${model}${result.cached ? " (cached)" : ""}. Review and edit before committing.`;
-    } else {
-      status.textContent = `Narrator unavailable (${result?.detail ?? result?.reason ?? "not configured"}). Write a message, or set the narrator up in Settings.`;
-      if (!text.value.trim()) {
-        text.value = "";
-      }
-    }
-  } catch (error) {
-    status.textContent = error.message ?? "Could not generate a message.";
-    status.classList.add("is-error");
-  } finally {
-    generate.disabled = false;
-    confirm2.disabled = false;
-    text.focus();
-    text.setSelectionRange(text.value.length, text.value.length);
-  }
-}
-async function submit() {
-  if (!dialog || !context) {
-    return;
-  }
-  const text = dialog.querySelector(".commit-message");
-  const status = dialog.querySelector(".commit-status");
-  const generate = dialog.querySelector(".commit-generate");
-  const confirm2 = dialog.querySelector(".commit-confirm");
-  const push = dialog.querySelector(".commit-push-toggle")?.checked !== false;
-  const message = text.value.trim();
-  if (message === "") {
-    status.classList.add("is-error");
-    status.textContent = "A commit message is required.";
-    text.focus();
-    return;
-  }
-  generate.disabled = true;
-  confirm2.disabled = true;
-  status.classList.remove("is-error");
-  status.textContent = push ? "Committing and pushing\u2026" : "Committing\u2026";
-  try {
-    const result = await commitWorkingTree(context.repository, message, { push });
-    if (!result?.available) {
-      status.classList.add("is-error");
-      status.textContent = result?.detail ?? "The commit did not run.";
-      return;
-    }
-    showToast(result.message);
-    dialog.close();
-    context.onCommitted?.(result);
-  } catch (error) {
-    status.classList.add("is-error");
-    status.textContent = error.message ?? "The commit did not run.";
-  } finally {
-    generate.disabled = false;
-    confirm2.disabled = false;
-  }
-}
-function openCommitDialog({ repository, onCommitted } = {}) {
-  const element2 = ensureDialog();
-  context = { repository: repository ?? null, onCommitted };
-  element2.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
-  element2.querySelector(".commit-message").value = "";
-  const status = element2.querySelector(".commit-status");
-  status.classList.remove("is-error");
-  status.textContent = "Generating a message with the narrator\u2026";
-  if (!element2.open) {
-    element2.showModal();
-  }
-  void generateMessage();
 }
 
 // ui/strabo-settings.js
@@ -11438,7 +9884,7 @@ function section(title) {
   group.append(heading2);
   return group;
 }
-function note2(text) {
+function note(text) {
   const paragraph = document.createElement("p");
   paragraph.className = "setting-note";
   paragraph.textContent = text;
@@ -11464,7 +9910,7 @@ function narratorSection(handlers = {}) {
   const view2 = handlers.narrator;
   const state2 = handlers.narratorState ?? {};
   if (!view2) {
-    group.append(note2("Loading narrator settings\u2026"));
+    group.append(note("Loading narrator settings\u2026"));
     return group;
   }
   const locked = view2.locked ?? {};
@@ -11527,7 +9973,7 @@ function narratorSection(handlers = {}) {
   modelRow.append(modelInput, fetchButton);
   group.append(field("Model", modelRow), modelList);
   if (state2.modelsNote) {
-    group.append(note2(state2.modelsNote));
+    group.append(note(state2.modelsNote));
   }
   if (locked.model) {
     group.append(lockedNote(locked.model, "The model"));
@@ -11548,7 +9994,7 @@ function narratorSection(handlers = {}) {
   keySelect.id = "narrator-key-source";
   keySelect.disabled = Boolean(locked.apiKeyEnv);
   group.append(field("API key source", keySelect));
-  group.append(note2(narratorKeyLabel(view2.key)));
+  group.append(note(narratorKeyLabel(view2.key)));
   if (keyMode === "env") {
     const envInput = textInput(view2.apiKeyEnv ?? "STRABO_NARRATOR_API_KEY", {
       placeholder: "STRABO_NARRATOR_API_KEY",
@@ -11561,7 +10007,7 @@ function narratorSection(handlers = {}) {
     envRow.className = "setting-row";
     envRow.append(envInput, saveEnv);
     group.append(field("Variable name", envRow));
-    group.append(note2("The panel only shows whether the variable is set, never its value."));
+    group.append(note("The panel only shows whether the variable is set, never its value."));
   } else if (keyMode === "stored") {
     const keyInput = document.createElement("input");
     keyInput.type = "password";
@@ -11588,12 +10034,12 @@ function narratorSection(handlers = {}) {
     keyRow.append(keyInput, storeButton, clearButton);
     group.append(field("Stored key", keyRow));
     group.append(
-      note2(
+      note(
         "Stored in the state directory with owner-only permissions, bound to this host. It is never shown again, logged, or sent anywhere but the endpoint."
       )
     );
   } else {
-    group.append(note2("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
+    group.append(note("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
   }
   keySelect.addEventListener("change", () => {
     const next = keySelect.value;
@@ -11607,7 +10053,7 @@ function narratorSection(handlers = {}) {
   sendSourceToggle.disabled = Boolean(locked.sendSource);
   group.append(field("Send source", sendSourceToggle));
   group.append(
-    note2("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
+    note("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
   );
   if (locked.sendSource) {
     group.append(lockedNote(locked.sendSource, "The Send source toggle"));
@@ -11639,7 +10085,7 @@ function narratorSection(handlers = {}) {
   });
   testButton.id = "narrator-test";
   group.append(field("Connection", testButton));
-  group.append(note2(narratorTestLabel(state2.test)));
+  group.append(note(narratorTestLabel(state2.test)));
   const saveButton = button2(
     "Save endpoint and model",
     () => handlers.onNarratorChange?.({
@@ -11650,7 +10096,7 @@ function narratorSection(handlers = {}) {
   saveButton.id = "narrator-save";
   group.append(saveButton);
   group.append(
-    note2("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
+    note("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
   );
   return group;
 }
@@ -11666,20 +10112,20 @@ function renderingSection() {
   group.append(field("GPU rendering (WebGL2)", toggle));
   if (!available) {
     group.append(
-      note2("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
+      note("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
     );
     return group;
   }
   if (armed && webglRefused()) {
     group.append(
-      note2(
+      note(
         "WebGL failed to start in this tab and the map fell back to the 2D canvas. Open a new tab to try again."
       )
     );
     return group;
   }
   group.append(
-    note2(
+    note(
       "Draws the map on the GPU. Changing this reloads the page. Diagnostics reports the renderer actually in use."
     )
   );
@@ -11691,7 +10137,7 @@ function commitSection(prefs, handlers) {
     field("Narrator commit", checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.("commitEnabled", value)))
   );
   group.append(
-    note2(
+    note(
       "Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default."
     )
   );
@@ -11724,15 +10170,15 @@ function renderSettings(container, handlers = {}) {
       "Large-file threshold (lines)",
       numberInput(prefs.locThreshold, LOC_THRESHOLD_DEFAULT, (value) => handlers.onPref?.("locThreshold", value))
     ),
-    note2("The large-file lens (canvas \u201CZ\u201D) keeps files at or above this line count and sizes them by lines of code."),
-    note2("Preferences are stored in this browser.")
+    note("The large-file lens (canvas \u201CZ\u201D) keeps files at or above this line count and sizes them by lines of code."),
+    note("Preferences are stored in this browser.")
   );
   container.append(local);
   container.append(renderingSection());
   container.append(commitSection(prefs, handlers));
   const remote = section("Server");
   if (!server) {
-    remote.append(note2("Loading server settings\u2026"));
+    remote.append(note("Loading server settings\u2026"));
   } else {
     remote.append(field("Start root", textInput(server.workspaceRoot, { readOnly: true })));
     const ceilingInput = textInput(server.scanCeiling);
@@ -11748,7 +10194,7 @@ function renderSettings(container, handlers = {}) {
     ceilingRow.append(ceilingInput, saveButton, resetButton);
     remote.append(field("Scan ceiling", ceilingRow));
     remote.append(
-      note2(
+      note(
         server.allowCeilingWidening ? "Widening is enabled for this process (startup flag), so the ceiling may also be raised above the start boundary." : "Widening is off for this process: the ceiling can only be narrowed. Restart with STRABO_ALLOW_CEILING_WIDENING=1 (or --allow-ceiling-widening) to permit raising it."
       )
     );
@@ -11774,7 +10220,7 @@ function renderSettings(container, handlers = {}) {
       });
     });
     remote.append(
-      note2(
+      note(
         "Whether widening is permitted is a startup-only setting, shown here read-only. It is never accepted from the browser, so this panel cannot widen what the server may read."
       )
     );
@@ -11789,10 +10235,10 @@ function renderSettings(container, handlers = {}) {
       )
     );
     if (server.riskDeniedLicenses && server.riskDeniedLicenses.length > 0) {
-      remote.append(note2(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
+      remote.append(note(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
     }
     remote.append(
-      note2("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
+      note("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
     );
     if (server.restartAvailable) {
       const restartButton = button2("Restart Strabo", () => {
@@ -11805,7 +10251,7 @@ function renderSettings(container, handlers = {}) {
       restartButton.title = "Relaunch the server process with the same arguments";
       remote.append(field("Server process", restartButton));
       remote.append(
-        note2(
+        note(
           "Stops this server process and starts a new one with the same arguments, so a code change takes effect. The page reloads once it is back."
         )
       );
@@ -11909,7 +10355,3054 @@ function createStore(initial) {
   };
 }
 
-// node_modules/@xterm/xterm/lib/xterm.mjs
+// ui/strabo-elements.js
+function queryElements(doc = document) {
+  return {
+    repository: doc.getElementById("repository"),
+    browse: doc.getElementById("browse"),
+    detail: doc.getElementById("detail"),
+    refresh: doc.getElementById("refresh"),
+    filter: doc.getElementById("filter"),
+    filterClear: doc.getElementById("filter-clear"),
+    filterCount: doc.getElementById("filter-count"),
+    overlay: doc.getElementById("overlay"),
+    tier: doc.getElementById("tier"),
+    overlayPanel: doc.getElementById("overlay-panel"),
+    edgePanel: doc.getElementById("edge-panel"),
+    reviewPanel: doc.getElementById("review-panel"),
+    riskPanel: doc.getElementById("risk-panel"),
+    diagnosticsToggle: doc.getElementById("diagnostics-toggle"),
+    diagnosticsBadge: doc.getElementById("diagnostics-badge"),
+    diagnostics: doc.getElementById("diagnostics"),
+    legend: doc.getElementById("legend"),
+    breadcrumb: doc.getElementById("breadcrumb"),
+    status: doc.getElementById("status"),
+    freshness: doc.getElementById("freshness"),
+    inspector: doc.getElementById("inspector"),
+    strip: doc.getElementById("strip"),
+    hover: doc.getElementById("hover"),
+    systemNote: doc.getElementById("system-note"),
+    tooltip: doc.getElementById("tooltip"),
+    graphEmpty: doc.getElementById("graph-empty"),
+    graphEmptyClear: doc.getElementById("graph-empty-clear"),
+    graphLoading: doc.getElementById("graph-loading"),
+    zoomIn: doc.getElementById("zoom-in"),
+    zoomOut: doc.getElementById("zoom-out"),
+    zoomFit: doc.getElementById("zoom-fit"),
+    tbFocus: doc.getElementById("tb-focus"),
+    tbImpact: doc.getElementById("tb-impact"),
+    tbOutside: doc.getElementById("tb-outside"),
+    tbUnits: doc.getElementById("tb-units"),
+    tbPath: doc.getElementById("tb-path"),
+    tbBoundaries: doc.getElementById("tb-boundaries"),
+    tbCalls: doc.getElementById("tb-calls"),
+    tbCoChange: doc.getElementById("tb-cochange"),
+    tbLabels: doc.getElementById("tb-labels"),
+    tbLoc: doc.getElementById("tb-loc"),
+    tbTimeline: doc.getElementById("tb-timeline"),
+    tbReview: doc.getElementById("tb-review"),
+    tbRisk: doc.getElementById("tb-risk"),
+    tbBranches: doc.getElementById("tb-branches"),
+    tbClear: doc.getElementById("tb-clear"),
+    tbOverflow: doc.getElementById("tb-overflow"),
+    tbOverflowMenu: doc.getElementById("tb-overflow-menu"),
+    graphToolbar: doc.querySelector(".graph-toolbar"),
+    groupCount: doc.getElementById("group-count"),
+    tbDelegateGroup: doc.getElementById("tb-delegate-group"),
+    timelinePanel: doc.getElementById("timeline-panel"),
+    branchesPanel: doc.getElementById("branches-panel"),
+    narrationPanel: doc.getElementById("narration-panel"),
+    folderDialog: doc.getElementById("folder-dialog"),
+    folderPath: doc.getElementById("folder-path"),
+    folderNote: doc.getElementById("folder-note"),
+    folderList: doc.getElementById("folder-list"),
+    folderUp: doc.getElementById("folder-up"),
+    folderUse: doc.getElementById("folder-use"),
+    folderCancel: doc.getElementById("folder-cancel"),
+    forget: doc.getElementById("forget"),
+    memberView: doc.getElementById("member-view"),
+    graphHint: doc.getElementById("graph-hint"),
+    shortcuts: doc.getElementById("shortcuts"),
+    settingsToggle: doc.getElementById("settings-toggle"),
+    settingsPanel: doc.getElementById("settings-panel"),
+    workspacePanel: doc.getElementById("workspace-panel"),
+    passportPanel: doc.getElementById("passport-panel"),
+    routePanel: doc.getElementById("route-panel"),
+    blocksPanel: doc.getElementById("blocks-panel"),
+    sourcePanel: doc.getElementById("source-panel"),
+    screenTabGraph: doc.getElementById("screen-tab-graph"),
+    screenTabTerminal: doc.getElementById("screen-tab-terminal"),
+    screenTabReview: doc.getElementById("screen-tab-review"),
+    screenTabHistory: doc.getElementById("screen-tab-history"),
+    graphScreen: doc.getElementById("graph-screen"),
+    terminalScreen: doc.getElementById("terminal-screen"),
+    terminalContainer: doc.getElementById("terminal-container"),
+    reviewScreen: doc.getElementById("review-screen"),
+    reviewScreenBody: doc.getElementById("review-screen-body"),
+    reviewScreenRefresh: doc.getElementById("review-screen-refresh"),
+    reviewScreenPending: doc.getElementById("review-screen-pending"),
+    historyScreen: doc.getElementById("history-screen"),
+    historyScreenBody: doc.getElementById("history-screen-body"),
+    historyScreenRefresh: doc.getElementById("history-screen-refresh")
+  };
+}
+
+// ui/strabo-view-prefs.js
+function createViewPrefs(app2) {
+  const { state: state2, view: view2, elements: elements2 } = app2;
+  const VIEW_PREFS_PREFIX = "strabo.view.";
+  let prefsSaveTimer = null;
+  function viewPrefsKey(repository) {
+    return `${VIEW_PREFS_PREFIX}${repository ?? "default"}`;
+  }
+  function readViewPrefs(repository) {
+    try {
+      const raw = window.localStorage.getItem(viewPrefsKey(repository));
+      if (!raw) {
+        return null;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return null;
+      }
+      const prefs = {};
+      if (parsed.mode === "block" || parsed.mode === "file" || parsed.mode === "system") {
+        prefs.mode = parsed.mode;
+      }
+      if (typeof parsed.overlay === "string" && parsed.overlay !== "") {
+        prefs.overlay = parsed.overlay;
+      }
+      if (typeof parsed.filter === "string" && parsed.filter !== "") {
+        prefs.filter = parsed.filter.slice(0, 200);
+      }
+      if (parsed.edgeKind === "calls" || parsed.edgeKind === "imports") {
+        prefs.edgeKind = parsed.edgeKind;
+      }
+      if (parsed.tier === "all" || TIER_ORDER.includes(parsed.tier)) {
+        prefs.tier = parsed.tier;
+      }
+      if (parsed.coChange === true) {
+        prefs.coChange = true;
+      }
+      if (parsed.locLens === true) {
+        prefs.locLens = true;
+      }
+      return prefs;
+    } catch {
+      return null;
+    }
+  }
+  function writeViewPrefs() {
+    try {
+      window.localStorage.setItem(
+        viewPrefsKey(state2.repository),
+        JSON.stringify({
+          mode: state2.mode,
+          overlay: state2.overlay,
+          filter: state2.filter,
+          edgeKind: state2.edgeKind,
+          coChange: state2.coChange,
+          locLens: state2.locLens,
+          tier: state2.tier
+        })
+      );
+    } catch {
+    }
+  }
+  function schedulePrefsSave() {
+    if (prefsSaveTimer) {
+      clearTimeout(prefsSaveTimer);
+    }
+    prefsSaveTimer = setTimeout(() => {
+      prefsSaveTimer = null;
+      writeViewPrefs();
+    }, 300);
+  }
+  function applyViewPrefs() {
+    view2.setIslandOffsets(readIslandLayout(state2.repository));
+    const prefs = readViewPrefs(state2.repository);
+    if (!prefs) {
+      return;
+    }
+    if (prefs.mode) {
+      state2.mode = prefs.mode;
+      elements2.detail.value = prefs.mode;
+    }
+    if (prefs.tier && elements2.tier) {
+      state2.tier = prefs.tier;
+      elements2.tier.value = prefs.tier;
+      if (state2.mode !== "file") {
+        state2.mode = "file";
+        elements2.detail.value = "file";
+      }
+    }
+    if (prefs.filter) {
+      state2.filter = prefs.filter;
+      elements2.filter.value = prefs.filter;
+    }
+    if (prefs.overlay && [...elements2.overlay.options].some((option) => option.value === prefs.overlay)) {
+      state2.overlay = prefs.overlay;
+      elements2.overlay.value = prefs.overlay;
+      if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state2.mode !== "file") {
+        state2.mode = "file";
+        elements2.detail.value = "file";
+      }
+    }
+    if (prefs.edgeKind === "calls" && state2.mode === "file") {
+      state2.edgeKind = "calls";
+    }
+    if (prefs.coChange) {
+      state2.coChange = true;
+    }
+    if (prefs.locLens) {
+      state2.locLens = true;
+    }
+  }
+  return {
+    applyViewPrefs,
+    schedulePrefsSave,
+    writeViewPrefs
+  };
+}
+
+// ui/strabo-runtime-readout.js
+function createRuntimeReadout(app2) {
+  const { view: view2, elements: elements2 } = app2;
+  const frameSampler = createFrameSampler(window);
+  let runtimeBase = "";
+  let runtimeTimer = 0;
+  function runtimeSuffix() {
+    const { fps, ms: ms2 } = frameSampler.stats();
+    const redraws = view2.cy?.renderer?.()?.redraws ?? 0;
+    const drawn = view2.cy?.elements().length ?? 0;
+    const fpsText = fps === null ? "fps: sampling\u2026" : `${Math.round(fps)} fps`;
+    const msText = ms2 === null ? "" : ` / ${ms2.toFixed(1)} ms`;
+    return `${fpsText}${msText} \xB7 ${redraws} redraws \xB7 ${drawn} elements`;
+  }
+  function refreshRuntimeReadout() {
+    if (!elements2.diagnostics || elements2.diagnostics.hidden || !runtimeBase) {
+      return;
+    }
+    const line = elements2.diagnostics.querySelector('[data-role="runtime"]');
+    if (line) {
+      line.textContent = `${runtimeBase} \xB7 ${runtimeSuffix()}`;
+    }
+  }
+  function startRuntimeReadout() {
+    frameSampler.start();
+    if (!runtimeTimer) {
+      runtimeTimer = setInterval(refreshRuntimeReadout, 500);
+    }
+    refreshRuntimeReadout();
+  }
+  function setRuntimeBase(text) {
+    runtimeBase = text;
+  }
+  function stopRuntimeReadout() {
+    frameSampler.stop();
+    if (runtimeTimer) {
+      clearInterval(runtimeTimer);
+      runtimeTimer = 0;
+    }
+  }
+  return {
+    refreshRuntimeReadout,
+    setRuntimeBase,
+    startRuntimeReadout,
+    stopRuntimeReadout
+  };
+}
+
+// ui/strabo-url-state.js
+function createUrlState(app2) {
+  const { store: store2, state: state2, elements: elements2 } = app2;
+  let urlIntent = null;
+  function currentUrlParams() {
+    try {
+      return new URL(window.location.href).searchParams;
+    } catch {
+      return new URLSearchParams();
+    }
+  }
+  function syncUrl() {
+    try {
+      const url = new URL(window.location.href);
+      const set = (key, value) => {
+        if (value) {
+          url.searchParams.set(key, value);
+        } else {
+          url.searchParams.delete(key);
+        }
+      };
+      set("repository", state2.repository ?? "");
+      set("mode", state2.mode === "file" ? "file" : state2.mode === "system" ? "system" : "");
+      set("unit", state2.mode === "system" ? state2.systemUnit ?? "" : "");
+      set("outside", state2.mode === "system" && state2.showOutside ? "1" : "");
+      set("node", store2.get().ui.node ?? "");
+      set("panel", store2.get().ui.memberOpen ? "member-map" : "");
+      if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
+        window.history.replaceState(null, "", url);
+      }
+    } catch {
+    }
+  }
+  function applyUrl() {
+    const params = currentUrlParams();
+    urlIntent = { node: params.get("node"), panel: params.get("panel") };
+    const repository = params.get("repository");
+    if (repository) {
+      state2.repository = repository;
+    }
+    const mode = params.get("mode");
+    if (mode === "file" || mode === "block" || mode === "system") {
+      state2.mode = mode;
+      elements2.detail.value = mode;
+    }
+    state2.systemUnit = mode === "system" ? params.get("unit") : null;
+    state2.systemUnitLabel = state2.systemUnit;
+    state2.showOutside = mode === "system" && params.get("outside") === "1";
+    return params;
+  }
+  async function restoreUrlPanel() {
+    const intent = urlIntent;
+    urlIntent = null;
+    if (!intent || intent.panel !== "member-map" || !intent.node) {
+      return;
+    }
+    if (!app2.current || !(app2.current.nodes ?? []).some((entry) => entry.id === intent.node)) {
+      return;
+    }
+    app2.selection.selectNode(intent.node);
+    await app2.memberMap.openMemberMap(intent.node);
+  }
+  return {
+    applyUrl,
+    restoreUrlPanel,
+    syncUrl
+  };
+}
+
+// ui/strabo-narration-controller.js
+function createNarrationController(app2) {
+  const { state: state2, elements: elements2, request: request2 } = app2;
+  function functionsHandlers(result) {
+    return {
+      narratorStatus: app2.narratorStatus,
+      onNarrate: () => narrateFile(result),
+      onOpenNarratorSettings: app2.settings.openNarratorSettings
+    };
+  }
+  async function fetchNarratorStatus() {
+    try {
+      const response = await fetch(`${API_PATH}/narrator`);
+      if (!response.ok) {
+        return { configured: false, reason: "not-configured" };
+      }
+      const body = await response.json();
+      if (Array.isArray(body?.presets) && body.presets.length > 0) {
+        app2.narratorPresets = body.presets;
+      }
+      return body;
+    } catch {
+      return { configured: false, reason: "not-configured" };
+    }
+  }
+  async function ensureNarratorStatus() {
+    if (app2.narratorStatus === null) {
+      app2.narratorStatus = await fetchNarratorStatus();
+    }
+    return app2.narratorStatus;
+  }
+  async function narrateGroup(id) {
+    if (app2.narratorStatus === null) {
+      app2.narratorStatus = await fetchNarratorStatus();
+    }
+    return postNarration(
+      GROUP_NAMING_INSTRUCTION,
+      buildGroupNamingEvidence(app2.current, id)
+    );
+  }
+  async function narrateFile(result) {
+    return postNarration(
+      "Summarise the recorded complexity, signals, and call wiring in this file.",
+      buildNarratorEvidence(result)
+    );
+  }
+  async function narrateMemberMap() {
+    return postNarration(
+      MEMBER_NARRATION_INSTRUCTION,
+      fileNarrationEvidence(app2.memberData?.file, app2.memberData, app2.memberData?.importIds, app2.memberData?.consumerIds)
+    );
+  }
+  async function narrateReview(result) {
+    return postNarration(REVIEW_NARRATION_INSTRUCTION, buildReviewNarrationEvidence(result));
+  }
+  function fileNarrationEvidence(file, source, imports, usedBy) {
+    if (source?.memberMap?.types?.length > 0) {
+      return buildMemberNarratorEvidence(source.memberMap, {
+        file,
+        imports: imports ?? void 0,
+        usedBy: usedBy ?? void 0,
+        functions: source.functions
+      });
+    }
+    return buildNarratorEvidence({ functions: source?.functions });
+  }
+  function isNarratable(id) {
+    if (!id || !app2.current || state2.mode === "block" || id.endsWith("#support")) {
+      return false;
+    }
+    return app2.current.nodes.some((candidate) => candidate.id === id);
+  }
+  async function narrateNode(id) {
+    const label = app2.current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
+    const showPanel = (panelState) => {
+      renderNarrationPanel(elements2.narrationPanel, panelState, { onOpenNarratorSettings: app2.settings.openNarratorSettings });
+    };
+    showPanel({ label, phase: "loading" });
+    app2.floatingWindows.find((controller) => controller.key === "narration")?.open();
+    try {
+      let reply;
+      if (app2.current?.system && !app2.current?.systemUnit) {
+        reply = await narrateGroup(id);
+      } else {
+        const params = new URLSearchParams({ file: id });
+        if (state2.repository) {
+          params.set("repository", state2.repository);
+        }
+        const result = await request2(`/symbols?${params.toString()}`);
+        const passport = passportFor(app2.current, id);
+        reply = await postNarration(
+          MEMBER_NARRATION_INSTRUCTION,
+          fileNarrationEvidence(
+            id,
+            result,
+            passport?.imports.map((entry) => entry.id),
+            passport?.usedBy.map((entry) => entry.id)
+          )
+        );
+      }
+      showPanel({ label, phase: "done", reply });
+    } catch (error) {
+      showPanel({ label, phase: "error", message: error.message });
+    }
+  }
+  async function narrateRouteTour() {
+    const params = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(state2.repository ? { repository: state2.repository } : {})
+    });
+    const reply = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
+    }
+    return reply;
+  }
+  async function narrateRouteStep(step) {
+    return postNarration(
+      ROUTE_STEP_INSTRUCTION,
+      buildRouteStepEvidence(step, app2.panels.currentRouteSummary())
+    );
+  }
+  async function postNarration(instruction, evidence) {
+    const response = await fetch(`${API_PATH}/narrator`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ instruction, evidence })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
+    }
+    return body;
+  }
+  function narrateMenuItems(target) {
+    if (target?.kind !== "node") {
+      return [];
+    }
+    const menuState = isNarratable(target.id) ? narratorMenuState(app2.narratorStatus) : { enabled: false, hint: "Narrate works on a file or a System unit \u2014 open the folder to reach its files." };
+    return [
+      {
+        label: "\u2726 Narrate",
+        hint: menuState.enabled ? "model-generated" : "unavailable",
+        ...menuState.enabled ? { action: () => narrateNode(target.id) } : { title: menuState.hint }
+      },
+      { separator: true }
+    ];
+  }
+  return {
+    ensureNarratorStatus,
+    fetchNarratorStatus,
+    functionsHandlers,
+    narrateGroup,
+    narrateMemberMap,
+    narrateMenuItems,
+    narrateReview,
+    narrateRouteStep,
+    narrateRouteTour
+  };
+}
+
+// ui/strabo-member-map-controller.js
+function createMemberMapController(app2) {
+  const { store: store2, state: state2, memberUI: memberUI2, elements: elements2, request: request2 } = app2;
+  let memberTimer = null;
+  function memberMapBack() {
+    const file = app2.memberData?.file;
+    closeMemberMap();
+    if (file) {
+      app2.selection.selectNode(file);
+    }
+  }
+  async function openMemberMap(id) {
+    const params = new URLSearchParams({ file: id });
+    if (state2.repository) {
+      params.set("repository", state2.repository);
+    }
+    const result = await request2(`/symbols?${params.toString()}`);
+    const healthParams = new URLSearchParams({ file: id });
+    if (state2.repository) {
+      healthParams.set("repository", state2.repository);
+    }
+    let health = await request2(`/analysis/file-health?${healthParams.toString()}`).catch(() => null);
+    if (!health) {
+      const healthQuery = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+      health = await request2(`/analysis/architecture-health${healthQuery}`).catch(() => null);
+    }
+    const passport = passportFor(app2.current, id);
+    app2.memberData = {
+      file: id,
+      repository: state2.repository,
+      memberMap: result.memberMap,
+      symbols: result.symbols,
+      health,
+      metrics: health?.metrics ?? null,
+      consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
+      importIds: passport ? passport.imports.map((entry) => entry.id) : null,
+      functions: result.functions
+    };
+    if (app2.narratorStatus === null) {
+      app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+    }
+    store2.set("ui", { memberOpen: true, node: id });
+    store2.set("member", { stepIndex: 0, find: "" });
+    app2.floatingWindows.find((controller) => controller.key === "member")?.open();
+    app2.windows.refreshDock();
+  }
+  function memberStepCount() {
+    return memberMapSteps(app2.memberData?.memberMap, {
+      consumers: app2.memberData?.consumerIds ? app2.memberData.consumerIds.length : null
+    }).length;
+  }
+  function renderMemberMapView() {
+    if (!app2.memberData) {
+      return;
+    }
+    renderMemberMap(elements2.memberView, app2.memberData, memberUI2, {
+      onFind: (value) => store2.set("member", { find: value }),
+      onOrder: (value) => store2.set("member", { order: value }),
+      onWiring: (value) => store2.set("member", { showWiring: value }),
+      onZoom: (value) => store2.set("member", { zoom: value }),
+      onExplain: () => {
+        store2.set("member", { explain: !memberUI2.explain });
+        if (memberUI2.explain) {
+          revealMemberExplain();
+        }
+      },
+      onNight: () => store2.set("member", { dim: !memberUI2.dim }),
+      onCompare: () => {
+        app2.git.toggleTimeline().catch((error) => {
+          elements2.status.textContent = `Error: ${error.message}`;
+        });
+      },
+      onOnlyFlow: () => store2.set("member", { onlyFlow: !memberUI2.onlyFlow }),
+      onReset: () => store2.set("member", {
+        order: "source",
+        find: "",
+        showWiring: true,
+        zoom: "medium",
+        dataFlow: true,
+        onlyFlow: false,
+        explain: false,
+        stepIndex: 0,
+        dim: false
+      }),
+      onDataFlow: (value) => store2.set("member", { dataFlow: value }),
+      // The member map may ask the opt-in narrator to explain the recorded members and data flow.
+      narratorStatus: app2.narratorStatus,
+      onNarrate: () => app2.narration.narrateMemberMap(),
+      onOpenNarratorSettings: app2.settings.openNarratorSettings,
+      onStep: (delta) => {
+        stopMemberPlay();
+        store2.set("member", {
+          stepIndex: Math.min(memberStepCount() - 1, Math.max(0, memberUI2.stepIndex + delta))
+        });
+      },
+      onPlay: () => toggleMemberPlay(),
+      onBack: () => memberMapBack(),
+      onClose: () => closeMemberMap()
+    });
+  }
+  function revealMemberExplain() {
+    const container = elements2.memberView;
+    const explain = container.querySelector('[data-role="explain"]');
+    if (!explain) {
+      return;
+    }
+    const toolbar = container.querySelector(".member-toolbar");
+    const containerTop = container.getBoundingClientRect().top;
+    const offset = (toolbar?.offsetHeight ?? 0) + 8;
+    const top = explain.getBoundingClientRect().top;
+    if (top < containerTop + offset) {
+      container.scrollTop = Math.max(0, container.scrollTop + (top - containerTop - offset));
+    }
+  }
+  function stopMemberPlay() {
+    if (memberTimer) {
+      clearInterval(memberTimer);
+      memberTimer = null;
+    }
+    elements2.memberView.classList.remove("is-playing");
+  }
+  function toggleMemberPlay() {
+    if (memberTimer) {
+      stopMemberPlay();
+      return;
+    }
+    elements2.memberView.classList.add("is-playing");
+    memberTimer = setInterval(() => {
+      if (memberUI2.stepIndex >= memberStepCount() - 1) {
+        store2.set("member", { stepIndex: 0 });
+        stopMemberPlay();
+        return;
+      }
+      store2.set("member", { stepIndex: memberUI2.stepIndex + 1 });
+    }, 1400);
+  }
+  function closeMemberMap() {
+    stopMemberPlay();
+    elements2.memberView.hidden = true;
+    memberUI2.dim = false;
+    store2.set("ui", { memberOpen: false });
+    app2.windows.refreshDock();
+  }
+  return {
+    closeMemberMap,
+    memberStepCount,
+    openMemberMap,
+    renderMemberMapView
+  };
+}
+
+// ui/strabo-git-controller.js
+function createGitController(app2) {
+  const { store: store2, state: state2, view: view2, elements: elements2, request: request2 } = app2;
+  let selectedCommitHash = null;
+  let selectedBranchName = null;
+  let branchBase = null;
+  let branchesBusy = false;
+  let reviewHistory = [];
+  let currentReviewRequest = null;
+  async function toggleTimeline() {
+    if (!elements2.timelinePanel.hidden) {
+      elements2.timelinePanel.hidden = true;
+      return;
+    }
+    elements2.timelinePanel.hidden = false;
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const result = await request2(`/analysis/timeline${query}`);
+    const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
+    const draw = (metrics, drift2) => renderTimeline(elements2.timelinePanel, result, (commit) => {
+      selectCommit(commit).catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }, {
+      selectedHash: selectedCommitHash,
+      metrics,
+      drift: drift2,
+      onClose: () => {
+        elements2.timelinePanel.hidden = true;
+      }
+    });
+    draw(null, null);
+    if (result?.available === false) {
+      return;
+    }
+    const [history, drift] = await Promise.all([
+      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
+      request2(`/analysis/drift${driftQuery}`).catch(() => null)
+    ]);
+    if (!elements2.timelinePanel.hidden && (history?.available || drift !== null)) {
+      draw(
+        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+        drift
+      );
+    }
+  }
+  async function toggleBranches() {
+    if (!elements2.branchesPanel.hidden) {
+      elements2.branchesPanel.hidden = true;
+      return;
+    }
+    elements2.branchesPanel.hidden = false;
+    await loadBranches();
+  }
+  async function loadBranches() {
+    const params = new URLSearchParams();
+    if (state2.repository) params.set("repository", state2.repository);
+    if (branchBase) params.set("base", branchBase);
+    const query = params.toString() ? `?${params}` : "";
+    const result = await request2(`/analysis/branches${query}`);
+    if (result?.available && result.base) branchBase = result.base.name;
+    renderBranches(elements2.branchesPanel, result, {
+      selected: selectedBranchName,
+      busy: branchesBusy,
+      onSelect: (branch) => {
+        selectBranch(branch.name).catch((error) => {
+          elements2.status.textContent = `Error: ${error.message}`;
+        });
+      },
+      onBase: (name) => {
+        branchBase = name;
+        loadBranches().catch((error) => {
+          elements2.status.textContent = `Error: ${error.message}`;
+        });
+      },
+      onFetch: () => runBranchAction("fetch", {}),
+      onPull: () => runBranchAction("pull", { branch: result?.current }),
+      onPullBranch: (branch) => runBranchAction("pull", { branch: branch.name }),
+      onPush: (branch) => runBranchAction("push", { branch: branch.name }),
+      onClose: () => {
+        elements2.branchesPanel.hidden = true;
+      }
+    });
+  }
+  async function runBranchAction(action, payload) {
+    if (branchesBusy) return;
+    if ((action === "sync" || action === "pull") && !payload.branch) {
+      elements2.status.textContent = `${action === "pull" ? "Pull" : "Sync"} needs a checked-out branch.`;
+      return;
+    }
+    branchesBusy = true;
+    await loadBranches().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+    try {
+      const params = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+      const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      }
+      elements2.status.textContent = body.available === false ? `${action} failed: ${body.detail}` : body.message;
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+    } finally {
+      branchesBusy = false;
+      await loadBranches().catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }
+  }
+  async function selectBranch(name) {
+    selectedBranchName = name;
+    const against = branchBase ? `&against=${encodeURIComponent(branchBase)}` : "";
+    await showReview(`?branch=${encodeURIComponent(name)}${against}`, null, name);
+    for (const row of elements2.branchesPanel.querySelectorAll(".branch-row")) {
+      row.classList.toggle("selected-branch", row.querySelector(".branch")?.dataset.branch === name);
+    }
+  }
+  async function selectCommit(commit) {
+    selectedCommitHash = commit.hash;
+    await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
+  }
+  async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
+    const entry = { query, commit, branchName };
+    if (!fromHistory && currentReviewRequest) {
+      reviewHistory.push(currentReviewRequest);
+    }
+    currentReviewRequest = entry;
+    const navigation = {
+      canGoBack: reviewHistory.length > 0,
+      onBack: reviewBack
+    };
+    const separator = query ? "&" : "?";
+    const repository = state2.repository ? `${separator}repository=${encodeURIComponent(state2.repository)}` : "";
+    const ticket = ++reviewTicket;
+    elements2.reviewPanel.hidden = false;
+    renderReviewLoading(elements2.reviewPanel, { onClose: closeReview, ...navigation });
+    let data;
+    try {
+      data = await request2(`/analysis/review${query}${repository}`);
+    } catch (error) {
+      if (ticket === reviewTicket) {
+        renderReview(elements2.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
+      }
+      throw error;
+    }
+    if (ticket !== reviewTicket) return;
+    app2.currentReview = data;
+    if (data.available === false) {
+      elements2.reviewPanel.hidden = false;
+      renderReview(elements2.reviewPanel, data, { onClose: closeReview, ...navigation });
+      return;
+    }
+    if (commit) {
+      try {
+        data.structural = await request2(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+      } catch (error) {
+        data.structural = { available: false, reason: "git-error", detail: error.message };
+      }
+      if (ticket !== reviewTicket) return;
+    }
+    if (app2.narratorStatus === null) {
+      app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+    }
+    if (ticket !== reviewTicket) return;
+    const overlay2 = reviewOverlay(data);
+    view2.overlay(overlay2.classes);
+    elements2.reviewPanel.hidden = false;
+    renderReview(elements2.reviewPanel, data, reviewHandlers(data, navigation));
+    if (store2.get().ui.screen === "review") {
+      renderReview(elements2.reviewScreenBody, data, reviewHandlers(data, navigation, () => app2.setScreen("graph")));
+    }
+    const label = branchName ?? (commit ? commit.shortHash : "working tree");
+    elements2.status.textContent = `Review ${label}: ${overlay2.summary}`;
+  }
+  async function reviewBack() {
+    const previous = reviewHistory.pop();
+    if (!previous) {
+      return;
+    }
+    try {
+      await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+    }
+  }
+  let reviewTicket = 0;
+  function closeReview() {
+    reviewTicket += 1;
+    app2.currentReview = null;
+    reviewHistory = [];
+    currentReviewRequest = null;
+    elements2.reviewPanel.hidden = true;
+    elements2.reviewPanel.replaceChildren();
+  }
+  function clearReviewMarks() {
+    selectedCommitHash = null;
+    selectedBranchName = null;
+  }
+  async function toggleReview() {
+    if (!elements2.reviewPanel.hidden) {
+      closeReview();
+      view2.overlay(null);
+      return;
+    }
+    try {
+      await showReview("");
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+    }
+  }
+  async function showRisk() {
+    const repository = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const report = await request2(`/analysis/risk${repository}`);
+    closeReview();
+    elements2.riskPanel.hidden = false;
+    renderRisk(elements2.riskPanel, report, {
+      onClose: closeRisk,
+      onSelect: (id) => app2.selection.selectNode(id)
+    });
+    elements2.status.textContent = riskSummary(report);
+  }
+  function closeRisk() {
+    elements2.riskPanel.hidden = true;
+    renderRisk(elements2.riskPanel, null, {});
+  }
+  async function toggleRisk() {
+    if (!elements2.riskPanel.hidden) {
+      closeRisk();
+      return;
+    }
+    try {
+      await showRisk();
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+    }
+  }
+  function reviewDiffSpec(result, file) {
+    if (result?.kind === "commit" && result.ref) {
+      return { ref: result.ref };
+    }
+    if (result?.kind === "branch" && result.branch) {
+      return { base: result.branch.mergeBase, head: result.branch.tipHash };
+    }
+    if (file?.group === "staged") return { staged: 1 };
+    if (file?.group === "untracked") return { untracked: 1 };
+    return {};
+  }
+  elements2.tbBranches.addEventListener("click", () => {
+    toggleBranches().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.tbTimeline.addEventListener("click", () => {
+    toggleTimeline().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.tbReview.addEventListener("click", () => {
+    toggleReview().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.tbRisk.addEventListener("click", () => {
+    toggleRisk().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  function reviewHandlers(data, navigation, onClose = closeReview) {
+    return {
+      onClose,
+      ...navigation,
+      onSelect: (id) => selectFromReview(id),
+      onOpenDiff: (file, entry) => openReviewDiff(data, file, entry),
+      narratorStatus: app2.narratorStatus,
+      onNarrate: () => app2.narration.narrateReview(data),
+      onOpenNarratorSettings: app2.settings.openNarratorSettings
+    };
+  }
+  function selectFromReview(id) {
+    if (store2.get().ui.screen !== "graph") {
+      app2.setScreen("graph");
+    }
+    app2.selection.selectNode(id);
+    if (!elements2.inspector.hidden) {
+      app2.floatingWindows?.find((controller) => controller.key === "inspector")?.raise?.();
+    }
+  }
+  function openReviewDiff(data, file, entry) {
+    if (store2.get().ui.screen !== "graph") {
+      app2.setScreen("graph");
+    }
+    app2.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status });
+  }
+  function openReviewScreen() {
+    const body = elements2.reviewScreenBody;
+    if (!body) {
+      return;
+    }
+    if (!app2.currentReview) {
+      body.replaceChildren();
+      const note3 = document.createElement("p");
+      note3.className = "evidence";
+      note3.textContent = "Reviewing the working tree\u2026";
+      body.append(note3);
+      showReview("").catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+      return;
+    }
+    const navigation = { canGoBack: reviewHistory.length > 0, onBack: reviewBack };
+    renderReview(body, app2.currentReview, reviewHandlers(app2.currentReview, navigation, () => app2.setScreen("graph")));
+    if (app2.currentReview.available !== false) {
+      const label = currentReviewRequest?.branchName ?? (currentReviewRequest?.commit ? currentReviewRequest.commit.shortHash : "working tree");
+      elements2.status.textContent = `Review ${label}`;
+    }
+  }
+  function refreshReviewScreen() {
+    const entry = currentReviewRequest ?? { query: "", commit: null, branchName: null };
+    showReview(entry.query, entry.commit, entry.branchName, { fromHistory: true }).catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  }
+  elements2.reviewScreenPending?.addEventListener("click", () => {
+    showReview("").catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.reviewScreenRefresh?.addEventListener("click", refreshReviewScreen);
+  elements2.historyScreenRefresh?.addEventListener("click", () => {
+    loadTimelineScreen().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  async function loadTimelineScreen() {
+    const body = elements2.historyScreenBody;
+    if (!body) {
+      return;
+    }
+    body.replaceChildren();
+    const note3 = document.createElement("p");
+    note3.className = "evidence";
+    note3.textContent = "Loading recorded history\u2026";
+    body.append(note3);
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
+    const [result, history, drift] = await Promise.all([
+      request2(`/analysis/timeline${query}`),
+      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
+      request2(`/analysis/drift${driftQuery}`).catch(() => null)
+    ]);
+    renderTimeline(body, result, (commit) => {
+      selectCommit(commit).catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }, {
+      selectedHash: selectedCommitHash,
+      metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+      drift
+    });
+  }
+  function openHistoryScreen() {
+    loadTimelineScreen().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  }
+  return {
+    clearReviewMarks,
+    closeReview,
+    closeRisk,
+    openHistoryScreen,
+    openReviewScreen,
+    showReview,
+    showRisk,
+    toggleBranches,
+    toggleReview,
+    toggleRisk,
+    toggleTimeline
+  };
+}
+
+// ui/strabo-delegate.js
+var menuElement = null;
+var toastStack = null;
+var promptDialog = null;
+var promptDialogResolve = null;
+var sessionOpener = null;
+function setDelegateSessionOpener(opener) {
+  sessionOpener = typeof opener === "function" ? opener : null;
+}
+var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
+function ensureMenu() {
+  if (!menuElement) {
+    menuElement = document.createElement("div");
+    menuElement.id = "agent-menu";
+    menuElement.className = "agent-menu";
+    menuElement.setAttribute("role", "menu");
+    menuElement.hidden = true;
+    document.body.append(menuElement);
+  }
+  return menuElement;
+}
+function ensureToasts() {
+  if (!toastStack) {
+    toastStack = document.createElement("div");
+    toastStack.id = "toast-stack";
+    toastStack.className = "toast-stack";
+    toastStack.setAttribute("aria-live", "polite");
+    document.body.append(toastStack);
+  }
+  return toastStack;
+}
+function closeContextMenu() {
+  if (menuElement) {
+    menuElement.hidden = true;
+    menuElement.replaceChildren();
+  }
+}
+function showContextMenu({ x, y, title, items }) {
+  const menu = ensureMenu();
+  menu.replaceChildren();
+  if (title) {
+    const header = document.createElement("div");
+    header.className = "agent-menu-title";
+    header.textContent = title;
+    menu.append(header);
+  }
+  for (const item of items ?? []) {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "agent-menu-sep";
+      sep.setAttribute("aria-hidden", "true");
+      menu.append(sep);
+      continue;
+    }
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "agent-menu-item";
+    button3.setAttribute("role", "menuitem");
+    if (item.title) {
+      button3.title = item.title;
+    }
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    button3.append(label);
+    if (item.hint) {
+      const hint = document.createElement("span");
+      hint.className = "agent-menu-hint";
+      hint.textContent = item.hint;
+      button3.append(hint);
+    }
+    if (typeof item.action === "function") {
+      button3.addEventListener("click", () => {
+        closeContextMenu();
+        item.action();
+      });
+    } else {
+      button3.disabled = true;
+    }
+    menu.append(button3);
+  }
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
+  const first = menu.querySelector(".agent-menu-item:not(:disabled)");
+  first?.focus();
+  const onPointerDown = (event) => {
+    if (!menu.contains(event.target)) {
+      cleanup();
+    }
+  };
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      cleanup();
+    }
+  };
+  const onScroll = () => cleanup();
+  function cleanup() {
+    closeContextMenu();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("resize", onScroll);
+    document.removeEventListener("scroll", onScroll, true);
+  }
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("resize", onScroll);
+    document.addEventListener("scroll", onScroll, true);
+  }, 0);
+  return cleanup;
+}
+function showToast(message, action = null, { timeout = 6e3 } = {}) {
+  const stack = ensureToasts();
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.setAttribute("role", "status");
+  const text = document.createElement("span");
+  text.textContent = message;
+  toast.append(text);
+  if (action) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "toast-action";
+    button3.textContent = action.label;
+    button3.addEventListener("click", () => {
+      action.onClick?.();
+      toast.remove();
+    });
+    toast.append(button3);
+  }
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "toast-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss notification");
+  dismiss.textContent = "\xD7";
+  dismiss.addEventListener("click", () => toast.remove());
+  toast.append(dismiss);
+  stack.append(toast);
+  setTimeout(() => toast.remove(), timeout);
+  return toast;
+}
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
+function settlePromptReview(value) {
+  const resolve = promptDialogResolve;
+  promptDialogResolve = null;
+  resolve?.(value);
+}
+function ensurePromptDialog() {
+  if (promptDialog) {
+    return promptDialog;
+  }
+  const dialog2 = document.createElement("dialog");
+  dialog2.id = "prompt-dialog";
+  dialog2.className = "dialog prompt-dialog";
+  dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading2 = document.createElement("strong");
+  heading2.className = "prompt-dialog-title";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => dialog2.close());
+  header.append(heading2, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Task prompt");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", async () => {
+    await copyText(text.value);
+    copy.textContent = "Copied";
+    setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1500);
+  });
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog2.close());
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "primary prompt-dialog-send";
+  send.addEventListener("click", () => {
+    const reviewed = text.value;
+    settlePromptReview(reviewed);
+    dialog2.close();
+  });
+  actions.append(cancel, send);
+  footer.append(copy, actions);
+  dialog2.append(header, target, text, footer);
+  dialog2.addEventListener("close", () => settlePromptReview(null));
+  document.body.append(dialog2);
+  promptDialog = dialog2;
+  return dialog2;
+}
+function showPromptReview({ agent, title, prompt }) {
+  const dialog2 = ensurePromptDialog();
+  settlePromptReview(null);
+  const agentName = AGENT_LABELS[agent] ?? agent;
+  dialog2.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
+  dialog2.querySelector(".prompt-dialog-target").textContent = title;
+  const text = dialog2.querySelector(".prompt-dialog-text");
+  text.value = prompt;
+  dialog2.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
+  const pending = new Promise((resolve) => {
+    promptDialogResolve = resolve;
+  });
+  if (!dialog2.open) {
+    dialog2.showModal();
+  }
+  text.focus();
+  text.setSelectionRange(text.value.length, text.value.length);
+  return pending;
+}
+async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
+  const response = await fetch(`${API_PATH}/delegate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent, repository, target, prompt, title, ...dryRun ? { dryRun: true } : {} })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Delegate failed (${response.status})`);
+  }
+  if (body.sessionId && sessionOpener) {
+    sessionOpener(body.sessionId, body);
+  }
+  return body;
+}
+
+// ui/strabo-settings-controller.js
+function createSettingsController(app2) {
+  const { state: state2, elements: elements2, request: request2 } = app2;
+  let serverSettings = null;
+  let settingsStatus = "";
+  let settingsStatusError = false;
+  let narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
+  function setClientPref(key, value) {
+    app2.clientPrefs = { ...app2.clientPrefs, [key]: value };
+    writeSettings(app2.clientPrefs);
+    app2.applyClientPrefs();
+    app2.lenses.updateLabelsButton();
+    if (key === "locThreshold") {
+      app2.lenses.applyLocLens();
+    }
+    renderSettingsView();
+    if (key === "commitEnabled" && state2.overlay === "impact") {
+      app2.lenses.applyOverlay();
+    }
+  }
+  function renderSettingsView() {
+    if (!elements2.settingsPanel) return;
+    renderSettings(elements2.settingsPanel, {
+      prefs: app2.clientPrefs,
+      server: serverSettings,
+      presets: app2.narratorPresets,
+      narratorState: narratorUiState,
+      onNarratorState: (patch2) => {
+        narratorUiState = { ...narratorUiState, ...patch2 };
+        renderSettingsView();
+      },
+      status: settingsStatus || null,
+      statusError: settingsStatusError,
+      onPref: (key, value) => setClientPref(key, value),
+      onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
+      onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
+      onRestart: () => restartServer(),
+      onNarratorChange: async (patch2) => {
+        const saved = await saveServerSettings({ narrator: patch2 }, "Narrator updated.");
+        if (saved?.narrator?.keyCleared) {
+          showToast("The endpoint host changed, so the stored key was removed.");
+        }
+        await refreshNarratorSettings();
+        renderSettingsView();
+        await refreshNarratorStatus();
+      },
+      onFetchModels: async ({ endpoint, model }) => {
+        const params = new URLSearchParams();
+        if (endpoint) params.set("endpoint", endpoint);
+        if (model) params.set("model", model);
+        const response = await fetch(`${API_PATH}/narrator/models?${params.toString()}`);
+        const body = await response.json().catch(() => ({}));
+        return response.ok ? body : { models: [], error: body.error ?? `Could not list models (${response.status}).` };
+      },
+      onTestConnection: async ({ endpoint, model }) => {
+        const response = await fetch(`${API_PATH}/narrator/test`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ endpoint, model })
+        });
+        return response.json().catch(() => ({ ok: false, reason: "provider-error", detail: "no response" }));
+      },
+      onStoreKey: async (key) => {
+        const response = await fetch(`${API_PATH}/narrator/key`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ key })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body.error ?? `Could not store the key (${response.status}).`);
+        }
+        settingsStatus = "Key stored for this host.";
+        settingsStatusError = false;
+        await refreshNarratorSettings();
+        renderSettingsView();
+        return body;
+      },
+      onClearKey: async () => {
+        await fetch(`${API_PATH}/narrator/key`, { method: "DELETE" }).catch(() => {
+        });
+        await refreshNarratorSettings();
+        renderSettingsView();
+      }
+    });
+  }
+  async function refreshNarratorSettings() {
+    try {
+      serverSettings = await request2("/settings");
+    } catch {
+    }
+  }
+  async function refreshNarratorStatus() {
+    app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+  }
+  async function saveServerSettings(patch2, successMessage) {
+    let saved = null;
+    try {
+      saved = await putServerSettings(patch2);
+      settingsStatus = successMessage;
+      settingsStatusError = false;
+    } catch (error) {
+      settingsStatus = error.message;
+      settingsStatusError = true;
+    }
+    renderSettingsView();
+    app2.repos.loadCatalogue().catch(() => {
+    });
+    return saved;
+  }
+  async function putServerSettings(patch2) {
+    const response = await fetch(`${API_PATH}/settings`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch2)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error ?? `Could not save settings (${response.status}).`);
+    }
+    serverSettings = body;
+    return body;
+  }
+  async function restartServer() {
+    const response = await fetch(`${API_PATH}/settings/restart`, { method: "POST" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error ?? `Could not restart the server (${response.status}).`);
+    }
+    await waitForServerRestart();
+  }
+  async function waitForServerRestart() {
+    settingsStatus = "Restarting\u2026";
+    settingsStatusError = false;
+    renderSettingsView();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      try {
+        const response = await fetch(`${API_PATH}/health`, { cache: "no-store" });
+        if (response.ok) {
+          window.location.reload();
+          return;
+        }
+      } catch {
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    settingsStatus = "The server did not come back; restart it from the terminal.";
+    settingsStatusError = true;
+    renderSettingsView();
+  }
+  async function openSettings() {
+    settingsStatus = "";
+    settingsStatusError = false;
+    renderSettingsView();
+    try {
+      serverSettings = await request2("/settings");
+      if (app2.narratorPresets.length === 0) {
+        app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+      }
+    } catch (error) {
+      settingsStatus = error.message;
+      settingsStatusError = true;
+    }
+    renderSettingsView();
+  }
+  function openNarratorSettings() {
+    app2.floatingWindows?.find?.((controller) => controller.key === "settings")?.open?.();
+    const reveal = (attempt = 0) => {
+      const target = elements2.settingsPanel?.querySelector("#setting-narrator");
+      if (target) {
+        target.scrollIntoView?.({ block: "start" });
+        return;
+      }
+      if (attempt < 10) {
+        setTimeout(() => reveal(attempt + 1), 50);
+      }
+    };
+    setTimeout(() => reveal(), 50);
+  }
+  return {
+    openNarratorSettings,
+    openSettings,
+    setClientPref
+  };
+}
+
+// ui/strabo-panel-blocks.js
+var LEGEND = [
+  ["plain", "plain brick"],
+  ["keystone", "load-bearing (double ring)"],
+  ["tangled", "dependency cycle (dashed)"],
+  ["detached", "no recorded import (dotted)"]
+];
+function fitLabel2(label, width) {
+  const max = Math.max(3, Math.floor((width - 8) / 6.2));
+  return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
+}
+function brickGroup(brick, options) {
+  const selected = options.selected === brick.id;
+  const group = svgElement("g", {
+    class: `brick ${brick.status}${selected ? " is-selected" : ""}`,
+    transform: `translate(${brick.x},${brick.y})`,
+    tabindex: "0",
+    role: "button",
+    "aria-label": `${brick.label}: ${brick.status}, ${brick.studs} stud(s), rests on ${brick.restsOn} brick(s)`
+  });
+  group.dataset.brick = brick.id;
+  const studs = Math.max(1, Math.min(brick.studs, Math.max(1, Math.round(brick.w / 10))));
+  for (let index = 1; index <= studs; index += 1) {
+    group.append(
+      svgElement("circle", {
+        class: "brick-stud",
+        cx: (brick.w * index / (studs + 1)).toFixed(1),
+        cy: "-1",
+        r: "3"
+      })
+    );
+  }
+  group.append(svgElement("rect", { class: "brick-rect", width: brick.w, height: brick.h, rx: "5" }));
+  const text = svgElement("text", {
+    class: "brick-label",
+    x: (brick.w / 2).toFixed(1),
+    y: String(brick.h - 5),
+    "text-anchor": "middle"
+  });
+  text.textContent = fitLabel2(brick.label, brick.w);
+  group.append(text);
+  const title = svgElement("title", {});
+  title.textContent = `${brick.label} (${brick.kind}) \xB7 layer ${brick.layer} \xB7 studs ${brick.studs} \xB7 rests on ${brick.restsOn} \xB7 topples ${brick.topples}`;
+  group.append(title);
+  if (typeof options.onOpen === "function") {
+    group.addEventListener("click", (event) => {
+      event.stopPropagation();
+      options.onOpen(brick.id);
+    });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        options.onOpen(brick.id);
+      }
+    });
+  }
+  return group;
+}
+function assemblySvg(layout, options) {
+  const svg = svgElement("svg", {
+    viewBox: `0 0 ${layout.width} ${layout.height}`,
+    class: "blocks-svg",
+    role: "img",
+    "aria-label": `Brick assembly: ${layout.bricks.length} bricks, ${layout.snaps.length} recorded snaps`
+  });
+  svg.dataset.role = "blocks-svg";
+  const snapLayer = svgElement("g", { class: "blocks-snaps" });
+  for (const snap of layout.snaps) {
+    const path = svgElement("path", {
+      class: "blocks-snap",
+      d: `M ${snap.x1.toFixed(1)} ${snap.y1.toFixed(1)} C ${snap.x1.toFixed(1)} ${(snap.y1 + 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${(snap.y2 - 8).toFixed(1)}, ${snap.x2.toFixed(1)} ${snap.y2.toFixed(1)}`
+    });
+    snapLayer.append(path);
+  }
+  svg.append(snapLayer);
+  const brickLayer = svgElement("g", { class: "blocks-bricks" });
+  for (const brick of layout.bricks) {
+    brickLayer.append(brickGroup(brick, options));
+  }
+  svg.append(brickLayer);
+  if (typeof options.onClear === "function") {
+    svg.addEventListener("click", () => options.onClear());
+  }
+  return svg;
+}
+function renderBlocks(container, assembly, options = {}) {
+  container.replaceChildren();
+  container.dataset.role = "blocks";
+  const head = document.createElement("header");
+  head.className = "blocks-head";
+  const summary = document.createElement("p");
+  summary.className = "blocks-summary";
+  summary.dataset.role = "blocks-summary";
+  summary.textContent = assemblySummary(assembly);
+  head.append(summary);
+  container.append(head);
+  if (!assembly?.available) {
+    container.append(unavailableNote("No map is drawn yet, so there are no bricks to assemble."));
+    return;
+  }
+  const stage = document.createElement("div");
+  stage.className = "blocks-stage";
+  stage.append(assemblySvg(layoutAssembly(assembly), options));
+  container.append(stage);
+  const legend = document.createElement("ul");
+  legend.className = "blocks-legend";
+  for (const [status, label] of LEGEND) {
+    const item = document.createElement("li");
+    item.className = `blocks-legend-row ${status}`;
+    const swatch = document.createElement("span");
+    swatch.className = `blocks-swatch ${status}`;
+    swatch.setAttribute("aria-hidden", "true");
+    const text = document.createElement("span");
+    text.textContent = label;
+    item.append(swatch, text);
+    legend.append(item);
+  }
+  container.append(legend);
+  const notes = document.createElement("section");
+  notes.className = "blocks-notes";
+  const title = document.createElement("h4");
+  title.textContent = "Assembly notes";
+  notes.append(title);
+  if ((assembly.suggestions ?? []).length === 0) {
+    const clear = document.createElement("p");
+    clear.className = "blocks-clear";
+    clear.textContent = "Every brick connects to the stack, and no cycle was recorded.";
+    notes.append(clear);
+  } else {
+    const list = document.createElement("ul");
+    for (const suggestion of assembly.suggestions) {
+      const item = document.createElement("li");
+      item.className = `blocks-note ${suggestion.kind}`;
+      item.dataset.kind = suggestion.kind;
+      const strong = document.createElement("strong");
+      strong.textContent = suggestion.title;
+      const detail = document.createElement("p");
+      detail.textContent = suggestion.detail;
+      item.append(strong, detail);
+      list.append(item);
+    }
+    notes.append(list);
+  }
+  container.append(notes);
+}
+
+// ui/strabo-route.js
+var ROUTE_PROGRESS_PREFIX = "strabo.route.progress.";
+function routeProgressKey(repository) {
+  return `${ROUTE_PROGRESS_PREFIX}${repository ?? "default"}`;
+}
+function routeSteps(route) {
+  const steps = [];
+  for (const unit of route?.units ?? []) {
+    for (const step of unit.files ?? []) {
+      steps.push({ ...step, unitName: unit.summary?.name ?? step.unit });
+    }
+  }
+  return steps;
+}
+function routeIndexOf(route, file) {
+  if (!file) {
+    return -1;
+  }
+  return routeSteps(route).findIndex((step) => step.file === file);
+}
+function clampRouteIndex(index, length) {
+  if (!Number.isFinite(index) || length <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(Math.trunc(index), 0), length - 1);
+}
+function routeStepLabel(step) {
+  if (!step) {
+    return "No file is on the route.";
+  }
+  const reached = step.from ? `reached from ${step.from}` : "entry point";
+  return `${step.file} \xB7 depth ${step.depth} \xB7 ${reached} \xB7 ${step.fanIn} importer(s) \xB7 ${step.tier}`;
+}
+function readRouteProgress(storage, repository) {
+  try {
+    const raw = storage?.getItem(routeProgressKey(repository));
+    if (raw === null || raw === void 0) {
+      return null;
+    }
+    const index = Number.parseInt(raw, 10);
+    return Number.isFinite(index) ? index : null;
+  } catch {
+    return null;
+  }
+}
+function writeRouteProgress(storage, repository, index) {
+  try {
+    storage?.setItem(routeProgressKey(repository), String(index));
+  } catch {
+  }
+}
+function heading(level, text) {
+  const node = document.createElement(level);
+  node.textContent = text;
+  return node;
+}
+function note2(text, className = "overlay-note") {
+  const node = document.createElement("p");
+  node.className = className;
+  node.textContent = text;
+  return node;
+}
+function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
+  container.replaceChildren();
+  container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
+  if (!route) {
+    if (state2.error) {
+      container.append(note2("The reading route could not be loaded.", "unavailable"));
+      container.append(note2(state2.error, "route-error-detail"));
+      if (handlers.onRetry) {
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "route-retry";
+        retry.dataset.role = "route-retry";
+        retry.textContent = "Retry";
+        retry.addEventListener("click", () => handlers.onRetry());
+        container.append(retry);
+      }
+    } else {
+      container.append(note2("No reading route was recorded for this repository.", "unavailable"));
+    }
+    return;
+  }
+  const steps = routeSteps(route);
+  const index = clampRouteIndex(state2.index ?? 0, steps.length);
+  if (route.truncated) {
+    container.append(note2(route.truncated, "route-truncated"));
+  }
+  const controls = document.createElement("div");
+  controls.className = "route-controls";
+  controls.dataset.role = "route-controls";
+  const back = document.createElement("button");
+  back.type = "button";
+  back.className = "route-back";
+  back.textContent = "Previous";
+  back.disabled = index <= 0;
+  back.addEventListener("click", () => handlers.onStep?.(index - 1));
+  const counter = document.createElement("span");
+  counter.className = "route-counter";
+  counter.dataset.role = "route-counter";
+  counter.textContent = steps.length > 0 ? `Step ${index + 1} of ${steps.length}` : "No file is on the route.";
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "route-next";
+  next.textContent = "Next";
+  next.disabled = steps.length === 0 || index >= steps.length - 1;
+  next.addEventListener("click", () => handlers.onStep?.(index + 1));
+  const focus2 = document.createElement("button");
+  focus2.type = "button";
+  focus2.className = "route-focus";
+  focus2.dataset.role = "route-focus";
+  focus2.textContent = "Focus on map";
+  focus2.disabled = steps.length === 0;
+  focus2.addEventListener("click", () => {
+    const step = steps[index];
+    if (step) {
+      handlers.onFocus?.(step.file);
+    }
+  });
+  const stepNarrate = handlers.onNarrateStep ? (() => {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "route-narrate-step";
+    button3.dataset.role = "route-narrate-step";
+    button3.textContent = "Narrate this step";
+    const reason = narratorDisabledReason(state2.narratorStatus);
+    button3.disabled = steps.length === 0 || reason !== null;
+    button3.title = reason ?? "Ask the opt-in narrator to explain the current file";
+    return button3;
+  })() : null;
+  const stepReply = stepNarrate ? document.createElement("div") : null;
+  if (stepReply) {
+    stepReply.className = "narrator-reply route-step-narrative";
+    stepReply.dataset.role = "route-step-narrative";
+    stepNarrate.addEventListener("click", async () => {
+      const step = steps[index];
+      if (!step) {
+        return;
+      }
+      stepNarrate.disabled = true;
+      stepReply.replaceChildren("Asking the narrator\u2026");
+      try {
+        renderNarrativeReply(stepReply, await handlers.onNarrateStep(step));
+      } catch (error) {
+        stepReply.replaceChildren(`Narrator unavailable: ${error.message}`);
+      } finally {
+        stepNarrate.disabled = false;
+      }
+    });
+  }
+  controls.append(back, counter, next, focus2);
+  if (stepNarrate) {
+    controls.append(stepNarrate);
+  }
+  container.append(controls);
+  const current = steps[index];
+  const currentCard = document.createElement("p");
+  currentCard.className = "route-current";
+  currentCard.dataset.role = "route-current";
+  currentCard.textContent = routeStepLabel(current);
+  if (current) {
+    currentCard.dataset.file = current.file;
+  }
+  container.append(currentCard);
+  if (stepReply) {
+    container.append(stepReply);
+  }
+  const summary = route.summary ?? {};
+  container.append(
+    note2(
+      `${summary.entryPoints ?? 0} entry point(s) \xB7 ${summary.routed ?? 0} routed \xB7 ${summary.unreached ?? 0} no entry point reaches \xB7 ${summary.units ?? 0} unit(s)`,
+      "route-summary"
+    )
+  );
+  for (const unit of route.units ?? []) {
+    const section2 = document.createElement("section");
+    section2.className = "route-unit";
+    section2.dataset.role = "route-unit";
+    section2.dataset.unit = unit.summary?.id ?? "";
+    const unitName = unit.summary?.name ?? unit.summary?.id ?? "unit";
+    section2.append(
+      heading("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
+    );
+    if (unit.summary?.roleEvidence) {
+      section2.append(note2(unit.summary.roleEvidence, "route-unit-why"));
+    }
+    for (const step of unit.files ?? []) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "route-step";
+      row.dataset.role = "route-step";
+      row.dataset.file = step.file;
+      if (step.file === current?.file) {
+        row.classList.add("is-current");
+      }
+      row.textContent = routeStepLabel(step);
+      row.addEventListener("click", () => handlers.onStep?.(routeIndexOf(route, step.file)));
+      section2.append(row);
+    }
+    if ((unit.unreached ?? []).length > 0) {
+      const unreached = document.createElement("details");
+      unreached.className = "route-unreached";
+      unreached.dataset.role = "route-unreached";
+      const count = document.createElement("summary");
+      count.textContent = `${unit.unreached.length} file(s) no entry point reaches`;
+      unreached.append(count);
+      for (const entry of unit.unreached) {
+        const row = document.createElement("div");
+        row.className = "route-unreached-file";
+        row.dataset.file = entry.file;
+        row.textContent = `${entry.file} \xB7 ${entry.fanIn} importer(s) \xB7 ${entry.tier}`;
+        unreached.append(row);
+      }
+      section2.append(unreached);
+    }
+    container.append(section2);
+  }
+  if (handlers.onNarrateTour) {
+    appendNarratorBlock(
+      container,
+      {
+        narratorStatus: state2.narratorStatus,
+        ...handlers.onOpenNarratorSettings ? { onOpenNarratorSettings: handlers.onOpenNarratorSettings } : {},
+        onNarrate: () => handlers.onNarrateTour()
+      },
+      { id: "narrate-tour", label: "Narrate tour" }
+    );
+  }
+}
+
+// ui/strabo-repo-panels.js
+function createRepositoryPanels(app2) {
+  const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
+  let currentRoute = null;
+  let routeIndex = 0;
+  async function showWorkspace() {
+    elements2.workspacePanel.hidden = false;
+    try {
+      workspaceReport = await request2("/workspace");
+      workspaceTools.databases = await request2("/workspace/databases").catch(() => null);
+      renderWorkspaceView();
+      view2.crossRepo(crossRepoNodeIds(workspaceReport, (app2.current?.nodes ?? []).map((node) => node.id)));
+    } catch (error) {
+      workspaceReport = null;
+      renderWorkspace(elements2.workspacePanel, null, { onClose: closeWorkspace });
+      const note3 = document.createElement("p");
+      note3.className = "unavailable";
+      note3.textContent = error.message;
+      elements2.workspacePanel.append(note3);
+    }
+    app2.windows.refreshDock();
+  }
+  function showBlocks() {
+    const assembly = buildBrickAssembly(app2.current?.nodes ?? [], app2.current?.edges ?? []);
+    renderBlocks(elements2.blocksPanel, assembly, {
+      selected: app2.selected,
+      onOpen: (id) => app2.selection.selectNode(id)
+    });
+    elements2.blocksPanel.hidden = false;
+    app2.windows.refreshDock();
+  }
+  let workspaceReport = null;
+  const workspaceTools = {
+    base: "HEAD",
+    busy: "",
+    error: "",
+    compat: null,
+    preflight: null,
+    databases: null,
+    live: null,
+    confirming: null,
+    scriptHref: ""
+  };
+  function renderWorkspaceView() {
+    workspaceTools.scriptHref = `${API_PATH}/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}&format=sql`;
+    renderWorkspace(elements2.workspacePanel, workspaceReport, {
+      onClose: closeWorkspace,
+      tools: workspaceTools,
+      onBase: (value) => {
+        workspaceTools.base = value;
+      },
+      onCompat: () => runWorkspaceTool("comparing revisions", async () => {
+        workspaceTools.compat = await request2(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
+      }),
+      onPreflight: () => runWorkspaceTool("building preflight queries", async () => {
+        workspaceTools.preflight = await request2(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
+      }),
+      onConfirmRun: (name) => {
+        workspaceTools.confirming = name;
+        renderWorkspaceView();
+      },
+      onCancelRun: () => {
+        workspaceTools.confirming = null;
+        renderWorkspaceView();
+      },
+      onRun: (name) => runWorkspaceTool("running read-only checks", async () => {
+        workspaceTools.confirming = null;
+        workspaceTools.preflight = await postWorkspace("/workspace/preflight/run", {
+          database: name,
+          base: workspaceTools.base || "HEAD"
+        });
+        workspaceTools.databases = await request2("/workspace/databases").catch(() => workspaceTools.databases);
+      }),
+      onLive: (name) => runWorkspaceTool("reading the live schema", async () => {
+        workspaceTools.live = await postWorkspace("/workspace/live/schema", { database: name });
+        workspaceTools.databases = await request2("/workspace/databases").catch(() => workspaceTools.databases);
+      })
+    });
+  }
+  async function runWorkspaceTool(label, action) {
+    workspaceTools.busy = label;
+    workspaceTools.error = "";
+    renderWorkspaceView();
+    try {
+      await action();
+    } catch (error) {
+      workspaceTools.error = error.message;
+    } finally {
+      workspaceTools.busy = "";
+      renderWorkspaceView();
+    }
+  }
+  async function postWorkspace(path, body) {
+    const response = await fetch(`${API_PATH}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+    }
+    return payload;
+  }
+  function closeWorkspace() {
+    elements2.workspacePanel.hidden = true;
+    view2.crossRepo(null);
+    app2.windows.refreshDock();
+  }
+  async function showPassport() {
+    elements2.passportPanel.hidden = false;
+    try {
+      const report = await request2(`/analysis/passport${state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : ""}`);
+      renderRepositoryPassport(elements2.passportPanel, report, {
+        onSelect: (id) => app2.selection.selectNode(id),
+        onOpenRoute: () => showRoute(),
+        onReviewChange: () => {
+          closePassport();
+          app2.setScreen("review");
+        },
+        onCheckBranches: () => {
+          closePassport();
+          if (elements2.branchesPanel.hidden) {
+            app2.git.toggleBranches().catch((error) => {
+              elements2.status.textContent = `Error: ${error.message}`;
+            });
+          }
+        },
+        onExportReport: (format) => exportRepositoryReport(format),
+        onClose: closePassport
+      });
+    } catch (error) {
+      renderRepositoryPassport(elements2.passportPanel, null, { onClose: closePassport });
+      const note3 = document.createElement("p");
+      note3.className = "unavailable";
+      note3.textContent = error.message;
+      elements2.passportPanel.append(note3);
+    }
+    app2.windows.refreshDock();
+  }
+  function closePassport() {
+    elements2.passportPanel.hidden = true;
+    app2.windows.refreshDock();
+  }
+  async function exportRepositoryReport(format) {
+    const query = new URLSearchParams({ format });
+    if (state2.repository) {
+      query.set("repository", state2.repository);
+    }
+    const endpoint = `${API_PATH}/analysis/report?${query.toString()}`;
+    if (format === "html") {
+      window.open(endpoint, "_blank", "noopener");
+      elements2.status.textContent = "Opening the printable report in a new tab\u2026";
+      return;
+    }
+    const extension = format === "json" ? "json" : "md";
+    elements2.status.textContent = "Generating the report\u2026";
+    try {
+      const response = await fetch(endpoint);
+      if (!response.ok) {
+        elements2.status.textContent = response.status === 404 ? "Report export failed: this server was started before the report route existed \u2014 restart it." : `Report export failed: ${response.status} ${response.statusText}`;
+        return;
+      }
+      const text = await response.text();
+      const safeName = String(state2.repository ?? "repository").replace(/[\\/]/g, "-");
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `strabo-report-${safeName}.${extension}`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      elements2.status.textContent = `Report exported as ${extension.toUpperCase()}.`;
+    } catch (error) {
+      elements2.status.textContent = `Report export failed: ${error.message}`;
+    }
+  }
+  async function showRoute(preferredFile) {
+    elements2.routePanel.hidden = false;
+    try {
+      const report = await request2(`/analysis/route${state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : ""}`);
+      currentRoute = report;
+      await app2.narration.ensureNarratorStatus();
+      const steps = routeSteps(report);
+      const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
+      routeIndex = preferred >= 0 ? clampRouteIndex(preferred, steps.length) : clampRouteIndex(readRouteProgress(window.localStorage, state2.repository) ?? 0, steps.length);
+      renderRouteView();
+    } catch (error) {
+      currentRoute = null;
+      renderRoutePanel(elements2.routePanel, null, { error: error.message }, {
+        onRetry: () => showRoute(preferredFile)
+      });
+    }
+    app2.windows.refreshDock();
+  }
+  function renderRouteView() {
+    renderRoutePanel(elements2.routePanel, currentRoute, {
+      index: routeIndex,
+      narratorStatus: app2.narratorStatus
+    }, {
+      onStep: (index) => stepRoute(index),
+      onFocus: (file) => focusRouteFile(file),
+      onNarrateTour: () => app2.narration.narrateRouteTour(),
+      onNarrateStep: (step) => app2.narration.narrateRouteStep(step),
+      onOpenNarratorSettings: app2.settings.openNarratorSettings
+    });
+  }
+  function stepRoute(index) {
+    const steps = routeSteps(currentRoute);
+    routeIndex = clampRouteIndex(index, steps.length);
+    writeRouteProgress(window.localStorage, state2.repository, routeIndex);
+    renderRouteView();
+    const step = steps[routeIndex];
+    if (step) {
+      focusRouteFile(step.file);
+    }
+  }
+  function focusRouteFile(file) {
+    const visible = (app2.current?.nodes ?? []).some((node) => node.id === file);
+    if (!visible) {
+      elements2.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
+      return;
+    }
+    app2.selection.selectNode(file);
+  }
+  function currentRouteSummary() {
+    return currentRoute?.summary;
+  }
+  function closeRoute() {
+    elements2.routePanel.hidden = true;
+    app2.windows.refreshDock();
+  }
+  const PASSPORT_SEEN_PREFIX = "strabo.passport.seen.";
+  function passportSeen(repository) {
+    try {
+      return window.localStorage.getItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`) === "1";
+    } catch {
+      return true;
+    }
+  }
+  function markPassportSeen(repository) {
+    try {
+      window.localStorage.setItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`, "1");
+    } catch {
+    }
+  }
+  async function maybeOpenPassport() {
+    const key = state2.repository ?? (await request2("/status").catch(() => null))?.repository?.root ?? null;
+    if (!key || passportSeen(key)) {
+      return;
+    }
+    markPassportSeen(key);
+    await showPassport();
+  }
+  return {
+    closePassport,
+    closeRoute,
+    closeWorkspace,
+    currentRouteSummary,
+    maybeOpenPassport,
+    showBlocks,
+    showPassport,
+    showRoute,
+    showWorkspace
+  };
+}
+
+// ui/strabo-tier-panel.js
+function headerCell(text) {
+  const cell = document.createElement("th");
+  cell.textContent = text;
+  return cell;
+}
+function numberCell(text, title) {
+  const cell = document.createElement("td");
+  cell.textContent = text;
+  if (title) {
+    cell.title = title;
+  }
+  return cell;
+}
+function renderTierPanel(container, report, filter = "all") {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Tier lens";
+  container.append(title);
+  const note3 = document.createElement("p");
+  note3.className = "overlay-note";
+  note3.textContent = tierSummaryLabel(report);
+  container.append(note3);
+  const rows = tierMatrixRows(report);
+  if (rows.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "unavailable";
+    empty.textContent = "No file was classified into a tier.";
+    container.append(empty);
+    return;
+  }
+  const units = report?.matrix?.units ?? [];
+  const table = document.createElement("table");
+  table.className = "tier-matrix";
+  const head = document.createElement("tr");
+  head.append(headerCell("Tier"));
+  for (const unit of units) {
+    head.append(headerCell(unit === "." ? "/" : unit));
+  }
+  head.append(headerCell("Files"), headerCell("Lines"));
+  table.append(head);
+  for (const row of rows) {
+    const tr2 = document.createElement("tr");
+    tr2.dataset.role = "tier-row";
+    tr2.dataset.tier = row.tier;
+    if (filter !== "all" && filter === row.tier) {
+      tr2.classList.add("is-selected");
+    }
+    const name = document.createElement("th");
+    name.textContent = row.label;
+    tr2.append(name);
+    for (const cell of row.cells) {
+      tr2.append(numberCell(cell.files === 0 ? "\xB7" : String(cell.files), `${cell.lines} line(s)`));
+    }
+    tr2.append(numberCell(String(row.files)), numberCell(String(row.lines)));
+    table.append(tr2);
+  }
+  container.append(table);
+  const shares = document.createElement("p");
+  shares.className = "tier-shares";
+  shares.dataset.role = "tier-shares";
+  shares.textContent = tierPerTierRows(report).map((entry) => `${entry.label} ${entry.shareLabel}`).join(" \xB7 ");
+  container.append(shares);
+  const directionNote = document.createElement("p");
+  directionNote.className = "overlay-note";
+  directionNote.dataset.role = "tier-directions";
+  directionNote.textContent = tierDirectionLabel(report);
+  container.append(directionNote);
+  for (const entry of report?.directions ?? []) {
+    const item = document.createElement("div");
+    item.className = "tier-direction";
+    item.dataset.role = "tier-direction";
+    item.textContent = `${entry.kind === "upward" ? "upward" : "skip-layer"} \xB7 ${entry.source} \u2192 ${entry.target} (L${entry.line})`;
+    container.append(item);
+  }
+  const calls = tierCallSites(report);
+  if (calls.length > 0) {
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Calls";
+    container.append(heading2);
+    for (const call of calls.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-call";
+      item.dataset.role = "tier-call";
+      item.textContent = `${call.method ?? "CALL"} ${call.target} \xB7 ${call.file}:${call.line}`;
+      container.append(item);
+    }
+  }
+  const endpoints = tierEndpointSites(report);
+  if (endpoints.length > 0) {
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Endpoints";
+    container.append(heading2);
+    for (const endpoint of endpoints.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-endpoint";
+      item.dataset.role = "tier-endpoint";
+      item.textContent = `${endpoint.method} ${endpoint.path} \xB7 ${endpoint.file}`;
+      container.append(item);
+    }
+  }
+  const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
+  if (joined.length > 0) {
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Trace";
+    container.append(heading2);
+    for (const entry of joined.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-trace";
+      item.dataset.role = "tier-trace";
+      item.textContent = `${entry.call.file}:${entry.call.line} \u2192 ${entry.endpoint.method} ${entry.endpoint.path} (${entry.endpoint.file})`;
+      container.append(item);
+    }
+  }
+  const tables = tierTables(report);
+  if (tables.length > 0) {
+    const heading2 = document.createElement("h4");
+    heading2.textContent = "Tables";
+    container.append(heading2);
+    for (const entry of tables.slice(0, 20)) {
+      const item = document.createElement("div");
+      item.className = "tier-table";
+      item.dataset.role = "tier-table";
+      item.textContent = `${entry.table} \xB7 ${entry.count} reference(s)`;
+      container.append(item);
+      const trace = tierTableTrace(report, entry.table);
+      if (trace.length > 0) {
+        const caption = document.createElement("div");
+        caption.className = "tier-table-trace";
+        caption.dataset.role = "tier-table-trace";
+        caption.textContent = trace.map((row) => `${row.file} (${row.tier}${row.unit === "." ? "" : `, ${row.unit}`})`).join(" \xB7 ");
+        container.append(caption);
+      }
+    }
+  }
+}
+
+// ui/strabo-commit.js
+async function requestCommitMessage(repository) {
+  const response = await fetch(`${API_PATH}/narrator/commit-message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(repository ? { repository } : {})
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not generate a message (${response.status}).`);
+  }
+  return body;
+}
+async function commitWorkingTree(repository, message, { push = true } = {}) {
+  const response = await fetch(`${API_PATH}/analysis/commit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, push, ...repository ? { repository } : {} })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Commit failed (${response.status}).`);
+  }
+  return body;
+}
+var dialog = null;
+var context = null;
+function ensureDialog() {
+  if (dialog) {
+    return dialog;
+  }
+  const element2 = document.createElement("dialog");
+  element2.id = "commit-dialog";
+  element2.className = "dialog prompt-dialog commit-dialog";
+  element2.setAttribute("aria-label", "Review the commit message before committing");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading2 = document.createElement("strong");
+  heading2.className = "commit-dialog-title";
+  heading2.textContent = "Commit changes";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => element2.close());
+  header.append(heading2, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const status = document.createElement("p");
+  status.className = "dialog-note commit-status";
+  status.setAttribute("role", "status");
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text commit-message";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Commit message");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const generate = document.createElement("button");
+  generate.type = "button";
+  generate.className = "commit-generate";
+  generate.textContent = "Generate again";
+  generate.addEventListener("click", () => void generateMessage());
+  const pushLabel = document.createElement("label");
+  pushLabel.className = "commit-push";
+  const pushToggle = document.createElement("input");
+  pushToggle.type = "checkbox";
+  pushToggle.checked = true;
+  pushToggle.className = "commit-push-toggle";
+  pushLabel.append(pushToggle, document.createTextNode("Push after commit"));
+  const left = document.createElement("span");
+  left.className = "commit-footer-left";
+  left.append(generate, pushLabel);
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => element2.close());
+  const confirm2 = document.createElement("button");
+  confirm2.type = "button";
+  confirm2.className = "primary commit-confirm";
+  confirm2.textContent = "Commit & push";
+  confirm2.addEventListener("click", () => void submit());
+  actions.append(cancel, confirm2);
+  footer.append(left, actions);
+  element2.append(header, target, status, text, footer);
+  document.body.append(element2);
+  dialog = element2;
+  return element2;
+}
+async function generateMessage() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm2 = dialog.querySelector(".commit-confirm");
+  generate.disabled = true;
+  confirm2.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  try {
+    const result = await requestCommitMessage(context.repository);
+    if (result?.available && typeof result.message === "string" && result.message.trim() !== "") {
+      text.value = result.message.trim();
+      const model = result.model ?? "the narrator";
+      status.textContent = `Generated by ${model}${result.cached ? " (cached)" : ""}. Review and edit before committing.`;
+    } else {
+      status.textContent = `Narrator unavailable (${result?.detail ?? result?.reason ?? "not configured"}). Write a message, or set the narrator up in Settings.`;
+      if (!text.value.trim()) {
+        text.value = "";
+      }
+    }
+  } catch (error) {
+    status.textContent = error.message ?? "Could not generate a message.";
+    status.classList.add("is-error");
+  } finally {
+    generate.disabled = false;
+    confirm2.disabled = false;
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+  }
+}
+async function submit() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm2 = dialog.querySelector(".commit-confirm");
+  const push = dialog.querySelector(".commit-push-toggle")?.checked !== false;
+  const message = text.value.trim();
+  if (message === "") {
+    status.classList.add("is-error");
+    status.textContent = "A commit message is required.";
+    text.focus();
+    return;
+  }
+  generate.disabled = true;
+  confirm2.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = push ? "Committing and pushing\u2026" : "Committing\u2026";
+  try {
+    const result = await commitWorkingTree(context.repository, message, { push });
+    if (!result?.available) {
+      status.classList.add("is-error");
+      status.textContent = result?.detail ?? "The commit did not run.";
+      return;
+    }
+    showToast(result.message);
+    dialog.close();
+    context.onCommitted?.(result);
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message ?? "The commit did not run.";
+  } finally {
+    generate.disabled = false;
+    confirm2.disabled = false;
+  }
+}
+function openCommitDialog({ repository, onCommitted } = {}) {
+  const element2 = ensureDialog();
+  context = { repository: repository ?? null, onCommitted };
+  element2.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
+  element2.querySelector(".commit-message").value = "";
+  const status = element2.querySelector(".commit-status");
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  if (!element2.open) {
+    element2.showModal();
+  }
+  void generateMessage();
+}
+
+// ui/strabo-lens-controller.js
+function createLensController(app2) {
+  const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
+  let tierReportCache = { generation: -1, report: null };
+  async function applyTierLens() {
+    if (state2.tier === "off" || !app2.current || app2.current.system || app2.current.prefixLength !== void 0) {
+      view2.applyTier(null);
+      view2.applyTierDirections(null);
+      return;
+    }
+    const generation = state2.renderedGeneration;
+    if (tierReportCache.generation !== generation || !tierReportCache.report) {
+      try {
+        const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+        const response = await fetch(`${API_PATH}/analysis/tiers${query}`);
+        tierReportCache = {
+          generation,
+          report: response.ok ? await response.json() : null
+        };
+      } catch {
+        tierReportCache = { generation, report: null };
+      }
+    }
+    if (!app2.current || state2.tier === "off" || state2.renderedGeneration !== generation) {
+      view2.applyTier(null);
+      view2.applyTierDirections(null);
+      return;
+    }
+    view2.applyTier(tierOfFile(tierReportCache.report), state2.tier === "all" ? "all" : state2.tier);
+    view2.applyTierDirections(tierDirectionClasses(tierReportCache.report));
+    renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier);
+  }
+  async function loadChangesWith(id) {
+    const repository = state2.repository ?? null;
+    if (!coChangeReport || coChangeRepository !== repository) {
+      try {
+        const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
+        coChangeReport = await request2(`/analysis/co-change${query}`);
+        coChangeRepository = repository;
+      } catch (error) {
+        return { available: false, detail: error.message };
+      }
+    }
+    if (coChangeReport?.unavailable) {
+      return { available: false, detail: coChangeReport.detail };
+    }
+    return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
+  }
+  function clearOverlay() {
+    state2.overlay = "none";
+    elements2.overlay.value = "none";
+    view2.overlay(null);
+    view2.setHiddenCoupling(null, false);
+    renderOverlayPanel(elements2.overlayPanel, "", null);
+    app2.windows.refreshDock();
+  }
+  async function applyOverlay(generation) {
+    const kind = state2.overlay;
+    if (kind === "none") {
+      view2.overlay(null);
+      renderOverlayPanel(elements2.overlayPanel, "", null);
+      app2.windows.refreshDock();
+      return;
+    }
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const data = await request2(`${OVERLAY_ENDPOINTS[kind]}${query}`);
+    if (generation !== void 0 && generation !== app2.scanGeneration) {
+      return;
+    }
+    const overlay2 = overlayFor(kind, data);
+    view2.overlay(overlay2.classes);
+    view2.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
+    const actions = [];
+    if (kind === "impact" && app2.clientPrefs.commitEnabled) {
+      actions.push({
+        label: "Commit\u2026",
+        title: "Generate a commit message with the narrator, then commit and push",
+        onClick: () => openCommitDialog({
+          repository: state2.repository,
+          onCommitted: () => applyOverlay()
+        })
+      });
+    }
+    renderOverlayPanel(elements2.overlayPanel, OVERLAY_TITLES[kind], overlay2, {
+      kind,
+      onClose: clearOverlay,
+      onSelect: (id) => app2.selection.selectNode(id),
+      ...actions.length > 0 ? { actions } : {}
+    });
+    app2.windows.refreshDock();
+  }
+  let unitHotspotCache = null;
+  async function enrichUnitCards(generation) {
+    const repository = app2.current?.repository?.root ?? null;
+    if (!app2.current?.unitCards?.length || unitHotspotCache?.repository === repository) {
+      return;
+    }
+    try {
+      const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+      const report = await request2(`/analysis/functions${query}`);
+      if (generation !== app2.scanGeneration || app2.current?.repository?.root !== repository) {
+        return;
+      }
+      unitHotspotCache = { repository, report };
+      view2.setUnitCards(withUnitHotspots(app2.current.unitCards, report));
+    } catch {
+    }
+  }
+  function applyEdgeKindLens() {
+    view2.setEdgeKind(state2.mode === "file" ? state2.edgeKind : "imports");
+  }
+  function applyCoChangeLens() {
+    if (state2.mode !== "file" || !state2.coChange) {
+      view2.setCoChange(null, false);
+      return;
+    }
+    if (coChangeReport) {
+      view2.setCoChange(coChangeReport, true);
+    }
+  }
+  function toggleEdgeKind() {
+    if (state2.mode !== "file") {
+      return;
+    }
+    state2.edgeKind = state2.edgeKind === "calls" ? "imports" : "calls";
+    updateEdgeKindButton();
+    applyEdgeKindLens();
+    app2.prefs.schedulePrefsSave();
+  }
+  function updateEdgeKindButton() {
+    if (!elements2.tbCalls) {
+      return;
+    }
+    const showCalls = state2.mode === "file" && state2.edgeKind === "calls";
+    elements2.tbCalls.classList.toggle("active", showCalls);
+    elements2.tbCalls.setAttribute("aria-pressed", String(showCalls));
+  }
+  let coChangeReport = null;
+  let coChangeRepository = null;
+  async function toggleCoChange() {
+    state2.coChange = !state2.coChange;
+    updateCoChangeButton();
+    app2.prefs.schedulePrefsSave();
+    if (!state2.coChange) {
+      view2.setCoChange(null, false);
+      return;
+    }
+    const repository = state2.repository ?? null;
+    if (!coChangeReport || coChangeRepository !== repository) {
+      try {
+        const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
+        coChangeReport = await request2(`/analysis/co-change${query}`);
+        coChangeRepository = repository;
+      } catch (error) {
+        state2.coChange = false;
+        updateCoChangeButton();
+        elements2.status.textContent = `Error: ${error.message}`;
+        return;
+      }
+    }
+    view2.setCoChange(coChangeReport, true);
+  }
+  function updateCoChangeButton() {
+    if (!elements2.tbCoChange) {
+      return;
+    }
+    const shown = state2.mode === "file";
+    elements2.tbCoChange.hidden = !shown;
+    elements2.tbCoChange.classList.toggle("active", shown && state2.coChange);
+    elements2.tbCoChange.setAttribute("aria-pressed", String(shown && state2.coChange));
+  }
+  function updateLabelsButton() {
+    if (!elements2.tbLabels) {
+      return;
+    }
+    const shown = state2.mode === "file";
+    const on2 = shown && Boolean(app2.clientPrefs.allLabels);
+    elements2.tbLabels.hidden = !shown;
+    elements2.tbLabels.classList.toggle("active", on2);
+    elements2.tbLabels.setAttribute("aria-pressed", String(on2));
+  }
+  function applyLocLens2() {
+    const enabled = state2.mode === "file" && state2.locLens;
+    view2.applyLocLens(app2.clientPrefs.locThreshold, enabled);
+    updateLocButton();
+  }
+  function toggleLocLens() {
+    if (state2.mode !== "file") {
+      return;
+    }
+    state2.locLens = !state2.locLens;
+    applyLocLens2();
+    app2.prefs.schedulePrefsSave();
+  }
+  function updateLocButton() {
+    if (!elements2.tbLoc) {
+      return;
+    }
+    const shown = state2.mode === "file";
+    const on2 = shown && state2.locLens;
+    elements2.tbLoc.hidden = !shown;
+    elements2.tbLoc.classList.toggle("active", on2);
+    elements2.tbLoc.setAttribute("aria-pressed", String(on2));
+  }
+  if (elements2.tier) {
+    elements2.tier.addEventListener("change", () => {
+      state2.tier = elements2.tier.value;
+      if (state2.tier !== "off" && state2.mode !== "file") {
+        state2.mode = "file";
+        elements2.detail.value = "file";
+        app2.prefs.writeViewPrefs();
+        app2.scan();
+        return;
+      }
+      app2.prefs.writeViewPrefs();
+      applyTierLens();
+    });
+  }
+  elements2.overlay.addEventListener("change", () => {
+    state2.overlay = elements2.overlay.value;
+    if (state2.overlay === "none") {
+      app2.prefs.writeViewPrefs();
+      applyOverlay();
+      return;
+    }
+    const needsFileMode = FILE_MODE_OVERLAYS.includes(state2.overlay);
+    if (needsFileMode && state2.mode !== "file") {
+      state2.mode = "file";
+      elements2.detail.value = "file";
+      app2.prefs.writeViewPrefs();
+      app2.scan();
+      return;
+    }
+    app2.prefs.writeViewPrefs();
+    applyOverlay();
+  });
+  elements2.tbImpact.addEventListener("click", () => {
+    elements2.overlay.value = "impact";
+    elements2.overlay.dispatchEvent(new Event("change"));
+  });
+  if (elements2.tbCalls) {
+    elements2.tbCalls.addEventListener("click", toggleEdgeKind);
+  }
+  if (elements2.tbCoChange) {
+    elements2.tbCoChange.addEventListener("click", () => {
+      toggleCoChange().catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    });
+  }
+  if (elements2.tbLabels) {
+    elements2.tbLabels.addEventListener("click", () => app2.settings.setClientPref("allLabels", !app2.clientPrefs.allLabels));
+  }
+  if (elements2.tbLoc) {
+    elements2.tbLoc.addEventListener("click", toggleLocLens);
+  }
+  return {
+    applyCoChangeLens,
+    applyEdgeKindLens,
+    applyLocLens: applyLocLens2,
+    applyOverlay,
+    applyTierLens,
+    clearOverlay,
+    enrichUnitCards,
+    loadChangesWith,
+    updateCoChangeButton,
+    updateEdgeKindButton,
+    updateLabelsButton
+  };
+}
+
+// ui/strabo-repositories.js
+function createRepositoryPicker(app2) {
+  const { state: state2, elements: elements2, request: request2 } = app2;
+  let browsedFolder = null;
+  async function loadCatalogue() {
+    const catalogue = await request2("/repositories");
+    renderRepositoryOptions(catalogue.repositories, catalogue.active);
+  }
+  function renderRepositoryOptions(repositories, active) {
+    elements2.repository.replaceChildren(
+      ...repositories.map((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.root;
+        option.textContent = entry.name;
+        return option;
+      })
+    );
+    if (repositories.length === 0) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "No repositories";
+      option.disabled = true;
+      elements2.repository.append(option);
+    }
+    const chosen = active ?? repositories[0]?.root ?? null;
+    if (chosen) {
+      elements2.repository.value = chosen;
+    }
+    state2.repository = elements2.repository.value || null;
+    elements2.forget.disabled = !state2.repository;
+  }
+  async function rememberRepository(root) {
+    const response = await fetch(`${API_PATH}/repositories`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ root })
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error ?? `Could not remember ${root}`);
+    }
+    return response.json();
+  }
+  async function loadFolder(path) {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    const result = await request2(`/browse${query}`);
+    browsedFolder = result;
+    const location = folderLocation(result);
+    elements2.folderPath.textContent = result.path;
+    elements2.folderNote.textContent = location.note;
+    elements2.folderNote.classList.toggle("at-ceiling", location.atCeiling);
+    elements2.folderUp.disabled = location.atCeiling;
+    elements2.folderUp.title = location.upLabel;
+    elements2.folderUp.dataset.parent = result.parent ?? "";
+    renderFolderList(elements2.folderList, result, (next) => {
+      loadFolder(next).catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    });
+  }
+  function openFolderDialog() {
+    browsedFolder = null;
+    elements2.folderDialog.showModal();
+    loadFolder(state2.repository ?? void 0).catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  }
+  async function useRepository(path) {
+    app2.prefs.writeViewPrefs();
+    state2.repository = path;
+    state2.prefix = "";
+    state2.filter = "";
+    elements2.filter.value = "";
+    try {
+      await rememberRepository(path);
+      const catalogue = await request2("/repositories");
+      renderRepositoryOptions(catalogue.repositories, path);
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+      return;
+    }
+    app2.prefs.applyViewPrefs();
+    app2.scan();
+  }
+  async function forgetRepository() {
+    const root = state2.repository;
+    if (!root) {
+      return;
+    }
+    const response = await fetch(`${API_PATH}/repositories?root=${encodeURIComponent(root)}`, {
+      method: "DELETE"
+    });
+    if (!response.ok) {
+      elements2.status.textContent = "Error: could not forget the repository.";
+      return;
+    }
+    const catalogue = await request2("/repositories");
+    renderRepositoryOptions(catalogue.repositories, catalogue.active);
+    if (state2.repository !== root) {
+      app2.scan();
+    }
+  }
+  elements2.repository.addEventListener("change", () => {
+    const root = elements2.repository.value;
+    if (!root) {
+      return;
+    }
+    app2.prefs.writeViewPrefs();
+    state2.repository = root;
+    state2.prefix = "";
+    state2.filter = "";
+    elements2.filter.value = "";
+    elements2.forget.disabled = false;
+    app2.prefs.applyViewPrefs();
+    rememberRepository(root).then(() => app2.scan()).catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.forget.addEventListener("click", () => {
+    forgetRepository().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
+  elements2.browse.addEventListener("click", openFolderDialog);
+  elements2.folderCancel.addEventListener("click", () => elements2.folderDialog.close());
+  elements2.folderUp.addEventListener("click", () => {
+    const parent = elements2.folderUp.dataset.parent;
+    if (parent) {
+      loadFolder(parent).catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }
+  });
+  elements2.folderUse.addEventListener("click", () => {
+    if (browsedFolder) {
+      elements2.folderDialog.close();
+      useRepository(browsedFolder.path).catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }
+  });
+  return {
+    loadCatalogue
+  };
+}
+
+// ui/strabo-system-units.js
+function createSystemUnits(app2) {
+  const { state: state2, elements: elements2 } = app2;
+  function openUnit(id) {
+    if (state2.mode !== "system") {
+      return;
+    }
+    const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+    state2.systemUnit = id;
+    state2.systemUnitLabel = node?.label ?? id;
+    state2.unitFile = null;
+    state2.showOutside = false;
+    state2.expandedUnits = [];
+    app2.scan();
+  }
+  function closeUnit() {
+    state2.systemUnit = null;
+    state2.systemUnitLabel = null;
+    state2.unitFile = null;
+    state2.showOutside = false;
+    state2.expandedUnits = [];
+    app2.scan();
+  }
+  function toggleOutsideLinks() {
+    if (state2.mode !== "system" || !state2.systemUnit) {
+      return;
+    }
+    if (!state2.unitFile) {
+      elements2.hover.textContent = "Select a file inside the unit before showing outside links.";
+      return;
+    }
+    state2.showOutside = !state2.showOutside;
+    state2.expandedUnits = [];
+    updateOutsideButton();
+    app2.scan();
+  }
+  function toggleExpandedUnit(id) {
+    const set = new Set(state2.expandedUnits ?? []);
+    if (set.has(id)) {
+      set.delete(id);
+    } else {
+      set.add(id);
+    }
+    state2.expandedUnits = [...set].sort();
+    app2.scan();
+  }
+  function updateSystemNote(model) {
+    if (!elements2.systemNote) {
+      return;
+    }
+    const single = Boolean(model?.system && model.systemUnit && model.systemSingleUnit === model.systemUnit);
+    elements2.systemNote.hidden = !single;
+    if (single) {
+      elements2.systemNote.textContent = "1 build unit: showing its layers";
+    }
+  }
+  function updateOutsideButton() {
+    if (!elements2.tbOutside) {
+      return;
+    }
+    const shown = state2.mode === "system" && Boolean(state2.systemUnit);
+    elements2.tbOutside.hidden = !shown;
+    elements2.tbOutside.classList.toggle("active", state2.showOutside);
+    elements2.tbOutside.setAttribute("aria-pressed", String(state2.showOutside));
+  }
+  function updateUnitsButton() {
+    if (!elements2.tbUnits) {
+      return;
+    }
+    elements2.tbUnits.hidden = !(state2.mode === "system" && Boolean(state2.systemUnit));
+  }
+  if (elements2.tbOutside) {
+    elements2.tbOutside.addEventListener("click", () => toggleOutsideLinks());
+  }
+  if (elements2.tbUnits) {
+    elements2.tbUnits.addEventListener("click", () => closeUnit());
+  }
+  return {
+    closeUnit,
+    openUnit,
+    toggleExpandedUnit,
+    toggleOutsideLinks,
+    updateOutsideButton,
+    updateSystemNote,
+    updateUnitsButton
+  };
+}
+
+// ui/strabo-source-viewer.js
+function createSourceViewer(app2) {
+  const { state: state2, elements: elements2, request: request2 } = app2;
+  let sourceView = null;
+  function viewSource(file, options = {}) {
+    sourceView = {
+      file,
+      ref: options.ref ?? null,
+      line: options.line ?? null,
+      status: options.status ?? null,
+      diffSpec: options.diffSpec ?? null,
+      hasDiff: Boolean(options.diffSpec),
+      mode: options.diffSpec ? "diff" : "content",
+      loading: true,
+      error: null,
+      content: null,
+      diff: null
+    };
+    app2.floatingWindows.find((controller) => controller.key === "source")?.open();
+    loadSource(sourceView.mode).catch(() => {
+    });
+  }
+  function viewDiff(file, spec, options = {}) {
+    viewSource(file, { ...options, diffSpec: spec });
+  }
+  async function loadSource(mode) {
+    const target = sourceView;
+    if (!target) {
+      return;
+    }
+    target.mode = mode;
+    target.loading = true;
+    target.error = null;
+    sourceRender();
+    const query = new URLSearchParams({ file: target.file });
+    if (state2.repository) {
+      query.set("repository", state2.repository);
+    }
+    try {
+      if (mode === "diff") {
+        for (const [key, value] of Object.entries(target.diffSpec ?? {})) {
+          query.set(key, String(value));
+        }
+        const body = await request2(`/diff?${query.toString()}`);
+        if (sourceView !== target) return;
+        if (body.available === false) target.error = body.detail ?? body.reason;
+        else target.diff = body.diff;
+      } else {
+        if (target.ref) query.set("ref", target.ref);
+        const body = await request2(`/source?${query.toString()}`);
+        if (sourceView !== target) return;
+        target.content = body.content;
+      }
+    } catch (error) {
+      if (sourceView !== target) return;
+      target.error = error.message;
+    } finally {
+      if (sourceView === target) {
+        target.loading = false;
+        sourceRender();
+      }
+    }
+  }
+  function sourceRender() {
+    if (!sourceView) {
+      return;
+    }
+    renderSource(elements2.sourcePanel, sourceView, {
+      onClose: () => app2.floatingWindows.find((controller) => controller.key === "source")?.close(),
+      onShowFile: sourceView.hasDiff && sourceView.mode === "diff" ? () => loadSource("content") : null,
+      onShowDiff: sourceView.hasDiff && sourceView.mode === "content" ? () => loadSource("diff") : null
+    });
+  }
+  function hasSourceTarget() {
+    return Boolean(sourceView);
+  }
+  function closeSource() {
+    elements2.sourcePanel.hidden = true;
+    elements2.sourcePanel.replaceChildren();
+  }
+  function openSourceAt(file, line) {
+    const target = typeof file === "string" ? file.replace(/\\/g, "/") : "";
+    if (!target) {
+      return;
+    }
+    app2.setScreen("graph");
+    const node = (app2.current?.nodes ?? []).find((candidate) => candidate.id === target);
+    if (node) {
+      app2.selection.selectNode(node.id);
+    }
+    const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
+    viewSource(node?.id ?? target, { line: lineNumber });
+    if (lineNumber) {
+      revealSourceLine();
+    }
+  }
+  function revealSourceLine(attempt = 0) {
+    const marked = elements2.sourcePanel?.querySelector(".src-mark");
+    if (marked) {
+      marked.scrollIntoView?.({ block: "center" });
+      return;
+    }
+    if (attempt < 20) {
+      setTimeout(() => revealSourceLine(attempt + 1), 50);
+    }
+  }
+  return {
+    closeSource,
+    hasSourceTarget,
+    openSourceAt,
+    sourceRender,
+    viewDiff,
+    viewSource
+  };
+}
+
+// ../strabo/node_modules/@xterm/xterm/lib/xterm.mjs
 var zs = Object.defineProperty;
 var Rl = Object.getOwnPropertyDescriptor;
 var Ll = (s15, t) => {
@@ -21023,7 +22516,7 @@ var Dl = class extends D {
   }
 };
 
-// node_modules/@xterm/addon-fit/lib/addon-fit.mjs
+// ../strabo/node_modules/@xterm/addon-fit/lib/addon-fit.mjs
 var h2 = 2;
 var _ = 1;
 var o = class {
@@ -21727,15 +23220,15 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
   ensureOverlay();
   const { overlay: root, input, list } = overlayApi;
   let matches2 = filterSessions(sessions, "");
-  let selected2 = 0;
+  let selected = 0;
   const renderList = () => {
     const rows = matches2.map((session, index) => {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "terminal-switcher-item";
       row.setAttribute("role", "option");
-      row.setAttribute("aria-selected", String(index === selected2));
-      if (index === selected2) {
+      row.setAttribute("aria-selected", String(index === selected));
+      if (index === selected) {
         row.classList.add("is-selected");
       }
       const label = document.createElement("span");
@@ -21747,14 +23240,14 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
       row.append(label, meta);
       row.addEventListener("click", () => pick(session.id));
       row.addEventListener("pointermove", () => {
-        selected2 = index;
+        selected = index;
         renderList();
       });
       return row;
     });
     list.replaceChildren(...rows);
-    if (rows[selected2]) {
-      rows[selected2].scrollIntoView({ block: "nearest" });
+    if (rows[selected]) {
+      rows[selected].scrollIntoView({ block: "nearest" });
     }
   };
   const pick = (id) => {
@@ -21765,7 +23258,7 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
   };
   const onInput = () => {
     matches2 = filterSessions(sessions, input.value);
-    selected2 = 0;
+    selected = 0;
     renderList();
   };
   const onKeydown = (event) => {
@@ -21777,19 +23270,19 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      selected2 = matches2.length === 0 ? 0 : (selected2 + 1) % matches2.length;
+      selected = matches2.length === 0 ? 0 : (selected + 1) % matches2.length;
       renderList();
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
-      selected2 = matches2.length === 0 ? 0 : (selected2 - 1 + matches2.length) % matches2.length;
+      selected = matches2.length === 0 ? 0 : (selected - 1 + matches2.length) % matches2.length;
       renderList();
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      pick(matches2[selected2]?.id ?? null);
+      pick(matches2[selected]?.id ?? null);
     }
   };
   const onBackdrop = (event) => {
@@ -21805,7 +23298,7 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
   }
   input.value = "";
   matches2 = filterSessions(sessions, "");
-  selected2 = Math.max(0, matches2.findIndex((session) => session.id === activeId));
+  selected = Math.max(0, matches2.findIndex((session) => session.id === activeId));
   renderList();
   input.addEventListener("input", onInput);
   input.addEventListener("keydown", onKeydown);
@@ -21855,7 +23348,7 @@ function findCitations(text) {
   }
   return out;
 }
-function registerCitationLinks(term, { openSourceAt: openSourceAt2 } = {}) {
+function registerCitationLinks(term, { openSourceAt } = {}) {
   if (!term || typeof term.registerLinkProvider !== "function") {
     return () => {
     };
@@ -21878,7 +23371,7 @@ function registerCitationLinks(term, { openSourceAt: openSourceAt2 } = {}) {
           },
           text: citation.text,
           decorations: { underline: true, pointerCursor: true },
-          activate: () => openSourceAt2?.(citation.path, citation.line)
+          activate: () => openSourceAt?.(citation.path, citation.line)
         }))
       });
     }
@@ -22854,14 +24347,2161 @@ function ensureElement(container, id, className) {
   return element2;
 }
 
+// ui/strabo-terminal-bridge.js
+function createTerminalBridge(app2) {
+  const { state: state2, view: view2, elements: elements2 } = app2;
+  function isMappedNode(id) {
+    return Boolean(id) && (app2.current?.nodes ?? []).some((candidate) => candidate.id === id);
+  }
+  function handleTerminalControl(directive) {
+    const verb = directive?.verb;
+    const args = Array.isArray(directive?.args) ? directive.args : [];
+    switch (verb) {
+      case "focus": {
+        const id = args[0];
+        if (isMappedNode(id)) {
+          app2.setScreen("graph");
+          app2.selection.selectNode(id);
+        }
+        return;
+      }
+      case "open": {
+        const file = args[0];
+        const line = Number.parseInt(args[1] ?? "", 10);
+        if (file) {
+          app2.source.openSourceAt(file, Number.isInteger(line) ? line : null);
+        }
+        return;
+      }
+      case "highlight": {
+        const ids = args.filter(isMappedNode);
+        if (ids.length > 0) {
+          app2.setScreen("graph");
+          view2.highlight(ids);
+        }
+        return;
+      }
+      case "review": {
+        app2.setScreen("graph");
+        const ref = args[0];
+        const pending = ref ? app2.git.showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref }) : app2.git.showReview("");
+        Promise.resolve(pending).catch((error) => {
+          showToast(`Review failed (${error.message}).`);
+        });
+        return;
+      }
+      case "note": {
+        const message = args.join(" ").trim();
+        if (message) {
+          showToast(message);
+        }
+        return;
+      }
+      case "screen": {
+        const target = args[0];
+        if (target === "graph" || target === "terminal") {
+          app2.setScreen(target);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+  const terminalBadge = document.createElement("span");
+  terminalBadge.id = "terminal-badge";
+  terminalBadge.className = "diag-badge";
+  terminalBadge.hidden = true;
+  elements2.screenTabTerminal.append(terminalBadge);
+  function updateTerminalBadge(sessions) {
+    const list = Array.isArray(sessions) ? sessions : [];
+    const running = list.filter((session) => session?.status === "running").length;
+    const failed = list.filter(
+      (session) => session?.status === "exited" && (session.exitCode ?? 0) !== 0
+    ).length;
+    const count = running + failed;
+    terminalBadge.hidden = count === 0;
+    terminalBadge.textContent = String(count);
+    terminalBadge.classList.toggle("has-errors", failed > 0);
+    terminalBadge.title = failed > 0 ? `${running} running, ${failed} failed` : `${running} running`;
+  }
+  function resolveRepository() {
+    const repository = app2.current?.repository;
+    const root = repository?.root ?? state2.repository ?? null;
+    const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : null);
+    return { name, root };
+  }
+  function terminalToast(message, options = {}) {
+    return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6e3 });
+  }
+  app2.terminalScreen = initTerminalScreen(elements2.terminalContainer, {
+    openSourceAt: (file, line) => app2.source.openSourceAt(file, line),
+    toast: terminalToast,
+    onSessionsChanged: updateTerminalBadge,
+    resolveRepository,
+    closeTerminal: () => app2.setScreen("graph"),
+    onControl: handleTerminalControl
+  });
+  setDelegateSessionOpener((sessionId) => {
+    app2.setScreen("terminal");
+    return app2.terminalScreen?.openSession?.(sessionId);
+  });
+}
+
+// ui/strabo-float-toolbar.js
+var STORAGE_KEY = "strabo.float.toolbar.v1";
+var MIN_WIDTH = 200;
+var GAP = 8;
+var DOCK_REACH = 28;
+function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
+  const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
+  const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
+  return {
+    left: Math.min(Math.max(left, 0), maxLeft),
+    top: Math.min(Math.max(top, 0), maxTop)
+  };
+}
+function clampMenuLeft(anchorRight, menuWidth, viewportWidth, margin = 4) {
+  const wanted = anchorRight - menuWidth;
+  const maxLeft = Math.max(margin, viewportWidth - margin - menuWidth);
+  return Math.min(Math.max(wanted, margin), maxLeft);
+}
+function readStore(key) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(key) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function writeStore(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+  }
+}
+function initFloatingToolbar(element2, options = {}) {
+  if (!element2) return null;
+  const storageKey = options.storageKey ?? STORAGE_KEY;
+  const minWidth = options.minWidth ?? MIN_WIDTH;
+  const dock = options.dock ?? null;
+  const dockReach = options.dockReach ?? DOCK_REACH;
+  const floatParent = element2.parentElement ?? document.body;
+  const saved = readStore(storageKey);
+  const grip = document.createElement("span");
+  grip.className = "tb-grip";
+  grip.setAttribute("aria-hidden", "true");
+  grip.title = "Drag to move the toolbar";
+  grip.textContent = "\u283F";
+  element2.prepend(grip);
+  const resize = document.createElement("span");
+  resize.className = "tb-resize";
+  resize.setAttribute("aria-hidden", "true");
+  resize.title = "Drag to resize";
+  element2.append(resize);
+  let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
+  const isDocked = () => element2.classList.contains("is-docked");
+  const applyWidth = () => {
+    if (isDocked()) {
+      element2.style.width = "";
+      return;
+    }
+    if (width) element2.style.width = `${width}px`;
+  };
+  const containerSize = () => {
+    const rail = floatParent.querySelector?.(":scope > .float-dock");
+    const railWidth = rail?.offsetWidth ?? 0;
+    const width2 = floatParent.clientWidth || floatParent.getBoundingClientRect().width;
+    return {
+      boundWidth: Math.max(0, width2 - railWidth),
+      boundHeight: floatParent.clientHeight || floatParent.getBoundingClientRect().height
+    };
+  };
+  const place = (left, top) => {
+    const rect = element2.getBoundingClientRect();
+    const { boundWidth, boundHeight } = containerSize();
+    const clamped = clampToolbarPosition(left, top, {
+      width: element2.offsetWidth || rect.width,
+      height: element2.offsetHeight || rect.height,
+      boundWidth,
+      boundHeight
+    });
+    element2.style.left = `${clamped.left}px`;
+    element2.style.top = `${clamped.top}px`;
+    element2.style.bottom = "auto";
+    element2.style.right = "auto";
+    element2.style.transform = "none";
+    updateMenuDirection();
+  };
+  const updateMenuDirection = () => {
+    if (isDocked()) {
+      element2.classList.add("opens-up");
+      return;
+    }
+    const rect = element2.getBoundingClientRect();
+    const parentRect = floatParent.getBoundingClientRect();
+    const center = rect.top - parentRect.top + rect.height / 2;
+    const { boundHeight } = containerSize();
+    element2.classList.toggle("opens-up", center > boundHeight / 2);
+  };
+  function persist() {
+    const left = parseFloat(element2.style.left);
+    const top = parseFloat(element2.style.top);
+    writeStore(storageKey, {
+      docked: isDocked(),
+      left: Number.isFinite(left) ? left : null,
+      top: Number.isFinite(top) ? top : null,
+      width: width ?? null
+    });
+  }
+  function dockElement() {
+    if (!dock || isDocked()) return;
+    element2.classList.add("is-docked");
+    element2.style.left = "";
+    element2.style.top = "";
+    element2.style.bottom = "";
+    element2.style.right = "";
+    const meta = dock.querySelector(".bottom-meta");
+    if (meta) dock.insertBefore(element2, meta);
+    else dock.append(element2);
+    applyWidth();
+    updateMenuDirection();
+    persist();
+  }
+  function undockElement() {
+    if (!isDocked()) return;
+    element2.classList.remove("is-docked");
+    floatParent.append(element2);
+    applyWidth();
+  }
+  if (saved.docked && dock) {
+    dockElement();
+  } else if (Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+    place(saved.left, saved.top);
+  } else {
+    updateMenuDirection();
+  }
+  applyWidth();
+  grip.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const rect = element2.getBoundingClientRect();
+    const grabOffsetX = event.clientX - rect.left;
+    const grabOffsetY = event.clientY - rect.top;
+    let overDock = false;
+    grip.setPointerCapture(event.pointerId);
+    const dockHit = (clientX, clientY) => {
+      if (!dock) return false;
+      const bounds = dock.getBoundingClientRect();
+      return clientY >= bounds.top - dockReach && clientX >= bounds.left && clientX <= bounds.right;
+    };
+    const move = (moveEvent) => {
+      if (isDocked()) {
+        if (moveEvent.clientY >= dock.getBoundingClientRect().top) return;
+        undockElement();
+        try {
+          grip.setPointerCapture(moveEvent.pointerId);
+        } catch {
+        }
+      }
+      const parentRect = floatParent.getBoundingClientRect();
+      place(
+        moveEvent.clientX - parentRect.left - grabOffsetX,
+        moveEvent.clientY - parentRect.top - grabOffsetY
+      );
+      overDock = dockHit(moveEvent.clientX, moveEvent.clientY);
+      dock?.classList.toggle("is-dock-target", overDock);
+    };
+    const end = (endEvent) => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", end);
+      grip.removeEventListener("pointercancel", end);
+      dock?.classList.remove("is-dock-target");
+      const dropped = endEvent?.type === "pointerup" && Number.isFinite(endEvent.clientX) ? dockHit(endEvent.clientX, endEvent.clientY) : overDock;
+      if (dropped) dockElement();
+      else persist();
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", end);
+    grip.addEventListener("pointercancel", end);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  resize.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || isDocked()) return;
+    const startX = event.clientX;
+    const startWidth = element2.getBoundingClientRect().width;
+    const { boundWidth } = containerSize();
+    const left = parseFloat(element2.style.left);
+    const maxWidth = Math.max(minWidth, boundWidth - (Number.isFinite(left) ? left : 0) - GAP);
+    resize.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      width = Math.min(Math.max(startWidth + (moveEvent.clientX - startX), minWidth), maxWidth);
+      applyWidth();
+    };
+    const end = () => {
+      resize.removeEventListener("pointermove", move);
+      resize.removeEventListener("pointerup", end);
+      resize.removeEventListener("pointercancel", end);
+      persist();
+    };
+    resize.addEventListener("pointermove", move);
+    resize.addEventListener("pointerup", end);
+    resize.addEventListener("pointercancel", end);
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  window.addEventListener("resize", () => {
+    if (isDocked()) return;
+    if (Number.isFinite(parseFloat(element2.style.left))) {
+      place(parseFloat(element2.style.left), parseFloat(element2.style.top));
+    } else {
+      updateMenuDirection();
+    }
+  });
+  return { element: element2, grip, resize, dock, isDocked, undock: undockElement };
+}
+
+// ui/strabo-chrome-menus.js
+function createChromeMenus(app2) {
+  const { elements: elements2 } = app2;
+  function overflowItems() {
+    return [...elements2.tbOverflowMenu?.querySelectorAll('[role="menuitem"]') ?? []];
+  }
+  function closeOverflowMenu({ restoreFocus = false } = {}) {
+    if (!elements2.tbOverflowMenu || elements2.tbOverflowMenu.hidden) {
+      return;
+    }
+    elements2.tbOverflowMenu.hidden = true;
+    elements2.tbOverflow.setAttribute("aria-expanded", "false");
+    if (restoreFocus) {
+      elements2.tbOverflow.focus();
+    }
+  }
+  function openOverflowMenu() {
+    elements2.tbOverflowMenu.hidden = false;
+    elements2.tbOverflow.setAttribute("aria-expanded", "true");
+    positionOverflowMenu();
+    const items = overflowItems();
+    items.forEach((item, index) => {
+      item.tabIndex = index === 0 ? 0 : -1;
+    });
+    items[0]?.focus();
+  }
+  function positionOverflowMenu() {
+    const menu = elements2.tbOverflowMenu;
+    const anchor = menu.offsetParent;
+    if (!anchor) {
+      return;
+    }
+    menu.style.left = "";
+    menu.style.right = "";
+    const anchorRect = anchor.getBoundingClientRect();
+    const left = clampMenuLeft(anchorRect.right, menu.offsetWidth, window.innerWidth);
+    menu.style.left = `${left - anchorRect.left}px`;
+    menu.style.right = "auto";
+  }
+  if (elements2.tbOverflow) {
+    elements2.tbOverflow.addEventListener("click", (event) => {
+      event.stopPropagation();
+      for (const closeHeaderPopover of headerPopoverClosers) closeHeaderPopover();
+      if (elements2.tbOverflowMenu.hidden) {
+        openOverflowMenu();
+      } else {
+        closeOverflowMenu();
+      }
+    });
+    elements2.tbOverflowMenu.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        event.preventDefault();
+        closeOverflowMenu({ restoreFocus: true });
+        return;
+      }
+      const items = overflowItems();
+      const next = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
+      if (next === null) {
+        return;
+      }
+      event.preventDefault();
+      items.forEach((item, index) => {
+        item.tabIndex = index === next ? 0 : -1;
+      });
+      items[next].focus();
+    });
+    for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk"]) {
+      document.getElementById(id)?.addEventListener("click", () => closeOverflowMenu({ restoreFocus: true }));
+    }
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest?.(".tb-overflow-wrap")) closeOverflowMenu();
+    });
+  }
+  const headerPopoverClosers = [];
+  function bindHeaderPopover(toggle, popover) {
+    if (!toggle || !popover) {
+      return;
+    }
+    const close = ({ restoreFocus = false } = {}) => {
+      if (popover.hidden) return;
+      popover.hidden = true;
+      toggle.setAttribute("aria-expanded", "false");
+      if (restoreFocus) toggle.focus();
+    };
+    headerPopoverClosers.push(close);
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeOverflowMenu();
+      if (!popover.hidden) {
+        close();
+        return;
+      }
+      for (const closeOther of headerPopoverClosers) closeOther();
+      popover.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      popover.querySelector("button:not(:disabled), select")?.focus();
+    });
+    popover.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        event.preventDefault();
+        close({ restoreFocus: true });
+      }
+    });
+    popover.addEventListener("click", (event) => {
+      if (event.target.closest?.('[role="menuitem"]')) close();
+    });
+    document.addEventListener("click", (event) => {
+      if (!toggle.parentElement?.contains(event.target)) close();
+    });
+  }
+  bindHeaderPopover(document.getElementById("repo-menu-toggle"), document.getElementById("repo-menu"));
+  bindHeaderPopover(document.getElementById("view-menu-toggle"), document.getElementById("view-menu"));
+  bindHeaderPopover(document.getElementById("scope-menu-toggle"), document.getElementById("scope-menu"));
+  const scopeSummary = document.getElementById("scope-summary");
+  function updateScopeSummary() {
+    if (!scopeSummary || !elements2.strip) return;
+    const active = elements2.strip.querySelector('.strip-chip[aria-pressed="true"]');
+    scopeSummary.textContent = active ? active.textContent.trim() : "custom";
+  }
+  elements2.strip?.addEventListener("click", (event) => {
+    if (!event.target.closest?.(".strip-chip")) return;
+    const menu = document.getElementById("scope-menu");
+    if (menu && !menu.hidden) {
+      menu.hidden = true;
+      document.getElementById("scope-menu-toggle")?.setAttribute("aria-expanded", "false");
+    }
+  });
+  if (elements2.strip) {
+    new MutationObserver(updateScopeSummary).observe(elements2.strip, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["aria-pressed"]
+    });
+    updateScopeSummary();
+  }
+  const viewSummary = document.getElementById("view-summary");
+  function updateViewSummary() {
+    if (!viewSummary) return;
+    const text = (select) => select.selectedOptions[0]?.textContent.trim() ?? "";
+    const parts = [text(elements2.detail)];
+    if (elements2.tier.value !== "off") parts.push(text(elements2.tier));
+    if (elements2.overlay.value !== "none") parts.push(text(elements2.overlay));
+    viewSummary.textContent = parts.filter(Boolean).join(" \xB7 ");
+  }
+  const selectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+  for (const select of [elements2.detail, elements2.tier, elements2.overlay]) {
+    Object.defineProperty(select, "value", {
+      configurable: true,
+      get() {
+        return selectValue.get.call(this);
+      },
+      set(next) {
+        selectValue.set.call(this, next);
+        updateViewSummary();
+      }
+    });
+    select.addEventListener("change", updateViewSummary);
+  }
+  updateViewSummary();
+  return {
+    closeOverflowMenu
+  };
+}
+
+// ui/strabo-delegation.js
+function createDelegation(app2) {
+  const { state: state2, view: view2, elements: elements2 } = app2;
+  function nodeDelegateTarget(id) {
+    const passport = app2.current ? passportFor(app2.current, id) : null;
+    const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+    const evidence = [];
+    if (passport) {
+      for (const metric of passport.metrics) {
+        evidence.push(`${metric.label}: ${metric.value}`);
+      }
+      for (const entry of passport.imports.slice(0, 8)) {
+        evidence.push(`imports ${entry.id} (L${entry.line ?? "?"} ${entry.specifier ?? ""})`.replace(" )", ")"));
+      }
+      for (const entry of passport.usedBy.slice(0, 8)) {
+        evidence.push(`imported by ${entry.id} (L${entry.line ?? "?"} ${entry.specifier ?? ""})`.replace(" )", ")"));
+      }
+    } else {
+      evidence.push("Node is not in the current graph (it may be filtered out).");
+    }
+    return { kind: "node", id, label: node?.label ?? id, evidence };
+  }
+  function groupDelegateTarget() {
+    const items = app2.groupSelection.map((id) => nodeDelegateTarget(id));
+    return { kind: "group", label: `${items.length} file(s)`, items };
+  }
+  function updateGroupUI(ids) {
+    app2.groupSelection = ids ?? [];
+    const count = app2.groupSelection.length;
+    const active = count >= 2;
+    elements2.groupCount.hidden = !active;
+    elements2.groupCount.textContent = active ? `${count} selected` : "";
+    elements2.tbDelegateGroup.hidden = !active;
+  }
+  view2.onGroupChange(updateGroupUI);
+  elements2.tbDelegateGroup.addEventListener("click", () => {
+    const rect = elements2.tbDelegateGroup.getBoundingClientRect();
+    openDelegateMenu(groupDelegateTarget(), rect.left, rect.bottom + 4);
+  });
+  function edgeDelegateTarget(edgeId) {
+    const evidence = app2.current ? edgeEvidenceFor(app2.current, edgeId) : null;
+    if (!evidence) {
+      return null;
+    }
+    return {
+      kind: "edge",
+      id: edgeId,
+      label: `${evidence.source} \u2192 ${evidence.target}`,
+      evidence: [
+        `relationship: ${evidence.kind}`,
+        `specifier: ${evidence.specifier ?? "not recorded"}`,
+        `line: ${evidence.line ?? "not recorded"}`,
+        `resolution: ${evidence.resolutionLabel}`
+      ]
+    };
+  }
+  function diagnosticDelegateTarget(text) {
+    const match = /^(.+):(\d+)\s?(.*)$/.exec(String(text ?? "").trim());
+    return {
+      kind: "diagnostic",
+      id: match ? `${match[1]}:${match[2]}` : String(text ?? "diagnostic"),
+      label: String(text ?? "diagnostic").slice(0, 120),
+      detail: String(text ?? ""),
+      evidence: match ? [`file: ${match[1]}`, `line: ${match[2]}`, `message: ${match[3] || "\u2014"}`] : [String(text ?? "")]
+    };
+  }
+  function reviewDelegateTarget(result) {
+    const label = result.kind === "branch" && result.branch ? `branch ${result.branch.branch} against ${result.branch.base}` : result.kind === "commit" && result.commit ? `commit ${result.commit.shortHash}` : "pending working tree";
+    const evidence = [];
+    if (result.branch) {
+      const branch = result.branch;
+      evidence.push(
+        `branch: ${branch.branch} is ${branch.ahead} commit(s) ahead of ${branch.base} and ${branch.behind} behind; merge base ${branch.mergeBase}`
+      );
+      if (branch.conflicts.available) {
+        evidence.push(
+          branch.conflicts.clean ? `trial merge into ${branch.base}: clean` : `trial merge into ${branch.base}: conflicts in ${branch.conflicts.paths.join(", ")}`
+        );
+      }
+      for (const entry of branch.movedUnderneath.slice(0, 30)) {
+        evidence.push(`changed on ${branch.base} since the merge base, imported by ${entry.via}: ${entry.id}`);
+      }
+    } else if (result.commit) {
+      evidence.push(`commit: ${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.subject}`);
+    }
+    for (const file of result.files ?? []) {
+      const counts = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} -${file.deletions}`;
+      evidence.push(`${file.status} (${file.group}): ${file.path} \u2014 ${counts}${file.inGraph ? "" : " (outside scanned graph)"}`);
+    }
+    const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
+    for (const entry of affected.slice(0, 30)) {
+      evidence.push(`potentially affected: ${entry.id} (distance ${entry.distance})`);
+    }
+    if (affected.length > 30) {
+      evidence.push(`\u2026and ${affected.length - 30} more affected file(s) (truncated).`);
+    }
+    return { kind: "review", label, evidence };
+  }
+  function commitDelegateTarget(button3) {
+    const meta = button3.parentElement?.querySelector(".evidence")?.textContent ?? "";
+    return {
+      kind: "commit",
+      id: button3.dataset.hash ?? button3.textContent,
+      label: button3.textContent.trim().slice(0, 120),
+      detail: meta ? `${button3.textContent.trim()} (${meta.trim()})` : button3.textContent.trim(),
+      evidence: meta ? [`commit: ${button3.textContent.trim()}`, `meta: ${meta.trim()}`] : []
+    };
+  }
+  function memberDelegateTarget(card) {
+    const name = card.dataset.member ?? "member";
+    const file = app2.memberData?.file ?? app2.selected;
+    const facts = [...card.querySelectorAll(".card-signature, .card-tag, .card-metrics")].map((part) => part.textContent.trim()).filter(Boolean);
+    return {
+      kind: "member",
+      id: file ? `${file}#${name}` : name,
+      label: `${name} (${file ?? "unknown file"})`,
+      evidence: [`member: ${name}`, `file: ${file ?? "unknown"}`, ...facts]
+    };
+  }
+  function overlayDelegateTarget(item) {
+    const heading2 = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
+    return {
+      kind: "view",
+      label: heading2.trim().slice(0, 120),
+      detail: item.dataset.delegateOverlayItem ?? item.textContent.trim(),
+      evidence: [`overlay: ${heading2.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
+    };
+  }
+  function viewDelegateTarget(detail) {
+    return {
+      kind: "view",
+      label: detail ?? graphSummary(app2.current ?? { nodes: [], edges: [] }),
+      detail: detail ?? void 0,
+      evidence: [
+        app2.current ? graphSummary(app2.current) : "No scan loaded.",
+        state2.filter ? `active filter: ${state2.filter}` : "no active filter",
+        state2.overlay !== "none" ? `active review: ${state2.overlay}` : "no active review overlay",
+        state2.mode === "block" ? `directory view${state2.prefix ? ` at ${state2.prefix}` : ""}` : state2.mode === "system" ? "system view" : "file view"
+      ]
+    };
+  }
+  function fallbackDelegateTarget() {
+    return app2.selected ? nodeDelegateTarget(app2.selected) : viewDelegateTarget();
+  }
+  function resolveDomDelegateTarget(node) {
+    if (!node?.closest) {
+      return null;
+    }
+    const byNode = node.closest("[data-delegate-node]");
+    if (byNode?.dataset.delegateNode) {
+      return nodeDelegateTarget(byNode.dataset.delegateNode);
+    }
+    const diagnostic = node.closest("[data-delegate-diagnostic]");
+    if (diagnostic?.dataset.delegateDiagnostic) {
+      return diagnosticDelegateTarget(diagnostic.dataset.delegateDiagnostic);
+    }
+    const commit = node.closest("#timeline-panel .commit");
+    if (commit) {
+      return commitDelegateTarget(commit);
+    }
+    const reviewPanel = node.closest("#review-panel");
+    if (reviewPanel && app2.currentReview?.available) {
+      return reviewDelegateTarget(app2.currentReview);
+    }
+    const overlayItem = node.closest("#overlay-panel [data-delegate-overlay-item]");
+    if (overlayItem) {
+      return overlayDelegateTarget(overlayItem);
+    }
+    const edgePanel = node.closest("#edge-panel");
+    if (edgePanel && app2.selectedEdgeId) {
+      return edgeDelegateTarget(app2.selectedEdgeId);
+    }
+    const card = node.closest("#member-view .member-card");
+    if (card) {
+      return memberDelegateTarget(card);
+    }
+    if (node.closest("#inspector") && app2.selected) {
+      return nodeDelegateTarget(app2.selected);
+    }
+    const chip = node.closest(".strip-chip");
+    if (chip) {
+      return viewDelegateTarget(`filter: ${chip.dataset.filter || "all"}`);
+    }
+    const crumb = node.closest("#breadcrumb .crumb");
+    if (crumb) {
+      return viewDelegateTarget(`directory: ${crumb.textContent.trim()}`);
+    }
+    return null;
+  }
+  async function delegateToAgent(agent, target) {
+    const repository = app2.current?.repository ?? null;
+    const prompt = buildAgentPrompt({ agent, repository, target });
+    const title = (target.label ?? target.id ?? "repository view").slice(0, 80);
+    const reviewed = await showPromptReview({ agent, title, prompt });
+    if (reviewed === null) {
+      return;
+    }
+    try {
+      const result = await launchAgent(agent, {
+        repository: state2.repository ?? repository?.root,
+        target: { kind: target.kind, id: target.id, label: target.label },
+        prompt: reviewed,
+        title
+      });
+      showToast(
+        result?.sessionId ? `Opened ${agent} in the Terminal on ${title} \u2014 edit the prefilled task, then send.` : `Prepared ${agent} on ${title}.`
+      );
+    } catch (error) {
+      showToast(`Could not open an agent session (${error.message}).`, {
+        label: "Copy prompt",
+        onClick: async () => {
+          await copyText(reviewed);
+          showToast("Prompt copied \u2014 paste it into your agent.");
+        }
+      });
+    }
+  }
+  function resetMapLayout() {
+    view2.resetIslandOffsets();
+    writeIslandLayout(state2.repository, {});
+    app2.applyFilterToView();
+    showToast("Map layout reset to the computed arrangement.");
+  }
+  function layoutMenuItems(target) {
+    if (target?.kind !== "view" || Object.keys(view2.islandOffsets()).length === 0) {
+      return [];
+    }
+    return [
+      { label: "\u21BA Reset map layout", hint: "computed positions", action: resetMapLayout },
+      { separator: true }
+    ];
+  }
+  function openDelegateMenu(target, x, y) {
+    if (!target) {
+      return;
+    }
+    const repository = app2.current?.repository ?? null;
+    const menuTitle = (target.label ?? target.id ?? "repository view").slice(0, 80);
+    const promptFor = (agent) => buildAgentPrompt({ agent, repository, target });
+    showContextMenu({
+      x,
+      y,
+      title: menuTitle,
+      items: [
+        ...app2.narration.narrateMenuItems(target),
+        ...layoutMenuItems(target),
+        { label: "\u25B6 Delegate to OpenCode", hint: "opens agent session", action: () => delegateToAgent("opencode", target) },
+        { label: "\u25B6 Delegate to Claude", hint: "opens agent session", action: () => delegateToAgent("claude", target) },
+        { separator: true },
+        {
+          label: "\u29C9 Copy prompt",
+          action: async () => {
+            await copyText(promptFor("opencode"));
+            showToast("Prompt copied \u2014 paste it into your agent.");
+          }
+        },
+        ...target.id ? [{
+          label: "\u29C9 Copy path",
+          action: async () => {
+            await copyText(target.id);
+            showToast("Path copied.");
+          }
+        }] : [],
+        ...Array.isArray(target.items) && target.items.length > 0 ? [{
+          label: "\u29C9 Copy paths",
+          action: async () => {
+            await copyText(target.items.map((entry) => entry.id ?? entry.label).join("\n"));
+            showToast(`${target.items.length} path(s) copied.`);
+          }
+        }] : []
+      ]
+    });
+  }
+  view2.onContext((target, originalEvent) => {
+    app2.selection.hideTooltip();
+    const x = originalEvent?.clientX ?? window.innerWidth / 2;
+    const y = originalEvent?.clientY ?? window.innerHeight / 2;
+    if (target.kind === "node" && target.id && app2.groupSelection.length >= 2 && app2.groupSelection.includes(target.id)) {
+      openDelegateMenu(groupDelegateTarget(), x, y);
+    } else if (target.kind === "node" && target.id) {
+      openDelegateMenu(nodeDelegateTarget(target.id), x, y);
+    } else if (target.kind === "edge" && target.id) {
+      openDelegateMenu(edgeDelegateTarget(target.id) ?? viewDelegateTarget("edge"), x, y);
+    } else {
+      openDelegateMenu(fallbackDelegateTarget(), x, y);
+    }
+  });
+  document.addEventListener("contextmenu", (event) => {
+    if (event.target.closest?.('input, select, textarea, [contenteditable="true"], dialog')) {
+      return;
+    }
+    if (event.target.closest?.(".terminal-screen")) {
+      return;
+    }
+    if (event.target.closest?.("#graph")) {
+      event.preventDefault();
+      return;
+    }
+    if (!event.target.closest?.(".workspace, .statusbar, #member-view, #diagnostics, #breadcrumb, .toolbar")) {
+      return;
+    }
+    const selection = window.getSelection?.()?.toString().trim() ?? "";
+    event.preventDefault();
+    closeContextMenu();
+    app2.selection.hideTooltip();
+    const resolved = resolveDomDelegateTarget(event.target);
+    openDelegateMenu(withSelection(resolved, selection), event.clientX, event.clientY);
+  });
+  function withSelection(resolved, selection) {
+    if (!selection) {
+      return resolved ?? fallbackDelegateTarget();
+    }
+    if (resolved) {
+      return { ...resolved, selection };
+    }
+    const context2 = fallbackDelegateTarget();
+    const excerpt = selection.replace(/\s+/g, " ");
+    return {
+      kind: "selection",
+      label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
+      evidence: context2.evidence,
+      selection
+    };
+  }
+  return {
+    resetMapLayout
+  };
+}
+
+// ui/strabo-selection-controller.js
+function createSelectionController(app2) {
+  const { store: store2, state: state2, view: view2, elements: elements2 } = app2;
+  let passportHistory = [];
+  let passportGoingBack = false;
+  function selectNode(id) {
+    if (!app2.current) {
+      return;
+    }
+    app2.dismissHint();
+    if (state2.pathMode) {
+      if (!state2.pathFrom) {
+        state2.pathFrom = id;
+        elements2.hover.textContent = `Path start: ${id}. Select the end node.`;
+        view2.highlight(neighbourhood(app2.current, id));
+        return;
+      }
+      const from = state2.pathFrom;
+      state2.pathFrom = null;
+      state2.pathMode = false;
+      elements2.tbPath.classList.remove("active");
+      const path = findPath(app2.current, from, id);
+      elements2.hover.textContent = path ? `${path.length - 1} step(s): ${path.join(" -> ")}` : `No directed path from ${from} to ${id}.`;
+      view2.highlight(path ?? [from, id]);
+      return;
+    }
+    const previousSelection = app2.selected;
+    app2.selected = id;
+    store2.set("ui", { node: id });
+    if (!passportGoingBack && previousSelection && previousSelection !== id) {
+      passportHistory.push(previousSelection);
+    }
+    view2.clearEdge();
+    app2.selectedEdgeId = null;
+    renderEdgeEvidence(elements2.edgePanel, null);
+    updateFocusButton();
+    view2.highlight(neighbourhood(app2.current, id));
+    const unitNode = (app2.current?.nodes ?? []).find((candidate) => candidate.id === id);
+    if (app2.current?.systemUnit && unitNode?.systemUnit && !id.endsWith("#support")) {
+      state2.unitFile = id;
+      view2.focusFile(id);
+    }
+    renderInspector(elements2.inspector, app2.current, id, {
+      onSelect: (target) => selectNode(target),
+      onTrace: (from, to) => tracePath(from, to),
+      onOpenWorkspace: (target) => openFile(target),
+      onBack: passportBack,
+      backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
+      ...isFileNode(id) ? { onViewSource: (target) => app2.source.viewSource(target) } : {},
+      // The reading route is repository-wide; a Module Passport opens it at its own file.
+      ...isFileNode(id) ? { onOpenRoute: (target) => app2.panels.showRoute(target) } : {},
+      onOpenMemberMap: (target) => {
+        app2.memberMap.openMemberMap(target).then(() => {
+          app2.floatingWindows.find((controller) => controller.key === "inspector")?.close();
+        }).catch((error) => {
+          elements2.status.textContent = `Error: ${error.message}`;
+        });
+      },
+      // A System-view unit may ask the opt-in narrator to name its group.
+      ...app2.current?.system && !app2.current?.systemUnit ? { narratorStatus: app2.narratorStatus, onNarrate: () => app2.narration.narrateGroup(id), onOpenNarratorSettings: app2.settings.openNarratorSettings } : {},
+      // Inside a unit, the selected file may show its cross-unit links (L17).
+      ...app2.current?.systemUnit ? {
+        outsideShown: state2.showOutside,
+        onShowOutside: () => app2.units.toggleOutsideLinks(),
+        onExpandUnit: (unit) => app2.units.toggleExpandedUnit(unit)
+      } : {}
+    });
+    if (!app2.current?.system) {
+      loadMembers(id);
+    }
+    app2.windows.refreshDock();
+  }
+  async function loadMembers(id) {
+    const membersSection = elements2.inspector.querySelector('[data-role="members"]');
+    const functionsSection = elements2.inspector.querySelector('[data-role="functions"]');
+    const impactSection = elements2.inspector.querySelector('[data-role="impact"]');
+    const changesWithSection = elements2.inspector.querySelector('[data-role="changes-with"]');
+    if (!membersSection && !functionsSection && !impactSection && !changesWithSection) {
+      return;
+    }
+    const params = new URLSearchParams({ file: id });
+    if (state2.repository) {
+      params.set("repository", state2.repository);
+    }
+    const impactParams = new URLSearchParams(params);
+    try {
+      if (app2.narratorStatus === null) {
+        app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+      }
+      const [symbolsResponse, impactResponse] = await Promise.all([
+        fetch(`${API_PATH}/symbols?${params.toString()}`),
+        fetch(`${API_PATH}/analysis/impact-passport?${impactParams.toString()}`)
+      ]);
+      const result = symbolsResponse.ok ? await symbolsResponse.json() : { available: false, detail: "Symbols are unavailable for this file." };
+      const impact = impactResponse.ok ? await impactResponse.json() : null;
+      const changesWith = changesWithSection ? await app2.lenses.loadChangesWith(id) : null;
+      if (app2.selected === id) {
+        if (membersSection) renderMembers(membersSection, result);
+        if (functionsSection) renderFunctions(functionsSection, result, app2.narration.functionsHandlers(result));
+        if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
+        if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
+      }
+    } catch {
+      if (app2.selected === id) {
+        const fallback = { available: false, detail: "Symbols could not be loaded." };
+        if (membersSection) renderMembers(membersSection, fallback);
+        if (functionsSection) renderFunctions(functionsSection, fallback, app2.narration.functionsHandlers(fallback));
+        if (impactSection) renderImpactPassport(impactSection, null);
+        if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: "Co-change could not be loaded." });
+      }
+    }
+  }
+  function impactPassportSet(card) {
+    if (!card || card.path === void 0) {
+      return null;
+    }
+    return {
+      scope: "file",
+      baseline: card.status === "added" ? null : "HEAD",
+      files: [card],
+      totals: null,
+      capped: false,
+      ...card.provenance ? { provenance: card.provenance } : {}
+    };
+  }
+  function clearSelection() {
+    app2.selected = null;
+    passportHistory = [];
+    store2.set("ui", { node: null });
+    state2.pathFrom = null;
+    state2.pathMode = false;
+    elements2.tbPath.classList.remove("active");
+    state2.unitFile = null;
+    view2.focusFile(null);
+    elements2.hover.textContent = "";
+    hideTooltip();
+    view2.highlight(null);
+    view2.clearEdge();
+    app2.selectedEdgeId = null;
+    renderEdgeEvidence(elements2.edgePanel, null);
+    app2.git.closeReview();
+    app2.git.closeRisk();
+    elements2.inspector.hidden = true;
+    view2.clearGroupSelection();
+    updateFocusButton();
+    app2.windows.refreshDock();
+  }
+  function passportBack() {
+    const previous = passportHistory.pop();
+    passportGoingBack = true;
+    try {
+      if (previous) {
+        selectNode(previous);
+      } else {
+        clearSelection();
+      }
+    } finally {
+      passportGoingBack = false;
+    }
+  }
+  function tracePath(from, to) {
+    const path = findPath(app2.current, from, to);
+    const trace = elements2.inspector.querySelector('[data-role="trace"]');
+    if (trace) {
+      if (path) {
+        trace.textContent = `${path.length - 1} step(s): ${path.join(" \u2192 ")}`;
+      } else {
+        trace.textContent = `No directed path from ${from} to ${to}.`;
+      }
+    }
+    if (path) {
+      view2.highlight(path);
+      elements2.hover.textContent = `${path.length - 1} step(s): ${path.join(" -> ")}`;
+    } else {
+      elements2.hover.textContent = `No directed path from ${from} to ${to}.`;
+    }
+  }
+  function selectEdge(edgeId) {
+    if (!app2.current || !edgeId) {
+      view2.clearEdge();
+      app2.selectedEdgeId = null;
+      renderEdgeEvidence(elements2.edgePanel, null);
+      app2.windows.refreshDock();
+      return;
+    }
+    app2.selectedEdgeId = edgeId;
+    const evidence = edgeEvidenceFor(app2.current, edgeId);
+    renderEdgeEvidence(elements2.edgePanel, evidence, {
+      onSelect: (id) => selectNode(id),
+      onTrace: (from, to) => tracePath(from, to),
+      ...evidence && isFileNode(evidence.source) ? { onViewSource: (file, line) => app2.source.viewSource(file, { line }) } : {},
+      onClear: () => {
+        view2.clearEdge();
+        app2.selectedEdgeId = null;
+        renderEdgeEvidence(elements2.edgePanel, null);
+        app2.windows.refreshDock();
+      }
+    });
+    if (evidence) {
+      elements2.hover.textContent = `${evidence.source} \u2192 ${evidence.target} \xB7 ${evidence.kind} \xB7 L${evidence.line ?? "?"} ${evidence.specifier ?? ""}`;
+    }
+    app2.windows.refreshDock();
+  }
+  function onSelect(id) {
+    selectNode(id);
+  }
+  function updateFocusButton() {
+    if (!elements2.tbFocus) {
+      return;
+    }
+    elements2.tbFocus.disabled = !app2.selected;
+  }
+  function onDrill(id) {
+    if (state2.mode === "system") {
+      const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+      if (!node) {
+        return;
+      }
+      if (node.systemUnit) {
+        if (!id.endsWith("#support")) app2.source.viewSource(id);
+        return;
+      }
+      app2.units.openUnit(id);
+      return;
+    }
+    if (state2.mode === "block") {
+      state2.prefix = id;
+      state2.filter = "";
+      elements2.filter.value = "";
+      app2.scan();
+      return;
+    }
+    app2.source.viewSource(id);
+  }
+  function openFile(id) {
+    const adapters = window.straboAdapters ?? {};
+    if (typeof adapters.openWorkspaceFile === "function") {
+      adapters.openWorkspaceFile(id);
+      return;
+    }
+    const url = fileWebUrl(app2.current?.repository, id);
+    if (url) {
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+    elements2.status.textContent = `No opener available for ${id}`;
+  }
+  function isFileNode(id) {
+    const node = (app2.current?.nodes ?? []).find((candidate) => candidate.id === id);
+    if (!node || node.kind === "unit" || node.kind === "shelf") {
+      return false;
+    }
+    return state2.mode === "file" || Boolean(node.systemUnit && !id.endsWith("#support"));
+  }
+  function showTooltip(id, clientX, clientY) {
+    if (!elements2.tooltip || !app2.current) return;
+    const node = app2.current.nodes.find((candidate) => candidate.id === id);
+    if (!node) return;
+    elements2.tooltip.replaceChildren();
+    const kind = node.kind ?? "";
+    const unit = kind === "unit" ? unitHoverFacts(app2.current, id) : null;
+    const title = document.createElement("div");
+    title.className = "tt-title";
+    title.textContent = unit ? unit.title : node.label ?? id;
+    elements2.tooltip.append(title);
+    const rows = unit ? unit.rows : node.shelf ? [shelfHoverText(node.shelf)] : [
+      node.systemUnit && !id.endsWith("#support") ? `blast ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 id ${id}` : `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`
+    ];
+    rows.forEach((text, index) => {
+      const row = document.createElement("div");
+      row.className = "tt-row";
+      if (index === 0 && !unit && !node.shelf) {
+        const chip = document.createElement("span");
+        chip.className = "tt-kind";
+        chip.textContent = kind;
+        row.append(chip);
+      }
+      const value = document.createElement("span");
+      value.textContent = text;
+      row.append(value);
+      elements2.tooltip.append(row);
+    });
+    elements2.tooltip.hidden = false;
+    const wrap = elements2.tooltip.parentElement.getBoundingClientRect();
+    elements2.tooltip.style.left = `${Math.min(clientX - wrap.left + 14, wrap.width - 310)}px`;
+    elements2.tooltip.style.top = `${Math.max(clientY - wrap.top - 10, 8)}px`;
+  }
+  function hideTooltip() {
+    if (elements2.tooltip) elements2.tooltip.hidden = true;
+  }
+  view2.onHover((id, event) => {
+    if (!id) {
+      elements2.hover.textContent = "";
+      hideTooltip();
+      return;
+    }
+    const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+    const unit = node?.kind === "unit" ? unitHoverFacts(app2.current, id) : null;
+    const insideUnit = node?.systemUnit && !id.endsWith("#support");
+    if (unit) {
+      elements2.hover.textContent = `${unit.title} \xB7 ${unit.rows.join(" \xB7 ")}`;
+    } else if (node?.shelf) {
+      elements2.hover.textContent = `${id} \xB7 ${shelfHoverText(node.shelf)}`;
+    } else {
+      elements2.hover.textContent = insideUnit ? `${id} \xB7 blast radius ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 ${node.kind ?? ""}` : `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
+    }
+    if (event?.clientX !== void 0) showTooltip(id, event.clientX, event.clientY);
+  });
+  elements2.tbFocus.addEventListener("click", () => {
+    if (app2.selected) {
+      focus(view2.cy, app2.selected);
+    }
+  });
+  elements2.tbPath.addEventListener("click", () => {
+    state2.pathMode = !state2.pathMode;
+    state2.pathFrom = null;
+    elements2.tbPath.classList.toggle("active", state2.pathMode);
+    elements2.hover.textContent = state2.pathMode ? "Path mode: select the start node." : "";
+  });
+  elements2.tbClear.addEventListener("click", clearSelection);
+  view2.onSelect(onSelect);
+  view2.onDrill(onDrill);
+  view2.onEdge(selectEdge);
+  return {
+    clearSelection,
+    hideTooltip,
+    isFileNode,
+    onDrill,
+    selectEdge,
+    selectNode,
+    updateFocusButton
+  };
+}
+
+// ui/strabo-float-dock-menu.js
+function createDockMoreMenu() {
+  let moreOpen = false;
+  const moreToggle = document.createElement("button");
+  moreToggle.type = "button";
+  moreToggle.className = "dock-more";
+  moreToggle.dataset.glyph = "\u22EF";
+  moreToggle.textContent = "More";
+  moreToggle.title = "More panels";
+  moreToggle.setAttribute("aria-haspopup", "menu");
+  const moreMenu = document.createElement("div");
+  moreMenu.className = "dock-more-menu";
+  moreMenu.setAttribute("role", "menu");
+  moreMenu.setAttribute("aria-label", "More panels");
+  const setMoreOpen = (open) => {
+    moreOpen = open;
+    moreMenu.hidden = !open;
+    moreToggle.setAttribute("aria-expanded", String(open));
+  };
+  moreToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setMoreOpen(!moreOpen);
+    if (moreOpen) moreMenu.querySelector(".dock-chip:not(:disabled)")?.focus();
+  });
+  moreMenu.addEventListener("click", (event) => {
+    if (event.target.closest?.(".dock-chip")) setMoreOpen(false);
+  });
+  moreMenu.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      setMoreOpen(false);
+      moreToggle.focus();
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (moreOpen && !moreMenu.contains(event.target)) setMoreOpen(false);
+  });
+  setMoreOpen(false);
+  return { moreToggle, moreMenu, setMoreOpen };
+}
+
+// ui/strabo-float-dock-overflow.js
+function createDockOverflow(dock) {
+  const sync2 = () => {
+    if (!dock) return;
+    const max = dock.scrollHeight - dock.clientHeight;
+    dock.classList.toggle("is-overflow-top", dock.scrollTop > 1);
+    dock.classList.toggle("is-overflow-bottom", max > 1 && dock.scrollTop < max - 1);
+  };
+  dock?.addEventListener("scroll", sync2, { passive: true });
+  if (dock && typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(sync2).observe(dock);
+  }
+  return sync2;
+}
+
+// ui/strabo-float-dock.js
+function createDockRail({ dock, controllers }) {
+  const syncOverflow = createDockOverflow(dock);
+  const { moreToggle, moreMenu, setMoreOpen } = createDockMoreMenu();
+  const render = () => {
+    if (!dock) return;
+    const docked = controllers.filter((controller) => controller.docked);
+    const inRail = (controller) => controller.pinned || controller.isOpen();
+    const railOrder = (controller) => controller.pinned ? controller.pinOrder : Infinity;
+    const railChips = docked.filter(inRail).sort((a, b2) => railOrder(a) - railOrder(b2)).map((controller) => controller.dockButton());
+    const moreChips = docked.filter((controller) => !inRail(controller)).map((controller) => {
+      const chip = controller.dockButton();
+      chip.setAttribute("role", "menuitem");
+      return chip;
+    });
+    moreMenu.replaceChildren(...moreChips);
+    moreToggle.hidden = moreChips.length === 0;
+    const tail = moreChips.length ? [moreToggle, moreMenu] : [];
+    dock.replaceChildren(...railChips, ...tail);
+    const enabled = railItems();
+    enabled.forEach((chip, index) => {
+      chip.tabIndex = index === 0 ? 0 : -1;
+    });
+    syncOverflow();
+  };
+  const railItems = () => [...dock?.children ?? []].filter(
+    (item) => (item.classList.contains("dock-chip") || item === moreToggle) && !item.disabled && !item.hidden
+  );
+  const flashChip = (key) => {
+    const chip = dock?.querySelector(`.dock-chip[data-panel="${key}"]`);
+    if (!chip) return;
+    chip.classList.remove("is-flash");
+    void chip.offsetWidth;
+    chip.classList.add("is-flash");
+  };
+  dock?.addEventListener("keydown", (event) => {
+    if (moreMenu.contains(event.target)) {
+      const items = [...moreMenu.querySelectorAll(".dock-chip")].filter((chip) => !chip.disabled);
+      const target = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
+      if (target !== null) {
+        event.preventDefault();
+        items[target].focus();
+      }
+      return;
+    }
+    const chips = railItems();
+    const next = rovingIndex(chips.indexOf(document.activeElement), chips.length, event.key);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    chips.forEach((chip, index) => {
+      chip.tabIndex = index === next ? 0 : -1;
+    });
+    chips[next].focus();
+  });
+  return { dock, moreMenu, moreToggle, render, railItems, flashChip };
+}
+
+// ui/strabo-float-geometry.js
+var DOCK_RAIL_WIDTH = 64;
+var GAP2 = 12;
+var DEFAULT_WIDTH = 384;
+var HEADER_HEIGHT = 34;
+var MIN_WIDTH2 = 240;
+var MIN_HEIGHT = 160;
+var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP2;
+var RAIL_TOP = 64;
+function topFloor(headerBottom) {
+  return Number.isFinite(headerBottom) && headerBottom > 0 ? Math.ceil(headerBottom) : 0;
+}
+function railTopBelow(headerBottom) {
+  return Math.max(RAIL_TOP, topFloor(headerBottom) + GAP2);
+}
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), Math.max(min, max));
+}
+function sanitizeSize(size) {
+  const width = Number(size?.width);
+  const height = Number(size?.height);
+  return {
+    width: Number.isFinite(width) && width >= MIN_WIDTH2 ? width : null,
+    height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
+  };
+}
+function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP2 } = {}) {
+  const sorted = [...occupied].sort((a, b2) => a.top - b2.top);
+  let candidate = startTop;
+  for (const rect of sorted) {
+    if (candidate + height <= rect.top) {
+      break;
+    }
+    candidate = Math.max(candidate, rect.bottom + gap);
+  }
+  return candidate;
+}
+
+// ui/strabo-float-chrome.js
+function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, height = null }) {
+  const element2 = config.element;
+  const win = document.createElement("section");
+  win.className = "float-window";
+  win.dataset.panel = config.key;
+  win.hidden = true;
+  win.style.width = `${width}px`;
+  if (height) {
+    win.style.height = `${height}px`;
+  }
+  const header = document.createElement("header");
+  header.className = "float-header";
+  header.tabIndex = 0;
+  header.title = "Drag to move \xB7 double-click to collapse";
+  const grip = document.createElement("span");
+  grip.className = "float-grip";
+  grip.setAttribute("aria-hidden", "true");
+  grip.textContent = "\u283F";
+  const title = document.createElement("span");
+  title.className = "float-title";
+  title.textContent = config.title ?? config.key;
+  win.setAttribute("role", "dialog");
+  win.setAttribute("aria-label", title.textContent);
+  win.tabIndex = -1;
+  const spacer = document.createElement("span");
+  spacer.className = "float-spacer";
+  const collapseButton = document.createElement("button");
+  collapseButton.type = "button";
+  collapseButton.className = "float-button float-collapse";
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "float-button float-close";
+  closeButton.setAttribute("aria-label", "Close panel");
+  closeButton.title = "Close";
+  closeButton.textContent = "\xD7";
+  const body = document.createElement("div");
+  body.className = "float-body";
+  const resizeHandle = document.createElement("span");
+  resizeHandle.className = "float-resize";
+  resizeHandle.setAttribute("aria-hidden", "true");
+  resizeHandle.title = "Drag to resize";
+  header.append(grip, title, spacer, collapseButton, closeButton);
+  win.append(header, body, resizeHandle);
+  element2.parentNode.insertBefore(win, element2);
+  body.append(element2);
+  return { win, header, title, collapseButton, closeButton, resizeHandle };
+}
+
+// ui/strabo-float-placement.js
+function appHeaderBottom() {
+  return document.querySelector("header.toolbar")?.getBoundingClientRect().bottom ?? 0;
+}
+function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
+  let hasPosition = false;
+  const place = (x, y) => {
+    const floor = topFloor(appHeaderBottom());
+    win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
+    win.style.top = `${clamp(y, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    hasPosition = true;
+  };
+  const firstFreeRailTop = () => {
+    const height = win.offsetHeight || fallbackHeight;
+    const occupied = [];
+    for (const other of controllers) {
+      if (other.window === win || other.window.hidden || other.isCollapsed()) {
+        continue;
+      }
+      const rect = other.window.getBoundingClientRect();
+      if (rect.height > 0) {
+        occupied.push(rect);
+      }
+    }
+    occupied.sort((a, b2) => a.top - b2.top);
+    return firstFreeSlotTop(occupied, height, { startTop: railTopBelow(appHeaderBottom()) });
+  };
+  const placeInRail = () => {
+    const railWidth = win.offsetWidth || width;
+    const height = win.offsetHeight || fallbackHeight;
+    const top = firstFreeRailTop();
+    const placedTop = top + height <= window.innerHeight ? top : railTopBelow(appHeaderBottom());
+    const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP2);
+    win.style.maxHeight = `${available}px`;
+    place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
+  };
+  const position = saved.position ?? config.position ?? {};
+  if (config.center) {
+    place(
+      (window.innerWidth - width) / 2,
+      Math.max(56, (window.innerHeight - fallbackHeight) / 2)
+    );
+  } else if (Object.keys(position).length > 0) {
+    const left = typeof position.left === "number" ? position.left : window.innerWidth - width - (typeof position.right === "number" ? position.right : RAIL_RIGHT);
+    const top = typeof position.top === "number" ? position.top : window.innerHeight - fallbackHeight - (typeof position.bottom === "number" ? position.bottom : 0);
+    place(left, top);
+  }
+  return { place, placeInRail, hasPosition: () => hasPosition };
+}
+
+// ui/strabo-float-gestures.js
+function wireWindowGestures({
+  win,
+  header,
+  resizeHandle,
+  place,
+  raise,
+  persist,
+  onResized,
+  isCollapsed,
+  setCollapsed
+}) {
+  header.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button") || event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startLeft = parseFloat(win.style.left) || 0;
+    const startTop = parseFloat(win.style.top) || 0;
+    header.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      place(
+        startLeft + (moveEvent.clientX - startX),
+        startTop + (moveEvent.clientY - startY)
+      );
+    };
+    const end = () => {
+      header.removeEventListener("pointermove", move);
+      header.removeEventListener("pointerup", end);
+      header.removeEventListener("pointercancel", end);
+      persist();
+    };
+    header.addEventListener("pointermove", move);
+    header.addEventListener("pointerup", end);
+    header.addEventListener("pointercancel", end);
+    raise();
+    event.preventDefault();
+  });
+  resizeHandle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const rect = win.getBoundingClientRect();
+    const startWidth = rect.width;
+    const startHeight = rect.height;
+    const left = parseFloat(win.style.left) || 0;
+    const top = parseFloat(win.style.top) || 0;
+    const maxWidth = Math.max(MIN_WIDTH2, window.innerWidth - left - GAP2);
+    const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP2);
+    resizeHandle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH2, maxWidth)}px`;
+      win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
+    };
+    const end = () => {
+      resizeHandle.removeEventListener("pointermove", move);
+      resizeHandle.removeEventListener("pointerup", end);
+      resizeHandle.removeEventListener("pointercancel", end);
+      onResized(sanitizeSize({
+        width: parseFloat(win.style.width),
+        height: parseFloat(win.style.height)
+      }));
+      persist();
+    };
+    resizeHandle.addEventListener("pointermove", move);
+    resizeHandle.addEventListener("pointerup", end);
+    resizeHandle.addEventListener("pointercancel", end);
+    raise();
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  header.addEventListener("dblclick", (event) => {
+    if (event.target.closest("button")) return;
+    setCollapsed(!isCollapsed());
+  });
+}
+
+// ui/strabo-float-window.js
+function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
+  const element2 = config.element;
+  const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
+  let size = sanitizeSize(saved.size);
+  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
+  const { win, header, title, collapseButton, closeButton, resizeHandle } = buildWindowChrome({ config, width, height: size.height });
+  const fallbackHeight = config.height ?? 260;
+  const { place, placeInRail, hasPosition } = createPlacement({
+    win,
+    controllers,
+    width,
+    fallbackHeight,
+    config,
+    saved
+  });
+  const isCollapsed = () => win.classList.contains("is-collapsed");
+  const updateCollapseChrome = () => {
+    const collapsed = isCollapsed();
+    collapseButton.textContent = collapsed ? "+" : "\u2013";
+    collapseButton.title = collapsed ? "Expand" : "Collapse";
+    collapseButton.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
+  };
+  const setCollapsed = (collapsed) => {
+    win.classList.toggle("is-collapsed", collapsed);
+    updateCollapseChrome();
+    persist();
+  };
+  if (saved.collapsed ?? config.collapsed) win.classList.add("is-collapsed");
+  updateCollapseChrome();
+  let lastHidden = null;
+  const raise = () => {
+    win.style.zIndex = String(nextZ());
+  };
+  const sync2 = () => {
+    const hidden = element2.hidden === true;
+    win.hidden = hidden;
+    if (!hidden && config.titleFrom) {
+      const heading2 = config.titleFrom(element2);
+      if (heading2) {
+        title.textContent = heading2;
+      }
+    }
+    win.setAttribute("aria-label", title.textContent);
+    if (hidden !== lastHidden) {
+      lastHidden = hidden;
+      renderDock();
+      if (!hidden) {
+        if (!hasPosition()) placeInRail();
+        raise();
+        flashChip(config.key);
+      }
+    }
+  };
+  new MutationObserver(sync2).observe(element2, {
+    attributes: true,
+    attributeFilter: ["hidden"],
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+  const controller = {
+    key: config.key,
+    docked: config.dock !== false,
+    pinned: Boolean(config.pinned),
+    // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
+    pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
+    window: win,
+    element: element2,
+    isOpen: () => !win.hidden,
+    isCollapsed,
+    // Bring an already-open window to the top of the stack without the focus shift and
+    // re-placement `open()` performs, for callers that only need it seen (a selection).
+    raise,
+    open() {
+      if (config.canOpen && !config.canOpen()) {
+        config.onBlocked?.();
+        return false;
+      }
+      config.onOpen?.();
+      element2.hidden = false;
+      win.hidden = false;
+      if (!hasPosition()) {
+        placeInRail();
+      }
+      sync2();
+      raise();
+      persist();
+      win.focus({ preventScroll: true });
+      return true;
+    },
+    close() {
+      const hadFocus = win.contains(document.activeElement);
+      if (config.onClose) config.onClose();
+      else element2.hidden = true;
+      win.hidden = true;
+      lastHidden = true;
+      renderDock();
+      persist();
+      if (hadFocus) {
+        const chip = dock?.querySelector(`.dock-chip[data-panel="${config.key}"]`);
+        if (chip && !moreMenu.contains(chip)) chip.focus();
+        else moreToggle.focus();
+      }
+    },
+    toggle() {
+      if (win.hidden) {
+        return this.open();
+      } else if (isCollapsed()) {
+        setCollapsed(false);
+        raise();
+        return true;
+      } else {
+        this.close();
+        return true;
+      }
+    },
+    snapshot() {
+      const snapshot = {
+        size: { ...size },
+        collapsed: isCollapsed()
+      };
+      if (hasPosition()) {
+        snapshot.position = {
+          left: parseFloat(win.style.left) || 0,
+          top: parseFloat(win.style.top) || 0
+        };
+      }
+      return snapshot;
+    },
+    dockButton() {
+      const button3 = document.createElement("button");
+      button3.type = "button";
+      button3.className = "dock-chip";
+      button3.dataset.panel = config.key;
+      const open = !win.hidden;
+      const canOpen = !config.canOpen || config.canOpen();
+      button3.classList.toggle("active", open);
+      button3.classList.toggle("collapsed", open && isCollapsed());
+      button3.setAttribute("aria-pressed", String(open));
+      button3.textContent = config.dockLabel ?? config.title ?? config.key;
+      button3.dataset.glyph = config.glyph ?? "\u2022";
+      if (!canOpen && !open) {
+        button3.disabled = true;
+        const reason = typeof config.blockedTitle === "function" ? config.blockedTitle() : config.blockedTitle ?? `Open ${config.title ?? config.key} (unavailable)`;
+        button3.title = reason;
+      } else {
+        button3.title = open ? `Close ${config.title ?? config.key}` : `Open ${config.title ?? config.key}`;
+      }
+      button3.addEventListener("click", () => controller.toggle());
+      return button3;
+    }
+  };
+  win.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.stopPropagation();
+      event.preventDefault();
+      controller.close();
+    }
+  });
+  wireWindowGestures({
+    win,
+    header,
+    resizeHandle,
+    place,
+    raise,
+    persist,
+    onResized: (resized) => {
+      size = { width: resized.width ?? size.width, height: resized.height ?? size.height };
+    },
+    isCollapsed,
+    setCollapsed
+  });
+  collapseButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setCollapsed(!isCollapsed());
+  });
+  closeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    controller.close();
+  });
+  win.addEventListener("pointerdown", raise, true);
+  win.addEventListener("contextmenu", raise, true);
+  if (!hasPosition() && element2.hidden !== true) {
+    placeInRail();
+  }
+  controllers.push(controller);
+  sync2();
+  return controller;
+}
+
+// ui/strabo-float-store.js
+var STORAGE_KEY2 = "strabo.float.windows.v2";
+function readStore2() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY2) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function writeStore2(store2) {
+  try {
+    localStorage.setItem(STORAGE_KEY2, JSON.stringify(store2));
+  } catch {
+  }
+}
+
+// ui/strabo-float.js
+function initFloatingWindows({ dock, panels = [] } = {}) {
+  const store2 = readStore2();
+  const controllers = [];
+  let topZ = 60;
+  const nextZ = () => {
+    topZ += 1;
+    return topZ;
+  };
+  const persist = () => {
+    const next = {};
+    for (const controller of controllers) {
+      next[controller.key] = controller.snapshot();
+    }
+    writeStore2(next);
+  };
+  const dockRail = createDockRail({ dock, controllers });
+  for (const config of panels) {
+    if (!config.element) continue;
+    const saved = store2[config.key] ?? {};
+    createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
+  }
+  const keepOnScreen = () => {
+    const floor = topFloor(appHeaderBottom());
+    for (const controller of controllers) {
+      const win = controller.window;
+      if (win.hidden) continue;
+      const left = parseFloat(win.style.left) || 0;
+      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4));
+      win.style.top = `${top}px`;
+      win.style.maxHeight = `${Math.max(MIN_HEIGHT, window.innerHeight - top - GAP2)}px`;
+      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
+      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
+      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
+      win.style.top = `${clamp(top, floor, Math.max(floor, window.innerHeight - height))}px`;
+    }
+  };
+  window.addEventListener("resize", keepOnScreen);
+  const header = document.querySelector("header.toolbar");
+  if (header && typeof ResizeObserver === "function") {
+    new ResizeObserver(keepOnScreen).observe(header);
+  }
+  dockRail.render();
+  controllers.refresh = dockRail.render;
+  return controllers;
+}
+
+// ui/strabo-floating-panels.js
+function createFloatingPanels(app2) {
+  const { state: state2, view: view2, elements: elements2 } = app2;
+  function toggleShortcuts() {
+    app2.floatingWindows?.find?.((controller) => controller.key === "shortcuts")?.toggle();
+  }
+  app2.floatingWindows = initFloatingWindows({
+    dock: document.getElementById("float-dock"),
+    panels: [
+      {
+        key: "review",
+        element: elements2.reviewPanel,
+        title: "Review",
+        dockLabel: "Review",
+        dock: false,
+        // Review is a screen tab, and R toggles this panel
+        width: 400,
+        // The heading's own text, without the dismiss button's `×`.
+        titleFrom: (panel) => panel.querySelector("h3")?.firstChild?.textContent?.trim() ?? "",
+        onOpen: () => {
+          if (elements2.reviewPanel.hidden) app2.git.toggleReview();
+        },
+        onClose: () => {
+          app2.git.closeReview();
+          view2.overlay(null);
+        }
+      },
+      {
+        key: "risk",
+        element: elements2.riskPanel,
+        title: "Dependency risk",
+        dockLabel: "Risk",
+        glyph: "\u26A0",
+        width: 400,
+        onOpen: () => {
+          if (elements2.riskPanel.hidden) app2.git.toggleRisk();
+        },
+        onClose: () => app2.git.closeRisk()
+      },
+      {
+        key: "timeline",
+        element: elements2.timelinePanel,
+        title: "Timeline",
+        dockLabel: "Timeline",
+        dock: false,
+        // History is a screen tab, and T toggles this panel
+        width: 380,
+        onOpen: () => {
+          if (elements2.timelinePanel.hidden) {
+            app2.git.toggleTimeline().catch((error) => {
+              elements2.status.textContent = `Error: ${error.message}`;
+            });
+          }
+        },
+        onClose: () => {
+          elements2.timelinePanel.hidden = true;
+        }
+      },
+      {
+        key: "branches",
+        element: elements2.branchesPanel,
+        title: "Branches",
+        dockLabel: "Branches",
+        glyph: "\u2442",
+        width: 420,
+        onOpen: () => {
+          if (elements2.branchesPanel.hidden) {
+            app2.git.toggleBranches().catch((error) => {
+              elements2.status.textContent = `Error: ${error.message}`;
+            });
+          }
+        },
+        onClose: () => {
+          elements2.branchesPanel.hidden = true;
+        }
+      },
+      {
+        key: "narration",
+        element: elements2.narrationPanel,
+        title: "Narrator",
+        dockLabel: "Narrator",
+        glyph: "\u2726",
+        width: 420,
+        canOpen: () => elements2.narrationPanel.childElementCount > 0,
+        blockedTitle: "Right-click a file or unit and choose Narrate first",
+        onBlocked: () => {
+          elements2.status.textContent = "Right-click a file or unit and choose Narrate first.";
+        },
+        onClose: () => {
+          elements2.narrationPanel.hidden = true;
+        }
+      },
+      {
+        key: "overlay",
+        element: elements2.overlayPanel,
+        title: "Overlay",
+        dockLabel: "Overlay",
+        glyph: "\u25D0",
+        pinned: 5,
+        width: 360,
+        titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
+        canOpen: () => state2.overlay !== "none",
+        blockedTitle: "Select an overlay (Review dropdown) to open Overlay",
+        onBlocked: () => {
+          elements2.status.textContent = "Select an overlay first \u2014 Overlay has nothing to show.";
+        },
+        onClose: () => app2.lenses.clearOverlay()
+      },
+      {
+        key: "edge",
+        element: elements2.edgePanel,
+        title: "Edge",
+        dockLabel: "Edge",
+        glyph: "\u27F7",
+        pinned: 6,
+        width: 360,
+        titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
+        canOpen: () => Boolean(app2.selectedEdgeId),
+        blockedTitle: "Click an edge in the graph to open Edge",
+        onBlocked: () => {
+          elements2.status.textContent = "Click an edge in the graph first \u2014 no edge selected.";
+        },
+        onClose: () => app2.selection.selectEdge(null)
+      },
+      {
+        key: "source",
+        element: elements2.sourcePanel,
+        title: "Source",
+        dockLabel: "Source",
+        glyph: "\u2039\u203A",
+        pinned: 3,
+        width: 720,
+        height: 640,
+        canOpen: () => app2.source.hasSourceTarget(),
+        blockedTitle: "Select a file to view its source",
+        onBlocked: () => {
+          elements2.status.textContent = "Select a file first \u2014 no source to show.";
+        },
+        onOpen: () => app2.source.sourceRender(),
+        onClose: () => app2.source.closeSource()
+      },
+      {
+        key: "legend",
+        element: elements2.legend,
+        title: "Legend",
+        dockLabel: "Legend",
+        glyph: "\u2261",
+        pinned: 1,
+        width: 340
+      },
+      {
+        key: "inspector",
+        element: elements2.inspector,
+        title: "Module passport",
+        dockLabel: "Passport",
+        glyph: "\u24D8",
+        pinned: 2,
+        width: 384,
+        canOpen: () => Boolean(app2.selected),
+        blockedTitle: "Select a module in the graph to open Passport",
+        onBlocked: () => {
+          elements2.status.textContent = "Select a module first \u2014 no passport to show.";
+        },
+        onClose: () => {
+          elements2.inspector.hidden = true;
+        }
+      },
+      {
+        key: "diagnostics",
+        element: elements2.diagnostics,
+        title: "Diagnostics",
+        dockLabel: "Diagnostics",
+        dock: false,
+        // the header's Diagnostics icon opens it
+        width: 420,
+        titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
+        onOpen: () => {
+          app2.runtime.startRuntimeReadout();
+        },
+        onClose: () => {
+          elements2.diagnostics.hidden = true;
+          elements2.diagnosticsToggle.setAttribute("aria-expanded", "false");
+          app2.runtime.stopRuntimeReadout();
+        }
+      },
+      {
+        key: "settings",
+        element: elements2.settingsPanel,
+        title: "Settings",
+        dockLabel: "Settings",
+        dock: false,
+        // the header's Settings icon opens it
+        width: 420,
+        onOpen: () => {
+          if (elements2.settingsPanel.hidden) {
+            app2.settings.openSettings().catch((error) => {
+              elements2.status.textContent = `Error: ${error.message}`;
+            });
+          }
+          elements2.settingsToggle?.setAttribute("aria-expanded", "true");
+        },
+        onClose: () => {
+          elements2.settingsPanel.hidden = true;
+          elements2.settingsToggle?.setAttribute("aria-expanded", "false");
+        }
+      },
+      {
+        key: "shortcuts",
+        element: elements2.shortcuts,
+        title: "Keyboard shortcuts",
+        dockLabel: "Shortcuts",
+        dock: false,
+        // ? opens it
+        width: 320,
+        onOpen: () => renderShortcuts(elements2.shortcuts),
+        onClose: () => {
+          elements2.shortcuts.hidden = true;
+        }
+      },
+      {
+        key: "member",
+        element: elements2.memberView,
+        title: "Member map",
+        dockLabel: "Member map",
+        glyph: "\u25A6",
+        pinned: 4,
+        width: 900,
+        height: 700,
+        center: true,
+        canOpen: () => Boolean(app2.memberData),
+        blockedTitle: "Open a member map from a module passport first",
+        onBlocked: () => {
+          elements2.status.textContent = "Open a member map from a module passport first.";
+        },
+        onOpen: () => app2.memberMap.renderMemberMapView(),
+        onClose: () => app2.memberMap.closeMemberMap()
+      },
+      {
+        key: "workspace",
+        element: elements2.workspacePanel,
+        title: "Workspace",
+        dockLabel: "Workspace",
+        glyph: "\u29C9",
+        width: 460,
+        onOpen: () => {
+          app2.panels.showWorkspace().catch(() => {
+          });
+        },
+        onClose: () => app2.panels.closeWorkspace()
+      },
+      {
+        key: "passport",
+        element: elements2.passportPanel,
+        title: "Repository passport",
+        dockLabel: "Repo",
+        glyph: "\u2302",
+        width: 460,
+        onOpen: () => {
+          app2.panels.showPassport().catch(() => {
+          });
+        },
+        onClose: () => app2.panels.closePassport()
+      },
+      {
+        key: "route",
+        element: elements2.routePanel,
+        title: "Reading route",
+        dockLabel: "Route",
+        glyph: "\u279C",
+        width: 440,
+        onOpen: () => {
+          app2.panels.showRoute().catch(() => {
+          });
+        },
+        onClose: () => app2.panels.closeRoute()
+      },
+      {
+        key: "blocks",
+        element: elements2.blocksPanel,
+        title: "Blocks",
+        dockLabel: "Blocks",
+        glyph: "\u25A3",
+        width: 560,
+        height: 620,
+        onOpen: () => app2.panels.showBlocks(),
+        onClose: () => {
+          elements2.blocksPanel.hidden = true;
+        }
+      }
+    ]
+  });
+  initFloatingToolbar(elements2.graphToolbar, { dock: document.getElementById("bottom-bar") });
+  function refreshDock() {
+    try {
+      app2.floatingWindows?.refresh?.();
+    } catch {
+    }
+  }
+  elements2.settingsToggle?.addEventListener("click", () => {
+    app2.floatingWindows.find((controller) => controller.key === "settings")?.toggle();
+  });
+  return {
+    refreshDock,
+    toggleShortcuts
+  };
+}
+
+// ui/strabo-keyboard.js
+function bindKeyboardShortcuts(app2) {
+  const { store: store2, state: state2, view: view2, elements: elements2 } = app2;
+  document.addEventListener("keydown", (event) => {
+    const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "");
+    const screen = store2.get().ui.screen;
+    const onGraph = screen === "graph";
+    if (event.key === "Escape" && (screen === "review" || screen === "history") && !inField) {
+      event.preventDefault();
+      app2.setScreen("graph");
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && onGraph) {
+      event.preventDefault();
+      elements2.filter.focus();
+      elements2.filter.select();
+      return;
+    }
+    if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
+      const screenKey = event.key.toLowerCase();
+      if (screenKey === "t") {
+        event.preventDefault();
+        app2.setScreen("terminal");
+        app2.terminalScreen?.newSession?.({ kind: "shell" })?.catch((error) => {
+          showToast(`Could not open a shell (${error.message}).`);
+        });
+        return;
+      }
+      if (screenKey === "w") {
+        event.preventDefault();
+        app2.terminalScreen?.closeActiveSession?.();
+        return;
+      }
+      if (screenKey === "r") {
+        event.preventDefault();
+        app2.setScreen("terminal");
+        app2.terminalScreen?.openPresetMenu?.();
+        return;
+      }
+    }
+    if (event.key === "Escape") {
+      app2.menus.closeOverflowMenu();
+      if (!elements2.memberView.hidden) {
+        app2.memberMap.closeMemberMap();
+        return;
+      }
+      if (state2.filter && !inField) {
+        state2.filter = "";
+        elements2.filter.value = "";
+        app2.applyFilterToView();
+        return;
+      }
+      if (state2.mode === "system" && state2.systemUnit && !inField) {
+        app2.units.closeUnit();
+        return;
+      }
+      if (!inField) app2.selection.clearSelection();
+      return;
+    }
+    if (event.key === "Enter" && !inField && state2.mode === "system" && app2.selected) {
+      const node = app2.current?.nodes.find((candidate) => candidate.id === app2.selected);
+      if (node && !node.systemUnit) {
+        event.preventDefault();
+        app2.units.openUnit(app2.selected);
+        return;
+      }
+    }
+    if (event.key === "?" && !inField) {
+      event.preventDefault();
+      app2.windows.toggleShortcuts();
+      return;
+    }
+    if (inField || !elements2.memberView.hidden || !onGraph) return;
+    const key = event.key.toLowerCase();
+    if (key === "f" && app2.selected) focus(view2.cy, app2.selected);
+    else if (key === "i") elements2.tbImpact.click();
+    else if (key === "o" && state2.mode === "system" && state2.systemUnit) elements2.tbOutside.click();
+    else if (key === "u" && state2.mode === "system" && state2.systemUnit) app2.units.closeUnit();
+    else if (key === "p") elements2.tbPath.click();
+    else if (key === "b") elements2.tbBoundaries.click();
+    else if (key === "c" && state2.mode === "file") elements2.tbCalls?.click();
+    else if (key === "h" && state2.mode === "file") elements2.tbCoChange?.click();
+    else if (key === "l" && state2.mode === "file") elements2.tbLabels?.click();
+    else if (key === "z" && state2.mode === "file") elements2.tbLoc?.click();
+    else if (key === "s" && app2.selected && app2.selection.isFileNode(app2.selected)) app2.source.viewSource(app2.selected);
+    else if (key === "t") elements2.tbTimeline.click();
+    else if (key === "r") elements2.tbReview.click();
+    else if (key === "v") elements2.tbRisk.click();
+    else if (key === "n") elements2.tbBranches.click();
+    else if (key === "g" && app2.groupSelection.length >= 2) elements2.tbDelegateGroup.click();
+  });
+}
+
 // ui/strabo.js
-var scanGeneration = 0;
-var current = null;
-var selected = null;
-var selectedEdgeId = null;
-var groupSelection = [];
-var currentReview = null;
-var narratorStatus = null;
+var app = {
+  /** Incremented on every scan; async completions check their captured generation. */
+  scanGeneration: 0,
+  /** The graph model the canvas is drawing, or null before the first scan. */
+  current: null,
+  /** The node the Module Passport shows, or null. */
+  selected: null,
+  /** Edge id (`e<N>`) with an open evidence panel, or null. */
+  selectedEdgeId: null,
+  /** Node ids currently held in cytoscape's own selection: ⌘/ctrl-click or shift-drag. */
+  groupSelection: [],
+  /** The Git review result currently shown in the review panel, for delegation. */
+  currentReview: null,
+  /** The narrator status from `/narrator`, fetched once; null until it resolves. */
+  narratorStatus: null,
+  /** Provider presets for the Settings Narrator section, from `/narrator`. */
+  narratorPresets: [],
+  /** Client preferences, read once and re-applied on every change. */
+  clientPrefs: readSettings(),
+  /** The Terminal screen, assigned once it is created at bootstrap. */
+  terminalScreen: null,
+  /** The last loaded member-map payload. */
+  memberData: null,
+  /** The floating-window controllers, assigned once the panels are wrapped. */
+  floatingWindows: null
+};
 var store = createStore({
   view: {
     repository: null,
@@ -22909,251 +26549,19 @@ var store = createStore({
 });
 var state = store.get().view;
 var memberUI = store.get().member;
-var VIEW_PREFS_PREFIX = "strabo.view.";
-var prefsSaveTimer = null;
-function viewPrefsKey(repository) {
-  return `${VIEW_PREFS_PREFIX}${repository ?? "default"}`;
-}
-function readViewPrefs(repository) {
-  try {
-    const raw = window.localStorage.getItem(viewPrefsKey(repository));
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
-      return null;
-    }
-    const prefs = {};
-    if (parsed.mode === "block" || parsed.mode === "file" || parsed.mode === "system") {
-      prefs.mode = parsed.mode;
-    }
-    if (typeof parsed.overlay === "string" && parsed.overlay !== "") {
-      prefs.overlay = parsed.overlay;
-    }
-    if (typeof parsed.filter === "string" && parsed.filter !== "") {
-      prefs.filter = parsed.filter.slice(0, 200);
-    }
-    if (parsed.edgeKind === "calls" || parsed.edgeKind === "imports") {
-      prefs.edgeKind = parsed.edgeKind;
-    }
-    if (parsed.coChange === true) {
-      prefs.coChange = true;
-    }
-    if (parsed.locLens === true) {
-      prefs.locLens = true;
-    }
-    return prefs;
-  } catch {
-    return null;
-  }
-}
-function writeViewPrefs() {
-  try {
-    window.localStorage.setItem(
-      viewPrefsKey(state.repository),
-      JSON.stringify({
-        mode: state.mode,
-        overlay: state.overlay,
-        filter: state.filter,
-        edgeKind: state.edgeKind,
-        coChange: state.coChange,
-        locLens: state.locLens
-      })
-    );
-  } catch {
-  }
-}
-function schedulePrefsSave() {
-  if (prefsSaveTimer) {
-    clearTimeout(prefsSaveTimer);
-  }
-  prefsSaveTimer = setTimeout(() => {
-    prefsSaveTimer = null;
-    writeViewPrefs();
-  }, 300);
-}
-function applyViewPrefs() {
-  view.setIslandOffsets(readIslandLayout(state.repository));
-  const prefs = readViewPrefs(state.repository);
-  if (!prefs) {
-    return;
-  }
-  if (prefs.mode) {
-    state.mode = prefs.mode;
-    elements.detail.value = prefs.mode;
-  }
-  if (prefs.filter) {
-    state.filter = prefs.filter;
-    elements.filter.value = prefs.filter;
-  }
-  if (prefs.overlay && [...elements.overlay.options].some((option) => option.value === prefs.overlay)) {
-    state.overlay = prefs.overlay;
-    elements.overlay.value = prefs.overlay;
-    if (FILE_MODE_OVERLAYS.includes(prefs.overlay) && state.mode !== "file") {
-      state.mode = "file";
-      elements.detail.value = "file";
-    }
-  }
-  if (prefs.edgeKind === "calls" && state.mode === "file") {
-    state.edgeKind = "calls";
-  }
-  if (prefs.coChange) {
-    state.coChange = true;
-  }
-  if (prefs.locLens) {
-    state.locLens = true;
-  }
-}
 var view = createView(document.getElementById("graph"));
 view.onIslandLayout((offsets) => {
   writeIslandLayout(state.repository, offsets);
 });
-var frameSampler = createFrameSampler(window);
-var runtimeBase = "";
-var runtimeTimer = 0;
-function runtimeSuffix() {
-  const { fps, ms: ms2 } = frameSampler.stats();
-  const redraws = view.cy?.renderer?.()?.redraws ?? 0;
-  const drawn = view.cy?.elements().length ?? 0;
-  const fpsText = fps === null ? "fps: sampling\u2026" : `${Math.round(fps)} fps`;
-  const msText = ms2 === null ? "" : ` / ${ms2.toFixed(1)} ms`;
-  return `${fpsText}${msText} \xB7 ${redraws} redraws \xB7 ${drawn} elements`;
-}
-function refreshRuntimeReadout() {
-  if (!elements.diagnostics || elements.diagnostics.hidden || !runtimeBase) {
-    return;
-  }
-  const line = elements.diagnostics.querySelector('[data-role="runtime"]');
-  if (line) {
-    line.textContent = `${runtimeBase} \xB7 ${runtimeSuffix()}`;
-  }
-}
-function startRuntimeReadout() {
-  frameSampler.start();
-  if (!runtimeTimer) {
-    runtimeTimer = setInterval(refreshRuntimeReadout, 500);
-  }
-  refreshRuntimeReadout();
-}
-function stopRuntimeReadout() {
-  frameSampler.stop();
-  if (runtimeTimer) {
-    clearInterval(runtimeTimer);
-    runtimeTimer = 0;
-  }
-}
-var clientPrefs = readSettings();
-var terminalScreen = null;
 function applyClientPrefs() {
-  applyAppearance(clientPrefs);
+  applyAppearance(app.clientPrefs);
   view.applyTheme();
-  view.setLabelsVisible(clientPrefs.labels);
-  view.setLabelsForceAll(clientPrefs.allLabels);
-  terminalScreen?.applyTheme();
+  view.setLabelsVisible(app.clientPrefs.labels);
+  view.setLabelsForceAll(app.clientPrefs.allLabels);
+  app.terminalScreen?.applyTheme();
 }
 applyClientPrefs();
-var elements = {
-  repository: document.getElementById("repository"),
-  browse: document.getElementById("browse"),
-  detail: document.getElementById("detail"),
-  refresh: document.getElementById("refresh"),
-  filter: document.getElementById("filter"),
-  filterClear: document.getElementById("filter-clear"),
-  filterCount: document.getElementById("filter-count"),
-  overlay: document.getElementById("overlay"),
-  tier: document.getElementById("tier"),
-  overlayPanel: document.getElementById("overlay-panel"),
-  edgePanel: document.getElementById("edge-panel"),
-  reviewPanel: document.getElementById("review-panel"),
-  riskPanel: document.getElementById("risk-panel"),
-  diagnosticsToggle: document.getElementById("diagnostics-toggle"),
-  diagnosticsBadge: document.getElementById("diagnostics-badge"),
-  diagnostics: document.getElementById("diagnostics"),
-  legend: document.getElementById("legend"),
-  breadcrumb: document.getElementById("breadcrumb"),
-  status: document.getElementById("status"),
-  freshness: document.getElementById("freshness"),
-  inspector: document.getElementById("inspector"),
-  strip: document.getElementById("strip"),
-  hover: document.getElementById("hover"),
-  systemNote: document.getElementById("system-note"),
-  tooltip: document.getElementById("tooltip"),
-  graphEmpty: document.getElementById("graph-empty"),
-  graphEmptyClear: document.getElementById("graph-empty-clear"),
-  graphLoading: document.getElementById("graph-loading"),
-  zoomIn: document.getElementById("zoom-in"),
-  zoomOut: document.getElementById("zoom-out"),
-  zoomFit: document.getElementById("zoom-fit"),
-  tbFocus: document.getElementById("tb-focus"),
-  tbImpact: document.getElementById("tb-impact"),
-  tbOutside: document.getElementById("tb-outside"),
-  tbUnits: document.getElementById("tb-units"),
-  tbPath: document.getElementById("tb-path"),
-  tbBoundaries: document.getElementById("tb-boundaries"),
-  tbCalls: document.getElementById("tb-calls"),
-  tbCoChange: document.getElementById("tb-cochange"),
-  tbLabels: document.getElementById("tb-labels"),
-  tbLoc: document.getElementById("tb-loc"),
-  tbTimeline: document.getElementById("tb-timeline"),
-  tbReview: document.getElementById("tb-review"),
-  tbRisk: document.getElementById("tb-risk"),
-  tbBranches: document.getElementById("tb-branches"),
-  tbClear: document.getElementById("tb-clear"),
-  tbOverflow: document.getElementById("tb-overflow"),
-  tbOverflowMenu: document.getElementById("tb-overflow-menu"),
-  graphToolbar: document.querySelector(".graph-toolbar"),
-  groupCount: document.getElementById("group-count"),
-  tbDelegateGroup: document.getElementById("tb-delegate-group"),
-  timelinePanel: document.getElementById("timeline-panel"),
-  branchesPanel: document.getElementById("branches-panel"),
-  narrationPanel: document.getElementById("narration-panel"),
-  folderDialog: document.getElementById("folder-dialog"),
-  folderPath: document.getElementById("folder-path"),
-  folderNote: document.getElementById("folder-note"),
-  folderList: document.getElementById("folder-list"),
-  folderUp: document.getElementById("folder-up"),
-  folderUse: document.getElementById("folder-use"),
-  folderCancel: document.getElementById("folder-cancel"),
-  forget: document.getElementById("forget"),
-  memberView: document.getElementById("member-view"),
-  graphHint: document.getElementById("graph-hint"),
-  shortcuts: document.getElementById("shortcuts"),
-  settingsToggle: document.getElementById("settings-toggle"),
-  settingsPanel: document.getElementById("settings-panel"),
-  workspacePanel: document.getElementById("workspace-panel"),
-  passportPanel: document.getElementById("passport-panel"),
-  routePanel: document.getElementById("route-panel"),
-  blocksPanel: document.getElementById("blocks-panel"),
-  sourcePanel: document.getElementById("source-panel"),
-  screenTabGraph: document.getElementById("screen-tab-graph"),
-  screenTabTerminal: document.getElementById("screen-tab-terminal"),
-  screenTabReview: document.getElementById("screen-tab-review"),
-  screenTabHistory: document.getElementById("screen-tab-history"),
-  graphScreen: document.getElementById("graph-screen"),
-  terminalScreen: document.getElementById("terminal-screen"),
-  terminalContainer: document.getElementById("terminal-container"),
-  reviewScreen: document.getElementById("review-screen"),
-  reviewScreenBody: document.getElementById("review-screen-body"),
-  reviewScreenRefresh: document.getElementById("review-screen-refresh"),
-  reviewScreenPending: document.getElementById("review-screen-pending"),
-  historyScreen: document.getElementById("history-screen"),
-  historyScreenBody: document.getElementById("history-screen-body"),
-  historyScreenRefresh: document.getElementById("history-screen-refresh")
-};
-var memberData = null;
-var memberTimer = null;
-var selectedCommitHash = null;
-var selectedBranchName = null;
-var branchBase = null;
-var branchesBusy = false;
-var reviewHistory = [];
-var currentReviewRequest = null;
-var passportHistory = [];
-var passportGoingBack = false;
-var currentRoute = null;
-var routeIndex = 0;
-var browsedFolder = null;
+var elements = queryElements();
 async function request(path) {
   const response = await fetch(`${API_PATH}${path}`);
   if (!response.ok) {
@@ -23162,73 +26570,59 @@ async function request(path) {
   }
   return response.json();
 }
+Object.assign(app, { store, state, memberUI, view, elements, request });
+Object.assign(app, {
+  applyClientPrefs,
+  applyFilterToView,
+  dismissHint,
+  scan,
+  setScreen
+});
+bindKeyboardShortcuts(app);
+app.prefs = createViewPrefs(app);
+app.runtime = createRuntimeReadout(app);
+app.url = createUrlState(app);
+app.narration = createNarrationController(app);
+app.memberMap = createMemberMapController(app);
+app.git = createGitController(app);
+app.settings = createSettingsController(app);
+app.panels = createRepositoryPanels(app);
+app.lenses = createLensController(app);
+app.repos = createRepositoryPicker(app);
+app.units = createSystemUnits(app);
+app.source = createSourceViewer(app);
+createTerminalBridge(app);
+app.menus = createChromeMenus(app);
+app.delegation = createDelegation(app);
+app.selection = createSelectionController(app);
+app.windows = createFloatingPanels(app);
 var freshness = createFreshnessBadge(elements.freshness, {
   request,
   onRebuild: () => scan({ refresh: true }),
   repository: () => state.repository
 });
-async function loadCatalogue() {
-  const catalogue = await request("/repositories");
-  renderRepositoryOptions(catalogue.repositories, catalogue.active);
-}
-function renderRepositoryOptions(repositories, active) {
-  elements.repository.replaceChildren(
-    ...repositories.map((entry) => {
-      const option = document.createElement("option");
-      option.value = entry.root;
-      option.textContent = entry.name;
-      return option;
-    })
-  );
-  if (repositories.length === 0) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No repositories";
-    option.disabled = true;
-    elements.repository.append(option);
-  }
-  const selected2 = active ?? repositories[0]?.root ?? null;
-  if (selected2) {
-    elements.repository.value = selected2;
-  }
-  state.repository = elements.repository.value || null;
-  elements.forget.disabled = !state.repository;
-}
-async function rememberRepository(root) {
-  const response = await fetch(`${API_PATH}/repositories`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ root })
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.error ?? `Could not remember ${root}`);
-  }
-  return response.json();
-}
 async function scan({ refresh = false } = {}) {
-  const generation = ++scanGeneration;
+  const generation = ++app.scanGeneration;
   elements.status.textContent = "Scanning\u2026";
   if (elements.graphLoading) elements.graphLoading.hidden = false;
   if (elements.graphEmpty) elements.graphEmpty.hidden = true;
-  hideTooltip();
-  closeMemberMap();
+  app.selection.hideTooltip();
+  app.memberMap.closeMemberMap();
   try {
     const model = await request(`/graph${buildGraphQuery(state, { refresh })}`);
-    if (generation !== scanGeneration) {
+    if (generation !== app.scanGeneration) {
       return;
     }
-    current = model;
+    app.current = model;
     if (state.mode === "system" && !model.systemUnit && model.systemSingleUnit && !state.systemAutoOpened) {
       state.systemAutoOpened = true;
-      openUnit(model.systemSingleUnit);
+      app.units.openUnit(model.systemSingleUnit);
       return;
     }
     const restoreFile = state.mode === "system" ? state.unitFile : null;
-    selected = null;
-    selectedEdgeId = null;
-    selectedCommitHash = null;
-    selectedBranchName = null;
+    app.selected = null;
+    app.selectedEdgeId = null;
+    app.git.clearReviewMarks();
     state.renderedGeneration = generation;
     if (model.systemUnit) {
       state.systemUnitLabel = model.systemUnitName ?? state.systemUnit;
@@ -23241,62 +26635,62 @@ async function scan({ refresh = false } = {}) {
     view.render(model);
     view.focusFile(null);
     applyFilterToView();
-    applyTierLens();
-    applyLocLens2();
-    applyEdgeKindLens();
-    applyCoChangeLens();
+    app.lenses.applyTierLens();
+    app.lenses.applyLocLens();
+    app.lenses.applyEdgeKindLens();
+    app.lenses.applyCoChangeLens();
     renderLegend(elements.legend, model, { locLens: state.mode === "file" && state.locLens });
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
       renderer: rendererName(),
       shown: view.cy.nodes().length
     });
-    runtimeBase = elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? "";
-    refreshRuntimeReadout();
+    app.runtime.setRuntimeBase(elements.diagnostics.querySelector('[data-role="runtime"]')?.textContent ?? "");
+    app.runtime.refreshRuntimeReadout();
     updateDiagnosticsBadge(summary);
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === "system") {
-        if (!prefix) closeUnit();
+        if (!prefix) app.units.closeUnit();
         return;
       }
       state.prefix = prefix;
       scan();
     });
-    updateOutsideButton();
+    app.units.updateOutsideButton();
     applyModeChrome();
-    updateUnitsButton();
-    updateEdgeKindButton();
-    updateCoChangeButton();
-    updateLabelsButton();
-    updateFocusButton();
+    app.units.updateUnitsButton();
+    app.lenses.updateEdgeKindButton();
+    app.lenses.updateCoChangeButton();
+    app.lenses.updateLabelsButton();
+    app.selection.updateFocusButton();
     elements.inspector.hidden = true;
     elements.status.textContent = graphSummary(model);
     updateStatusbar(model);
     void freshness.refresh({ repository: state.repository });
     if (elements.graphLoading) elements.graphLoading.hidden = true;
     updateEmptyState();
-    updateSystemNote(model);
+    app.units.updateSystemNote(model);
     view.resize();
     fit(view.cy);
     if (restoreFile && model.systemUnit && (model.nodes ?? []).some((node) => node.id === restoreFile)) {
-      if (generation === scanGeneration) {
-        selectNode(restoreFile);
+      if (generation === app.scanGeneration) {
+        app.selection.selectNode(restoreFile);
       }
     }
     if (shouldShowHint()) {
       elements.graphHint.hidden = false;
     }
     if (state.overlay !== "none") {
-      await applyOverlay(generation);
+      await app.lenses.applyOverlay(generation);
     } else if (state.tier === "off") {
       renderOverlayPanel(elements.overlayPanel, "", null);
     }
     if (state.mode === "system" && !model.systemUnit && (model.unitCards?.length ?? 0) > 0) {
-      enrichUnitCards(generation);
+      app.lenses.enrichUnitCards(generation);
     }
-    refreshDock();
+    app.windows.refreshDock();
   } catch (error) {
-    if (generation !== scanGeneration) {
+    if (generation !== app.scanGeneration) {
       return;
     }
     if (elements.graphLoading) elements.graphLoading.hidden = true;
@@ -23337,7 +26731,7 @@ function dismissHint() {
   }
 }
 function updateEmptyState() {
-  if (!elements.graphEmpty || !current) return;
+  if (!elements.graphEmpty || !app.current) return;
   const visible = view.cy.nodes().filter((n) => !n.hasClass("filtered-out")).length;
   const filtering = state.filter.trim().length > 0;
   elements.graphEmpty.hidden = !(filtering && visible === 0);
@@ -23354,1866 +26748,29 @@ function updateFilterChrome(matchedCount, totalCount) {
   }
 }
 function applyFilterToView() {
-  if (!current) return;
-  const ids = filterNodes(current, state.filter);
+  if (!app.current) return;
+  const ids = filterNodes(app.current, state.filter);
   view.filter(ids);
-  updateFilterChrome(ids.length, current.nodes.length);
+  updateFilterChrome(ids.length, app.current.nodes.length);
   updateEmptyState();
-  if (current) {
-    renderTestsStrip(elements.strip, mapCounts(current), applyStripFilter, state.filter);
+  if (app.current) {
+    renderTestsStrip(elements.strip, mapCounts(app.current), applyStripFilter, state.filter);
   }
-}
-var tierReportCache = { generation: -1, report: null };
-async function applyTierLens() {
-  if (state.tier === "off" || !current || current.system || current.prefixLength !== void 0) {
-    view.applyTier(null);
-    view.applyTierDirections(null);
-    return;
-  }
-  const generation = state.renderedGeneration;
-  if (tierReportCache.generation !== generation || !tierReportCache.report) {
-    try {
-      const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-      const response = await fetch(`${API_PATH}/analysis/tiers${query}`);
-      tierReportCache = {
-        generation,
-        report: response.ok ? await response.json() : null
-      };
-    } catch {
-      tierReportCache = { generation, report: null };
-    }
-  }
-  if (!current || state.tier === "off" || state.renderedGeneration !== generation) {
-    view.applyTier(null);
-    view.applyTierDirections(null);
-    return;
-  }
-  view.applyTier(tierOfFile(tierReportCache.report), state.tier === "all" ? "all" : state.tier);
-  view.applyTierDirections(tierDirectionClasses(tierReportCache.report));
-  renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
-}
-function selectNode(id) {
-  if (!current) {
-    return;
-  }
-  dismissHint();
-  if (state.pathMode) {
-    if (!state.pathFrom) {
-      state.pathFrom = id;
-      elements.hover.textContent = `Path start: ${id}. Select the end node.`;
-      view.highlight(neighbourhood(current, id));
-      return;
-    }
-    const from = state.pathFrom;
-    state.pathFrom = null;
-    state.pathMode = false;
-    elements.tbPath.classList.remove("active");
-    const path = findPath(current, from, id);
-    elements.hover.textContent = path ? `${path.length - 1} step(s): ${path.join(" -> ")}` : `No directed path from ${from} to ${id}.`;
-    view.highlight(path ?? [from, id]);
-    return;
-  }
-  const previousSelection = selected;
-  selected = id;
-  store.set("ui", { node: id });
-  if (!passportGoingBack && previousSelection && previousSelection !== id) {
-    passportHistory.push(previousSelection);
-  }
-  view.clearEdge();
-  selectedEdgeId = null;
-  renderEdgeEvidence(elements.edgePanel, null);
-  updateFocusButton();
-  view.highlight(neighbourhood(current, id));
-  const unitNode = (current?.nodes ?? []).find((candidate) => candidate.id === id);
-  if (current?.systemUnit && unitNode?.systemUnit && !id.endsWith("#support")) {
-    state.unitFile = id;
-    view.focusFile(id);
-  }
-  renderInspector(elements.inspector, current, id, {
-    onSelect: (target) => selectNode(target),
-    onTrace: (from, to) => tracePath(from, to),
-    onOpenWorkspace: (target) => openFile(target),
-    onBack: passportBack,
-    backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
-    ...isFileNode(id) ? { onViewSource: (target) => viewSource(target) } : {},
-    // The reading route is repository-wide; a Module Passport opens it at its own file.
-    ...isFileNode(id) ? { onOpenRoute: (target) => showRoute(target) } : {},
-    onOpenMemberMap: (target) => {
-      openMemberMap(target).then(() => {
-        floatingWindows.find((controller) => controller.key === "inspector")?.close();
-      }).catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
-    },
-    // A System-view unit may ask the opt-in narrator to name its group.
-    ...current?.system && !current?.systemUnit ? { narratorStatus, onNarrate: () => narrateGroup(id), onOpenNarratorSettings: openNarratorSettings } : {},
-    // Inside a unit, the selected file may show its cross-unit links (L17).
-    ...current?.systemUnit ? {
-      outsideShown: state.showOutside,
-      onShowOutside: () => toggleOutsideLinks(),
-      onExpandUnit: (unit) => toggleExpandedUnit(unit)
-    } : {}
-  });
-  if (!current?.system) {
-    loadMembers(id);
-  }
-  refreshDock();
-}
-async function loadMembers(id) {
-  const membersSection = elements.inspector.querySelector('[data-role="members"]');
-  const functionsSection = elements.inspector.querySelector('[data-role="functions"]');
-  const impactSection = elements.inspector.querySelector('[data-role="impact"]');
-  const changesWithSection = elements.inspector.querySelector('[data-role="changes-with"]');
-  if (!membersSection && !functionsSection && !impactSection && !changesWithSection) {
-    return;
-  }
-  const params = new URLSearchParams({ file: id });
-  if (state.repository) {
-    params.set("repository", state.repository);
-  }
-  const impactParams = new URLSearchParams(params);
-  try {
-    if (narratorStatus === null) {
-      narratorStatus = await fetchNarratorStatus();
-    }
-    const [symbolsResponse, impactResponse] = await Promise.all([
-      fetch(`${API_PATH}/symbols?${params.toString()}`),
-      fetch(`${API_PATH}/analysis/impact-passport?${impactParams.toString()}`)
-    ]);
-    const result = symbolsResponse.ok ? await symbolsResponse.json() : { available: false, detail: "Symbols are unavailable for this file." };
-    const impact = impactResponse.ok ? await impactResponse.json() : null;
-    const changesWith = changesWithSection ? await loadChangesWith(id) : null;
-    if (selected === id) {
-      if (membersSection) renderMembers(membersSection, result);
-      if (functionsSection) renderFunctions(functionsSection, result, functionsHandlers(result));
-      if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
-      if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
-    }
-  } catch {
-    if (selected === id) {
-      const fallback = { available: false, detail: "Symbols could not be loaded." };
-      if (membersSection) renderMembers(membersSection, fallback);
-      if (functionsSection) renderFunctions(functionsSection, fallback, functionsHandlers(fallback));
-      if (impactSection) renderImpactPassport(impactSection, null);
-      if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: "Co-change could not be loaded." });
-    }
-  }
-}
-async function loadChangesWith(id) {
-  const repository = state.repository ?? null;
-  if (!coChangeReport || coChangeRepository !== repository) {
-    try {
-      const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
-      coChangeReport = await request(`/analysis/co-change${query}`);
-      coChangeRepository = repository;
-    } catch (error) {
-      return { available: false, detail: error.message };
-    }
-  }
-  if (coChangeReport?.unavailable) {
-    return { available: false, detail: coChangeReport.detail };
-  }
-  return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
-}
-function impactPassportSet(card) {
-  if (!card || card.path === void 0) {
-    return null;
-  }
-  return {
-    scope: "file",
-    baseline: card.status === "added" ? null : "HEAD",
-    files: [card],
-    totals: null,
-    capped: false,
-    ...card.provenance ? { provenance: card.provenance } : {}
-  };
-}
-function functionsHandlers(result) {
-  return {
-    narratorStatus,
-    onNarrate: () => narrateFile(result),
-    onOpenNarratorSettings: openNarratorSettings
-  };
-}
-async function fetchNarratorStatus() {
-  try {
-    const response = await fetch(`${API_PATH}/narrator`);
-    if (!response.ok) {
-      return { configured: false, reason: "not-configured" };
-    }
-    const body = await response.json();
-    if (Array.isArray(body?.presets) && body.presets.length > 0) {
-      narratorPresets = body.presets;
-    }
-    return body;
-  } catch {
-    return { configured: false, reason: "not-configured" };
-  }
-}
-async function ensureNarratorStatus() {
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
-  }
-  return narratorStatus;
-}
-async function narrateGroup(id) {
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
-  }
-  return postNarration(
-    GROUP_NAMING_INSTRUCTION,
-    buildGroupNamingEvidence(current, id)
-  );
-}
-async function narrateFile(result) {
-  return postNarration(
-    "Summarise the recorded complexity, signals, and call wiring in this file.",
-    buildNarratorEvidence(result)
-  );
-}
-async function narrateMemberMap() {
-  return postNarration(
-    MEMBER_NARRATION_INSTRUCTION,
-    fileNarrationEvidence(memberData?.file, memberData, memberData?.importIds, memberData?.consumerIds)
-  );
-}
-async function narrateReview(result) {
-  return postNarration(REVIEW_NARRATION_INSTRUCTION, buildReviewNarrationEvidence(result));
-}
-function fileNarrationEvidence(file, source, imports, usedBy) {
-  if (source?.memberMap?.types?.length > 0) {
-    return buildMemberNarratorEvidence(source.memberMap, {
-      file,
-      imports: imports ?? void 0,
-      usedBy: usedBy ?? void 0,
-      functions: source.functions
-    });
-  }
-  return buildNarratorEvidence({ functions: source?.functions });
-}
-function isNarratable(id) {
-  if (!id || !current || state.mode === "block" || id.endsWith("#support")) {
-    return false;
-  }
-  return current.nodes.some((candidate) => candidate.id === id);
-}
-async function narrateNode(id) {
-  const label = current?.nodes.find((candidate) => candidate.id === id)?.label ?? id;
-  const showPanel = (panelState) => {
-    renderNarrationPanel(elements.narrationPanel, panelState, { onOpenNarratorSettings: openNarratorSettings });
-  };
-  showPanel({ label, phase: "loading" });
-  floatingWindows.find((controller) => controller.key === "narration")?.open();
-  try {
-    let reply;
-    if (current?.system && !current?.systemUnit) {
-      reply = await narrateGroup(id);
-    } else {
-      const params = new URLSearchParams({ file: id });
-      if (state.repository) {
-        params.set("repository", state.repository);
-      }
-      const result = await request(`/symbols?${params.toString()}`);
-      const passport = passportFor(current, id);
-      reply = await postNarration(
-        MEMBER_NARRATION_INSTRUCTION,
-        fileNarrationEvidence(
-          id,
-          result,
-          passport?.imports.map((entry) => entry.id),
-          passport?.usedBy.map((entry) => entry.id)
-        )
-      );
-    }
-    showPanel({ label, phase: "done", reply });
-  } catch (error) {
-    showPanel({ label, phase: "error", message: error.message });
-  }
-}
-async function narrateRouteTour() {
-  const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const response = await fetch(`${API_PATH}/narrator/tour${params}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(state.repository ? { repository: state.repository } : {})
-  });
-  const reply = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(reply.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return reply;
-}
-async function narrateRouteStep(step) {
-  return postNarration(
-    ROUTE_STEP_INSTRUCTION,
-    buildRouteStepEvidence(step, currentRoute?.summary)
-  );
-}
-async function postNarration(instruction, evidence) {
-  const response = await fetch(`${API_PATH}/narrator`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ instruction, evidence })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Narrator request failed (${response.status}).`);
-  }
-  return body;
-}
-function clearSelection() {
-  selected = null;
-  passportHistory = [];
-  store.set("ui", { node: null });
-  state.pathFrom = null;
-  state.pathMode = false;
-  elements.tbPath.classList.remove("active");
-  state.unitFile = null;
-  view.focusFile(null);
-  elements.hover.textContent = "";
-  hideTooltip();
-  view.highlight(null);
-  view.clearEdge();
-  selectedEdgeId = null;
-  renderEdgeEvidence(elements.edgePanel, null);
-  closeReview();
-  closeRisk();
-  elements.inspector.hidden = true;
-  view.clearGroupSelection();
-  updateFocusButton();
-  refreshDock();
-}
-function passportBack() {
-  const previous = passportHistory.pop();
-  passportGoingBack = true;
-  try {
-    if (previous) {
-      selectNode(previous);
-    } else {
-      clearSelection();
-    }
-  } finally {
-    passportGoingBack = false;
-  }
-}
-function memberMapBack() {
-  const file = memberData?.file;
-  closeMemberMap();
-  if (file) {
-    selectNode(file);
-  }
-}
-async function openMemberMap(id) {
-  const params = new URLSearchParams({ file: id });
-  if (state.repository) {
-    params.set("repository", state.repository);
-  }
-  const result = await request(`/symbols?${params.toString()}`);
-  const healthParams = new URLSearchParams({ file: id });
-  if (state.repository) {
-    healthParams.set("repository", state.repository);
-  }
-  let health = await request(`/analysis/file-health?${healthParams.toString()}`).catch(() => null);
-  if (!health) {
-    const healthQuery = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-    health = await request(`/analysis/architecture-health${healthQuery}`).catch(() => null);
-  }
-  const passport = passportFor(current, id);
-  memberData = {
-    file: id,
-    repository: state.repository,
-    memberMap: result.memberMap,
-    symbols: result.symbols,
-    health,
-    metrics: health?.metrics ?? null,
-    consumerIds: passport ? passport.usedBy.map((entry) => entry.id) : null,
-    importIds: passport ? passport.imports.map((entry) => entry.id) : null,
-    functions: result.functions
-  };
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
-  }
-  store.set("ui", { memberOpen: true, node: id });
-  store.set("member", { stepIndex: 0, find: "" });
-  floatingWindows.find((controller) => controller.key === "member")?.open();
-  refreshDock();
-}
-function memberStepCount() {
-  return memberMapSteps(memberData?.memberMap, {
-    consumers: memberData?.consumerIds ? memberData.consumerIds.length : null
-  }).length;
-}
-function renderMemberMapView() {
-  if (!memberData) {
-    return;
-  }
-  renderMemberMap(elements.memberView, memberData, memberUI, {
-    onFind: (value) => store.set("member", { find: value }),
-    onOrder: (value) => store.set("member", { order: value }),
-    onWiring: (value) => store.set("member", { showWiring: value }),
-    onZoom: (value) => store.set("member", { zoom: value }),
-    onExplain: () => {
-      store.set("member", { explain: !memberUI.explain });
-      if (memberUI.explain) {
-        revealMemberExplain();
-      }
-    },
-    onNight: () => store.set("member", { dim: !memberUI.dim }),
-    onCompare: () => {
-      toggleTimeline().catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
-    },
-    onOnlyFlow: () => store.set("member", { onlyFlow: !memberUI.onlyFlow }),
-    onReset: () => store.set("member", {
-      order: "source",
-      find: "",
-      showWiring: true,
-      zoom: "medium",
-      dataFlow: true,
-      onlyFlow: false,
-      explain: false,
-      stepIndex: 0,
-      dim: false
-    }),
-    onDataFlow: (value) => store.set("member", { dataFlow: value }),
-    // The member map may ask the opt-in narrator to explain the recorded members and data flow.
-    narratorStatus,
-    onNarrate: () => narrateMemberMap(),
-    onOpenNarratorSettings: openNarratorSettings,
-    onStep: (delta) => {
-      stopMemberPlay();
-      store.set("member", {
-        stepIndex: Math.min(memberStepCount() - 1, Math.max(0, memberUI.stepIndex + delta))
-      });
-    },
-    onPlay: () => toggleMemberPlay(),
-    onBack: () => memberMapBack(),
-    onClose: () => closeMemberMap()
-  });
-}
-function revealMemberExplain() {
-  const container = elements.memberView;
-  const explain = container.querySelector('[data-role="explain"]');
-  if (!explain) {
-    return;
-  }
-  const toolbar = container.querySelector(".member-toolbar");
-  const containerTop = container.getBoundingClientRect().top;
-  const offset = (toolbar?.offsetHeight ?? 0) + 8;
-  const top = explain.getBoundingClientRect().top;
-  if (top < containerTop + offset) {
-    container.scrollTop = Math.max(0, container.scrollTop + (top - containerTop - offset));
-  }
-}
-function stopMemberPlay() {
-  if (memberTimer) {
-    clearInterval(memberTimer);
-    memberTimer = null;
-  }
-  elements.memberView.classList.remove("is-playing");
-}
-function toggleMemberPlay() {
-  if (memberTimer) {
-    stopMemberPlay();
-    return;
-  }
-  elements.memberView.classList.add("is-playing");
-  memberTimer = setInterval(() => {
-    if (memberUI.stepIndex >= memberStepCount() - 1) {
-      store.set("member", { stepIndex: 0 });
-      stopMemberPlay();
-      return;
-    }
-    store.set("member", { stepIndex: memberUI.stepIndex + 1 });
-  }, 1400);
-}
-function closeMemberMap() {
-  stopMemberPlay();
-  elements.memberView.hidden = true;
-  memberUI.dim = false;
-  store.set("ui", { memberOpen: false });
-  refreshDock();
-}
-var urlIntent = null;
-function currentUrlParams() {
-  try {
-    return new URL(window.location.href).searchParams;
-  } catch {
-    return new URLSearchParams();
-  }
-}
-function syncUrl() {
-  try {
-    const url = new URL(window.location.href);
-    const set = (key, value) => {
-      if (value) {
-        url.searchParams.set(key, value);
-      } else {
-        url.searchParams.delete(key);
-      }
-    };
-    set("repository", state.repository ?? "");
-    set("mode", state.mode === "file" ? "file" : state.mode === "system" ? "system" : "");
-    set("unit", state.mode === "system" ? state.systemUnit ?? "" : "");
-    set("outside", state.mode === "system" && state.showOutside ? "1" : "");
-    set("node", store.get().ui.node ?? "");
-    set("panel", store.get().ui.memberOpen ? "member-map" : "");
-    if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
-      window.history.replaceState(null, "", url);
-    }
-  } catch {
-  }
-}
-function applyUrl() {
-  const params = currentUrlParams();
-  urlIntent = { node: params.get("node"), panel: params.get("panel") };
-  const repository = params.get("repository");
-  if (repository) {
-    state.repository = repository;
-  }
-  const mode = params.get("mode");
-  if (mode === "file" || mode === "block" || mode === "system") {
-    state.mode = mode;
-    elements.detail.value = mode;
-  }
-  state.systemUnit = mode === "system" ? params.get("unit") : null;
-  state.systemUnitLabel = state.systemUnit;
-  state.showOutside = mode === "system" && params.get("outside") === "1";
-  return params;
-}
-async function restoreUrlPanel() {
-  const intent = urlIntent;
-  urlIntent = null;
-  if (!intent || intent.panel !== "member-map" || !intent.node) {
-    return;
-  }
-  if (!current || !(current.nodes ?? []).some((entry) => entry.id === intent.node)) {
-    return;
-  }
-  selectNode(intent.node);
-  await openMemberMap(intent.node);
 }
 store.subscribe((_2, changed) => {
   if (changed.member) {
-    renderMemberMapView();
+    app.memberMap.renderMemberMapView();
   }
-  syncUrl();
+  app.url.syncUrl();
 });
-document.addEventListener("keydown", (event) => {
-  const inField = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "");
-  const screen = store.get().ui.screen;
-  const onGraph = screen === "graph";
-  if (event.key === "Escape" && (screen === "review" || screen === "history") && !inField) {
-    event.preventDefault();
-    setScreen("graph");
-    return;
-  }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && onGraph) {
-    event.preventDefault();
-    elements.filter.focus();
-    elements.filter.select();
-    return;
-  }
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
-    const screenKey = event.key.toLowerCase();
-    if (screenKey === "t") {
-      event.preventDefault();
-      setScreen("terminal");
-      terminalScreen?.newSession?.({ kind: "shell" })?.catch((error) => {
-        showToast(`Could not open a shell (${error.message}).`);
-      });
-      return;
-    }
-    if (screenKey === "w") {
-      event.preventDefault();
-      terminalScreen?.closeActiveSession?.();
-      return;
-    }
-    if (screenKey === "r") {
-      event.preventDefault();
-      setScreen("terminal");
-      terminalScreen?.openPresetMenu?.();
-      return;
-    }
-  }
-  if (event.key === "Escape") {
-    closeOverflowMenu();
-    if (!elements.memberView.hidden) {
-      closeMemberMap();
-      return;
-    }
-    if (state.filter && !inField) {
-      state.filter = "";
-      elements.filter.value = "";
-      applyFilterToView();
-      return;
-    }
-    if (state.mode === "system" && state.systemUnit && !inField) {
-      closeUnit();
-      return;
-    }
-    if (!inField) clearSelection();
-    return;
-  }
-  if (event.key === "Enter" && !inField && state.mode === "system" && selected) {
-    const node = current?.nodes.find((candidate) => candidate.id === selected);
-    if (node && !node.systemUnit) {
-      event.preventDefault();
-      openUnit(selected);
-      return;
-    }
-  }
-  if (event.key === "?" && !inField) {
-    event.preventDefault();
-    toggleShortcuts();
-    return;
-  }
-  if (inField || !elements.memberView.hidden || !onGraph) return;
-  const key = event.key.toLowerCase();
-  if (key === "f" && selected) focus(view.cy, selected);
-  else if (key === "i") elements.tbImpact.click();
-  else if (key === "o" && state.mode === "system" && state.systemUnit) elements.tbOutside.click();
-  else if (key === "u" && state.mode === "system" && state.systemUnit) closeUnit();
-  else if (key === "p") elements.tbPath.click();
-  else if (key === "b") elements.tbBoundaries.click();
-  else if (key === "c" && state.mode === "file") elements.tbCalls?.click();
-  else if (key === "h" && state.mode === "file") elements.tbCoChange?.click();
-  else if (key === "l" && state.mode === "file") elements.tbLabels?.click();
-  else if (key === "z" && state.mode === "file") elements.tbLoc?.click();
-  else if (key === "s" && selected && isFileNode(selected)) viewSource(selected);
-  else if (key === "t") elements.tbTimeline.click();
-  else if (key === "r") elements.tbReview.click();
-  else if (key === "v") elements.tbRisk.click();
-  else if (key === "n") elements.tbBranches.click();
-  else if (key === "g" && groupSelection.length >= 2) elements.tbDelegateGroup.click();
-});
-async function toggleTimeline() {
-  if (!elements.timelinePanel.hidden) {
-    elements.timelinePanel.hidden = true;
-    return;
-  }
-  elements.timelinePanel.hidden = false;
-  const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const result = await request(`/analysis/timeline${query}`);
-  const driftQuery = state.repository ? `?limit=20&repository=${encodeURIComponent(state.repository)}` : "?limit=20";
-  const draw = (metrics, drift2) => renderTimeline(elements.timelinePanel, result, (commit) => {
-    selectCommit(commit).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }, {
-    selectedHash: selectedCommitHash,
-    metrics,
-    drift: drift2,
-    onClose: () => {
-      elements.timelinePanel.hidden = true;
-    }
-  });
-  draw(null, null);
-  if (result?.available === false) {
-    return;
-  }
-  const [history, drift] = await Promise.all([
-    request(`/analysis/change-metrics/history${query}`).catch(() => null),
-    request(`/analysis/drift${driftQuery}`).catch(() => null)
-  ]);
-  if (!elements.timelinePanel.hidden && (history?.available || drift !== null)) {
-    draw(
-      history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-      drift
-    );
-  }
-}
-async function toggleBranches() {
-  if (!elements.branchesPanel.hidden) {
-    elements.branchesPanel.hidden = true;
-    return;
-  }
-  elements.branchesPanel.hidden = false;
-  await loadBranches();
-}
-async function loadBranches() {
-  const params = new URLSearchParams();
-  if (state.repository) params.set("repository", state.repository);
-  if (branchBase) params.set("base", branchBase);
-  const query = params.toString() ? `?${params}` : "";
-  const result = await request(`/analysis/branches${query}`);
-  if (result?.available && result.base) branchBase = result.base.name;
-  renderBranches(elements.branchesPanel, result, {
-    selected: selectedBranchName,
-    busy: branchesBusy,
-    onSelect: (branch) => {
-      selectBranch(branch.name).catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
-    },
-    onBase: (name) => {
-      branchBase = name;
-      loadBranches().catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
-    },
-    onFetch: () => runBranchAction("fetch", {}),
-    onPull: () => runBranchAction("pull", { branch: result?.current }),
-    onPullBranch: (branch) => runBranchAction("pull", { branch: branch.name }),
-    onPush: (branch) => runBranchAction("push", { branch: branch.name }),
-    onClose: () => {
-      elements.branchesPanel.hidden = true;
-    }
-  });
-}
-async function runBranchAction(action, payload) {
-  if (branchesBusy) return;
-  if ((action === "sync" || action === "pull") && !payload.branch) {
-    elements.status.textContent = `${action === "pull" ? "Pull" : "Sync"} needs a checked-out branch.`;
-    return;
-  }
-  branchesBusy = true;
-  await loadBranches().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-  try {
-    const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-    const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(body.error ?? `${response.status} ${response.statusText}`);
-    }
-    elements.status.textContent = body.available === false ? `${action} failed: ${body.detail}` : body.message;
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-  } finally {
-    branchesBusy = false;
-    await loadBranches().catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }
-}
-async function selectBranch(name) {
-  selectedBranchName = name;
-  const against = branchBase ? `&against=${encodeURIComponent(branchBase)}` : "";
-  await showReview(`?branch=${encodeURIComponent(name)}${against}`, null, name);
-  for (const row of elements.branchesPanel.querySelectorAll(".branch-row")) {
-    row.classList.toggle("selected-branch", row.querySelector(".branch")?.dataset.branch === name);
-  }
-}
-async function selectCommit(commit) {
-  selectedCommitHash = commit.hash;
-  await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
-}
-async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
-  const entry = { query, commit, branchName };
-  if (!fromHistory && currentReviewRequest) {
-    reviewHistory.push(currentReviewRequest);
-  }
-  currentReviewRequest = entry;
-  const navigation = {
-    canGoBack: reviewHistory.length > 0,
-    onBack: reviewBack
-  };
-  const separator = query ? "&" : "?";
-  const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : "";
-  const ticket = ++reviewTicket;
-  elements.reviewPanel.hidden = false;
-  renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
-  let data;
-  try {
-    data = await request(`/analysis/review${query}${repository}`);
-  } catch (error) {
-    if (ticket === reviewTicket) {
-      renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
-    }
-    throw error;
-  }
-  if (ticket !== reviewTicket) return;
-  currentReview = data;
-  if (data.available === false) {
-    elements.reviewPanel.hidden = false;
-    renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
-    return;
-  }
-  if (commit) {
-    try {
-      data.structural = await request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
-    } catch (error) {
-      data.structural = { available: false, reason: "git-error", detail: error.message };
-    }
-    if (ticket !== reviewTicket) return;
-  }
-  if (narratorStatus === null) {
-    narratorStatus = await fetchNarratorStatus();
-  }
-  if (ticket !== reviewTicket) return;
-  const overlay2 = reviewOverlay(data);
-  view.overlay(overlay2.classes);
-  elements.reviewPanel.hidden = false;
-  renderReview(elements.reviewPanel, data, reviewHandlers(data, navigation));
-  if (store.get().ui.screen === "review") {
-    renderReview(elements.reviewScreenBody, data, reviewHandlers(data, navigation, () => setScreen("graph")));
-  }
-  const label = branchName ?? (commit ? commit.shortHash : "working tree");
-  elements.status.textContent = `Review ${label}: ${overlay2.summary}`;
-}
-async function reviewBack() {
-  const previous = reviewHistory.pop();
-  if (!previous) {
-    return;
-  }
-  try {
-    await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-  }
-}
-var reviewTicket = 0;
-function closeReview() {
-  reviewTicket += 1;
-  currentReview = null;
-  reviewHistory = [];
-  currentReviewRequest = null;
-  elements.reviewPanel.hidden = true;
-  elements.reviewPanel.replaceChildren();
-}
-async function toggleReview() {
-  if (!elements.reviewPanel.hidden) {
-    closeReview();
-    view.overlay(null);
-    return;
-  }
-  try {
-    await showReview("");
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-  }
-}
-async function showRisk() {
-  const repository = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const report = await request(`/analysis/risk${repository}`);
-  closeReview();
-  elements.riskPanel.hidden = false;
-  renderRisk(elements.riskPanel, report, {
-    onClose: closeRisk,
-    onSelect: (id) => selectNode(id)
-  });
-  elements.status.textContent = riskSummary(report);
-}
-function closeRisk() {
-  elements.riskPanel.hidden = true;
-  renderRisk(elements.riskPanel, null, {});
-}
-async function toggleRisk() {
-  if (!elements.riskPanel.hidden) {
-    closeRisk();
-    return;
-  }
-  try {
-    await showRisk();
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-  }
-}
-var serverSettings = null;
-var settingsStatus = "";
-var settingsStatusError = false;
-var narratorPresets = [];
-var narratorUiState = { presetId: null, keyMode: null, models: [], modelsNote: null, test: null };
-function setClientPref(key, value) {
-  clientPrefs = { ...clientPrefs, [key]: value };
-  writeSettings(clientPrefs);
-  applyClientPrefs();
-  updateLabelsButton();
-  if (key === "locThreshold") {
-    applyLocLens2();
-  }
-  renderSettingsView();
-  if (key === "commitEnabled" && state.overlay === "impact") {
-    applyOverlay();
-  }
-}
-function renderSettingsView() {
-  if (!elements.settingsPanel) return;
-  renderSettings(elements.settingsPanel, {
-    prefs: clientPrefs,
-    server: serverSettings,
-    presets: narratorPresets,
-    narratorState: narratorUiState,
-    onNarratorState: (patch2) => {
-      narratorUiState = { ...narratorUiState, ...patch2 };
-      renderSettingsView();
-    },
-    status: settingsStatus || null,
-    statusError: settingsStatusError,
-    onPref: (key, value) => setClientPref(key, value),
-    onSaveCeiling: (value) => saveServerSettings({ scanCeiling: value }, value ? "Scan ceiling updated." : "Scan ceiling reset."),
-    onToggleRisk: (value) => saveServerSettings({ riskOnline: value }, "Online risk lookup updated."),
-    onRestart: () => restartServer(),
-    onNarratorChange: async (patch2) => {
-      const saved = await saveServerSettings({ narrator: patch2 }, "Narrator updated.");
-      if (saved?.narrator?.keyCleared) {
-        showToast("The endpoint host changed, so the stored key was removed.");
-      }
-      await refreshNarratorSettings();
-      renderSettingsView();
-      await refreshNarratorStatus();
-    },
-    onFetchModels: async ({ endpoint, model }) => {
-      const params = new URLSearchParams();
-      if (endpoint) params.set("endpoint", endpoint);
-      if (model) params.set("model", model);
-      const response = await fetch(`${API_PATH}/narrator/models?${params.toString()}`);
-      const body = await response.json().catch(() => ({}));
-      return response.ok ? body : { models: [], error: body.error ?? `Could not list models (${response.status}).` };
-    },
-    onTestConnection: async ({ endpoint, model }) => {
-      const response = await fetch(`${API_PATH}/narrator/test`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ endpoint, model })
-      });
-      return response.json().catch(() => ({ ok: false, reason: "provider-error", detail: "no response" }));
-    },
-    onStoreKey: async (key) => {
-      const response = await fetch(`${API_PATH}/narrator/key`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ key })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body.error ?? `Could not store the key (${response.status}).`);
-      }
-      settingsStatus = "Key stored for this host.";
-      settingsStatusError = false;
-      await refreshNarratorSettings();
-      renderSettingsView();
-      return body;
-    },
-    onClearKey: async () => {
-      await fetch(`${API_PATH}/narrator/key`, { method: "DELETE" }).catch(() => {
-      });
-      await refreshNarratorSettings();
-      renderSettingsView();
-    }
-  });
-}
-async function refreshNarratorSettings() {
-  try {
-    serverSettings = await request("/settings");
-  } catch {
-  }
-}
-async function refreshNarratorStatus() {
-  narratorStatus = await fetchNarratorStatus();
-}
-async function saveServerSettings(patch2, successMessage) {
-  let saved = null;
-  try {
-    saved = await putServerSettings(patch2);
-    settingsStatus = successMessage;
-    settingsStatusError = false;
-  } catch (error) {
-    settingsStatus = error.message;
-    settingsStatusError = true;
-  }
-  renderSettingsView();
-  loadCatalogue().catch(() => {
-  });
-  return saved;
-}
-async function putServerSettings(patch2) {
-  const response = await fetch(`${API_PATH}/settings`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(patch2)
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Could not save settings (${response.status}).`);
-  }
-  serverSettings = body;
-  return body;
-}
-async function restartServer() {
-  const response = await fetch(`${API_PATH}/settings/restart`, { method: "POST" });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Could not restart the server (${response.status}).`);
-  }
-  await waitForServerRestart();
-}
-async function waitForServerRestart() {
-  settingsStatus = "Restarting\u2026";
-  settingsStatusError = false;
-  renderSettingsView();
-  await new Promise((resolve) => setTimeout(resolve, 800));
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      const response = await fetch(`${API_PATH}/health`, { cache: "no-store" });
-      if (response.ok) {
-        window.location.reload();
-        return;
-      }
-    } catch {
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-  settingsStatus = "The server did not come back; restart it from the terminal.";
-  settingsStatusError = true;
-  renderSettingsView();
-}
-async function openSettings() {
-  settingsStatus = "";
-  settingsStatusError = false;
-  renderSettingsView();
-  try {
-    serverSettings = await request("/settings");
-    if (narratorPresets.length === 0) {
-      narratorStatus = await fetchNarratorStatus();
-    }
-  } catch (error) {
-    settingsStatus = error.message;
-    settingsStatusError = true;
-  }
-  renderSettingsView();
-}
-async function showWorkspace() {
-  elements.workspacePanel.hidden = false;
-  try {
-    workspaceReport = await request("/workspace");
-    workspaceTools.databases = await request("/workspace/databases").catch(() => null);
-    renderWorkspaceView();
-    view.crossRepo(crossRepoNodeIds(workspaceReport, (current?.nodes ?? []).map((node) => node.id)));
-  } catch (error) {
-    workspaceReport = null;
-    renderWorkspace(elements.workspacePanel, null, { onClose: closeWorkspace });
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = error.message;
-    elements.workspacePanel.append(note3);
-  }
-  refreshDock();
-}
-function showBlocks() {
-  const assembly = buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []);
-  renderBlocks(elements.blocksPanel, assembly, {
-    selected,
-    onOpen: (id) => selectNode(id)
-  });
-  elements.blocksPanel.hidden = false;
-  refreshDock();
-}
-var workspaceReport = null;
-var workspaceTools = {
-  base: "HEAD",
-  busy: "",
-  error: "",
-  compat: null,
-  preflight: null,
-  databases: null,
-  live: null,
-  confirming: null,
-  scriptHref: ""
-};
-function renderWorkspaceView() {
-  workspaceTools.scriptHref = `${API_PATH}/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}&format=sql`;
-  renderWorkspace(elements.workspacePanel, workspaceReport, {
-    onClose: closeWorkspace,
-    tools: workspaceTools,
-    onBase: (value) => {
-      workspaceTools.base = value;
-    },
-    onCompat: () => runWorkspaceTool("comparing revisions", async () => {
-      workspaceTools.compat = await request(`/workspace/compat?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
-    }),
-    onPreflight: () => runWorkspaceTool("building preflight queries", async () => {
-      workspaceTools.preflight = await request(`/workspace/preflight?base=${encodeURIComponent(workspaceTools.base || "HEAD")}`);
-    }),
-    onConfirmRun: (name) => {
-      workspaceTools.confirming = name;
-      renderWorkspaceView();
-    },
-    onCancelRun: () => {
-      workspaceTools.confirming = null;
-      renderWorkspaceView();
-    },
-    onRun: (name) => runWorkspaceTool("running read-only checks", async () => {
-      workspaceTools.confirming = null;
-      workspaceTools.preflight = await postWorkspace("/workspace/preflight/run", {
-        database: name,
-        base: workspaceTools.base || "HEAD"
-      });
-      workspaceTools.databases = await request("/workspace/databases").catch(() => workspaceTools.databases);
-    }),
-    onLive: (name) => runWorkspaceTool("reading the live schema", async () => {
-      workspaceTools.live = await postWorkspace("/workspace/live/schema", { database: name });
-      workspaceTools.databases = await request("/workspace/databases").catch(() => workspaceTools.databases);
-    })
-  });
-}
-async function runWorkspaceTool(label, action) {
-  workspaceTools.busy = label;
-  workspaceTools.error = "";
-  renderWorkspaceView();
-  try {
-    await action();
-  } catch (error) {
-    workspaceTools.error = error.message;
-  } finally {
-    workspaceTools.busy = "";
-    renderWorkspaceView();
-  }
-}
-async function postWorkspace(path, body) {
-  const response = await fetch(`${API_PATH}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
-  }
-  return payload;
-}
-function closeWorkspace() {
-  elements.workspacePanel.hidden = true;
-  view.crossRepo(null);
-  refreshDock();
-}
-async function showPassport() {
-  elements.passportPanel.hidden = false;
-  try {
-    const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
-    renderRepositoryPassport(elements.passportPanel, report, {
-      onSelect: (id) => selectNode(id),
-      onOpenRoute: () => showRoute(),
-      onExportReport: (format) => exportRepositoryReport(format),
-      onClose: closePassport
-    });
-  } catch (error) {
-    renderRepositoryPassport(elements.passportPanel, null, { onClose: closePassport });
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = error.message;
-    elements.passportPanel.append(note3);
-  }
-  refreshDock();
-}
-function closePassport() {
-  elements.passportPanel.hidden = true;
-  refreshDock();
-}
-async function exportRepositoryReport(format) {
-  const query = new URLSearchParams({ format });
-  if (state.repository) {
-    query.set("repository", state.repository);
-  }
-  const endpoint = `${API_PATH}/analysis/report?${query.toString()}`;
-  if (format === "html") {
-    window.open(endpoint, "_blank", "noopener");
-    elements.status.textContent = "Opening the printable report in a new tab\u2026";
-    return;
-  }
-  const extension = format === "json" ? "json" : "md";
-  elements.status.textContent = "Generating the report\u2026";
-  try {
-    const response = await fetch(endpoint);
-    if (!response.ok) {
-      elements.status.textContent = response.status === 404 ? "Report export failed: this server was started before the report route existed \u2014 restart it." : `Report export failed: ${response.status} ${response.statusText}`;
-      return;
-    }
-    const text = await response.text();
-    const safeName = String(state.repository ?? "repository").replace(/[\\/]/g, "-");
-    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `strabo-report-${safeName}.${extension}`;
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    elements.status.textContent = `Report exported as ${extension.toUpperCase()}.`;
-  } catch (error) {
-    elements.status.textContent = `Report export failed: ${error.message}`;
-  }
-}
-async function showRoute(preferredFile) {
-  elements.routePanel.hidden = false;
-  try {
-    const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ""}`);
-    currentRoute = report;
-    await ensureNarratorStatus();
-    const steps = routeSteps(report);
-    const preferred = preferredFile ? routeIndexOf(report, preferredFile) : -1;
-    routeIndex = preferred >= 0 ? clampRouteIndex(preferred, steps.length) : clampRouteIndex(readRouteProgress(window.localStorage, state.repository) ?? 0, steps.length);
-    renderRouteView();
-  } catch (error) {
-    currentRoute = null;
-    renderRoutePanel(elements.routePanel, null, { error: error.message }, {
-      onRetry: () => showRoute(preferredFile)
-    });
-  }
-  refreshDock();
-}
-function renderRouteView() {
-  renderRoutePanel(elements.routePanel, currentRoute, {
-    index: routeIndex,
-    narratorStatus
-  }, {
-    onStep: (index) => stepRoute(index),
-    onFocus: (file) => focusRouteFile(file),
-    onNarrateTour: () => narrateRouteTour(),
-    onNarrateStep: (step) => narrateRouteStep(step),
-    onOpenNarratorSettings: openNarratorSettings
-  });
-}
-function stepRoute(index) {
-  const steps = routeSteps(currentRoute);
-  routeIndex = clampRouteIndex(index, steps.length);
-  writeRouteProgress(window.localStorage, state.repository, routeIndex);
-  renderRouteView();
-  const step = steps[routeIndex];
-  if (step) {
-    focusRouteFile(step.file);
-  }
-}
-function focusRouteFile(file) {
-  const visible = (current?.nodes ?? []).some((node) => node.id === file);
-  if (!visible) {
-    elements.status.textContent = `${file} is on the route; open its unit to see it on the map.`;
-    return;
-  }
-  selectNode(file);
-}
-function closeRoute() {
-  elements.routePanel.hidden = true;
-  refreshDock();
-}
-var PASSPORT_SEEN_PREFIX = "strabo.passport.seen.";
-function passportSeen(repository) {
-  try {
-    return window.localStorage.getItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`) === "1";
-  } catch {
-    return true;
-  }
-}
-function markPassportSeen(repository) {
-  try {
-    window.localStorage.setItem(`${PASSPORT_SEEN_PREFIX}${repository ?? "default"}`, "1");
-  } catch {
-  }
-}
-async function maybeOpenPassport() {
-  if (!state.repository || passportSeen(state.repository)) {
-    return;
-  }
-  markPassportSeen(state.repository);
-  await showPassport();
-}
-function clearOverlay() {
-  state.overlay = "none";
-  elements.overlay.value = "none";
-  view.overlay(null);
-  view.setHiddenCoupling(null, false);
-  renderOverlayPanel(elements.overlayPanel, "", null);
-  refreshDock();
-}
 function applyStripFilter(filter) {
   state.filter = filter;
   elements.filter.value = filter;
   applyFilterToView();
 }
-function tracePath(from, to) {
-  const path = findPath(current, from, to);
-  const trace = elements.inspector.querySelector('[data-role="trace"]');
-  if (trace) {
-    if (path) {
-      trace.textContent = `${path.length - 1} step(s): ${path.join(" \u2192 ")}`;
-    } else {
-      trace.textContent = `No directed path from ${from} to ${to}.`;
-    }
-  }
-  if (path) {
-    view.highlight(path);
-    elements.hover.textContent = `${path.length - 1} step(s): ${path.join(" -> ")}`;
-  } else {
-    elements.hover.textContent = `No directed path from ${from} to ${to}.`;
-  }
-}
-function selectEdge(edgeId) {
-  if (!current || !edgeId) {
-    view.clearEdge();
-    selectedEdgeId = null;
-    renderEdgeEvidence(elements.edgePanel, null);
-    refreshDock();
-    return;
-  }
-  selectedEdgeId = edgeId;
-  const evidence = edgeEvidenceFor(current, edgeId);
-  renderEdgeEvidence(elements.edgePanel, evidence, {
-    onSelect: (id) => selectNode(id),
-    onTrace: (from, to) => tracePath(from, to),
-    ...evidence && isFileNode(evidence.source) ? { onViewSource: (file, line) => viewSource(file, { line }) } : {},
-    onClear: () => {
-      view.clearEdge();
-      selectedEdgeId = null;
-      renderEdgeEvidence(elements.edgePanel, null);
-      refreshDock();
-    }
-  });
-  if (evidence) {
-    elements.hover.textContent = `${evidence.source} \u2192 ${evidence.target} \xB7 ${evidence.kind} \xB7 L${evidence.line ?? "?"} ${evidence.specifier ?? ""}`;
-  }
-  refreshDock();
-}
-function onSelect(id) {
-  selectNode(id);
-}
-var OVERLAY_TITLES = {
-  impact: "Change impact",
-  cycles: "Cycles",
-  "test-reach": "Test reach",
-  architecture: "Architecture health",
-  hotspots: "Function hotspots",
-  "module-depth": "Module depth",
-  ownership: "Ownership",
-  smells: "Smells",
-  "hidden-coupling": "Hidden coupling (co-change, no import path)",
-  "declared-rules": "Declared rules"
-};
-var OVERLAY_ENDPOINTS = {
-  impact: "/analysis/impact",
-  cycles: "/analysis/cycles",
-  "test-reach": "/analysis/test-reach",
-  architecture: "/analysis/architecture-health",
-  hotspots: "/analysis/functions",
-  "module-depth": "/analysis/module-depth",
-  ownership: "/analysis/ownership",
-  smells: "/analysis/smells",
-  "hidden-coupling": "/analysis/co-change",
-  "declared-rules": "/analysis/rules"
-};
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules"];
-async function applyOverlay(generation) {
-  const kind = state.overlay;
-  if (kind === "none") {
-    view.overlay(null);
-    renderOverlayPanel(elements.overlayPanel, "", null);
-    refreshDock();
-    return;
-  }
-  const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const data = await request(`${OVERLAY_ENDPOINTS[kind]}${query}`);
-  if (generation !== void 0 && generation !== scanGeneration) {
-    return;
-  }
-  const overlay2 = overlayFor(kind, data);
-  view.overlay(overlay2.classes);
-  view.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
-  const actions = [];
-  if (kind === "impact" && clientPrefs.commitEnabled) {
-    actions.push({
-      label: "Commit\u2026",
-      title: "Generate a commit message with the narrator, then commit and push",
-      onClick: () => openCommitDialog({
-        repository: state.repository,
-        onCommitted: () => applyOverlay()
-      })
-    });
-  }
-  renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay2, {
-    kind,
-    onClose: clearOverlay,
-    onSelect: (id) => selectNode(id),
-    ...actions.length > 0 ? { actions } : {}
-  });
-  refreshDock();
-}
-var unitHotspotCache = null;
-async function enrichUnitCards(generation) {
-  const repository = current?.repository?.root ?? null;
-  if (!current?.unitCards?.length || unitHotspotCache?.repository === repository) {
-    return;
-  }
-  try {
-    const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-    const report = await request(`/analysis/functions${query}`);
-    if (generation !== scanGeneration || current?.repository?.root !== repository) {
-      return;
-    }
-    unitHotspotCache = { repository, report };
-    view.setUnitCards(withUnitHotspots(current.unitCards, report));
-  } catch {
-  }
-}
-async function loadFolder(path) {
-  const query = path ? `?path=${encodeURIComponent(path)}` : "";
-  const result = await request(`/browse${query}`);
-  browsedFolder = result;
-  const location = folderLocation(result);
-  elements.folderPath.textContent = result.path;
-  elements.folderNote.textContent = location.note;
-  elements.folderNote.classList.toggle("at-ceiling", location.atCeiling);
-  elements.folderUp.disabled = location.atCeiling;
-  elements.folderUp.title = location.upLabel;
-  elements.folderUp.dataset.parent = result.parent ?? "";
-  renderFolderList(elements.folderList, result, (next) => {
-    loadFolder(next).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  });
-}
-function openFolderDialog() {
-  browsedFolder = null;
-  elements.folderDialog.showModal();
-  loadFolder(state.repository ?? void 0).catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-}
-async function useRepository(path) {
-  writeViewPrefs();
-  state.repository = path;
-  state.prefix = "";
-  state.filter = "";
-  elements.filter.value = "";
-  try {
-    await rememberRepository(path);
-    const catalogue = await request("/repositories");
-    renderRepositoryOptions(catalogue.repositories, path);
-  } catch (error) {
-    elements.status.textContent = `Error: ${error.message}`;
-    return;
-  }
-  applyViewPrefs();
-  scan();
-}
-async function forgetRepository() {
-  const root = state.repository;
-  if (!root) {
-    return;
-  }
-  const response = await fetch(`${API_PATH}/repositories?root=${encodeURIComponent(root)}`, {
-    method: "DELETE"
-  });
-  if (!response.ok) {
-    elements.status.textContent = "Error: could not forget the repository.";
-    return;
-  }
-  const catalogue = await request("/repositories");
-  renderRepositoryOptions(catalogue.repositories, catalogue.active);
-  if (state.repository !== root) {
-    scan();
-  }
-}
-function openUnit(id) {
-  if (state.mode !== "system") {
-    return;
-  }
-  const node = current?.nodes.find((candidate) => candidate.id === id);
-  state.systemUnit = id;
-  state.systemUnitLabel = node?.label ?? id;
-  state.unitFile = null;
-  state.showOutside = false;
-  state.expandedUnits = [];
-  scan();
-}
-function closeUnit() {
-  state.systemUnit = null;
-  state.systemUnitLabel = null;
-  state.unitFile = null;
-  state.showOutside = false;
-  state.expandedUnits = [];
-  scan();
-}
-function toggleOutsideLinks() {
-  if (state.mode !== "system" || !state.systemUnit) {
-    return;
-  }
-  if (!state.unitFile) {
-    elements.hover.textContent = "Select a file inside the unit before showing outside links.";
-    return;
-  }
-  state.showOutside = !state.showOutside;
-  state.expandedUnits = [];
-  updateOutsideButton();
-  scan();
-}
-function toggleExpandedUnit(id) {
-  const set = new Set(state.expandedUnits ?? []);
-  if (set.has(id)) {
-    set.delete(id);
-  } else {
-    set.add(id);
-  }
-  state.expandedUnits = [...set].sort();
-  scan();
-}
-function updateSystemNote(model) {
-  if (!elements.systemNote) {
-    return;
-  }
-  const single = Boolean(model?.system && model.systemUnit && model.systemSingleUnit === model.systemUnit);
-  elements.systemNote.hidden = !single;
-  if (single) {
-    elements.systemNote.textContent = "1 build unit: showing its layers";
-  }
-}
-function applyEdgeKindLens() {
-  view.setEdgeKind(state.mode === "file" ? state.edgeKind : "imports");
-}
-function applyCoChangeLens() {
-  if (state.mode !== "file" || !state.coChange) {
-    view.setCoChange(null, false);
-    return;
-  }
-  if (coChangeReport) {
-    view.setCoChange(coChangeReport, true);
-  }
-}
-function toggleEdgeKind() {
-  if (state.mode !== "file") {
-    return;
-  }
-  state.edgeKind = state.edgeKind === "calls" ? "imports" : "calls";
-  updateEdgeKindButton();
-  applyEdgeKindLens();
-  schedulePrefsSave();
-}
-function updateEdgeKindButton() {
-  if (!elements.tbCalls) {
-    return;
-  }
-  const showCalls = state.mode === "file" && state.edgeKind === "calls";
-  elements.tbCalls.classList.toggle("active", showCalls);
-  elements.tbCalls.setAttribute("aria-pressed", String(showCalls));
-}
-var coChangeReport = null;
-var coChangeRepository = null;
-async function toggleCoChange() {
-  state.coChange = !state.coChange;
-  updateCoChangeButton();
-  schedulePrefsSave();
-  if (!state.coChange) {
-    view.setCoChange(null, false);
-    return;
-  }
-  const repository = state.repository ?? null;
-  if (!coChangeReport || coChangeRepository !== repository) {
-    try {
-      const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
-      coChangeReport = await request(`/analysis/co-change${query}`);
-      coChangeRepository = repository;
-    } catch (error) {
-      state.coChange = false;
-      updateCoChangeButton();
-      elements.status.textContent = `Error: ${error.message}`;
-      return;
-    }
-  }
-  view.setCoChange(coChangeReport, true);
-}
-function updateCoChangeButton() {
-  if (!elements.tbCoChange) {
-    return;
-  }
-  const shown = state.mode === "file";
-  elements.tbCoChange.hidden = !shown;
-  elements.tbCoChange.classList.toggle("active", shown && state.coChange);
-  elements.tbCoChange.setAttribute("aria-pressed", String(shown && state.coChange));
-}
-function updateLabelsButton() {
-  if (!elements.tbLabels) {
-    return;
-  }
-  const shown = state.mode === "file";
-  const on2 = shown && Boolean(clientPrefs.allLabels);
-  elements.tbLabels.hidden = !shown;
-  elements.tbLabels.classList.toggle("active", on2);
-  elements.tbLabels.setAttribute("aria-pressed", String(on2));
-}
-function applyLocLens2() {
-  const enabled = state.mode === "file" && state.locLens;
-  view.applyLocLens(clientPrefs.locThreshold, enabled);
-  updateLocButton();
-}
-function toggleLocLens() {
-  if (state.mode !== "file") {
-    return;
-  }
-  state.locLens = !state.locLens;
-  applyLocLens2();
-  schedulePrefsSave();
-}
-function updateLocButton() {
-  if (!elements.tbLoc) {
-    return;
-  }
-  const shown = state.mode === "file";
-  const on2 = shown && state.locLens;
-  elements.tbLoc.hidden = !shown;
-  elements.tbLoc.classList.toggle("active", on2);
-  elements.tbLoc.setAttribute("aria-pressed", String(on2));
-}
-function updateOutsideButton() {
-  if (!elements.tbOutside) {
-    return;
-  }
-  const shown = state.mode === "system" && Boolean(state.systemUnit);
-  elements.tbOutside.hidden = !shown;
-  elements.tbOutside.classList.toggle("active", state.showOutside);
-  elements.tbOutside.setAttribute("aria-pressed", String(state.showOutside));
-}
-function updateUnitsButton() {
-  if (!elements.tbUnits) {
-    return;
-  }
-  elements.tbUnits.hidden = !(state.mode === "system" && Boolean(state.systemUnit));
-}
-function updateFocusButton() {
-  if (!elements.tbFocus) {
-    return;
-  }
-  elements.tbFocus.disabled = !selected;
-}
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
 }
-function onDrill(id) {
-  if (state.mode === "system") {
-    const node = current?.nodes.find((candidate) => candidate.id === id);
-    if (!node) {
-      return;
-    }
-    if (node.systemUnit) {
-      if (!id.endsWith("#support")) viewSource(id);
-      return;
-    }
-    openUnit(id);
-    return;
-  }
-  if (state.mode === "block") {
-    state.prefix = id;
-    state.filter = "";
-    elements.filter.value = "";
-    scan();
-    return;
-  }
-  viewSource(id);
-}
-function openFile(id) {
-  const adapters = window.straboAdapters ?? {};
-  if (typeof adapters.openWorkspaceFile === "function") {
-    adapters.openWorkspaceFile(id);
-    return;
-  }
-  const url = fileWebUrl(current?.repository, id);
-  if (url) {
-    window.open(url, "_blank", "noopener");
-    return;
-  }
-  elements.status.textContent = `No opener available for ${id}`;
-}
-var sourceView = null;
-function isFileNode(id) {
-  const node = (current?.nodes ?? []).find((candidate) => candidate.id === id);
-  if (!node || node.kind === "unit" || node.kind === "shelf") {
-    return false;
-  }
-  return state.mode === "file" || Boolean(node.systemUnit && !id.endsWith("#support"));
-}
-function viewSource(file, options = {}) {
-  sourceView = {
-    file,
-    ref: options.ref ?? null,
-    line: options.line ?? null,
-    status: options.status ?? null,
-    diffSpec: options.diffSpec ?? null,
-    hasDiff: Boolean(options.diffSpec),
-    mode: options.diffSpec ? "diff" : "content",
-    loading: true,
-    error: null,
-    content: null,
-    diff: null
-  };
-  floatingWindows.find((controller) => controller.key === "source")?.open();
-  loadSource(sourceView.mode).catch(() => {
-  });
-}
-function viewDiff(file, spec, options = {}) {
-  viewSource(file, { ...options, diffSpec: spec });
-}
-async function loadSource(mode) {
-  const view2 = sourceView;
-  if (!view2) {
-    return;
-  }
-  view2.mode = mode;
-  view2.loading = true;
-  view2.error = null;
-  sourceRender();
-  const query = new URLSearchParams({ file: view2.file });
-  if (state.repository) {
-    query.set("repository", state.repository);
-  }
-  try {
-    if (mode === "diff") {
-      for (const [key, value] of Object.entries(view2.diffSpec ?? {})) {
-        query.set(key, String(value));
-      }
-      const body = await request(`/diff?${query.toString()}`);
-      if (sourceView !== view2) return;
-      if (body.available === false) view2.error = body.detail ?? body.reason;
-      else view2.diff = body.diff;
-    } else {
-      if (view2.ref) query.set("ref", view2.ref);
-      const body = await request(`/source?${query.toString()}`);
-      if (sourceView !== view2) return;
-      view2.content = body.content;
-    }
-  } catch (error) {
-    if (sourceView !== view2) return;
-    view2.error = error.message;
-  } finally {
-    if (sourceView === view2) {
-      view2.loading = false;
-      sourceRender();
-    }
-  }
-}
-function sourceRender() {
-  if (!sourceView) {
-    return;
-  }
-  renderSource(elements.sourcePanel, sourceView, {
-    onClose: () => floatingWindows.find((controller) => controller.key === "source")?.close(),
-    onShowFile: sourceView.hasDiff && sourceView.mode === "diff" ? () => loadSource("content") : null,
-    onShowDiff: sourceView.hasDiff && sourceView.mode === "content" ? () => loadSource("diff") : null
-  });
-}
-function closeSource() {
-  elements.sourcePanel.hidden = true;
-  elements.sourcePanel.replaceChildren();
-}
-function openSourceAt(file, line) {
-  const target = typeof file === "string" ? file.replace(/\\/g, "/") : "";
-  if (!target) {
-    return;
-  }
-  setScreen("graph");
-  const node = (current?.nodes ?? []).find((candidate) => candidate.id === target);
-  if (node) {
-    selectNode(node.id);
-  }
-  const lineNumber = Number.isInteger(line) && line > 0 ? line : null;
-  viewSource(node?.id ?? target, { line: lineNumber });
-  if (lineNumber) {
-    revealSourceLine();
-  }
-}
-function revealSourceLine(attempt = 0) {
-  const marked = elements.sourcePanel?.querySelector(".src-mark");
-  if (marked) {
-    marked.scrollIntoView?.({ block: "center" });
-    return;
-  }
-  if (attempt < 20) {
-    setTimeout(() => revealSourceLine(attempt + 1), 50);
-  }
-}
-function isMappedNode(id) {
-  return Boolean(id) && (current?.nodes ?? []).some((candidate) => candidate.id === id);
-}
-function handleTerminalControl(directive) {
-  const verb = directive?.verb;
-  const args = Array.isArray(directive?.args) ? directive.args : [];
-  switch (verb) {
-    case "focus": {
-      const id = args[0];
-      if (isMappedNode(id)) {
-        setScreen("graph");
-        selectNode(id);
-      }
-      return;
-    }
-    case "open": {
-      const file = args[0];
-      const line = Number.parseInt(args[1] ?? "", 10);
-      if (file) {
-        openSourceAt(file, Number.isInteger(line) ? line : null);
-      }
-      return;
-    }
-    case "highlight": {
-      const ids = args.filter(isMappedNode);
-      if (ids.length > 0) {
-        setScreen("graph");
-        view.highlight(ids);
-      }
-      return;
-    }
-    case "review": {
-      setScreen("graph");
-      const ref = args[0];
-      const pending = ref ? showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref }) : showReview("");
-      Promise.resolve(pending).catch((error) => {
-        showToast(`Review failed (${error.message}).`);
-      });
-      return;
-    }
-    case "note": {
-      const message = args.join(" ").trim();
-      if (message) {
-        showToast(message);
-      }
-      return;
-    }
-    case "screen": {
-      const target = args[0];
-      if (target === "graph" || target === "terminal") {
-        setScreen(target);
-      }
-      return;
-    }
-    default:
-      return;
-  }
-}
-function reviewDiffSpec(result, file) {
-  if (result?.kind === "commit" && result.ref) {
-    return { ref: result.ref };
-  }
-  if (result?.kind === "branch" && result.branch) {
-    return { base: result.branch.mergeBase, head: result.branch.tipHash };
-  }
-  if (file?.group === "staged") return { staged: 1 };
-  if (file?.group === "untracked") return { untracked: 1 };
-  return {};
-}
-elements.repository.addEventListener("change", () => {
-  const root = elements.repository.value;
-  if (!root) {
-    return;
-  }
-  writeViewPrefs();
-  state.repository = root;
-  state.prefix = "";
-  state.filter = "";
-  elements.filter.value = "";
-  elements.forget.disabled = false;
-  applyViewPrefs();
-  rememberRepository(root).then(() => scan()).catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.forget.addEventListener("click", () => {
-  forgetRepository().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
   state.prefix = "";
@@ -25225,53 +26782,22 @@ elements.detail.addEventListener("change", () => {
     state.showOutside = false;
     state.expandedUnits = [];
   }
-  writeViewPrefs();
+  app.prefs.writeViewPrefs();
   scan();
 });
-if (elements.tier) {
-  elements.tier.addEventListener("change", () => {
-    state.tier = elements.tier.value;
-    if (state.tier !== "off" && state.mode !== "file") {
-      state.mode = "file";
-      elements.detail.value = "file";
-      writeViewPrefs();
-      scan();
-      return;
-    }
-    applyTierLens();
-  });
-}
 elements.refresh.addEventListener("click", () => scan({ refresh: true }));
-elements.overlay.addEventListener("change", () => {
-  state.overlay = elements.overlay.value;
-  if (state.overlay === "none") {
-    writeViewPrefs();
-    applyOverlay();
-    return;
-  }
-  const needsFileMode = FILE_MODE_OVERLAYS.includes(state.overlay);
-  if (needsFileMode && state.mode !== "file") {
-    state.mode = "file";
-    elements.detail.value = "file";
-    writeViewPrefs();
-    scan();
-    return;
-  }
-  writeViewPrefs();
-  applyOverlay();
-});
 elements.filter.addEventListener("input", () => {
   dismissHint();
   state.filter = elements.filter.value;
   applyFilterToView();
-  schedulePrefsSave();
+  app.prefs.schedulePrefsSave();
 });
 if (elements.filterClear) {
   elements.filterClear.addEventListener("click", () => {
     state.filter = "";
     elements.filter.value = "";
     applyFilterToView();
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
     elements.filter.focus();
   });
 }
@@ -25280,7 +26806,7 @@ if (elements.graphEmptyClear) {
     state.filter = "";
     elements.filter.value = "";
     applyFilterToView();
-    writeViewPrefs();
+    app.prefs.writeViewPrefs();
   });
 }
 if (elements.zoomIn) elements.zoomIn.addEventListener("click", () => zoomIn(view.cy));
@@ -25290,1164 +26816,103 @@ elements.diagnosticsToggle.addEventListener("click", () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
   elements.diagnosticsToggle.setAttribute("aria-expanded", String(hidden));
-  if (hidden) startRuntimeReadout();
-  else stopRuntimeReadout();
+  if (hidden) app.runtime.startRuntimeReadout();
+  else app.runtime.stopRuntimeReadout();
 });
-elements.browse.addEventListener("click", openFolderDialog);
 document.getElementById("graph")?.addEventListener("pointerdown", dismissHint, { capture: true });
-elements.folderCancel.addEventListener("click", () => elements.folderDialog.close());
-elements.folderUp.addEventListener("click", () => {
-  const parent = elements.folderUp.dataset.parent;
-  if (parent) {
-    loadFolder(parent).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }
-});
-elements.folderUse.addEventListener("click", () => {
-  if (browsedFolder) {
-    elements.folderDialog.close();
-    useRepository(browsedFolder.path).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }
-});
-function showTooltip(id, clientX, clientY) {
-  if (!elements.tooltip || !current) return;
-  const node = current.nodes.find((candidate) => candidate.id === id);
-  if (!node) return;
-  elements.tooltip.replaceChildren();
-  const kind = node.kind ?? "";
-  const unit = kind === "unit" ? unitHoverFacts(current, id) : null;
-  const title = document.createElement("div");
-  title.className = "tt-title";
-  title.textContent = unit ? unit.title : node.label ?? id;
-  elements.tooltip.append(title);
-  const rows = unit ? unit.rows : node.shelf ? [shelfHoverText(node.shelf)] : [
-    node.systemUnit && !id.endsWith("#support") ? `blast ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 id ${id}` : `blast ${node.transitiveDependents ?? 0} \xB7 id ${id}`
-  ];
-  rows.forEach((text, index) => {
-    const row = document.createElement("div");
-    row.className = "tt-row";
-    if (index === 0 && !unit && !node.shelf) {
-      const chip = document.createElement("span");
-      chip.className = "tt-kind";
-      chip.textContent = kind;
-      row.append(chip);
-    }
-    const value = document.createElement("span");
-    value.textContent = text;
-    row.append(value);
-    elements.tooltip.append(row);
-  });
-  elements.tooltip.hidden = false;
-  const wrap = elements.tooltip.parentElement.getBoundingClientRect();
-  elements.tooltip.style.left = `${Math.min(clientX - wrap.left + 14, wrap.width - 310)}px`;
-  elements.tooltip.style.top = `${Math.max(clientY - wrap.top - 10, 8)}px`;
-}
-function hideTooltip() {
-  if (elements.tooltip) elements.tooltip.hidden = true;
-}
-view.onHover((id, event) => {
-  if (!id) {
-    elements.hover.textContent = "";
-    hideTooltip();
-    return;
-  }
-  const node = current?.nodes.find((candidate) => candidate.id === id);
-  const unit = node?.kind === "unit" ? unitHoverFacts(current, id) : null;
-  const insideUnit = node?.systemUnit && !id.endsWith("#support");
-  if (unit) {
-    elements.hover.textContent = `${unit.title} \xB7 ${unit.rows.join(" \xB7 ")}`;
-  } else if (node?.shelf) {
-    elements.hover.textContent = `${id} \xB7 ${shelfHoverText(node.shelf)}`;
-  } else {
-    elements.hover.textContent = insideUnit ? `${id} \xB7 blast radius ${node.inUnitDependents ?? 0} in unit \xB7 ${node.outsideDependents ?? 0} outside \xB7 ${node.kind ?? ""}` : `${id} \xB7 blast radius ${node?.transitiveDependents ?? 0} \xB7 ${node?.kind ?? ""}`;
-  }
-  if (event?.clientX !== void 0) showTooltip(id, event.clientX, event.clientY);
-});
-elements.tbFocus.addEventListener("click", () => {
-  if (selected) {
-    focus(view.cy, selected);
-  }
-});
-elements.tbImpact.addEventListener("click", () => {
-  elements.overlay.value = "impact";
-  elements.overlay.dispatchEvent(new Event("change"));
-});
-if (elements.tbOutside) {
-  elements.tbOutside.addEventListener("click", () => toggleOutsideLinks());
-}
-if (elements.tbUnits) {
-  elements.tbUnits.addEventListener("click", () => closeUnit());
-}
-elements.tbPath.addEventListener("click", () => {
-  state.pathMode = !state.pathMode;
-  state.pathFrom = null;
-  elements.tbPath.classList.toggle("active", state.pathMode);
-  elements.hover.textContent = state.pathMode ? "Path mode: select the start node." : "";
-});
 elements.tbBoundaries.addEventListener("click", () => {
   state.mode = state.mode === "block" ? "file" : "block";
   elements.detail.value = state.mode;
   state.prefix = "";
   scan();
 });
-if (elements.tbCalls) {
-  elements.tbCalls.addEventListener("click", toggleEdgeKind);
-}
-if (elements.tbCoChange) {
-  elements.tbCoChange.addEventListener("click", () => {
-    toggleCoChange().catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  });
-}
-if (elements.tbLabels) {
-  elements.tbLabels.addEventListener("click", () => setClientPref("allLabels", !clientPrefs.allLabels));
-}
-if (elements.tbLoc) {
-  elements.tbLoc.addEventListener("click", toggleLocLens);
-}
-elements.tbBranches.addEventListener("click", () => {
-  toggleBranches().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.tbTimeline.addEventListener("click", () => {
-  toggleTimeline().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.tbReview.addEventListener("click", () => {
-  toggleReview().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.tbRisk.addEventListener("click", () => {
-  toggleRisk().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.tbClear.addEventListener("click", clearSelection);
-function overflowItems() {
-  return [...elements.tbOverflowMenu?.querySelectorAll('[role="menuitem"]') ?? []];
-}
-function closeOverflowMenu({ restoreFocus = false } = {}) {
-  if (!elements.tbOverflowMenu || elements.tbOverflowMenu.hidden) {
-    return;
-  }
-  elements.tbOverflowMenu.hidden = true;
-  elements.tbOverflow.setAttribute("aria-expanded", "false");
-  if (restoreFocus) {
-    elements.tbOverflow.focus();
-  }
-}
-function openOverflowMenu() {
-  elements.tbOverflowMenu.hidden = false;
-  elements.tbOverflow.setAttribute("aria-expanded", "true");
-  positionOverflowMenu();
-  const items = overflowItems();
-  items.forEach((item, index) => {
-    item.tabIndex = index === 0 ? 0 : -1;
-  });
-  items[0]?.focus();
-}
-function positionOverflowMenu() {
-  const menu = elements.tbOverflowMenu;
-  const anchor = menu.offsetParent;
-  if (!anchor) {
-    return;
-  }
-  menu.style.left = "";
-  menu.style.right = "";
-  const anchorRect = anchor.getBoundingClientRect();
-  const left = clampMenuLeft(anchorRect.right, menu.offsetWidth, window.innerWidth);
-  menu.style.left = `${left - anchorRect.left}px`;
-  menu.style.right = "auto";
-}
-if (elements.tbOverflow) {
-  elements.tbOverflow.addEventListener("click", (event) => {
-    event.stopPropagation();
-    for (const closeHeaderPopover of headerPopoverClosers) closeHeaderPopover();
-    if (elements.tbOverflowMenu.hidden) {
-      openOverflowMenu();
-    } else {
-      closeOverflowMenu();
-    }
-  });
-  elements.tbOverflowMenu.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      event.preventDefault();
-      closeOverflowMenu({ restoreFocus: true });
-      return;
-    }
-    const items = overflowItems();
-    const next = rovingIndex(items.indexOf(document.activeElement), items.length, event.key);
-    if (next === null) {
-      return;
-    }
-    event.preventDefault();
-    items.forEach((item, index) => {
-      item.tabIndex = index === next ? 0 : -1;
-    });
-    items[next].focus();
-  });
-  for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk"]) {
-    document.getElementById(id)?.addEventListener("click", () => closeOverflowMenu({ restoreFocus: true }));
-  }
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest?.(".tb-overflow-wrap")) closeOverflowMenu();
-  });
-}
-var headerPopoverClosers = [];
-function bindHeaderPopover(toggle, popover) {
-  if (!toggle || !popover) {
-    return;
-  }
-  const close = ({ restoreFocus = false } = {}) => {
-    if (popover.hidden) return;
-    popover.hidden = true;
-    toggle.setAttribute("aria-expanded", "false");
-    if (restoreFocus) toggle.focus();
-  };
-  headerPopoverClosers.push(close);
-  toggle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    closeOverflowMenu();
-    if (!popover.hidden) {
-      close();
-      return;
-    }
-    for (const closeOther of headerPopoverClosers) closeOther();
-    popover.hidden = false;
-    toggle.setAttribute("aria-expanded", "true");
-    popover.querySelector("button:not(:disabled), select")?.focus();
-  });
-  popover.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      event.stopPropagation();
-      event.preventDefault();
-      close({ restoreFocus: true });
-    }
-  });
-  popover.addEventListener("click", (event) => {
-    if (event.target.closest?.('[role="menuitem"]')) close();
-  });
-  document.addEventListener("click", (event) => {
-    if (!toggle.parentElement?.contains(event.target)) close();
-  });
-}
-bindHeaderPopover(document.getElementById("repo-menu-toggle"), document.getElementById("repo-menu"));
-bindHeaderPopover(document.getElementById("view-menu-toggle"), document.getElementById("view-menu"));
-bindHeaderPopover(document.getElementById("scope-menu-toggle"), document.getElementById("scope-menu"));
-var scopeSummary = document.getElementById("scope-summary");
-function updateScopeSummary() {
-  if (!scopeSummary || !elements.strip) return;
-  const active = elements.strip.querySelector('.strip-chip[aria-pressed="true"]');
-  scopeSummary.textContent = active ? active.textContent.trim() : "custom";
-}
-elements.strip?.addEventListener("click", (event) => {
-  if (!event.target.closest?.(".strip-chip")) return;
-  const menu = document.getElementById("scope-menu");
-  if (menu && !menu.hidden) {
-    menu.hidden = true;
-    document.getElementById("scope-menu-toggle")?.setAttribute("aria-expanded", "false");
-  }
-});
-if (elements.strip) {
-  new MutationObserver(updateScopeSummary).observe(elements.strip, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-    attributeFilter: ["aria-pressed"]
-  });
-  updateScopeSummary();
-}
-var viewSummary = document.getElementById("view-summary");
-function updateViewSummary() {
-  if (!viewSummary) return;
-  const text = (select) => select.selectedOptions[0]?.textContent.trim() ?? "";
-  const parts = [text(elements.detail)];
-  if (elements.tier.value !== "off") parts.push(text(elements.tier));
-  if (elements.overlay.value !== "none") parts.push(text(elements.overlay));
-  viewSummary.textContent = parts.filter(Boolean).join(" \xB7 ");
-}
-var selectValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
-for (const select of [elements.detail, elements.tier, elements.overlay]) {
-  Object.defineProperty(select, "value", {
-    configurable: true,
-    get() {
-      return selectValue.get.call(this);
-    },
-    set(next) {
-      selectValue.set.call(this, next);
-      updateViewSummary();
-    }
-  });
-  select.addEventListener("change", updateViewSummary);
-}
-updateViewSummary();
-function toggleShortcuts() {
-  floatingWindows?.find?.((controller) => controller.key === "shortcuts")?.toggle();
-}
-function openNarratorSettings() {
-  floatingWindows?.find?.((controller) => controller.key === "settings")?.open?.();
-  const reveal = (attempt = 0) => {
-    const target = elements.settingsPanel?.querySelector("#setting-narrator");
-    if (target) {
-      target.scrollIntoView?.({ block: "start" });
-      return;
-    }
-    if (attempt < 10) {
-      setTimeout(() => reveal(attempt + 1), 50);
-    }
-  };
-  setTimeout(() => reveal(), 50);
-}
-function nodeDelegateTarget(id) {
-  const passport = current ? passportFor(current, id) : null;
-  const node = current?.nodes.find((candidate) => candidate.id === id);
-  const evidence = [];
-  if (passport) {
-    for (const metric of passport.metrics) {
-      evidence.push(`${metric.label}: ${metric.value}`);
-    }
-    for (const entry of passport.imports.slice(0, 8)) {
-      evidence.push(`imports ${entry.id} (L${entry.line ?? "?"} ${entry.specifier ?? ""})`.replace(" )", ")"));
-    }
-    for (const entry of passport.usedBy.slice(0, 8)) {
-      evidence.push(`imported by ${entry.id} (L${entry.line ?? "?"} ${entry.specifier ?? ""})`.replace(" )", ")"));
-    }
-  } else {
-    evidence.push("Node is not in the current graph (it may be filtered out).");
-  }
-  return { kind: "node", id, label: node?.label ?? id, evidence };
-}
-function groupDelegateTarget() {
-  const items = groupSelection.map((id) => nodeDelegateTarget(id));
-  return { kind: "group", label: `${items.length} file(s)`, items };
-}
-function updateGroupUI(ids) {
-  groupSelection = ids ?? [];
-  const count = groupSelection.length;
-  const active = count >= 2;
-  elements.groupCount.hidden = !active;
-  elements.groupCount.textContent = active ? `${count} selected` : "";
-  elements.tbDelegateGroup.hidden = !active;
-}
-view.onGroupChange(updateGroupUI);
-elements.tbDelegateGroup.addEventListener("click", () => {
-  const rect = elements.tbDelegateGroup.getBoundingClientRect();
-  openDelegateMenu(groupDelegateTarget(), rect.left, rect.bottom + 4);
-});
-function edgeDelegateTarget(edgeId) {
-  const evidence = current ? edgeEvidenceFor(current, edgeId) : null;
-  if (!evidence) {
-    return null;
-  }
-  return {
-    kind: "edge",
-    id: edgeId,
-    label: `${evidence.source} \u2192 ${evidence.target}`,
-    evidence: [
-      `relationship: ${evidence.kind}`,
-      `specifier: ${evidence.specifier ?? "not recorded"}`,
-      `line: ${evidence.line ?? "not recorded"}`,
-      `resolution: ${evidence.resolutionLabel}`
-    ]
-  };
-}
-function diagnosticDelegateTarget(text) {
-  const match = /^(.+):(\d+)\s?(.*)$/.exec(String(text ?? "").trim());
-  return {
-    kind: "diagnostic",
-    id: match ? `${match[1]}:${match[2]}` : String(text ?? "diagnostic"),
-    label: String(text ?? "diagnostic").slice(0, 120),
-    detail: String(text ?? ""),
-    evidence: match ? [`file: ${match[1]}`, `line: ${match[2]}`, `message: ${match[3] || "\u2014"}`] : [String(text ?? "")]
-  };
-}
-function reviewDelegateTarget(result) {
-  const label = result.kind === "branch" && result.branch ? `branch ${result.branch.branch} against ${result.branch.base}` : result.kind === "commit" && result.commit ? `commit ${result.commit.shortHash}` : "pending working tree";
-  const evidence = [];
-  if (result.branch) {
-    const branch = result.branch;
-    evidence.push(
-      `branch: ${branch.branch} is ${branch.ahead} commit(s) ahead of ${branch.base} and ${branch.behind} behind; merge base ${branch.mergeBase}`
-    );
-    if (branch.conflicts.available) {
-      evidence.push(
-        branch.conflicts.clean ? `trial merge into ${branch.base}: clean` : `trial merge into ${branch.base}: conflicts in ${branch.conflicts.paths.join(", ")}`
-      );
-    }
-    for (const entry of branch.movedUnderneath.slice(0, 30)) {
-      evidence.push(`changed on ${branch.base} since the merge base, imported by ${entry.via}: ${entry.id}`);
-    }
-  } else if (result.commit) {
-    evidence.push(`commit: ${result.commit.shortHash} \xB7 ${result.commit.author} \xB7 ${result.commit.subject}`);
-  }
-  for (const file of result.files ?? []) {
-    const counts = file.insertions === null || file.deletions === null ? "line counts unavailable" : `+${file.insertions} -${file.deletions}`;
-    evidence.push(`${file.status} (${file.group}): ${file.path} \u2014 ${counts}${file.inGraph ? "" : " (outside scanned graph)"}`);
-  }
-  const affected = (result.impact?.affected ?? []).filter((entry) => entry.distance > 0);
-  for (const entry of affected.slice(0, 30)) {
-    evidence.push(`potentially affected: ${entry.id} (distance ${entry.distance})`);
-  }
-  if (affected.length > 30) {
-    evidence.push(`\u2026and ${affected.length - 30} more affected file(s) (truncated).`);
-  }
-  return { kind: "review", label, evidence };
-}
-function commitDelegateTarget(button3) {
-  const meta = button3.parentElement?.querySelector(".evidence")?.textContent ?? "";
-  return {
-    kind: "commit",
-    id: button3.dataset.hash ?? button3.textContent,
-    label: button3.textContent.trim().slice(0, 120),
-    detail: meta ? `${button3.textContent.trim()} (${meta.trim()})` : button3.textContent.trim(),
-    evidence: meta ? [`commit: ${button3.textContent.trim()}`, `meta: ${meta.trim()}`] : []
-  };
-}
-function memberDelegateTarget(card) {
-  const name = card.dataset.member ?? "member";
-  const file = memberData?.file ?? selected;
-  const facts = [...card.querySelectorAll(".card-signature, .card-tag, .card-metrics")].map((part) => part.textContent.trim()).filter(Boolean);
-  return {
-    kind: "member",
-    id: file ? `${file}#${name}` : name,
-    label: `${name} (${file ?? "unknown file"})`,
-    evidence: [`member: ${name}`, `file: ${file ?? "unknown"}`, ...facts]
-  };
-}
-function overlayDelegateTarget(item) {
-  const heading2 = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
-  return {
-    kind: "view",
-    label: heading2.trim().slice(0, 120),
-    detail: item.dataset.delegateOverlayItem ?? item.textContent.trim(),
-    evidence: [`overlay: ${heading2.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
-  };
-}
-function viewDelegateTarget(detail) {
-  return {
-    kind: "view",
-    label: detail ?? graphSummary(current ?? { nodes: [], edges: [] }),
-    detail: detail ?? void 0,
-    evidence: [
-      current ? graphSummary(current) : "No scan loaded.",
-      state.filter ? `active filter: ${state.filter}` : "no active filter",
-      state.overlay !== "none" ? `active review: ${state.overlay}` : "no active review overlay",
-      state.mode === "block" ? `directory view${state.prefix ? ` at ${state.prefix}` : ""}` : state.mode === "system" ? "system view" : "file view"
-    ]
-  };
-}
-function fallbackDelegateTarget() {
-  return selected ? nodeDelegateTarget(selected) : viewDelegateTarget();
-}
-function resolveDomDelegateTarget(node) {
-  if (!node?.closest) {
-    return null;
-  }
-  const byNode = node.closest("[data-delegate-node]");
-  if (byNode?.dataset.delegateNode) {
-    return nodeDelegateTarget(byNode.dataset.delegateNode);
-  }
-  const diagnostic = node.closest("[data-delegate-diagnostic]");
-  if (diagnostic?.dataset.delegateDiagnostic) {
-    return diagnosticDelegateTarget(diagnostic.dataset.delegateDiagnostic);
-  }
-  const commit = node.closest("#timeline-panel .commit");
-  if (commit) {
-    return commitDelegateTarget(commit);
-  }
-  const reviewPanel = node.closest("#review-panel");
-  if (reviewPanel && currentReview?.available) {
-    return reviewDelegateTarget(currentReview);
-  }
-  const overlayItem = node.closest("#overlay-panel [data-delegate-overlay-item]");
-  if (overlayItem) {
-    return overlayDelegateTarget(overlayItem);
-  }
-  const edgePanel = node.closest("#edge-panel");
-  if (edgePanel && selectedEdgeId) {
-    return edgeDelegateTarget(selectedEdgeId);
-  }
-  const card = node.closest("#member-view .member-card");
-  if (card) {
-    return memberDelegateTarget(card);
-  }
-  if (node.closest("#inspector") && selected) {
-    return nodeDelegateTarget(selected);
-  }
-  const chip = node.closest(".strip-chip");
-  if (chip) {
-    return viewDelegateTarget(`filter: ${chip.dataset.filter || "all"}`);
-  }
-  const crumb = node.closest("#breadcrumb .crumb");
-  if (crumb) {
-    return viewDelegateTarget(`directory: ${crumb.textContent.trim()}`);
-  }
-  return null;
-}
-async function delegateToAgent(agent, target) {
-  const repository = current?.repository ?? null;
-  const prompt = buildAgentPrompt({ agent, repository, target });
-  const title = (target.label ?? target.id ?? "repository view").slice(0, 80);
-  const reviewed = await showPromptReview({ agent, title, prompt });
-  if (reviewed === null) {
-    return;
-  }
-  try {
-    const result = await launchAgent(agent, {
-      repository: state.repository ?? repository?.root,
-      target: { kind: target.kind, id: target.id, label: target.label },
-      prompt: reviewed,
-      title
-    });
-    showToast(
-      result?.sessionId ? `Opened ${agent} in the Terminal on ${title} \u2014 edit the prefilled task, then send.` : `Prepared ${agent} on ${title}.`
-    );
-  } catch (error) {
-    showToast(`Could not open an agent session (${error.message}).`, {
-      label: "Copy prompt",
-      onClick: async () => {
-        await copyText(reviewed);
-        showToast("Prompt copied \u2014 paste it into your agent.");
-      }
-    });
-  }
-}
-function narrateMenuItems(target) {
-  if (target?.kind !== "node") {
-    return [];
-  }
-  const menuState = isNarratable(target.id) ? narratorMenuState(narratorStatus) : { enabled: false, hint: "Narrate works on a file or a System unit \u2014 open the folder to reach its files." };
-  return [
-    {
-      label: "\u2726 Narrate",
-      hint: menuState.enabled ? "model-generated" : "unavailable",
-      ...menuState.enabled ? { action: () => narrateNode(target.id) } : { title: menuState.hint }
-    },
-    { separator: true }
-  ];
-}
-function resetMapLayout() {
-  view.resetIslandOffsets();
-  writeIslandLayout(state.repository, {});
-  applyFilterToView();
-  showToast("Map layout reset to the computed arrangement.");
-}
-function layoutMenuItems(target) {
-  if (target?.kind !== "view" || Object.keys(view.islandOffsets()).length === 0) {
-    return [];
-  }
-  return [
-    { label: "\u21BA Reset map layout", hint: "computed positions", action: resetMapLayout },
-    { separator: true }
-  ];
-}
-function openDelegateMenu(target, x, y) {
-  if (!target) {
-    return;
-  }
-  const repository = current?.repository ?? null;
-  const menuTitle = (target.label ?? target.id ?? "repository view").slice(0, 80);
-  const promptFor = (agent) => buildAgentPrompt({ agent, repository, target });
-  showContextMenu({
-    x,
-    y,
-    title: menuTitle,
-    items: [
-      ...narrateMenuItems(target),
-      ...layoutMenuItems(target),
-      { label: "\u25B6 Delegate to OpenCode", hint: "opens agent session", action: () => delegateToAgent("opencode", target) },
-      { label: "\u25B6 Delegate to Claude", hint: "opens agent session", action: () => delegateToAgent("claude", target) },
-      { separator: true },
-      {
-        label: "\u29C9 Copy prompt",
-        action: async () => {
-          await copyText(promptFor("opencode"));
-          showToast("Prompt copied \u2014 paste it into your agent.");
-        }
-      },
-      ...target.id ? [{
-        label: "\u29C9 Copy path",
-        action: async () => {
-          await copyText(target.id);
-          showToast("Path copied.");
-        }
-      }] : [],
-      ...Array.isArray(target.items) && target.items.length > 0 ? [{
-        label: "\u29C9 Copy paths",
-        action: async () => {
-          await copyText(target.items.map((entry) => entry.id ?? entry.label).join("\n"));
-          showToast(`${target.items.length} path(s) copied.`);
-        }
-      }] : []
-    ]
-  });
-}
-view.onContext((target, originalEvent) => {
-  hideTooltip();
-  const x = originalEvent?.clientX ?? window.innerWidth / 2;
-  const y = originalEvent?.clientY ?? window.innerHeight / 2;
-  if (target.kind === "node" && target.id && groupSelection.length >= 2 && groupSelection.includes(target.id)) {
-    openDelegateMenu(groupDelegateTarget(), x, y);
-  } else if (target.kind === "node" && target.id) {
-    openDelegateMenu(nodeDelegateTarget(target.id), x, y);
-  } else if (target.kind === "edge" && target.id) {
-    openDelegateMenu(edgeDelegateTarget(target.id) ?? viewDelegateTarget("edge"), x, y);
-  } else {
-    openDelegateMenu(fallbackDelegateTarget(), x, y);
-  }
-});
-document.addEventListener("contextmenu", (event) => {
-  if (event.target.closest?.('input, select, textarea, [contenteditable="true"], dialog')) {
-    return;
-  }
-  if (event.target.closest?.(".terminal-screen")) {
-    return;
-  }
-  if (event.target.closest?.("#graph")) {
-    event.preventDefault();
-    return;
-  }
-  if (!event.target.closest?.(".workspace, .statusbar, #member-view, #diagnostics, #breadcrumb, .toolbar")) {
-    return;
-  }
-  const selection = window.getSelection?.()?.toString().trim() ?? "";
-  event.preventDefault();
-  closeContextMenu();
-  hideTooltip();
-  const resolved = resolveDomDelegateTarget(event.target);
-  openDelegateMenu(withSelection(resolved, selection), event.clientX, event.clientY);
-});
-function withSelection(resolved, selection) {
-  if (!selection) {
-    return resolved ?? fallbackDelegateTarget();
-  }
-  if (resolved) {
-    return { ...resolved, selection };
-  }
-  const context2 = fallbackDelegateTarget();
-  const excerpt = selection.replace(/\s+/g, " ");
-  return {
-    kind: "selection",
-    label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
-    evidence: context2.evidence,
-    selection
-  };
-}
-view.onSelect(onSelect);
-view.onDrill(onDrill);
-view.onEdge(selectEdge);
-var terminalBadge = document.createElement("span");
-terminalBadge.id = "terminal-badge";
-terminalBadge.className = "diag-badge";
-terminalBadge.hidden = true;
-elements.screenTabTerminal.append(terminalBadge);
-function updateTerminalBadge(sessions) {
-  const list = Array.isArray(sessions) ? sessions : [];
-  const running = list.filter((session) => session?.status === "running").length;
-  const failed = list.filter(
-    (session) => session?.status === "exited" && (session.exitCode ?? 0) !== 0
-  ).length;
-  const count = running + failed;
-  terminalBadge.hidden = count === 0;
-  terminalBadge.textContent = String(count);
-  terminalBadge.classList.toggle("has-errors", failed > 0);
-  terminalBadge.title = failed > 0 ? `${running} running, ${failed} failed` : `${running} running`;
-}
-function resolveRepository() {
-  const repository = current?.repository;
-  const root = repository?.root ?? state.repository ?? null;
-  const name = repository?.name ?? (root ? root.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : null);
-  return { name, root };
-}
-function terminalToast(message, options = {}) {
-  return showToast(message, options.action ?? null, { timeout: options.timeout ?? 6e3 });
-}
-terminalScreen = initTerminalScreen(elements.terminalContainer, {
-  openSourceAt,
-  toast: terminalToast,
-  onSessionsChanged: updateTerminalBadge,
-  resolveRepository,
-  closeTerminal: () => setScreen("graph"),
-  onControl: handleTerminalControl
-});
-setDelegateSessionOpener((sessionId) => {
-  setScreen("terminal");
-  return terminalScreen?.openSession?.(sessionId);
-});
 function setScreen(screen) {
   store.set("ui", { screen });
-  const showTerminal = screen === "terminal";
-  const showReview2 = screen === "review";
-  const showHistory = screen === "history";
-  const showGraph = !showTerminal && !showReview2 && !showHistory;
-  elements.graphScreen.hidden = !showGraph;
-  elements.terminalScreen.hidden = !showTerminal;
-  if (elements.reviewScreen) elements.reviewScreen.hidden = !showReview2;
-  if (elements.historyScreen) elements.historyScreen.hidden = !showHistory;
-  document.body.classList.toggle("screen-off-graph", !showGraph);
+  const showTerminalTab = screen === "terminal";
+  const showReviewTab = screen === "review";
+  const showHistoryTab = screen === "history";
+  const showGraphTab = !showTerminalTab && !showReviewTab && !showHistoryTab;
+  elements.graphScreen.hidden = !showGraphTab;
+  elements.terminalScreen.hidden = !showTerminalTab;
+  if (elements.reviewScreen) elements.reviewScreen.hidden = !showReviewTab;
+  if (elements.historyScreen) elements.historyScreen.hidden = !showHistoryTab;
+  document.body.classList.toggle("screen-off-graph", !showGraphTab);
   if (elements.graphToolbar?.classList.contains("is-docked")) {
-    elements.graphToolbar.hidden = !showGraph;
+    elements.graphToolbar.hidden = !showGraphTab;
   }
-  elements.screenTabGraph.setAttribute("aria-selected", String(showGraph));
-  elements.screenTabTerminal.setAttribute("aria-selected", String(showTerminal));
-  elements.screenTabReview?.setAttribute("aria-selected", String(showReview2));
-  elements.screenTabHistory?.setAttribute("aria-selected", String(showHistory));
-  if (showTerminal) {
-    terminalScreen.activate();
-  } else if (showReview2) {
-    openReviewScreen();
-  } else if (showHistory) {
-    openHistoryScreen();
+  elements.screenTabGraph.setAttribute("aria-selected", String(showGraphTab));
+  elements.screenTabTerminal.setAttribute("aria-selected", String(showTerminalTab));
+  elements.screenTabReview?.setAttribute("aria-selected", String(showReviewTab));
+  elements.screenTabHistory?.setAttribute("aria-selected", String(showHistoryTab));
+  if (showTerminalTab) {
+    app.terminalScreen.activate();
+  } else if (showReviewTab) {
+    app.git.openReviewScreen();
+  } else if (showHistoryTab) {
+    app.git.openHistoryScreen();
   }
 }
 elements.screenTabGraph.addEventListener("click", () => setScreen("graph"));
 elements.screenTabTerminal.addEventListener("click", () => setScreen("terminal"));
 elements.screenTabReview?.addEventListener("click", () => setScreen("review"));
 elements.screenTabHistory?.addEventListener("click", () => setScreen("history"));
-function reviewHandlers(data, navigation, onClose = closeReview) {
-  return {
-    onClose,
-    ...navigation,
-    onSelect: (id) => selectNode(id),
-    onOpenDiff: (file, entry) => viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
-    narratorStatus,
-    onNarrate: () => narrateReview(data),
-    onOpenNarratorSettings: openNarratorSettings
-  };
-}
-function openReviewScreen() {
-  const body = elements.reviewScreenBody;
-  if (!body) {
-    return;
-  }
-  if (!currentReview) {
-    body.replaceChildren();
-    const note3 = document.createElement("p");
-    note3.className = "evidence";
-    note3.textContent = "Reviewing the working tree\u2026";
-    body.append(note3);
-    showReview("").catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-    return;
-  }
-  const navigation = { canGoBack: reviewHistory.length > 0, onBack: reviewBack };
-  renderReview(body, currentReview, reviewHandlers(currentReview, navigation, () => setScreen("graph")));
-  if (currentReview.available !== false) {
-    const label = currentReviewRequest?.branchName ?? (currentReviewRequest?.commit ? currentReviewRequest.commit.shortHash : "working tree");
-    elements.status.textContent = `Review ${label}`;
-  }
-}
-function refreshReviewScreen() {
-  const request2 = currentReviewRequest ?? { query: "", commit: null, branchName: null };
-  showReview(request2.query, request2.commit, request2.branchName, { fromHistory: true }).catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-}
-elements.reviewScreenPending?.addEventListener("click", () => {
-  showReview("").catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-elements.reviewScreenRefresh?.addEventListener("click", refreshReviewScreen);
-elements.historyScreenRefresh?.addEventListener("click", () => {
-  loadTimelineScreen().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-});
-async function loadTimelineScreen() {
-  const body = elements.historyScreenBody;
-  if (!body) {
-    return;
-  }
-  body.replaceChildren();
-  const note3 = document.createElement("p");
-  note3.className = "evidence";
-  note3.textContent = "Loading recorded history\u2026";
-  body.append(note3);
-  const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : "";
-  const driftQuery = state.repository ? `?limit=20&repository=${encodeURIComponent(state.repository)}` : "?limit=20";
-  const [result, history, drift] = await Promise.all([
-    request(`/analysis/timeline${query}`),
-    request(`/analysis/change-metrics/history${query}`).catch(() => null),
-    request(`/analysis/drift${driftQuery}`).catch(() => null)
-  ]);
-  renderTimeline(body, result, (commit) => {
-    selectCommit(commit).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
-  }, {
-    selectedHash: selectedCommitHash,
-    metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-    drift
-  });
-}
-function openHistoryScreen() {
-  loadTimelineScreen().catch((error) => {
-    elements.status.textContent = `Error: ${error.message}`;
-  });
-}
-var floatingWindows = initFloatingWindows({
-  dock: document.getElementById("float-dock"),
-  panels: [
-    {
-      key: "review",
-      element: elements.reviewPanel,
-      title: "Review",
-      dockLabel: "Review",
-      dock: false,
-      // Review is a screen tab, and R toggles this panel
-      width: 400,
-      // The heading's own text, without the dismiss button's `×`.
-      titleFrom: (panel) => panel.querySelector("h3")?.firstChild?.textContent?.trim() ?? "",
-      onOpen: () => {
-        if (elements.reviewPanel.hidden) toggleReview();
-      },
-      onClose: () => {
-        closeReview();
-        view.overlay(null);
-      }
-    },
-    {
-      key: "risk",
-      element: elements.riskPanel,
-      title: "Dependency risk",
-      dockLabel: "Risk",
-      glyph: "\u26A0",
-      width: 400,
-      onOpen: () => {
-        if (elements.riskPanel.hidden) toggleRisk();
-      },
-      onClose: () => closeRisk()
-    },
-    {
-      key: "timeline",
-      element: elements.timelinePanel,
-      title: "Timeline",
-      dockLabel: "Timeline",
-      dock: false,
-      // History is a screen tab, and T toggles this panel
-      width: 380,
-      onOpen: () => {
-        if (elements.timelinePanel.hidden) {
-          toggleTimeline().catch((error) => {
-            elements.status.textContent = `Error: ${error.message}`;
-          });
-        }
-      },
-      onClose: () => {
-        elements.timelinePanel.hidden = true;
-      }
-    },
-    {
-      key: "branches",
-      element: elements.branchesPanel,
-      title: "Branches",
-      dockLabel: "Branches",
-      glyph: "\u2442",
-      width: 420,
-      onOpen: () => {
-        if (elements.branchesPanel.hidden) {
-          toggleBranches().catch((error) => {
-            elements.status.textContent = `Error: ${error.message}`;
-          });
-        }
-      },
-      onClose: () => {
-        elements.branchesPanel.hidden = true;
-      }
-    },
-    {
-      key: "narration",
-      element: elements.narrationPanel,
-      title: "Narrator",
-      dockLabel: "Narrator",
-      glyph: "\u2726",
-      width: 420,
-      canOpen: () => elements.narrationPanel.childElementCount > 0,
-      blockedTitle: "Right-click a file or unit and choose Narrate first",
-      onBlocked: () => {
-        elements.status.textContent = "Right-click a file or unit and choose Narrate first.";
-      },
-      onClose: () => {
-        elements.narrationPanel.hidden = true;
-      }
-    },
-    {
-      key: "overlay",
-      element: elements.overlayPanel,
-      title: "Overlay",
-      dockLabel: "Overlay",
-      glyph: "\u25D0",
-      pinned: 5,
-      width: 360,
-      titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
-      canOpen: () => state.overlay !== "none",
-      blockedTitle: "Select an overlay (Review dropdown) to open Overlay",
-      onBlocked: () => {
-        elements.status.textContent = "Select an overlay first \u2014 Overlay has nothing to show.";
-      },
-      onClose: () => clearOverlay()
-    },
-    {
-      key: "edge",
-      element: elements.edgePanel,
-      title: "Edge",
-      dockLabel: "Edge",
-      glyph: "\u27F7",
-      pinned: 6,
-      width: 360,
-      titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
-      canOpen: () => Boolean(selectedEdgeId),
-      blockedTitle: "Click an edge in the graph to open Edge",
-      onBlocked: () => {
-        elements.status.textContent = "Click an edge in the graph first \u2014 no edge selected.";
-      },
-      onClose: () => selectEdge(null)
-    },
-    {
-      key: "source",
-      element: elements.sourcePanel,
-      title: "Source",
-      dockLabel: "Source",
-      glyph: "\u2039\u203A",
-      pinned: 3,
-      width: 720,
-      height: 640,
-      canOpen: () => Boolean(sourceView),
-      blockedTitle: "Select a file to view its source",
-      onBlocked: () => {
-        elements.status.textContent = "Select a file first \u2014 no source to show.";
-      },
-      onOpen: () => sourceRender(),
-      onClose: () => closeSource()
-    },
-    {
-      key: "legend",
-      element: elements.legend,
-      title: "Legend",
-      dockLabel: "Legend",
-      glyph: "\u2261",
-      pinned: 1,
-      width: 340
-    },
-    {
-      key: "inspector",
-      element: elements.inspector,
-      title: "Module passport",
-      dockLabel: "Passport",
-      glyph: "\u24D8",
-      pinned: 2,
-      width: 384,
-      canOpen: () => Boolean(selected),
-      blockedTitle: "Select a module in the graph to open Passport",
-      onBlocked: () => {
-        elements.status.textContent = "Select a module first \u2014 no passport to show.";
-      },
-      onClose: () => {
-        elements.inspector.hidden = true;
-      }
-    },
-    {
-      key: "diagnostics",
-      element: elements.diagnostics,
-      title: "Diagnostics",
-      dockLabel: "Diagnostics",
-      dock: false,
-      // the header's Diagnostics icon opens it
-      width: 420,
-      titleFrom: (panel) => panel.querySelector("h3")?.textContent?.trim() ?? "",
-      onOpen: () => {
-        startRuntimeReadout();
-      },
-      onClose: () => {
-        elements.diagnostics.hidden = true;
-        elements.diagnosticsToggle.setAttribute("aria-expanded", "false");
-        stopRuntimeReadout();
-      }
-    },
-    {
-      key: "settings",
-      element: elements.settingsPanel,
-      title: "Settings",
-      dockLabel: "Settings",
-      dock: false,
-      // the header's Settings icon opens it
-      width: 420,
-      onOpen: () => {
-        if (elements.settingsPanel.hidden) {
-          openSettings().catch((error) => {
-            elements.status.textContent = `Error: ${error.message}`;
-          });
-        }
-        elements.settingsToggle?.setAttribute("aria-expanded", "true");
-      },
-      onClose: () => {
-        elements.settingsPanel.hidden = true;
-        elements.settingsToggle?.setAttribute("aria-expanded", "false");
-      }
-    },
-    {
-      key: "shortcuts",
-      element: elements.shortcuts,
-      title: "Keyboard shortcuts",
-      dockLabel: "Shortcuts",
-      dock: false,
-      // ? opens it
-      width: 320,
-      onOpen: () => renderShortcuts(elements.shortcuts),
-      onClose: () => {
-        elements.shortcuts.hidden = true;
-      }
-    },
-    {
-      key: "member",
-      element: elements.memberView,
-      title: "Member map",
-      dockLabel: "Member map",
-      glyph: "\u25A6",
-      pinned: 4,
-      width: 900,
-      height: 700,
-      center: true,
-      canOpen: () => Boolean(memberData),
-      blockedTitle: "Open a member map from a module passport first",
-      onBlocked: () => {
-        elements.status.textContent = "Open a member map from a module passport first.";
-      },
-      onOpen: () => renderMemberMapView(),
-      onClose: () => closeMemberMap()
-    },
-    {
-      key: "workspace",
-      element: elements.workspacePanel,
-      title: "Workspace",
-      dockLabel: "Workspace",
-      glyph: "\u29C9",
-      width: 460,
-      onOpen: () => {
-        showWorkspace().catch(() => {
-        });
-      },
-      onClose: () => closeWorkspace()
-    },
-    {
-      key: "passport",
-      element: elements.passportPanel,
-      title: "Repository passport",
-      dockLabel: "Repo",
-      glyph: "\u2302",
-      width: 460,
-      onOpen: () => {
-        showPassport().catch(() => {
-        });
-      },
-      onClose: () => closePassport()
-    },
-    {
-      key: "route",
-      element: elements.routePanel,
-      title: "Reading route",
-      dockLabel: "Route",
-      glyph: "\u279C",
-      width: 440,
-      onOpen: () => {
-        showRoute().catch(() => {
-        });
-      },
-      onClose: () => closeRoute()
-    },
-    {
-      key: "blocks",
-      element: elements.blocksPanel,
-      title: "Blocks",
-      dockLabel: "Blocks",
-      glyph: "\u25A3",
-      width: 560,
-      height: 620,
-      onOpen: () => showBlocks(),
-      onClose: () => {
-        elements.blocksPanel.hidden = true;
-      }
-    }
-  ]
-});
-initFloatingToolbar(elements.graphToolbar, { dock: document.getElementById("bottom-bar") });
-function refreshDock() {
-  try {
-    floatingWindows?.refresh?.();
-  } catch {
-  }
-}
-elements.settingsToggle?.addEventListener("click", () => {
-  floatingWindows.find((controller) => controller.key === "settings")?.toggle();
-});
-watchSystemPreferences(clientPrefs, () => applyClientPrefs());
+watchSystemPreferences(app.clientPrefs, () => applyClientPrefs());
 if (window.STRABO_TEST) {
   window.straboTest = {
     cy: view.cy,
     state,
-    select: selectNode,
-    drill: onDrill,
-    openUnit,
-    closeUnit,
-    toggleOutsideLinks,
-    toggleExpandedUnit,
+    select: app.selection.selectNode,
+    drill: app.selection.onDrill,
+    openUnit: app.units.openUnit,
+    closeUnit: app.units.closeUnit,
+    toggleOutsideLinks: app.units.toggleOutsideLinks,
+    toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,
-    selectEdge,
-    model: () => current,
+    selectEdge: app.selection.selectEdge,
+    model: () => app.current,
     renderedGeneration: () => state.renderedGeneration,
-    openMemberMap: (id) => openMemberMap(id),
-    closeMemberMap: () => closeMemberMap(),
+    openMemberMap: (id) => app.memberMap.openMemberMap(id),
+    closeMemberMap: () => app.memberMap.closeMemberMap(),
     memberUI,
-    memberData: () => memberData,
-    memberStepCount,
-    review: () => showReview(""),
-    reviewCommit: (ref) => showReview(`?base=${encodeURIComponent(ref)}`),
-    risk: () => showRisk(),
-    groupSelection: () => groupSelection,
-    floatingWindows: () => floatingWindows,
+    memberData: () => app.memberData,
+    memberStepCount: app.memberMap.memberStepCount,
+    review: () => app.git.showReview(""),
+    reviewCommit: (ref) => app.git.showReview(`?base=${encodeURIComponent(ref)}`),
+    risk: () => app.git.showRisk(),
+    groupSelection: () => app.groupSelection,
+    floatingWindows: () => app.floatingWindows,
     islands: () => view.islandDirectories(),
     islandBoxes: () => view.islandBoxes(),
     islandOffsets: () => view.islandOffsets(),
     setIslandLayout: (offsets) => view.setIslandOffsets(offsets),
-    resetIslandLayout: resetMapLayout,
-    workspace: () => showWorkspace(),
-    passport: () => showPassport(),
-    route: (file) => showRoute(file),
-    blocks: () => showBlocks(),
-    brickAssembly: () => buildBrickAssembly(current?.nodes ?? [], current?.edges ?? []),
+    resetIslandLayout: app.delegation.resetMapLayout,
+    workspace: () => app.panels.showWorkspace(),
+    passport: () => app.panels.showPassport(),
+    route: (file) => app.panels.showRoute(file),
+    blocks: () => app.panels.showBlocks(),
+    brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,
-    openReviewScreen,
-    openHistoryScreen
+    openReviewScreen: app.git.openReviewScreen,
+    openHistoryScreen: app.git.openHistoryScreen
   };
 }
-fetchNarratorStatus().then((status) => {
-  narratorStatus ?? (narratorStatus = status);
+app.narration.fetchNarratorStatus().then((status) => {
+  app.narratorStatus ?? (app.narratorStatus = status);
 });
-loadCatalogue().then(() => {
-  state.mode = clientPrefs.defaultDetail;
-  elements.detail.value = clientPrefs.defaultDetail;
-  applyUrl();
+app.repos.loadCatalogue().then(() => {
+  state.mode = app.clientPrefs.defaultDetail;
+  elements.detail.value = app.clientPrefs.defaultDetail;
+  app.url.applyUrl();
   if (state.repository && [...elements.repository.options].some((option) => option.value === state.repository)) {
     elements.repository.value = state.repository;
     elements.forget.disabled = false;
   }
-  applyViewPrefs();
+  app.prefs.applyViewPrefs();
   return scan();
-}).then(() => restoreUrlPanel()).then(() => {
+}).then(() => app.url.restoreUrlPanel()).then(() => {
   if (elements.memberView.hidden) {
-    return maybeOpenPassport();
+    return app.panels.maybeOpenPassport();
   }
   return void 0;
 }).catch((error) => {

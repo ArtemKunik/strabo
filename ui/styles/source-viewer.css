@@ -1,0 +1,143 @@
+/* --------------------------------------------------------- Source viewer */
+/*
+ * The file viewer reads a file or a change, mono-spaced and numbered. Diff tints reuse the
+ * status hues rather than adding new ones, and the two gutters share fixed widths so old and
+ * new line numbers keep their columns however long the code runs.
+ */
+.source-panel {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+.float-body .source-panel {
+  padding: 0;
+  border-bottom: none;
+  background: none;
+}
+
+.source-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--veiled-surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.source-path {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.source-ref,
+.source-counts {
+  color: var(--ink-3);
+}
+
+.source-modes {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.source-mode {
+  font: inherit;
+  padding: 2px 8px;
+  color: var(--ink-2);
+  background: var(--wash);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.source-mode:hover {
+  border-color: var(--accent);
+}
+
+.source-body {
+  padding: 6px 0 14px;
+}
+
+.src-hunk {
+  margin: 8px 0 2px;
+  padding: 3px 12px;
+  color: var(--ink-3);
+  background: var(--wash);
+}
+
+.src-line {
+  display: flex;
+  align-items: baseline;
+  line-height: 1.55;
+}
+
+.src-no {
+  flex: none;
+  width: 3.6em;
+  padding: 0 8px 0 4px;
+  color: var(--ink-3);
+  text-align: right;
+  user-select: none;
+}
+
+.src-code {
+  flex: 1 1 auto;
+  padding-right: 14px;
+  white-space: pre;
+}
+
+.tok-keyword {
+  color: var(--syntax-keyword);
+}
+
+.tok-string {
+  color: var(--syntax-string);
+}
+
+.tok-number,
+.tok-literal {
+  color: var(--syntax-number);
+}
+
+.tok-type {
+  color: var(--syntax-type);
+}
+
+.tok-function {
+  color: var(--syntax-function);
+}
+
+.tok-meta {
+  color: var(--syntax-meta);
+}
+
+.tok-comment {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.src-add {
+  background: color-mix(in srgb, var(--status-good) 15%, transparent);
+}
+
+.src-del {
+  background: color-mix(in srgb, var(--status-critical) 15%, transparent);
+}
+
+.src-mark {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.source-loading,
+.source-note {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+

@@ -20,6 +20,7 @@ import {
   readDeclaredGroups,
   scanRepository,
 } from '../../src/index.ts';
+import type { MeasuredCoverageSummary } from '../../src/index.ts';
 import type { Graph } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
 
@@ -334,6 +335,53 @@ test('buildSystemViewModel marks a single unit and fills its card facts (L19, L2
   // Hotspots need the function analysis, so the server leaves them for the browser.
   assert.equal(card?.hotspots, null);
   assert.ok((card?.layers.length ?? 0) >= 1);
+  // No report was passed, so the card claims no measured figure.
+  assert.equal(card?.coverage, null);
+
+  // U2: with a report, the card sums the named files' lines and counts the rest as not in report.
+  const measured: MeasuredCoverageSummary = {
+    available: true,
+    basis: 'measured',
+    format: 'lcov',
+    reportPath: 'coverage/lcov.info',
+    reportModified: null,
+    reportAgeMs: null,
+    skipped: [],
+    outOfGraph: [],
+    stale: [],
+    summary: { filesMeasured: 1, linesFound: 4, linesHit: 1, lineCoverage: 25 },
+    files: [
+      {
+        rawPath: 'src/a.ts',
+        file: 'src/a.ts',
+        inGraph: true,
+        linesFound: 4,
+        linesHit: 1,
+        lineCoverage: 25,
+        functions: [],
+        functionsFound: 0,
+        functionsHit: 0,
+        lastCommit: null,
+        stale: null,
+      },
+    ],
+  };
+  const measuredModel = buildSystemViewModel(
+    report,
+    { name: 'solo', root, head: null, dirty: false, gitUrl: null },
+    { status: 'memory', fingerprint: null, artifactVersion: 'test', generatedAt: 'now' },
+    graph,
+    measured,
+  );
+  const measuredCard = measuredModel.unitCards?.find((entry) => entry.id === '.');
+  assert.deepEqual(measuredCard?.coverage, {
+    basis: 'measured',
+    linesHit: 1,
+    linesFound: 4,
+    value: 25,
+    filesMeasured: 1,
+    notInReport: 1,
+  });
 });
 
 test('buildSystemViewModel keeps the L0 map for an unmanifested single unit', () => {

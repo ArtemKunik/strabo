@@ -33,6 +33,7 @@ function sampleCard(overrides: Record<string, unknown> = {}) {
     shelf: { test: 3, script: 1, generated: 0, fixture: 0, total: 4 },
     hotspots: null,
     testReach: { reached: 6, total: 12 },
+    coverage: null,
     dependsOn: 2,
     usedBy: 4,
     why: 'crate `ledger-api` (Cargo.toml)',
@@ -146,4 +147,18 @@ test('withUnitHotspots joins the report to the longest unit prefix', () => {
   });
   assert.equal(filled.find((card: { id: string }) => card.id === 'crates/api')?.hotspots, 2);
   assert.equal(filled.find((card: { id: string }) => card.id === '.')?.hotspots, 1);
+});
+
+test('a unit card shows measured coverage when the report names its files (U2)', () => {
+  const measured = unitCardElement(
+    sampleCard({
+      coverage: { basis: 'measured', linesHit: 30, linesFound: 40, value: 75, filesMeasured: 10, notInReport: 2 },
+    }),
+  );
+  const text = measured.querySelector('.unit-card-reach')?.textContent ?? '';
+  assert.match(text, /measured 75%/);
+  assert.doesNotMatch(text, /test reach/);
+
+  const reachOnly = unitCardElement(sampleCard());
+  assert.match(reachOnly.querySelector('.unit-card-reach')?.textContent ?? '', /test reach 50%/);
 });

@@ -1,0 +1,197 @@
+/* ------------------------------------------------------------------ Top bar */
+.toolbar {
+  /* Above the floating-panel layer (50), the panel rail (55), and the canvas toolbar (60),
+     so the header's menus open over all of them. */
+  position: relative;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-2) 90%, var(--accent) 10%),
+    var(--bg-2)
+  );
+  flex-wrap: wrap;
+}
+
+.tb-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-right: 1px solid var(--line-soft);
+}
+
+.tb-group:first-child {
+  padding-left: 0;
+}
+
+.tb-group:last-of-type {
+  border-right: none;
+}
+
+.tb-view-group {
+  border-right: none;
+}
+
+/* Graph controls (View, Scope, filter, drill-down) act only on the map, so the other screens
+   do not show them. The panel rail lives inside the graph screen and hides with it. */
+body.screen-off-graph .tb-graph-only {
+  display: none !important;
+}
+
+.tb-menu-wrap {
+  position: relative;
+  display: flex;
+}
+
+.tb-menu.tb-menu-left {
+  left: 0;
+  right: auto;
+}
+
+.tb-menu .tb-menu-danger {
+  color: var(--status-serious);
+}
+
+.tb-menu button:disabled {
+  color: var(--ink-3);
+  background: none;
+  cursor: default;
+}
+
+/* A square icon button in the header (repo actions, diagnostics, settings). */
+.tb-icon-button {
+  position: relative;
+  min-width: 30px;
+  padding: 4px 7px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tb-icon-button .diag-badge {
+  position: absolute;
+  top: -4px;
+  right: -6px;
+}
+
+/* View: one button naming the current detail / tier / overlay, opening their selects. */
+.tb-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.tb-view-key {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tb-view-caret {
+  color: var(--ink-3);
+  font-size: 10px;
+}
+
+.tb-view-menu {
+  gap: 10px;
+  min-width: 230px;
+  padding: 12px;
+}
+
+.view-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view-field-label {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.view-field select {
+  width: 100%;
+}
+
+/* System mode (L20): hide the per-file lenses and file-map tools the unit map cannot act on. */
+body[data-mode="system"] .control-tier,
+body[data-mode="system"] .control-overlay,
+body[data-mode="system"] #tb-impact,
+body[data-mode="system"] #tb-path,
+body[data-mode="system"] #tb-boundaries {
+  display: none;
+}
+
+/* Calls are a file-mode lens: directory and unit edges are not function calls. */
+#tb-calls {
+  display: none;
+}
+body[data-mode="file"] #tb-calls {
+  display: inline-flex;
+}
+
+.tb-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A button that reads as chrome rather than an action: no border until hover. */
+.quiet-button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+}
+
+.quiet-button:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+
+.tb-brand-group {
+  gap: 8px;
+}
+
+.brand {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-size: 16px;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+/* Folded into the toolbar: the drill-down breadcrumb no longer spends its own row. */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+
+.control-label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+

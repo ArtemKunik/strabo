@@ -378,12 +378,40 @@ export function createGitController(app) {
     return {
       onClose,
       ...navigation,
-      onSelect: (id) => app.selection.selectNode(id),
-      onOpenDiff: (file, entry) => app.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status }),
+      onSelect: (id) => selectFromReview(id),
+      onOpenDiff: (file, entry) => openReviewDiff(data, file, entry),
       narratorStatus: app.narratorStatus,
       onNarrate: () => app.narration.narrateReview(data),
       onOpenNarratorSettings: app.settings.openNarratorSettings,
     };
+  }
+
+  /**
+   * Select a file from a review. The full-screen Review tab hides the graph and every floating
+   * window, so return to the graph first. Then raise the Module Passport: an already-open
+   * passport would otherwise be re-rendered behind the Review window that asked for the
+   * selection, and the click would look like it did nothing.
+   */
+  function selectFromReview(id) {
+    if (store.get().ui.screen !== 'graph') {
+      app.setScreen('graph');
+    }
+    app.selection.selectNode(id);
+    if (!elements.inspector.hidden) {
+      app.floatingWindows?.find((controller) => controller.key === 'inspector')?.raise?.();
+    }
+  }
+
+  /**
+   * Open a review row's Diff. The viewer is a floating window, and a full-screen Git tab hides
+   * every floating window, so return to the graph first; from the floating Review panel the
+   * graph is already showing and nothing changes.
+   */
+  function openReviewDiff(data, file, entry) {
+    if (store.get().ui.screen !== 'graph') {
+      app.setScreen('graph');
+    }
+    app.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status });
   }
 
   /**

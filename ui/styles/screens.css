@@ -1,0 +1,79 @@
+/* ------------------------------------------------------------------ Workspace */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+/* Both screens occupy the same grid cell so toggling `hidden` swaps them in place
+   instead of stacking a second row underneath. */
+.screen {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+
+/* A screen sets its own `display` (`.git-screen` is a flex column), and an author
+   `display` outranks the user-agent `[hidden]` rule. Because every screen shares one grid
+   cell, a screen that ignores `hidden` keeps painting over the active one — the Review and
+   History bodies bled into each other. This restores `hidden` for every screen at once. */
+.screen[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ Git screens */
+/*
+ * Review and History share the terminal screen's full-height shape: a fixed toolbar above a
+ * scrollable body. While a screen replaces the graph its floating windows are hidden
+ * (body.screen-off-graph), so a panel opened earlier can never draw over the screen shown.
+ */
+.git-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--bg-1);
+}
+
+.git-screen-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-2) 90%, var(--accent) 10%),
+    var(--bg-2)
+  );
+}
+
+.git-screen-title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink-1);
+}
+
+.git-screen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;             /* the scroll container for history/review */
+  overflow-x: hidden;           /* a wide child clips instead of scrolling the whole screen */
+}
+
+body.screen-off-graph .float-window {
+  display: none;
+}
+
+.graph-wrap {
+  position: relative;
+  background-color: var(--bg-1);
+  /* A faint accent bloom from the top edge gives the canvas depth without tinting nodes. */
+  background-image: radial-gradient(
+    120% 90% at 50% -10%,
+    color-mix(in srgb, var(--accent) 8%, transparent),
+    transparent 62%
+  );
+}
+

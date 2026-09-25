@@ -231,19 +231,22 @@ export function createAnalysisRouter(config: StraboConfig): Router {
 
   /**
    * The repository passport: languages, size, entry points, layers, top files by fan-in,
-   * cycles, and what no test reaches. The opening summary for an unfamiliar repository.
+   * cycles, and what tests leave uncovered (measured when a report exists, else reachability).
+   * The opening summary for an unfamiliar repository.
    */
   router.get('/analysis/passport', async (request, response) => {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       const limit = parsePositiveInt(request.query.limit, 10) ?? 10;
+      const measured = await measuredCoverage(repository, cached.report.graph);
       response.json({
         ...computeRepositoryPassport(
           repository.name,
           cached.report.graph,
           cached.report.extensionCounts,
           limit,
+          measured,
         ),
         provenance: await graphProvenance(repository.root, cached),
       });
@@ -277,6 +280,10 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         },
         change: includeChange,
         risk: { online: config.risk?.online === true, deniedLicenses: denied },
+        coverage: {
+          ...(config.coverageReports ? { reportPaths: config.coverageReports } : {}),
+          ceiling: config.scanCeiling ?? config.workspaceRoot,
+        },
       });
       const format = typeof request.query.format === 'string' ? request.query.format : 'json';
       if (format === 'md') {

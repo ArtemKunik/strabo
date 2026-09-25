@@ -1,0 +1,83 @@
+/* ---------------------------------------------------------------- Settings */
+.settings-panel {
+  padding: 12px 14px;
+}
+
+.float-body .settings-panel {
+  border-bottom: none;
+  background: none;
+}
+
+.settings-panel h3 {
+  margin: 0 0 10px;
+  font-size: var(--text-md);
+}
+
+.setting-section {
+  margin-bottom: 16px;
+}
+
+.setting-section h4 {
+  margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.setting-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.setting-field .setting-label {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.setting-field input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-row {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.setting-row input[type='text'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.setting-note {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.setting-locked {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
+.setting-status {
+  margin: 6px 0 0;
+  color: var(--status-good);
+  font-size: var(--text-xs);
+}
+
+.setting-status.is-error {
+  color: var(--status-critical);
+}

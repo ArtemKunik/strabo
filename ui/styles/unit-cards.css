@@ -1,0 +1,164 @@
+/* System-view unit cards (roadmap L21, L22). The card is DOM, anchored under its node,
+   so it carries the facts a canvas box cannot and never defines a colour of its own. */
+.unit-card-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* At overview zoom the layer keeps only the header, so full cards cannot pile up on the map. */
+.unit-card-layer[data-density="compact"] .unit-card-why,
+.unit-card-layer[data-density="compact"] .unit-card-stats,
+.unit-card-layer[data-density="compact"] .unit-card-layers,
+.unit-card-layer[data-density="compact"] .unit-card-reach,
+.unit-card-layer[data-density="compact"] .unit-shelf,
+.unit-card-layer[data-density="compact"] .unit-shelf-more {
+  display: none;
+}
+
+.unit-card {
+  position: absolute;
+  transform: translateX(-50%);
+  width: 210px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--bg-1);
+  box-shadow: var(--shadow-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+.unit-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+/* The header is a door into the unit; the rest of the card stays transparent to the map. */
+.unit-card-open {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.unit-card-open:hover .unit-card-name {
+  text-decoration: underline;
+}
+
+.unit-card-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-card-role {
+  color: var(--ink-3);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.unit-card-eco {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+
+.unit-card-why,
+.unit-card-stats,
+.unit-card-reach {
+  margin-top: 4px;
+  color: var(--ink-2);
+}
+
+.unit-card-why {
+  color: var(--ink-3);
+}
+
+.unit-card-stats,
+.unit-card-reach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.unit-card-layers {
+  display: grid;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.unit-layer {
+  display: grid;
+  grid-template-columns: 56px 1fr 24px;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-3);
+}
+
+.unit-layer-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--line-soft);
+}
+
+.unit-layer-bar {
+  display: block;
+  height: 100%;
+  background: var(--node-fill);
+}
+
+.unit-layer-count {
+  text-align: right;
+}
+
+.unit-layer-more {
+  color: var(--ink-3);
+}
+
+.unit-shelf {
+  width: 100%;
+  margin-top: 6px;
+  padding: 3px 6px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.unit-shelf:hover {
+  color: var(--ink-1);
+}
+
+.unit-shelf-more {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  color: var(--ink-3);
+}
+
+/* The L19 note: a one-unit repository skips the L0 unit map and says so. */
+.system-note {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--veiled-surface);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+

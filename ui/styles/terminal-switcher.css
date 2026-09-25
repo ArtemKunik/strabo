@@ -1,0 +1,69 @@
+/* -------------------------------------------------------- Terminal switcher */
+/*
+ * The Ctrl+K overlay is fixed to the viewport and veils the app, so it is reachable no matter
+ * which pane holds focus. It lives outside the terminal screen, hence the high z-index.
+ */
+.terminal-switcher {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  background: var(--veil);
+}
+
+.terminal-switcher-panel {
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+
+.terminal-switcher-input {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  padding: 10px 12px;
+  font-size: var(--text-md);
+}
+
+.terminal-switcher-list {
+  overflow-y: auto;
+}
+
+.terminal-switcher-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  background: none;
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--ink-2);
+}
+
+.terminal-switcher-item.is-selected,
+.terminal-switcher-item:hover {
+  background: var(--accent-soft);
+  color: var(--ink-1);
+  border: none;
+}
+
+.terminal-switcher-meta {
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+

@@ -1,0 +1,68 @@
+/*
+ * Reduce motion (the setting, or the OS preference applied by strabo-settings.js). The
+ * animations Strabo has are decorative transitions and the member-map playback; none of
+ * them carries information that is not also shown statically, so they collapse to their
+ * end state.
+ */
+:root[data-reduce-motion='1'] *,
+:root[data-reduce-motion='1'] *::before,
+:root[data-reduce-motion='1'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* The loading spinner conveys status, not decoration, so it keeps turning. */
+:root[data-reduce-motion='1'] .spinner {
+  animation-duration: 0.8s !important;
+  animation-iteration-count: infinite !important;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-3) 40%, transparent) transparent;
+}
+
+/* A thin, themed scrollbar everywhere, so panels and lists read as one surface. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--ink-3) 40%, transparent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ink-3) 65%, transparent);
+}
+
+/* `hidden` must win: several components set `display` (flex/inline-block) on the same
+   element, which outranks the user-agent `[hidden]` rule. Without this a "hidden" badge,
+   screen, or menu stays visible. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: grid;
+  /* toolbar · workspace · consolidated bottom bar (strip + dock + status). The explicit
+     `minmax(0, 1fr)` column clamps the track to the viewport; without it the implicit auto
+     column grows to the widest child's max-content and the whole chrome overflows. */
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--bg-1);
+  color: var(--ink-1);
+  font: 13px/1.5 var(--font-ui);
+}
+

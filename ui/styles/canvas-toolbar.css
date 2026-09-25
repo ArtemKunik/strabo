@@ -1,0 +1,210 @@
+.graph-toolbar {
+  position: absolute;
+  /* Opens centred along the top of the canvas; dragging places it by left/top. */
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above the floating windows (z-index 50): the canvas actions, including the System
+     back-to-units control, must stay clickable even when a panel is dragged over them. */
+  z-index: 60;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-1);
+  backdrop-filter: blur(10px) saturate(1.3);
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+}
+
+.graph-toolbar button {
+  padding: 4px 9px;
+  font-size: 12px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.graph-toolbar button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+/* Icon-only canvas toolbar: the label moves to title/aria-label, and the tooltip carries
+   the keyboard hint, so eight text buttons no longer wrap to two rows at 1280px. */
+.graph-toolbar .tb-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* A hidden toolbar button must actually hide: the `display: inline-flex` above outranks the
+   user-agent `[hidden]` rule, so without this the back-to-units control lingers in file mode
+   and reads as a button that does nothing. */
+.graph-toolbar button[hidden] {
+  display: none;
+}
+
+/* The toolbar floats: drag the grip to move it, the corner to widen it (the icon buttons
+   wrap, so it reflows). Placement and width are remembered in localStorage. */
+.tb-grip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 2px;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -2px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.tb-grip:active {
+  cursor: grabbing;
+}
+
+.tb-resize {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  border-radius: 0 0 9px 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.tb-resize::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  top: 4px;
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--ink-3);
+  opacity: 0.4;
+}
+
+/* A bottom-anchored toolbar opens its overflow menu upward, so the menu stays on screen. */
+.graph-toolbar.opens-up .tb-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
+/* Docked: dragged down onto the bottom bar, the toolbar joins the footer row beside the
+   panel dock instead of floating over the canvas. */
+.graph-toolbar.is-docked {
+  position: relative;
+  top: auto;
+  bottom: auto;
+  left: auto;
+  transform: none;
+  /* Keep its one-row width: the tests strip, panel dock, and status text give way first. */
+  flex: 0 0 auto;
+  max-width: min(560px, 62vw);
+  z-index: auto;
+}
+
+/* The footer is outside the graph screen, so a docked bar needs to be hidden explicitly
+   when the Terminal tab is active. */
+.graph-toolbar.is-docked[hidden] {
+  display: none;
+}
+
+/* The resize edge only means something while the bar floats. */
+.graph-toolbar.is-docked .tb-resize {
+  display: none;
+}
+
+/* Highlight the bottom bar while a dragged toolbar hovers over it, so the drop is visible. */
+.bottom-bar.is-dock-target {
+  border-top-color: var(--accent);
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
+.tb-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--line);
+}
+
+.tb-overflow-wrap {
+  position: relative;
+}
+
+.tb-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-m);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(12px) saturate(1.3);
+}
+
+.tb-menu[hidden] {
+  display: none;
+}
+
+.tb-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: var(--ink-1);
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.tb-menu button:hover {
+  background: var(--bg-3);
+}
+
+.tb-menu kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* ⌘/ctrl-click toggles a node into the native cytoscape selection; shift-drag box-selects
+   a region. This chip is the only feedback that a group exists until the delegate button
+   appears beside it, so it stays visible the instant the set is non-empty. */
+.group-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#tb-delegate-group {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+

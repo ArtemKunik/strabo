@@ -311,6 +311,7 @@ export function createLensController(app) {
         app.scan();
         return;
       }
+      app.prefs.writeViewPrefs();
       applyTierLens();
     });
   }

@@ -1,0 +1,355 @@
+/*
+ * Nord: arctic blue-grey surfaces.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='nord'] {
+  color-scheme: dark;
+  --bg-0: #272c36;
+  --bg-1: #2e3440;
+  --bg-2: #3b4252;
+  --bg-3: #434c5e;
+  --ink-1: #eceff4;
+  --ink-2: #d8dee9;
+  --ink-3: #97a1b3;
+  --line: #4c566a;
+  --line-soft: #3f4859;
+  --accent: #88c0d0;
+  --accent-ink: #bfe1e9;
+  --on-accent: #2e3440;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0ca50c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #dc6c6c;
+  --syntax-keyword: #b48ead;
+  --syntax-string: #a3be8c;
+  --syntax-number: #d08770;
+  --syntax-type: #8fbcbb;
+  --syntax-function: #88c0d0;
+  --syntax-meta: #ebcb8b;
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #d367b8;
+  --tier-api: #339bb0;
+  --tier-domain: #9781da;
+  --tier-data: #36a249;
+  --tier-integration: #cf7759;
+  --tier-infra: #a88b31;
+  --tier-build: #728bd6;
+  --tier-tests: #d26f8a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(39, 44, 54, 0.72);
+  --veiled-surface: rgba(59, 66, 82, 0.96);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #eceff4;
+  --graph-ink-outline: #2e3440;
+  --graph-edge: #55697f;
+  --graph-edge-accent: #88c0d0;
+  --graph-edge-selected: #88c0d0;
+  --graph-hub: #88c0d0;
+  --graph-selected: #ffffff;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #2b313d;
+}
+
+/*
+ * Dracula: vivid purple on near-black.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='dracula'] {
+  color-scheme: dark;
+  --bg-0: #1e1f29;
+  --bg-1: #282a36;
+  --bg-2: #343746;
+  --bg-3: #44475a;
+  --ink-1: #f8f8f2;
+  --ink-2: #d6d8e0;
+  --ink-3: #8b90a5;
+  --line: #44475a;
+  --line-soft: #383a4a;
+  --accent: #bd93f9;
+  --accent-ink: #d7bcff;
+  --on-accent: #282a36;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0ca50c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #dc6c6c;
+  --syntax-keyword: #ff79c6;
+  --syntax-string: #f1fa8c;
+  --syntax-number: #bd93f9;
+  --syntax-type: #8be9fd;
+  --syntax-function: #50fa7b;
+  --syntax-meta: #ffb86c;
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #d367b8;
+  --tier-api: #339bb0;
+  --tier-domain: #9781da;
+  --tier-data: #36a249;
+  --tier-integration: #cf7759;
+  --tier-infra: #a88b31;
+  --tier-build: #728bd6;
+  --tier-tests: #d26f8a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(30, 31, 41, 0.72);
+  --veiled-surface: rgba(52, 55, 70, 0.96);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #f8f8f2;
+  --graph-ink-outline: #282a36;
+  --graph-edge: #5f6f8f;
+  --graph-edge-accent: #bd93f9;
+  --graph-edge-selected: #bd93f9;
+  --graph-hub: #bd93f9;
+  --graph-selected: #ffffff;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #23242e;
+}
+
+/*
+ * Solarized Dark: the classic low-contrast dark palette.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='solarized-dark'] {
+  color-scheme: dark;
+  --bg-0: #00212b;
+  --bg-1: #002b36;
+  --bg-2: #073642;
+  --bg-3: #0a4453;
+  --ink-1: #fdf6e3;
+  --ink-2: #93a1a1;
+  --ink-3: #7d939a;
+  --line: #0f4c5a;
+  --line-soft: #0a3d49;
+  --accent: #268bd2;
+  --accent-ink: #7cc0e8;
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0ca50c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #dc6c6c;
+  --syntax-keyword: #859900;
+  --syntax-string: #2aa198;
+  --syntax-number: #d33682;
+  --syntax-type: #b58900;
+  --syntax-function: #268bd2;
+  --syntax-meta: #cb4b16;
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #d367b8;
+  --tier-api: #339bb0;
+  --tier-domain: #9781da;
+  --tier-data: #36a249;
+  --tier-integration: #cf7759;
+  --tier-infra: #a88b31;
+  --tier-build: #728bd6;
+  --tier-tests: #d26f8a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(0, 33, 43, 0.72);
+  --veiled-surface: rgba(7, 54, 66, 0.96);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #fdf6e3;
+  --graph-ink-outline: #002b36;
+  --graph-edge: #586e75;
+  --graph-edge-accent: #268bd2;
+  --graph-edge-selected: #268bd2;
+  --graph-hub: #268bd2;
+  --graph-selected: #fdf6e3;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #00252f;
+}
+
+/*
+ * Gruvbox Dark: warm retro earth tones.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='gruvbox-dark'] {
+  color-scheme: dark;
+  --bg-0: #1d2021;
+  --bg-1: #282828;
+  --bg-2: #3c3836;
+  --bg-3: #504945;
+  --ink-1: #ebdbb2;
+  --ink-2: #d5c4a1;
+  --ink-3: #a89984;
+  --line: #504945;
+  --line-soft: #3c3836;
+  --accent: #83a598;
+  --accent-ink: #b8d0c4;
+  --on-accent: #282828;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0ca50c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #dc6c6c;
+  --syntax-keyword: #fb4934;
+  --syntax-string: #b8bb26;
+  --syntax-number: #d3869b;
+  --syntax-type: #fabd2f;
+  --syntax-function: #8ec07c;
+  --syntax-meta: #fe8019;
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #d367b8;
+  --tier-api: #339bb0;
+  --tier-domain: #9781da;
+  --tier-data: #36a249;
+  --tier-integration: #cf7759;
+  --tier-infra: #a88b31;
+  --tier-build: #728bd6;
+  --tier-tests: #d26f8a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(29, 32, 33, 0.72);
+  --veiled-surface: rgba(60, 56, 54, 0.96);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #ebdbb2;
+  --graph-ink-outline: #282828;
+  --graph-edge: #665c54;
+  --graph-edge-accent: #83a598;
+  --graph-edge-selected: #83a598;
+  --graph-hub: #83a598;
+  --graph-selected: #fbf1c7;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #242424;
+}
+
+/*
+ * Monokai: classic editor palette with neon accents.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='monokai'] {
+  color-scheme: dark;
+  --bg-0: #1e1f1c;
+  --bg-1: #272822;
+  --bg-2: #3e3d32;
+  --bg-3: #49483e;
+  --ink-1: #f8f8f2;
+  --ink-2: #cfcfc2;
+  --ink-3: #a6a28c;
+  --line: #49483e;
+  --line-soft: #3a3a30;
+  --accent: #66d9ef;
+  --accent-ink: #a8ecf8;
+  --on-accent: #272822;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0ca50c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #dc6c6c;
+  --syntax-keyword: #f92672;
+  --syntax-string: #e6db74;
+  --syntax-number: #ae81ff;
+  --syntax-type: #66d9ef;
+  --syntax-function: #a6e22e;
+  --syntax-meta: #fd971f;
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #d367b8;
+  --tier-api: #339bb0;
+  --tier-domain: #9781da;
+  --tier-data: #36a249;
+  --tier-integration: #cf7759;
+  --tier-infra: #a88b31;
+  --tier-build: #728bd6;
+  --tier-tests: #d26f8a;
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(30, 31, 28, 0.72);
+  --veiled-surface: rgba(62, 61, 50, 0.96);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #f8f8f2;
+  --graph-ink-outline: #272822;
+  --graph-edge: #75715e;
+  --graph-edge-accent: #66d9ef;
+  --graph-edge-selected: #66d9ef;
+  --graph-hub: #66d9ef;
+  --graph-selected: #f8f8f2;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #22231e;
+}
+

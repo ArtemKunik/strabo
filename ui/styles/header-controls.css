@@ -1,0 +1,140 @@
+.control select,
+.control input,
+button {
+  background: var(--bg-0);
+  color: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 5px 9px;
+  font: inherit;
+}
+
+/* One focus ring for every interactive element (Phase 12 M4). Keyboard focus is always
+   visible; the pointer does not show it (`:focus-visible`), so the map stays uncluttered. */
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+button {
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+
+button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--ink-1);
+}
+
+button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-wrap input {
+  width: 180px;
+  padding-right: 24px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 3px;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--ink-3);
+  font-size: 15px;
+}
+
+.filter-count {
+  min-width: 52px;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.freshness-badge {
+  margin-left: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-0);
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.freshness-badge.is-stale {
+  border-color: var(--status-warning);
+  color: var(--status-warning);
+  cursor: pointer;
+}
+
+.freshness-badge:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.diag-badge {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--status-warning);
+  color: var(--on-warning);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.diag-badge.has-errors {
+  background: var(--status-critical);
+  color: var(--on-accent);
+}
+
+.crumb {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.crumb + .crumb::before {
+  content: "/";
+  margin-right: 8px;
+  margin-left: -4px;
+  color: var(--ink-3);
+}
+

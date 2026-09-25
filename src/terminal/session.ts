@@ -30,7 +30,11 @@ export type PtySpawner = (
 ) => PtyProcess | Promise<PtyProcess>;
 
 async function defaultSpawner(file: string, args: string[], options: PtySpawnOptions): Promise<PtyProcess> {
-  const pty = await import('node-pty');
+  // `node-pty` is an optional dependency: an install that could not build it still maps and
+  // reviews, and only the Terminal screen says why it cannot start a shell.
+  const pty = await import('node-pty').catch(() => {
+    throw new Error('The in-app terminal needs the optional native module node-pty, which is not installed.');
+  });
   // ConPTY does not search PATH; resolve the command first so a bare `opencode`, `claude`,
   // or `npm` launches the same way it would from a shell.
   return pty.spawn(resolveExecutable(file, options.env), args, {

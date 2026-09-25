@@ -1,0 +1,254 @@
+/* Change impact passport: the current-graph risk surface and the deltas a change made. */
+.impact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.impact-cell {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+}
+
+.impact-cell-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.impact-cell-value {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1);
+}
+
+.impact-cell-value.good { color: var(--status-good); }
+.impact-cell-value.warning { color: var(--status-warning); }
+.impact-cell-value.serious { color: var(--status-serious); }
+.impact-cell-value.critical { color: var(--status-critical); }
+.impact-cell-value.grown { color: var(--status-serious); }
+.impact-cell-value.shed { color: var(--status-good); }
+.impact-cell-value.flat { color: var(--ink-2); }
+.impact-cell-value.none { color: var(--ink-3); }
+
+.impact-cell-detail {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+
+.impact-list h5 {
+  margin: 8px 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.impact-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.impact-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.impact-files {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.impact-files li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.impact-risk-band {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.impact-risk-band.good { color: var(--status-good); border-color: var(--status-good); }
+.impact-risk-band.warning { color: var(--status-warning); border-color: var(--status-warning); }
+.impact-risk-band.serious { color: var(--status-serious); border-color: var(--status-serious); }
+.impact-risk-band.critical { color: var(--status-critical); border-color: var(--status-critical); }
+.impact-risk-band.none { color: var(--ink-3); }
+
+.health-delta {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-delta.up {
+  color: var(--status-good);
+  border-color: var(--status-good);
+}
+
+.health-delta.down {
+  color: var(--status-critical);
+  border-color: var(--status-critical);
+}
+
+.health-delta.flat {
+  color: var(--ink-3);
+}
+
+.health-delta.new {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.health-delta.removed {
+  color: var(--status-warning);
+  border-color: var(--status-warning);
+}
+
+.health-delta.none {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.metric-delta {
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+.metric-delta.worse {
+  color: var(--status-critical);
+}
+
+.metric-delta.better {
+  color: var(--status-good);
+}
+
+.metric-delta.none {
+  font-style: italic;
+}
+
+table.change-metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+table.change-metrics th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--ink-3);
+  padding: 2px 4px;
+}
+
+table.change-metrics th:first-child,
+table.change-metrics td:first-child {
+  text-align: left;
+}
+
+table.change-metrics td {
+  text-align: right;
+  padding: 1px 4px;
+  vertical-align: top;
+}
+
+table.change-metrics td:first-child .link {
+  font-family: var(--font-mono);
+  word-break: break-all;
+  text-align: left;
+}
+
+.risk-panel {
+  border-left: 3px solid var(--status-critical);
+  background: var(--bg-0);
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.risk-panel h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.risk-advisory {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.risk-severity {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.risk-severity.severity-critical { border-color: var(--status-critical); color: var(--status-critical); }
+.risk-severity.severity-high { border-color: var(--status-serious); color: var(--status-serious); }
+.risk-severity.severity-moderate { border-color: var(--status-warning); color: var(--status-warning); }
+.risk-severity.severity-low { border-color: var(--status-good); color: var(--status-good); }
+.risk-severity.severity-unknown { border-color: var(--ink-3); color: var(--ink-3); }
+
+.risk-panel .evidence {
+  margin: 2px 0;
+}
+
+.edge-route {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.edge-clear {
+  margin-left: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--input-bg);
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 12px;
+  background: var(--bg-0);
+}
+

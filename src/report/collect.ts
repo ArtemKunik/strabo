@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 
 import { computeCoverage } from '../analysis/coverage.ts';
+import { computeMeasuredCoverage } from '../analysis/measured-coverage.ts';
 import { collectDrift } from '../analysis/drift.ts';
 import { buildFunctions, type FunctionsReport } from '../analysis/functions.ts';
 import { rankHotspots } from '../analysis/hotspots.ts';
@@ -42,6 +43,8 @@ export interface CollectRepositoryReportOptions {
   drift?: boolean;
   /** Dependency-risk config; omitted means the risk section is not computed. */
   risk?: RiskOptions;
+  /** Where to read the measured coverage report; omitted means the conventional locations. */
+  coverage?: { reportPaths?: readonly string[]; ceiling?: string };
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }
@@ -74,6 +77,12 @@ export async function collectRepositoryReport(
   const drift =
     options.drift === false ? undefined : await collectDrift(root, options.repository, { limit: 10 });
 
+  // Read, never run: the report the repository already has, or unavailable with a reason.
+  const coverage = await computeMeasuredCoverage(root, graph, {
+    ...(options.coverage?.reportPaths ? { reportPaths: options.coverage.reportPaths } : {}),
+    ...(options.coverage?.ceiling ? { ceiling: options.coverage.ceiling } : {}),
+  });
+
   return buildRepositoryReport({
     repository: options.repository,
     root,
@@ -86,6 +95,7 @@ export async function collectRepositoryReport(
     ...(risk ? { risk } : {}),
     ...(change ? { change } : {}),
     ...(drift ? { drift } : {}),
+    coverage,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.limits ? { limits: options.limits } : {}),
   });

@@ -6,7 +6,18 @@ internals and limits live in [DESIGN.md](./DESIGN.md).
 
 ## Install and run
 
-Requires Node 22+ and npm. From the repository root:
+Requires Node 22+. The quickest route is the npm package, `strabo-map`, which installs the
+`strabo` command:
+
+```sh
+npx strabo-map /path/to/repo
+npm install -g strabo-map && strabo /path/to/repo
+```
+
+The Terminal screen needs the optional native module `node-pty`. An install that could not
+build it still maps, reviews, and reports; only the Terminal names the missing module.
+
+To run from a clone of this repository instead:
 
 ```sh
 npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
@@ -116,7 +127,8 @@ applied immediately:
 The theme is applied as `data-theme` on `<html>`; the surface, ink, border, and canvas
 colours are CSS custom properties, so both the chrome and the Cytoscape graph re-skin
 together (the graph stylesheet reads `--graph-*` at runtime). Every theme is a full token
-set in `ui/styles.css`, so the terminal, the graph, and the panels all follow. Reduce motion
+set in `ui/styles/themes-dark.css` or `ui/styles/themes-light.css` (the default dark set is
+`ui/styles/tokens.css`), so the terminal, the graph, and the panels all follow. Reduce motion
 sets `data-reduce-motion`, which the graph viewport also honours.
 
 **Rendering** chooses the map's renderer: **GPU rendering (WebGL2)** on draws on the GPU,

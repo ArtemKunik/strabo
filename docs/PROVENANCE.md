@@ -97,7 +97,7 @@ sign-off below.
 
 | Artifact | Origin | License | Evidence |
 | -------- | ------ | ------- | -------- |
-| `public/index.html`, `public/styles.css` | First-party source in `ui/` | MIT (repository) | Copied by `scripts/build-ui.mjs` |
+| `public/index.html`, `public/styles.css` | First-party source in `ui/` and `ui/styles/` | MIT (repository) | Copied, and the stylesheet parts concatenated, by `scripts/build-ui.mjs` |
 | `public/strabo.bundle.js`, `.map` | esbuild output of first-party `ui/` modules only; cytoscape is not bundled | MIT (repository) | `scripts/build-ui.mjs` `BUNDLED_MODULES`; tracked in git (`git ls-files public`) |
 | `bin/strabo.js`, `dist/**` | First-party source in `src/` | MIT (repository) | `tsc` output; `dist/` is gitignored build output |
 | `parsers/vendor/**` | Prebuilt grammar `.wasm` from `tree-sitter-wasm` | MIT (upstream, see above) | Generated, gitignored (`parsers/vendor/`) |

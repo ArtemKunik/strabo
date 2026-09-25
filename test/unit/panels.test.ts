@@ -1136,6 +1136,53 @@ test('renderRepositoryPassport shows graph fingerprint and scan time (T6)', () =
   assert.equal(line!.classList.contains('is-stale'), true);
 });
 
+function passportWithUntested(untested: unknown) {
+  return {
+    repository: 'acme',
+    size: { files: 3, edges: 2, directories: 1, tests: 1, diagnostics: 0, excluded: 0 },
+    languages: [],
+    entryPoints: [],
+    topDirectories: [],
+    topFiles: [],
+    cycles: { total: 0, largest: [] },
+    untested,
+  };
+}
+
+test('renderRepositoryPassport names the measured basis and each file figure (U2)', () => {
+  const target = container();
+  renderRepositoryPassport(
+    target,
+    passportWithUntested({
+      basis: 'measured',
+      threshold: 50,
+      total: 1,
+      files: ['src/zero.ts'],
+      figures: [{ file: 'src/zero.ts', value: 0, stale: true }],
+      notInReport: 2,
+    }),
+    {},
+  );
+  const text = target.textContent ?? '';
+  assert.match(text, /Used and under 50% measured/);
+  assert.doesNotMatch(text, /no test reaches/);
+  assert.match(text, /measured 0% · stale/);
+  assert.match(text, /2 used module\(s\) not in the coverage report/);
+});
+
+test('renderRepositoryPassport keeps the reachability heading without a report (U2)', () => {
+  const target = container();
+  renderRepositoryPassport(
+    target,
+    passportWithUntested({ basis: 'reachable', threshold: null, total: 1, files: ['b.ts'], figures: [{ file: 'b.ts', value: null, stale: null }], notInReport: 0 }),
+    {},
+  );
+  const text = target.textContent ?? '';
+  assert.match(text, /Used but no test reaches/);
+  assert.doesNotMatch(text, /measured/);
+  assert.match(text, /b\.ts/);
+});
+
 test('renderRepositoryPassport offers an export control that passes the chosen format', () => {
   const target = container();
   const formats: string[] = [];
@@ -1161,6 +1208,45 @@ test('renderRepositoryPassport offers an export control that passes the chosen f
   select!.value = 'html';
   button!.click();
   assert.deepEqual(formats, ['html']);
+});
+
+test('renderRepositoryPassport leads with the three Start here jobs, above the summary sections', () => {
+  const target = container();
+  const jobs: string[] = [];
+  const report = {
+    repository: 'acme',
+    size: { files: 3, edges: 2, directories: 1, tests: 0, diagnostics: 0, excluded: 0 },
+    languages: [],
+    entryPoints: [],
+    topDirectories: [],
+    topFiles: [],
+    cycles: { total: 0, largest: [] },
+    untested: { total: 0, files: [] },
+  };
+  renderRepositoryPassport(target, report, {
+    onOpenRoute: () => jobs.push('route'),
+    onReviewChange: () => jobs.push('review'),
+    onCheckBranches: () => jobs.push('branches'),
+  });
+
+  const start = target.querySelector('[data-role="passport-start"]');
+  assert.ok(start, 'the Start here block is rendered');
+  assert.ok(
+    start!.compareDocumentPosition(target.querySelector('.passport-section-heading')!) & 4,
+    'Start here comes before the first section',
+  );
+  const buttons = [...start!.querySelectorAll('button')] as HTMLButtonElement[];
+  assert.deepEqual(buttons.map((button) => button.id), ['open-route', 'start-review', 'start-branches']);
+  for (const button of buttons) button.click();
+  assert.deepEqual(jobs, ['route', 'review', 'branches']);
+
+  // A job with no handler is left out rather than drawn as an inert button.
+  const partial = container();
+  renderRepositoryPassport(partial, report, { onOpenRoute: () => {} });
+  assert.deepEqual([...partial.querySelectorAll('[data-role="passport-start"] button')].map((b) => b.id), ['open-route']);
+  const none = container();
+  renderRepositoryPassport(none, report, {});
+  assert.equal(none.querySelector('[data-role="passport-start"]'), null);
 });
 
 test('initFloatingToolbar adds a drag grip and a resize edge', () => {
@@ -1542,4 +1628,37 @@ test('the panel rail shows pinned panels in pin order, lists the rest under More
   windows.find((controller) => controller.key === 'risk')?.open();
   assert.deepEqual(railLabels(), ['Legend', 'Source', 'Risk'], 'an open panel joins the rail');
   assert.equal(dock.querySelector('.dock-more'), null, 'More leaves the rail with nothing in it');
+});
+
+test('raise moves an already-open window to the front without toggling it', () => {
+  (globalThis as { MutationObserver?: unknown }).MutationObserver = window.MutationObserver;
+  const dock = container();
+  const host = container();
+  document.body.append(dock, host);
+  const panel = (id: string) => {
+    const element = document.createElement('section');
+    element.id = id;
+    element.hidden = true;
+    host.append(element);
+    return element;
+  };
+  const windows = initFloatingWindows({
+    dock,
+    panels: [
+      { key: 'first', element: panel('first'), title: 'First', dock: false },
+      { key: 'second', element: panel('second'), title: 'Second', dock: false },
+    ],
+  });
+
+  const first = windows.find((controller) => controller.key === 'first')!;
+  const second = windows.find((controller) => controller.key === 'second')!;
+  first.open();
+  second.open();
+  const secondZ = Number(second.window.style.zIndex);
+  assert.ok(Number(first.window.style.zIndex) < secondZ, 'the window opened last is on top');
+
+  first.raise();
+  assert.ok(Number(first.window.style.zIndex) > secondZ, 'raise puts an open window above the rest');
+  assert.equal(first.isOpen(), true, 'raise neither closes nor reopens the window');
+  assert.equal(first.isCollapsed(), false, 'raise does not change the collapsed state');
 });

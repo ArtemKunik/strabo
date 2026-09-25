@@ -103,3 +103,30 @@ Declared-architecture rules (`strabo.rules.yml`, or the `rules:` key of `strabo.
 turn operator intent into a check failure: a rule id is passed straight to `--fail-on`, e.g.
 `strabo check --fail-on=domain-no-infra` fails on an edge the rule forbids and names the rule,
 the edge, and its evidence line.
+
+## Pull request comments (GitHub Action)
+
+The repository root is also a GitHub Action. It runs the change report for a pull request
+against its base commit, posts it as one comment that later pushes update in place, adds it
+to the job summary, and fails the check only for the rules named in `fail-on`.
+
+```yaml
+# .github/workflows/strabo.yml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  strabo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ArtemKunik/strabo@main
+        with:
+          fail-on: cycle,tier        # optional; empty reports without failing
+          expect: 'src/auth/**'      # optional scope fence
+```
+
+Inputs: `base` (defaults to the pull request's base commit, fetched if the checkout is
+shallow), `fail-on`, `expect`, `comment` (`true`), `version` (the `strabo-map` release to run,
+`latest` by default), and `github-token`. Outputs: `report` (the Markdown file) and `failed`.

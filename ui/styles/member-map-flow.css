@@ -1,0 +1,278 @@
+/* ------------------------------------------------------------------ Flow walkthrough animation */
+/* While Play runs, the region for the current step comes forward and the rest step back.
+   Only recorded wiring is animated; a step with no evidence highlights an empty panel. */
+.member-view.is-playing .member-header,
+.member-view.is-playing .member-type,
+.member-view.is-playing .flow-panel {
+  opacity: 0.45;
+  transition: opacity 240ms ease;
+}
+
+.member-view.is-playing[data-step='fingerprint'] .member-header,
+.member-view.is-playing[data-step='members'] .member-type,
+.member-view.is-playing[data-step='wiring'] .member-type {
+  opacity: 1;
+}
+
+.member-view.is-playing[data-step='data-flow'] .member-dataflow .flow-panel:not([data-flow='external']),
+.member-view.is-playing[data-step='consumption'] .member-dataflow .flow-panel[data-flow='external'] {
+  opacity: 1;
+  animation: dataflow-pulse 1.4s ease-out 1;
+}
+
+.member-view.is-playing[data-step='data-flow'] .flow-diagram-wrap .flow-diagram {
+  animation: dataflow-pulse 1.4s ease-out 1;
+}
+
+/* Members reveal in cluster order, so a class reads as its connected components. */
+.member-view.is-playing[data-step='members'] .member-card {
+  animation: cluster-reveal 420ms ease-out backwards;
+  animation-delay: calc(var(--cluster-stagger, 0) * 70ms);
+}
+
+/* The divider dot falls from `read` to `write`, the direction the recorded wiring runs. */
+.member-view.is-playing[data-step='data-flow'] .flow-marker {
+  animation: read-write-flow 1.4s ease-in-out infinite;
+}
+
+/* Data-flow diagram: fields left, methods right, recorded reads blue / writes amber. */
+.flow-diagram-wrap {
+  margin-bottom: 12px;
+}
+
+.flow-diagram {
+  width: 100%;
+  height: auto;
+  display: block;
+  padding: 12px 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-0);
+}
+
+.flow-edge {
+  fill: none;
+  stroke-width: 1.6;
+  opacity: 0.8;
+  transition: opacity 160ms ease;
+}
+
+.flow-edge.read {
+  stroke: var(--accent);
+}
+
+.flow-edge.write {
+  stroke: var(--status-warning);
+}
+
+.flow-arrowhead.read {
+  fill: var(--accent);
+}
+
+.flow-arrowhead.write {
+  fill: var(--status-warning);
+}
+
+.flow-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.flow-node rect {
+  fill: var(--bg-2);
+  stroke: var(--line);
+  transition: stroke 160ms ease, opacity 160ms ease;
+}
+
+.flow-node.field rect {
+  stroke-dasharray: none;
+  border-left: 3px solid var(--accent);
+}
+
+.flow-node text {
+  fill: var(--ink-1);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.flow-node:hover rect,
+.flow-node:focus-visible rect {
+  stroke: var(--accent);
+}
+
+.flow-node.hit rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.flow-diagram.tracing .flow-edge:not(.dim),
+.flow-diagram.isolated .flow-edge:not(.dim) {
+  opacity: 1;
+}
+
+.flow-diagram .dim {
+  opacity: 0.14;
+  transition: opacity 160ms ease;
+}
+
+@keyframes dataflow-pulse {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  70% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    border-color: var(--line);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes cluster-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes read-write-flow {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .member-view.is-playing .flow-panel,
+  .member-view.is-playing[data-step='members'] .member-card,
+  .member-view.is-playing[data-step='data-flow'] .flow-marker {
+    animation: none;
+  }
+}
+
+.member-insights {
+  position: sticky;
+  top: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.member-health,
+.member-constellation {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+}
+
+.member-insights h4 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.health-score {
+  color: var(--ink-1);
+}
+
+.health-metrics {
+  margin: 0 0 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.radar,
+.constellation {
+  width: 100%;
+  height: auto;
+}
+
+.radar-frame {
+  fill: none;
+  stroke: var(--line);
+}
+
+.radar-area {
+  fill: color-mix(in srgb, var(--accent) 20%, transparent);
+  stroke: var(--accent);
+}
+
+.radar-dot {
+  fill: var(--accent);
+}
+
+.health-axes {
+  margin: 8px 0 0;
+  padding-left: 16px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.constellation-dot.field { fill: var(--status-good); }
+.constellation-dot.method { fill: var(--accent); }
+.constellation-dot.consumer { fill: var(--ink-3); }
+
+.member-view .caveat {
+  margin: 6px 0 0;
+  color: var(--ink-3);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.member-view[data-zoom='overview'] .card-metrics {
+  display: none;
+}
+
+.member-view[data-zoom='overview'] .member-cards {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.member-view[data-zoom='detail'] .member-cards {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+@media (max-width: 1100px) {
+  .float-window {
+    max-width: calc(100vw - 24px);
+  }
+
+  .flow-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .flow-divider {
+    display: none;
+  }
+
+  .member-body {
+    grid-template-columns: 1fr;
+  }
+
+  .member-insights {
+    position: static;
+  }
+}
+
+

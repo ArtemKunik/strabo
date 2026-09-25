@@ -1,0 +1,83 @@
+/*
+ * The dot grid lives on the graph container, not on .graph-wrap: when the (opt-in)
+ * WebGL renderer is active, it reads this element's inline background colour to blend
+ * arrow tips, and strabo-view.js sets one here that would otherwise hide a grid painted
+ * behind it. Cytoscape's canvases clear to transparent, so the grid still shows through
+ * either way.
+ */
+.graph {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, var(--graph-grid) 1px, transparent 1.4px);
+  background-size: 26px 26px;
+}
+
+/*
+ * Directory islands. The layer is the first child of the Cytoscape container, so it
+ * paints over the container background and under every canvas Cytoscape appends.
+ */
+.island-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.island-plate {
+  fill: var(--island-fill);
+  stroke: var(--island-line);
+  stroke-width: 1;
+  rx: 14;
+  ry: 14;
+}
+
+.island-label {
+  fill: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.island-label.is-hidden {
+  display: none;
+}
+
+/*
+ * Island dragging is read at the container (the SVG stays pointer-events: none), so the
+ * grab affordance belongs on the graph surface: it shows only while a plate is under the
+ * pointer, and switches to a closed hand for the length of the drag.
+ */
+.graph.island-grab {
+  cursor: grab;
+}
+
+.graph.island-dragging {
+  cursor: grabbing;
+}
+
+/*
+ * The hover caption for a plate whose label had to be trimmed. It sits outside the SVG
+ * layer so the layer can stay `overflow: hidden`, takes no pointer events, and reports the
+ * full directory path the plate shortened.
+ */
+.island-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: 420px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--veiled-surface);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: var(--shadow-1);
+}
+

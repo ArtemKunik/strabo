@@ -1,0 +1,212 @@
+/*
+ * Light theme. Only the tokens change: every component is written against them, so the
+ * surfaces, ink, borders, and canvas colours all flip together. `color-scheme` makes the
+ * native controls (selects, scrollbars, form fields) follow too, which CSS cannot paint.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-0: #e6eaf1;
+  --bg-1: #f3f5f9;
+  --bg-2: #ffffff;
+  --bg-3: #e8ecf3;
+  --ink-1: #131a24;
+  --ink-2: #38445a;
+  --ink-3: #64728a;
+  --line: #d6dde7;
+  --line-soft: #e5eaf1;
+  --accent: #3b6fe0;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-ink: #1d47a0;
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  --focus-ring: var(--accent);
+  --status-good: #1f9e7c;
+  --status-warning: #b9741a;
+  --status-serious: #b5562a;
+  --status-critical: #d23b3b;
+  --syntax-keyword: #7b3fc4;
+  --syntax-string: #2b7a3d;
+  --syntax-number: #a94e14;
+  --syntax-type: #0f6a88;
+  --syntax-function: #2456b3;
+  --syntax-meta: #83630c;
+  --node-fill: #5b6b7d;
+  --node-line: rgba(20, 40, 70, 0.32);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #66748a;
+  /* Tier hues hold on the light surfaces at the same values as the dark theme. */
+  --tier-frontend: #b63596;
+  --tier-api: #3092a6;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #a68930;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
+  --wash: rgba(20, 40, 70, 0.05);
+  --hairline: rgba(20, 40, 70, 0.16);
+  --veil: rgba(243, 245, 249, 0.72);
+  --veiled-surface: rgba(255, 255, 255, 0.9);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 1px 2px rgba(30, 45, 70, 0.08), 0 10px 30px rgba(30, 45, 70, 0.12);
+  --shadow-2: 0 2px 6px rgba(30, 45, 70, 0.1), 0 18px 50px rgba(30, 45, 70, 0.18);
+  --graph-grid: rgba(20, 40, 70, 0.10);
+  --graph-ink: #1b2530;
+  --graph-ink-outline: #f4f6fa;
+  --graph-edge: #9aa9bb;
+  --graph-edge-accent: #3b6fe0;
+  --graph-edge-selected: #3b6fe0;
+  --graph-hub: #3b6fe0;
+  --graph-selected: #16202c;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #ffffff;
+}
+
+/*
+ * Solarized Light: the classic low-contrast light palette.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='solarized-light'] {
+  color-scheme: light;
+  --bg-0: #e9e0c8;
+  --bg-1: #fdf6e3;
+  --bg-2: #eee8d5;
+  --bg-3: #e4dcc4;
+  --ink-1: #073642;
+  --ink-2: #586e75;
+  --ink-3: #657b83;
+  --line: #d9d2bc;
+  --line-soft: #e6dfc9;
+  --accent: #268bd2;
+  --accent-ink: #1a5f92;
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0b970b;
+  --status-warning: #ac7604;
+  --status-serious: #e2521a;
+  --status-critical: #d03b3b;
+  --syntax-keyword: #6b7a00;
+  --syntax-string: #1a7a72;
+  --syntax-number: #a8275f;
+  --syntax-type: #8a6800;
+  --syntax-function: #1a6fa8;
+  --syntax-meta: #a03a10;
+  --node-fill: #5b6b7d;
+  --node-line: rgba(20, 40, 70, 0.32);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #b63596;
+  --tier-api: #2e8da0;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #9a7f2d;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
+  --wash: rgba(7, 54, 66, 0.05);
+  --hairline: rgba(7, 54, 66, 0.16);
+  --veil: rgba(253, 246, 227, 0.7);
+  --veiled-surface: rgba(238, 232, 213, 0.97);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 2px 8px rgba(7, 54, 66, 0.12);
+  --shadow-2: 0 10px 30px rgba(7, 54, 66, 0.18);
+  --graph-grid: rgba(7, 54, 66, 0.10);
+  --graph-ink: #073642;
+  --graph-ink-outline: #fdf6e3;
+  --graph-edge: #93a1a1;
+  --graph-edge-accent: #268bd2;
+  --graph-edge-selected: #268bd2;
+  --graph-hub: #268bd2;
+  --graph-selected: #073642;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #fdf6e3;
+}
+
+/*
+ * Gruvbox Light: warm retro earth tones on paper.
+ *
+ * A full token set, like the light theme: only the tokens change, so the chrome, the
+ * canvas, and the terminal all follow. The tier and status scales are re-tuned to clear
+ * 3:1 on this theme's surfaces (Phase 13 R4, Phase 16 L10).
+ */
+:root[data-theme='gruvbox-light'] {
+  color-scheme: light;
+  --bg-0: #ece0bd;
+  --bg-1: #fbf1c7;
+  --bg-2: #f2e5bc;
+  --bg-3: #ebdbb2;
+  --ink-1: #3c3836;
+  --ink-2: #504945;
+  --ink-3: #7c6f64;
+  --line: #d5c4a1;
+  --line-soft: #e3d5ac;
+  --accent: #076678;
+  --accent-ink: #054b59;
+  --on-accent: #fbf1c7;
+  --on-warning: #111111;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --focus-ring: var(--accent);
+  --status-good: #0b970b;
+  --status-warning: #ac7604;
+  --status-serious: #e2521a;
+  --status-critical: #d03b3b;
+  --syntax-keyword: #9d0006;
+  --syntax-string: #79740e;
+  --syntax-number: #8f3f71;
+  --syntax-type: #b57614;
+  --syntax-function: #427b58;
+  --syntax-meta: #af3a03;
+  --node-fill: #5b6b7d;
+  --node-line: rgba(60, 56, 54, 0.32);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  --tier-frontend: #b63596;
+  --tier-api: #2e8da0;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #9a7f2d;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
+  --wash: rgba(60, 56, 54, 0.05);
+  --hairline: rgba(60, 56, 54, 0.16);
+  --veil: rgba(251, 241, 199, 0.7);
+  --veiled-surface: rgba(242, 229, 188, 0.97);
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  --shadow-1: 0 2px 8px rgba(60, 56, 54, 0.12);
+  --shadow-2: 0 10px 30px rgba(60, 56, 54, 0.18);
+  --graph-grid: rgba(60, 56, 54, 0.10);
+  --graph-ink: #3c3836;
+  --graph-ink-outline: #fbf1c7;
+  --graph-edge: #a89984;
+  --graph-edge-accent: #076678;
+  --graph-edge-selected: #076678;
+  --graph-hub: #076678;
+  --graph-selected: #3c3836;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #fbf1c7;
+}
+

@@ -7,7 +7,7 @@ import path from 'node:path';
  * Release readiness check.
  *
  * Packs the real tarball, asserts the published file set, installs it into a clean
- * consumer project, and exercises the shipped entry points (`strabo`, `strabo/server`)
+ * consumer project, and exercises the shipped entry points (`strabo-map`, `strabo-map/server`)
  * including a language resolver so packaged grammar assets are proven to load.
  *
  * Opt-in via `npm run test:pack`; it installs dependencies and is not part of `npm test`.
@@ -102,8 +102,8 @@ try {
     path.join(consumer, 'verify.mjs'),
     `import assert from 'node:assert/strict';
 import path from 'node:path';
-import { scanRepository } from 'strabo';
-import { createStraboServer } from 'strabo/server';
+import { scanRepository } from 'strabo-map';
+import { createStraboServer } from 'strabo-map/server';
 
 const repo = path.join(import.meta.dirname, 'repo');
 const report = await scanRepository(repo);
@@ -162,7 +162,7 @@ console.log('consumer verification passed');
   gitIn('add .');
   gitIn('commit -q -m cycle');
 
-  const straboBin = path.join(consumer, 'node_modules', 'strabo', 'bin', 'strabo.js');
+  const straboBin = path.join(consumer, 'node_modules', 'strabo-map', 'bin', 'strabo.js');
   const report = execSync(`node "${straboBin}" report . --base ${baseHash} --format md`, { cwd: fixture }).toString();
   check(/Cycles introduced/.test(report), 'report names the introduced cycle');
   check(report.includes('src/a.ts') && report.includes('src/b.ts'), 'report names the cycle members');

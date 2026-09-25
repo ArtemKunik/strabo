@@ -137,6 +137,10 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
     hotspots: !hasFlag(argv, 'hotspots'),
     ownership: !hasFlag(argv, 'ownership'),
     drift: !hasFlag(argv, 'drift'),
+    coverage: {
+      ...(env.coverageReports ? { reportPaths: env.coverageReports } : {}),
+      ceiling: env.scanCeiling,
+    },
   });
 
   if (format === 'json') {

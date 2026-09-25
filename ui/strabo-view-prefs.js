@@ -8,6 +8,7 @@
 
 import { readIslandLayout } from './strabo-island-layout.js';
 import { FILE_MODE_OVERLAYS } from './strabo-overlays.js';
+import { TIER_ORDER } from './strabo-tiers.js';
 
 export function createViewPrefs(app) {
   const { state, view, elements } = app;
@@ -42,6 +43,9 @@ export function createViewPrefs(app) {
       if (parsed.edgeKind === 'calls' || parsed.edgeKind === 'imports') {
         prefs.edgeKind = parsed.edgeKind;
       }
+      if (parsed.tier === 'all' || TIER_ORDER.includes(parsed.tier)) {
+        prefs.tier = parsed.tier;
+      }
       if (parsed.coChange === true) {
         prefs.coChange = true;
       }
@@ -65,6 +69,7 @@ export function createViewPrefs(app) {
           edgeKind: state.edgeKind,
           coChange: state.coChange,
           locLens: state.locLens,
+          tier: state.tier,
         }),
       );
     } catch {
@@ -93,6 +98,15 @@ export function createViewPrefs(app) {
     if (prefs.mode) {
       state.mode = prefs.mode;
       elements.detail.value = prefs.mode;
+    }
+    // The tier lens colours files, so it needs file mode (same rule as the change handler).
+    if (prefs.tier && elements.tier) {
+      state.tier = prefs.tier;
+      elements.tier.value = prefs.tier;
+      if (state.mode !== 'file') {
+        state.mode = 'file';
+        elements.detail.value = 'file';
+      }
     }
     if (prefs.filter) {
       state.filter = prefs.filter;

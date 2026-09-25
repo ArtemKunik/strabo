@@ -1,0 +1,155 @@
+/* ---------------------------------------------------------------- Dialog */
+.dialog {
+  width: min(560px, 90vw);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--bg-2);
+  color: var(--ink-1);
+  box-shadow: var(--shadow-2);
+}
+
+.dialog::backdrop {
+  background: var(--veil);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dialog-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.dialog-path {
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.folder-list {
+  max-height: 50vh;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  list-style: none;
+}
+
+.folder {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-1);
+  text-align: left;
+}
+
+.folder:hover {
+  background: var(--bg-1);
+}
+
+.folder-repository {
+  color: var(--accent);
+}
+
+.folder-empty {
+  padding: 6px 8px;
+  color: var(--ink-3);
+}
+
+.dialog-note {
+  margin: 8px 16px 6px;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.dialog-note.at-ceiling {
+  color: var(--status-warning);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* ------------------------------------------------------- Prompt review dialog */
+.prompt-dialog {
+  width: min(720px, 92vw);
+}
+
+.prompt-dialog .dialog-path {
+  border-bottom: none;
+}
+
+.prompt-dialog-target {
+  padding-bottom: 0;
+}
+
+.prompt-dialog-text {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 32px);
+  height: 46vh;
+  min-height: 220px;
+  margin: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--bg-1);
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+}
+
+.dialog-footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------ Narrator commit dialog */
+.commit-dialog .commit-message {
+  height: 26vh;
+  min-height: 140px;
+}
+
+.commit-dialog .commit-status {
+  min-height: 16px;
+}
+
+.commit-dialog .commit-status.is-error {
+  color: var(--status-critical);
+}
+
+.commit-footer-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.commit-push {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+

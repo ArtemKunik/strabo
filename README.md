@@ -21,20 +21,24 @@ plan and what is still pending live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Install and run
 
-Requires Node 22+ and npm. From the repository root:
+Requires Node 22+. Strabo is published to npm as `strabo-map`; the command it installs is
+`strabo`:
+
+```sh
+npx strabo-map /path/to/repo     # try it without installing
+npm install -g strabo-map        # or install it, then:
+strabo /path/to/repo             # maps that repository; omit the path to map the current one
+```
+
+Open `http://localhost:3000`. The in-app Terminal uses the optional native module
+`node-pty`; if it cannot be built on your machine, everything else still works.
+
+From a clone of this repository:
 
 ```sh
 npm install          # also builds dist/ and vendors the parser .wasm files (prepare)
 npm start            # maps the repository you are standing in
-```
-
-Open `http://localhost:3000`. To map another repository, pass its path or set
-`STRABO_ROOT`:
-
-```sh
 npm start -- /path/to/repo
-# or the equivalent
-node bin/strabo.js /path/to/repo
 ```
 
 The root is resolved from the path argument, then `STRABO_ROOT`, then the working
@@ -110,6 +114,7 @@ read-only boundary are in [docs/MCP.md](docs/MCP.md).
 
 ```sh
 npm test              # unit tests (Node's built-in runner, no browser)
+npm run test:coverage # unit tests plus coverage/lcov.info, which Strabo reads on itself
 npm run acceptance:install   # once: download Chromium
 npm run acceptance    # Cucumber + Playwright, writes an HTML report with screenshots
 npm run test:pack     # release readiness: pack, install in a clean consumer, run shipped code

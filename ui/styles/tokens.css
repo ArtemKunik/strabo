@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark;
+  --bg-0: #05070c;
+  --bg-1: #0a0e16;
+  --bg-2: #111827;
+  --bg-3: #1a2334;
+  --ink-1: #eef3fb;
+  --ink-2: #bcc9dc;
+  --ink-3: #8494ac;
+  --line: #1f2a3d;
+  --line-soft: #161f2e;
+  --accent: #5b8dff;
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-ink: #bdd4ff;
+  /* Text on a filled colour that is not an ink token: a filled accent button and the
+     severity badge, whose background is the status scale. */
+  --on-accent: #ffffff;
+  --on-warning: #111111;
+  /* The focus ring is the accent: interaction, not status (Phase 12 M4). */
+  --focus-ring: var(--accent);
+  /* The status scale: fixed, reserved, never themed, never reused for identity. Hue on
+     the map and in panels means status and nothing else (Phase 13 M1 R4). Values are
+     chosen to clear 3:1 on both --bg-1 and --bg-2. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+  /* Syntax colours for the source viewer: identity within code, never status. */
+  --syntax-keyword: #c99bff;
+  --syntax-string: #9ccf8a;
+  --syntax-number: #f0a878;
+  --syntax-type: #6fc3df;
+  --syntax-function: #8ab8ff;
+  --syntax-meta: #d4b86a;
+  /* One neutral node fill. Near-achromatic, so any status hue beside it reads as the
+     marked one; full opacity, with --node-line as the hairline ring (R3). */
+  --node-fill: #6b7a8d;
+  --node-line: rgba(255, 255, 255, 0.22);
+  /* Bounded categorical: three hues plus one neutral, fixed order, never cycled (R8). */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-other: #8da0b5;
+  /* The tier lens: a second bounded categorical set (Phase 16 L10). Eight reserved hues
+     plus the neutral `--series-other` for unclassified. Each clears 3:1 on --bg-1 and the
+     light surfaces; no tier equals the accent or a status hue. Tiers never carry meaning by
+     hue alone — every chip ships its label. */
+  --tier-frontend: #b63596;
+  --tier-api: #3092a6;
+  --tier-domain: #7659cf;
+  --tier-data: #309141;
+  --tier-integration: #a64e30;
+  --tier-infra: #a68930;
+  --tier-build: #4969ca;
+  --tier-tests: #b83a5c;
+  /* Alpha is a scale, not a literal (R13): a wash for subtle fills, a hairline for
+     borders, and a veil for the translucent surfaces above the canvas. */
+  --wash: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.14);
+  --veil: rgba(8, 12, 19, 0.72);
+  --veiled-surface: rgba(17, 24, 39, 0.86);
+  /* Directory plates: structure, not status, so they stay achromatic and sit just above
+     the canvas rather than competing with any node on it. */
+  --island-fill: var(--wash);
+  --island-line: var(--hairline);
+  /* Canvas colours. The Cytoscape stylesheet in strabo-view.js reads these at runtime, so
+     the graph follows the theme instead of carrying a second palette in JavaScript. */
+  --graph-grid: rgba(255, 255, 255, 0.045);
+  --graph-ink: #eef3fb;
+  --graph-ink-outline: #05070c;
+  --graph-edge: #55697f;
+  --graph-edge-accent: #7fb4ff;
+  --graph-edge-selected: #5b8dff;
+  --graph-hub: #5b8dff;
+  --graph-selected: #ffffff;
+  --graph-changed: var(--status-critical);
+  --graph-affected: var(--status-warning);
+  --graph-cycle: var(--status-serious);
+  --graph-unreached: var(--ink-3);
+  --input-bg: #0b1018;
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+}
+

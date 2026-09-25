@@ -125,9 +125,12 @@ export function unitCardElement(card, options = {}) {
   const share = card.testReach?.total
     ? `${Math.round((card.testReach.reached / card.testReach.total) * 100)}%`
     : '0%';
+  // A measured figure replaces reachability when the report names the unit's files; the
+  // basis is in the label, so the two are never read as one scale.
+  const measured = card.coverage?.value ?? null;
   reach.append(
     element('span', 'unit-stat', `hotspots ${hotspots}`),
-    element('span', 'unit-stat', `test reach ${share}`),
+    element('span', 'unit-stat', measured === null ? `test reach ${share}` : `measured ${measured}%`),
   );
   root.append(reach);
 

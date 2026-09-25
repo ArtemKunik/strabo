@@ -43,6 +43,8 @@ record is reported as `unavailable`, never invented.
 | 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; acceptance scenarios pending) |
 | 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
+| 33 | Data layer, data products, and contracts | Planned (J1-J14: access direction, data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
+| 34 | Code coverage that tells | In progress (U0 done; U2 partial: helper, passport, unit cards, report; U1, U3-U7 planned: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1868,6 +1870,304 @@ first (`repository-map.steps.mjs`, `system.steps.mjs`, `review-panels.steps.mjs`
 `panel-dock.feature` checks the rail sits on the graph's right edge clear of the zoom controls,
 `keyboard-access.feature` walks the rail with ArrowDown, and `panels.test.ts` covers pin order,
 the More list, and `dock: false`. With C5-C8, the local acceptance run is 86 of 86 scenarios.
+
+## Phase 33 - Data layer, data products, and contracts
+
+Strabo already records many pieces of the data layer, but it records them separately. Phase 11
+reads contracts (Protobuf, OpenAPI, JSON Schema, language DTOs). Phase 16 L13 reads the tables a
+file names. Phase 20 reads a schema snapshot, matches code against it, and diffs it between
+revisions. Phase 30 reads string-typed edges. Nothing joins them yet. So Strabo cannot answer the
+questions a data owner asks: *which datasets does this system publish, who writes them, who reads
+them, what contract promises their shape, and what breaks if a column changes?* This phase models
+the data layer as a graph of its own. It identifies data products and contracts from declared and
+recorded evidence, and traces data from its producers to its consumers.
+
+Principles carry over unchanged:
+
+- **Declared beats derived, and derived beats nothing.** A data product exists because a
+  descriptor declares it, or because recorded edges show a dataset leaving its unit. A product is
+  never inferred from a name. Each product, contract link, and lineage edge carries its evidence
+  and a strength (`declared`, `strong`, `weak`), in the same way as the tier lens.
+- **Static only.** Runtime lineage (OpenLineage events, query logs, warehouse access history)
+  needs a running system, which the out-of-scope note under *Removed or frozen* excludes. A
+  dataset reached only at runtime is `unavailable`.
+- **Names are ids only when they are qualified.** Today a DTO matches across repositories on its
+  bare type name (A13). This phase qualifies ids where the format allows it, and it labels a
+  bare-name match as `weak`.
+
+### The model
+
+Four node kinds and the edges between them:
+
+- **Dataset**: a table or view (from the Phase 20 snapshot), a message topic or queue, a file or
+  object-store path, or an API resource. Each has a qualified id such as
+  `db:<repo>/<schema>.<table>`, `topic:<name>`, `path:<literal>`, or `api:<host><path>`.
+- **Contract**: a shape promise. The Phase 11 contracts, plus event schemas and declared data
+  contracts.
+- **Producer / consumer**: a file, and through it a unit and a tier, that writes or reads a
+  dataset, with its evidence line.
+- **Data product**: a named, owned group of *output ports* (datasets that other code consumes),
+  *input ports*, and the contracts that govern those ports.
+
+Edges are `writes`, `reads`, `governs` (contract → dataset), `derives` (dataset → dataset, which
+is lineage), and `exposes` (product → output port).
+
+### Slices
+
+- **J1 - Access direction.** `CodeDataUse` gains `access: 'read' | 'write' | 'ddl' | 'unknown'`.
+  String-literal SQL is classified by its statement shape: `SELECT` is `read`;
+  `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`UPSERT` are `write`; `CREATE`/`ALTER` are `ddl`. An ORM
+  mapping names a table but not what the code does with it, so it stays `unknown`. The only
+  exception is a write method whose name is recorded in a per-ecosystem rule table, such as
+  Spring Data `save`/`delete`, Room `@Insert`/`@Update`, or Prisma `create`/`update`. The rule
+  table is data, like the tier rules. Direction is the base of every later slice: it turns
+  "names a table" into producer and consumer.
+- **J2 - Data model view.** An entity-relationship view of the Phase 20 snapshot. Tables are
+  nodes and foreign keys are edges, each with its migration line. ORM entities are linked to
+  tables only through a declared mapping (`@Table(name=…)`, `#[sqlx(rename)]`, Django
+  `db_table`, Prisma `@@map`), never through name similarity. Views and materialized views move
+  from "not recorded" into the DDL reader, so a view `derives` from the tables in its `FROM` and
+  `JOIN`, and it reads as a dataset in its own right. A table with no primary key, a foreign key
+  to an undeclared table, and an orphan table (no reader and no writer anywhere in the workspace)
+  are listed as findings.
+- **J3 - Contract identity.** Contracts get qualified ids: a Protobuf `package.Message`, an
+  OpenAPI `document#/components/schemas/Name`, a JSON Schema `$id`, and a DTO's namespace, module,
+  or package path plus its type name. A bare-name match stays available as a `weak` match, so A13
+  keeps working. Qualified matching is optional: it is off by default and turned on with
+  `contracts: { identity: qualified }` in the workspace config, and both schemes are reported side by
+  side, never merged. Each contract also gets a **shape fingerprint**, a hash of its normalised
+  fields. Two contracts with different names and the same fingerprint are reported as
+  "same shape, different id", a recorded fact that often shows a copied DTO. Protobuf field
+  numbers are recorded, which closes the renumbering gap named under Phase 20.
+- **J4 - Event and message contracts.** Messages are datasets too. The slice reads AsyncAPI
+  `channels` and message payloads, Avro `.avsc`, and a schema-registry subject declared in config.
+  It records literal-topic producers and consumers: Kafka `producer.send("t")`,
+  `@KafkaListener(topics = "t")`, `KafkaConsumer.subscribe(["t"])`; SQS/SNS/Pub/Sub queue and topic
+  names; RabbitMQ exchange and routing keys; and a CloudEvents `type`. A producer and a consumer of
+  the same topic join across repositories, in the same way as service flows (A11). The payload
+  contract is attached when the send site names a type that J3 can resolve. A topic built at
+  runtime is a diagnostic, never an edge.
+- **J5 - Declared data products and contracts.** Strabo reads the descriptors teams already
+  write: an Open Data Contract Standard (ODCS) YAML, a Data Contract Specification
+  `datacontract.yaml`, an Open Data Product Standard descriptor, dbt `schema.yml` (models, sources,
+  exposures, `contract: {enforced: true}`, owners, and `meta`), and a `products:` key in
+  `strabo.groups.yml` for teams with none of these. Each descriptor names the product, its owner,
+  its output ports and their schemas, and optionally its classification (PII, confidential) and
+  its service levels. A descriptor Strabo cannot read is listed as a gap. Classification comes
+  only from a declaration (a descriptor, an `x-pii`/`x-classification` OpenAPI extension, or a
+  column comment tag), never from a column name like `email`.
+- **J6 - Undeclared product candidates and ownership.** Without a descriptor, the recorded edges
+  still show which datasets are shared. Each is listed as a **candidate** with its evidence, never
+  promoted to a product:
+  - a dataset written inside one unit and read from another unit or repository (a de facto
+    output port);
+  - a dataset written by **two or more units**, reported as "no single writer", the most common
+    root of data-quality incidents;
+  - a dataset read across a repository boundary with no contract that governs it, reported as
+    "shared without a contract".
+
+  Ownership comes from the descriptor first. After that it comes from CODEOWNERS for the writing
+  files, and after that from the writing unit. Each source is named.
+- **J7 - Conformance: contract against implementation.** A declared contract is checked against
+  what the code and schema actually do. A contract field is compared with its table column (J2)
+  for missing fields, differing types, and nullable-versus-required. The event contract is
+  compared with the DTO a producer sends (J4). The OpenAPI response schema is compared with the
+  DTO the handler returns, when the handler names it. A deviation is a finding with both evidence
+  lines. It reuses the Phase 11 deviation shape (`missing` / `type` / `required`), so the panel
+  and the report render it without new vocabulary.
+- **J8 - Lineage and trace.** Static, table-level lineage from recorded `derives` edges. It
+  reads `INSERT INTO a … SELECT … FROM b` and `CREATE TABLE a AS SELECT` in migrations and in
+  string-literal SQL; view definitions (J2); dbt `ref()` and `source()` (a model derives from what
+  it references); and literal file and object paths in batch code (`spark.read.table("x")`,
+  `read_parquet("s3://…")`, `to_parquet`, `COPY … FROM`). Column-level lineage only for a plain
+  `SELECT col AS alias` projection; an expression is recorded as "derived from these columns,
+  transformation not read". The trace then runs end to end: data product → output port → writers →
+  upstream datasets → their producers. It runs in reverse too: *who consumes column
+  `orders.status`?* returns readers, downstream datasets, contracts, products, and (through the
+  Phase 16 L13 trace) the screens.
+- **J9 - Change impact for data.** A Phase 20 D3 compatibility change on a dataset becomes more
+  severe when that dataset is an output port or is governed by a contract: *breaking for product
+  `billing-events`, 3 consumers in 2 repositories*. A pending change (Phase 17 Q8) that edits a
+  writer of a shared dataset names the downstream consumers. The Change impact passport card gains
+  a **Data** line.
+- **J10 - Surfaces.**
+  - A **Data** lens on the map: datasets, topics, and products as nodes, with `writes`/`reads`
+    edges to their files, within the Phase 13 colour budget. Data kind is carried by shape, not
+    hue.
+  - A **Data products** panel with product cards (owner, ports, contracts, consumers,
+    conformance), the candidates list, and the ER view.
+  - `GET /analysis/data/model`, `GET /analysis/data/products`, and
+    `GET /analysis/data/lineage?dataset=`.
+  - MCP `get_data_products`, `get_data_lineage`, and `get_dataset_consumers`, so an agent can ask
+    who reads a column before it renames it.
+  - `strabo check` rules `data-contract-breaking`, `data-no-single-writer`, and
+    `data-unconformant`.
+  - A **Data** section in the repository report.
+  - An export of the recorded lineage as OpenLineage static dataset and job facets, so a catalog
+    can ingest what Strabo read without Strabo becoming a catalog.
+
+- **J11 - Products in the System view, data on the code view.** Data products become a level
+  of their own in the System view. A product box sits above the units that write its output
+  ports, and a product that spans units draws across them rather than being forced into one.
+  Drilling into a product opens its ports, contracts, and consumers. The reverse direction is an
+  overlay on any code view (file map, unit, tier matrix, member map): a file or unit shows the
+  datasets it writes and reads as a badge, and a product ring marks the code that produces its
+  ports. It is off by default and shares one visual language with the Data lens (J10), so
+  switching between the product level and the code view keeps the same marks.
+- **J12 - dbt projects as a repository kind.** A `dbt_project.yml` makes the repository (or a
+  subdirectory of it) a dbt unit. Models, seeds, snapshots, and macros are files; `ref()` and
+  `source()` are recorded `use` edges; and sources and exposures are the unit's input and output
+  ports. The map, the tier lens (models as Data, exposures as Integration), the reading route, the
+  health axes, and change impact then run over it unchanged. Jinja the reader cannot resolve
+  (a macro-built `ref`, a variable table name) is a diagnostic, never an edge.
+- **J13 - Catalog snapshots as declarations.** An exported catalog snapshot (DataHub,
+  OpenMetadata, or Unity Catalog JSON) placed in the repository or named in the workspace config
+  is read as a *declaration*: its owners, domains, product groupings, classifications, and
+  lineage. Strabo never connects to the catalog. Each fact from the snapshot is labelled with its
+  source and export date. It is shown beside the facts Strabo recorded and never merged into them,
+  so a disagreement between the catalog and the code (a table the catalog lists that no code
+  writes, or lineage the code shows that the catalog lacks) is a finding in its own right.
+- **J14 - Classification along lineage.** A declared classification (J5, J13) propagates along
+  recorded `derives` edges (J8) and `writes` edges to output ports. The finding is a classified
+  column that reaches an output port or an event payload whose contract does not declare that
+  classification. Each propagated tag carries the full path of evidence lines, and it is labelled
+  `derived` so it is never mistaken for a declaration. Propagation stops, and says so, at an edge
+  whose column mapping was not read ("transformation not read").
+
+Slice order: **J1** first, because everything else needs direction. **J3** and **J2** come next.
+**J4** and **J5** can run in parallel. **J6** and **J7** need J1-J5. **J8** and **J9** need J2 and
+J6. **J10** grows with each slice. **J11** needs J5 and J6; **J12** needs J8; **J13** needs J5;
+**J14** needs J8 and J13. Acceptance fixture: an Axum service that writes `orders` and
+publishes `order-created` to Kafka with an Avro schema; a Python consumer in a sibling repository
+that reads the topic and writes `order_facts`; a dbt model that derives `daily_revenue` from
+`order_facts`; a `datacontract.yaml` declaring `daily_revenue` as the output port of product
+`revenue` with a field the model does not produce; and a second service that also writes
+`orders`. Expected results: the product with one conformance finding; `orders` flagged "no single
+writer"; the trace `daily_revenue` ← `order_facts` ← `order-created` ← `orders` with every edge's
+line; and a dynamic topic name listed as not resolved.
+
+Known limits, named rather than hidden:
+
+- Everything is lexical and literal-only, like Phases 11, 20, and 30. A query builder, a
+  dataframe pipeline assembled in code, and a topic or path from config at runtime record nothing.
+- ORM access direction is `unknown` unless the rule table names the method. Direction is never
+  guessed from a variable name.
+- Lineage is table-level, with column-level only for plain projections. Stored procedures and
+  procedural SQL are not read.
+- A data product is only as good as its declaration. A candidate is evidence that a dataset is
+  shared, not a claim that it is a product.
+
+Decisions from the brainstorm (2026-09-24), folded into the slices:
+
+- **Products get their own level, and data can also sit on the code view.** Data products are a
+  level of their own in the System view (J11). The Data lens can also be drawn over any code
+  view, so data stays visible without leaving the file or unit map.
+- **Qualified contract ids are optional.** Bare-name matching (A13) stays the default. Qualified
+  ids run alongside it when the workspace config turns them on (J3). Neither scheme replaces the
+  other, and a bare-name match is still labelled `weak`.
+- **A dbt project is a repository kind of its own (J12).**
+- **An exported catalog snapshot counts as a declaration (J13).**
+- **Classification travels along lineage (J14).**
+
+## Phase 34 - Code coverage that tells
+
+Phase 27 reads measured coverage correctly, but almost no view shows it, so a reader of the map
+learns little about tests. As of 2026-09-24:
+
+- **The map never shows measured coverage.** `GET /analysis/coverage` exists, but no UI code
+  calls it. The **Test reach** overlay (`ui/strabo-overlays.js` `testReachOverlay`) is binary
+  graph reachability, and it marks only the files that are used but unreached. A file at 3%
+  measured and a file at 95% look the same.
+- **Every summary uses reachability only.** These all call `computeCoverage` and ignore the
+  measured report:
+  - the passport's "Used but no test reaches" (`src/analysis/passport.ts`)
+  - unit-card test reach (`src/view/view-model.ts`)
+  - the impact and change passports, including "tests to run" (`src/analysis/impact-passport.ts`,
+    `src/analysis/change-passport.ts`)
+  - the repository report (`src/report/collect.ts`)
+
+  Measured figures appear only in the Functions tab, the hotspots caption, and the health
+  coverage axis.
+- **Reachability overstates.** One test that imports an entry file marks everything behind that
+  file as reached. Test reach records neither depth nor directness.
+- **Review has no coverage for the change itself.** Hunks are already mapped to functions
+  (Phase 17 Q3), but nothing compares the changed lines with the lines the report covered.
+- **No agent or gate surface.** MCP has no coverage tool, and `strabo check` has no coverage
+  rule.
+- **Strabo's own repository has no report.** `npm test` runs `node --test` without coverage, so
+  when Strabo views itself every measured figure is `unavailable`. Nothing on this repository
+  shows what the feature does.
+
+The principles stay the same: Strabo reads reports and never runs tests; every figure names its
+basis (`measured` or `reachable`) and the report's age; and a file the report does not name is
+`not in report`, never 0%.
+
+### Slices
+
+- **U0 - Dogfood.** *Done.* Add `npm run test:coverage`
+  (`node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`,
+  alongside the default reporter) and add `coverage/` to `.gitignore`. Strabo on itself then has
+  a measured report to show. This is also the acceptance fixture for the slices below.
+- **U1 - Coverage colour mode on the map.** A **Coverage** overlay replaces the binary Test reach
+  overlay. When a report exists, files are drawn on a measured line-coverage scale (a
+  sequential ramp within the Phase 13 budget). Where there is no report, the overlay falls back to
+  reachability as a distinct pattern, not a colour on the same scale. Four states are always
+  distinct and are named in the legend: `measured n%`, `measured 0%`, `not in report`, and
+  `reachable only`. A stale report (V3) greys its figures and says so. The overlay summary shows
+  the report path and age, the number of files measured, and the files the report names that are
+  not in the graph.
+- **U2 - One coverage source everywhere.** Add a `fileCoverage(graph, measured)` helper that
+  returns `{ basis, value, linesHit, linesFound, stale }` for each file. The passport, unit cards,
+  the tier matrix cells and per-tier stats (L11), the impact and change passports, the repository
+  report, and the System-view units read it instead of `computeCoverage`. Each keeps the
+  reachability figure as a labelled fallback. "Used but no test reaches" becomes
+  "used and under n% measured" when a report exists.
+
+  *Partial.* `fileCoverage` (`src/analysis/file-coverage.ts`) is the one source. The
+  repository passport lists "used and under 50% measured" when a report exists, lowest first
+  with each figure, and counts used files `not in report`; the repository report's
+  untested pain points share that list (`computeUntested`); unit cards and their inspector
+  facts show the unit's measured line coverage with reachability kept as the fallback.
+  **Open:** the tier matrix cells and per-tier stats (L11), and the impact and change
+  passports, still read reachability only.
+- **U3 - Honest reachability.** Test reach records its depth: `direct` (a test imports the file)
+  or `transitive, n hops`, with the shortest path. The overlay and the passport split the two, and
+  "reached only through n or more hops" is its own bucket. "Tests to run" is ordered direct
+  first.
+- **U4 - Changed-line coverage in review.** The changed lines of a pending change or a branch
+  (Phase 17 Q3, Phase 23) are intersected with the report's covered lines, giving for example
+  *28 of 40 changed lines covered; `parseRow` changed and uncovered*. A changed public-surface
+  function (Phase 17 Q4) that is uncovered is listed first. When the report is older than the
+  change, it answers "report predates the change" instead of a figure. The result goes into the
+  Change impact passport card, agent-change review (Phase 29), and the report.
+- **U5 - Risk from coverage.** A **risky and untested** list ranks functions by complexity
+  (Phase 14) × churn (Phase 17 Q5) × uncovered share, and shows each input beside the rank, never
+  a composite score alone. It feeds the hotspots overlay and the passport.
+- **U6 - Which tests cover this.** Coverage.py dynamic contexts, JaCoCo sessions, and
+  per-test `TN:` blocks in LCOV record which test executed which lines. When a report carries
+  them, the Functions tab and the impact passport name the covering tests. Without them, the
+  answer is the U3 reachability list, labelled as such.
+- **U7 - Agent and gate surface.**
+  - MCP `get_coverage` (per file or function, with basis and age) and `get_uncovered_changes`.
+  - `strabo check --fail-on=uncovered-change[:<percent>]` and `--fail-on=coverage-stale`.
+  - A **Coverage** section in the repository report.
+  - When no report is found, the panel names the locations it checked and the command that
+    produces a report for each detected ecosystem (Node test runner, c8 or nyc, pytest-cov,
+    JaCoCo, `cargo llvm-cov`, coverlet), so "unavailable" comes with a next step.
+
+Slice order: **U0** first, so every later slice can be seen on Strabo itself. **U2** comes before
+**U1**, so the overlay and the summaries share one source. **U3** is independent. **U4** and
+**U5** need U2. **U6** needs a report format that records per-test data. **U7** grows with each
+slice.
+
+Acceptance: the Phase 27 fixture (a file imported by a test but with zero covered lines) shows
+`measured 0%` on the map, in the passport, and on its unit card, not reached. In a change to an
+uncovered function, U4 names that function, and `--fail-on=uncovered-change` fails on it.
+
+Known limits, named rather than hidden: line coverage says a line ran, not that a test asserted
+anything about it; a report covers only the tests that produced it, so a monorepo with one report
+per package is merged by path and a package with no report is `not in report`; and per-test
+attribution exists only where the tool recorded it.
 
 ## Reading route (landed)
 

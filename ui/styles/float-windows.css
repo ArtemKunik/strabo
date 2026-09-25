@@ -1,0 +1,225 @@
+/* ------------------------------------------------------- Floating panels */
+/*
+ * Every auxiliary panel is a floating window: a header (drag / collapse / close) over a
+ * scrolling body that still contains the panel element by its original id. The dock at
+ * the bottom restores any window that was closed or collapsed.
+ */
+.float-layer {
+  position: fixed;
+  inset: 0;
+  /* Above the panel dock: inner window z-indexes are local to this stacking
+     context, so anything below the dock's z-index lets the dock swallow clicks
+     (e.g. a resize handle dragged under it). */
+  z-index: 50;
+  pointer-events: none;
+}
+
+.float-window {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 116px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: blur(18px) saturate(1.4);
+  overflow: hidden;
+  pointer-events: auto;
+  animation: float-in 0.18s ease-out;
+}
+
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.float-window[hidden] {
+  display: none;
+}
+
+.float-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bg-3), var(--bg-2));
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.float-header:active {
+  cursor: grabbing;
+}
+
+.float-window.is-collapsed .float-header {
+  border-bottom: none;
+}
+
+.float-grip {
+  color: var(--ink-3);
+  font-size: 12px;
+  letter-spacing: -2px;
+}
+
+.float-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-1);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.float-spacer {
+  flex: none;
+}
+
+.float-button {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.float-button:hover {
+  background: var(--bg-3);
+  color: var(--ink-1);
+}
+
+.float-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.float-window.is-collapsed .float-body {
+  display: none;
+}
+
+.float-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background:
+    linear-gradient(135deg, transparent 0 50%, var(--ink-3) 50% 58%, transparent 58% 66%, var(--ink-3) 66% 74%, transparent 74%);
+}
+
+.float-window.is-collapsed .float-resize {
+  display: none;
+}
+
+/* The window header owns the close affordance, so dismiss buttons inside a body are moot. */
+.float-window .panel-dismiss {
+  display: none;
+}
+
+.float-window[data-panel='member'] {
+  height: min(84vh, 780px);
+}
+
+.float-window[data-panel='member'] .float-body {
+  overflow: hidden;
+}
+
+/* Panels drop the docked chrome (borders, fixed heights) inside a window body. */
+.float-body .overlay-panel,
+.float-body .timeline-panel,
+.float-body .legend,
+.float-body .inspector,
+.float-body .diagnostics {
+  max-height: none;
+  border-bottom: none;
+  background: none;
+}
+
+.float-body .overlay-panel {
+  padding: 10px 14px;
+}
+
+/* The window body is the single scroll container, so the panel list must not clamp or scroll itself. */
+.float-body .overlay-panel ul {
+  max-height: none;
+  overflow: visible;
+}
+
+/*
+ * The Overlay window is the exception: its virtual list is the scroll container (that is how it
+ * virtualizes), so the list fills the body instead and the body never scrolls. The window's own
+ * max-height keeps the list within the viewport, whether the window is content-sized or resized.
+ */
+.float-window[data-panel='overlay'] .float-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.float-window[data-panel='overlay'] .overlay-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.float-window[data-panel='overlay'] .overlay-panel > :not(.overlay-list) {
+  flex: none;
+}
+
+.float-window[data-panel='overlay'] .overlay-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+.float-body .timeline-panel {
+  padding: 10px 14px;
+}
+
+.float-body .narration-panel {
+  padding: 10px 14px;
+}
+
+.float-body .legend {
+  padding: 10px 14px;
+}
+
+.float-body .inspector {
+  padding: 14px;
+}
+
+.float-body .diagnostics {
+  padding: 12px 14px;
+  border-top: none;
+}
+
+.float-body .member-view {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  height: 100%;
+  padding-bottom: 40px;
+}
+

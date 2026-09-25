@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 import * as graph from '../../ui/strabo-core.js';
 import { clusterSeriesClass } from '../../ui/strabo-member-map.js';
 import { THEMES } from '../../ui/strabo-settings.js';
+import { styleParts } from '../../scripts/styles.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const stylesPath = path.resolve(here, '..', '..', 'ui', 'styles.css');
-const styles = fs.readFileSync(stylesPath, 'utf8');
+const parts = styleParts(path.resolve(here, '..', '..', 'ui'));
+const styles = parts.map((part) => part.text).join('');
 
 /** The custom properties declared in the `:root` block that opens at `start`. */
 function tokensIn(start) {
@@ -80,10 +81,13 @@ function stripComments(source) {
 
 test('every colour is defined once: no literals outside a :root block (R10)', () => {
   const offenders = [];
-  const lines = styles.split(/\r?\n/);
+  // Each line keeps the part and line it came from, so an offender names the file to edit.
+  const lines = parts.flatMap((part) =>
+    part.text.split(/\r?\n/).map((text, index) => ({ text, where: `ui/${part.file}:${index + 1}` })),
+  );
   let depth = 0;
   let inRoot = false;
-  lines.forEach((line, index) => {
+  lines.forEach(({ text: line, where }) => {
     const trimmed = line.trim();
     if (!inRoot && /^:root\b[^{]*\{/.test(trimmed)) {
       inRoot = true;
@@ -99,7 +103,7 @@ test('every colour is defined once: no literals outside a :root block (R10)', ()
       return;
     }
     if (COLOR_LITERAL.test(line)) {
-      offenders.push(`styles.css:${index + 1}: ${trimmed}`);
+      offenders.push(`${where}: ${trimmed}`);
     }
   });
 

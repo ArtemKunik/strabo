@@ -2,7 +2,23 @@ import assert from 'node:assert/strict';
 
 import { Then, When } from '@cucumber/cucumber';
 
+/**
+ * Wait for a panel's own `float-in` open animation to finish. It translates and scales the
+ * window, so a rect read (or a drag started) mid-animation is off by a few pixels.
+ */
+async function panelSettled(page, key) {
+  await page.waitForFunction(
+    (panelKey) => {
+      const element = document.querySelector(`.float-window[data-panel="${panelKey}"]`);
+      return element != null && element.getAnimations().every((animation) => animation.playState !== 'running');
+    },
+    key,
+    { timeout: 10_000 },
+  );
+}
+
 async function panelRect(page, key) {
+  await panelSettled(page, key);
   return page.evaluate((panelKey) => {
     const element = document.querySelector(`.float-window[data-panel="${panelKey}"]`);
     if (!element) return null;
@@ -13,6 +29,7 @@ async function panelRect(page, key) {
 
 /** Drag from a locator's centre by a pixel offset, as a real pointer session Playwright drives end to end. */
 async function dragBy(page, locator, dx, dy) {
+  await locator.waitFor();
   const box = await locator.boundingBox();
   const startX = box.x + box.width / 2;
   const startY = box.y + box.height / 2;
