@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { isInside } from '../boundary/repository-root.ts';
+import { run } from '../process.ts';
 import { assertRepository, gitFailure } from './review.ts';
-
-const run = promisify(execFile);
 
 /** One working tree of a repository: the main checkout or a linked `git worktree add`. */
 export interface WorktreeSummary {
