@@ -39,12 +39,12 @@ record is reported as `unavailable`, never invented.
 | 26 | Headless report and structural diff | Landed (X1-X4 done) |
 | 27 | Measured coverage | Landed (V1-V4 done) |
 | 28 | Repository report | Landed (Z1-Z4 done) |
-| 29 | Reviewing an agent's change | Landed (E1-E3: module, route, CLI, MCP, UI; acceptance scenarios pending) |
-| 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; acceptance scenarios pending) |
-| 31 | Architecture drift over time | Landed (O1-O3: module, route, report, Timeline chart; O4 artifact pending) |
+| 29 | Reviewing an agent's change | Landed (E1-E3: module, route, CLI, MCP, UI; scope-fence acceptance scenario) |
+| 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; declared-rules acceptance scenario) |
+| 31 | Architecture drift over time | Landed (O1-O4: module, route, report, Timeline chart, published static drift artifact) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
-| 33 | Data layer, data products, and contracts | Planned (J1-J14: access direction, data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
-| 34 | Code coverage that tells | In progress (U0 done; U2 partial: helper, passport, unit cards, report; U1, U3-U7 planned: dogfood report, one coverage source, coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
+| 33 | Data layer, data products, and contracts | In progress (J1 done: data-use access direction; J2-J14 planned: data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
+| 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1710,7 +1710,9 @@ review response carries `scopeFence` when `?expect=` is present; `strabo report 
 API** sections; MCP gains `get_scope_fence`, `get_public_api_diff`, and `get_clones`. The
 Review panel gains a Scope fence section (`scopeFenceGroups`). Unit coverage is
 `test/unit/scope-fence.test.ts`, `test/unit/clones.test.ts`, and `test/unit/phase-29-31.test.ts`.
-A browser acceptance scenario is still pending.
+A browser acceptance scenario now reviews the working tree under `?expect=` and asserts the Scope
+fence section lists the out-of-zone change with its importer
+(`test/acceptance/features/review-history-tabs.feature`, `@scope-fence`).
 
 ## Phase 30 - String-typed edges and declared architecture
 
@@ -1770,8 +1772,10 @@ endpoint extractors for routes; dynamic env keys become `not resolved` diagnosti
 (`parseDeclaredRuleIds` widens the rule channel), and the map gains a **Declared rules** overlay
 (files on the forbidden side). Unit coverage is `test/unit/string-edges.test.ts`,
 `test/unit/rules.test.ts`, and `test/unit/phase-29-31.test.ts`. H5 is the node-class half of
-the lens; drawing the crossing edge itself is a follow-up, and a browser acceptance scenario is
-still pending.
+the lens; drawing the crossing edge itself is a follow-up. A browser acceptance scenario now
+selects the overlay and asserts a declared rule and both violating edges (`import` and `env`)
+against the `test/fixtures/declared-repo` fixture
+(`test/acceptance/features/architecture-health.feature`, `@declared-rules`).
 
 ## Phase 31 - Architecture drift over time
 
@@ -1815,8 +1819,15 @@ with the reason named, since the cache carries neither). Served at `GET /analysi
 gains `get_drift`, the repository report gains a **Drift** section (Markdown and HTML) fed by
 `collectDrift` and skipped with `--no-drift`, and the Timeline panel draws a drift chart (SVG,
 bounded categorical strokes per R8) above the commit list. Unit coverage is
-`test/unit/drift.test.ts` and `test/unit/phase-29-31.test.ts`. O4 (the published static drift
-artifact) is not started.
+`test/unit/drift.test.ts` and `test/unit/phase-29-31.test.ts`.
+
+**Landed (O4).** `src/export/drift-artifact.ts` renders a deterministic SVG drift chart
+(`buildDriftChart`, `renderDriftArtifact`); `scripts/drift-artifact.mjs` (`npm run drift:artifact`)
+writes `docs/drift/index.html` stamped with the revision and build date, byte-identical on a rerun
+except the date; the published-demo build (`src/export/site.ts`) emits a `drift.html` per
+repository next to its map page. Unit coverage is `test/unit/drift-artifact.test.ts` and the
+extended `test/unit/interop-site.test.ts`. The committed artifact measures the Strabo checkout
+itself, because no external repository list is declared.
 
 ## Phase 32 - Screen-scoped chrome
 
@@ -1914,7 +1925,7 @@ is lineage), and `exposes` (product → output port).
 
 ### Slices
 
-- **J1 - Access direction.** `CodeDataUse` gains `access: 'read' | 'write' | 'ddl' | 'unknown'`.
+- **J1 (done) - Access direction.** `CodeDataUse` gains `access: 'read' | 'write' | 'ddl' | 'unknown'`.
   String-literal SQL is classified by its statement shape: `SELECT` is `read`;
   `INSERT`/`UPDATE`/`DELETE`/`MERGE`/`UPSERT` are `write`; `CREATE`/`ALTER` are `ddl`. An ORM
   mapping names a table but not what the code does with it, so it stays `unknown`. The only
@@ -1922,6 +1933,13 @@ is lineage), and `exposes` (product → output port).
   Spring Data `save`/`delete`, Room `@Insert`/`@Update`, or Prisma `create`/`update`. The rule
   table is data, like the tier rules. Direction is the base of every later slice: it turns
   "names a table" into producer and consumer.
+
+  *Landed.* `src/workspace/data-usage.ts` (`ormMethodAccess`, `ORM_ACCESS_RULES`) classifies
+  string-literal SQL and ORM mappings; `access` round-trips through `CodeDataUse` and the workspace
+  cache, defaults to `unknown` for records that predate it, and `compat.ts` reads it instead of its
+  old regex heuristic. Coverage is `test/unit/data-access.test.ts`. J2's cross-file
+  entity-to-table resolution is what turns Spring Data `save`/Room `@Insert` from `unknown` into a
+  real direction.
 - **J2 - Data model view.** An entity-relationship view of the Phase 20 snapshot. Tables are
   nodes and foreign keys are edges, each with its migration line. ORM entities are linked to
   tables only through a declared mapping (`@Table(name=…)`, `#[sqlx(rename)]`, Django
@@ -2123,13 +2141,15 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   reachability figure as a labelled fallback. "Used but no test reaches" becomes
   "used and under n% measured" when a report exists.
 
-  *Partial.* `fileCoverage` (`src/analysis/file-coverage.ts`) is the one source. The
+  *Done.* `fileCoverage` (`src/analysis/file-coverage.ts`) is the one source. The
   repository passport lists "used and under 50% measured" when a report exists, lowest first
   with each figure, and counts used files `not in report`; the repository report's
   untested pain points share that list (`computeUntested`); unit cards and their inspector
-  facts show the unit's measured line coverage with reachability kept as the fallback.
-  **Open:** the tier matrix cells and per-tier stats (L11), and the impact and change
-  passports, still read reachability only.
+  facts show the unit's measured line coverage with reachability kept as the fallback. The tier
+  matrix cells and per-tier stats (L11) and the impact and change passports read it too, carry the
+  coverage aggregate and `notInReport`, and keep labelled reachability as the fallback when no
+  report exists. Coverage is
+  `test/unit/{file-coverage,tiers,impact-passport,change-passport}.test.ts`.
 - **U3 - Honest reachability.** Test reach records its depth: `direct` (a test imports the file)
   or `transitive, n hops`, with the shortest path. The overlay and the passport split the two, and
   "reached only through n or more hops" is its own bucket. "Tests to run" is ordered direct
