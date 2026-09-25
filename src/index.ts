@@ -158,6 +158,7 @@ export type {
   ImpactSnapshot,
   ImpactTotals,
   RiskBand,
+  SymbolReferences,
 } from './analysis/impact-passport.ts';
 export {
   computeCommitMetrics,

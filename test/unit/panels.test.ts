@@ -51,6 +51,7 @@ const { initFloatingToolbar } = await import('../../ui/strabo-float-toolbar.js')
 const { initFloatingWindows } = await import('../../ui/strabo-float.js');
 const { hiddenCouplingOverlay, overlayFor } = await import('../../ui/strabo-overlays.js');
 const { buildHiddenCouplingElements } = await import('../../ui/strabo-graph.js');
+const { filePassportCells, totalsPassportCells } = await import('../../ui/strabo-impact.js');
 
 const container = () => document.createElement('div');
 
@@ -1661,4 +1662,30 @@ test('raise moves an already-open window to the front without toggling it', () =
   assert.ok(Number(first.window.style.zIndex) > secondZ, 'raise puts an open window above the rest');
   assert.equal(first.isOpen(), true, 'raise neither closes nor reopens the window');
   assert.equal(first.isCollapsed(), false, 'raise does not change the collapsed state');
+});
+
+test('the symbol-references row renders a recorded count and is absent without one (T2)', () => {
+  const withReferences = filePassportCells({ symbolReferences: { total: 2, files: 1 } });
+  const row = withReferences.find((cell) => cell.key === 'symbol-references');
+  assert.ok(row, 'a recorded count renders the row');
+  assert.equal(row!.value, '2 references to 1 file');
+  assert.equal(row!.detail, 'recorded');
+
+  const singular = filePassportCells({ symbolReferences: { total: 1, files: 1 } });
+  assert.equal(singular.find((cell) => cell.key === 'symbol-references')!.value, '1 reference to 1 file');
+
+  const withoutCount = filePassportCells({});
+  assert.equal(
+    withoutCount.some((cell) => cell.key === 'symbol-references'),
+    false,
+    'no recorded count means no row, never an invented zero',
+  );
+
+  const totals = totalsPassportCells({ symbolReferences: { total: 2, files: 1 } });
+  assert.equal(totals.find((cell) => cell.key === 'symbol-references')!.value, '2 references to 1 file');
+  assert.equal(
+    totalsPassportCells({}).some((cell) => cell.key === 'symbol-references'),
+    false,
+    'the roll-up row is absent without a count too',
+  );
 });

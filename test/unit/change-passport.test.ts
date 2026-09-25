@@ -13,6 +13,7 @@ import {
   computeStructuralDiff,
   reviewCommit,
   reviewWorkingTree,
+  rollUpImpactPassports,
   scanRepository,
 } from '../../src/index.ts';
 
@@ -506,4 +507,51 @@ test('a commit that removes an import shows the edge removed and drops the forme
 
   const affected = review.impact.affected.filter((entry) => entry.distance > 0).map((entry) => entry.id);
   assert.equal(affected.includes('src/app.ts'), false, 'the former importer is not listed as affected');
+});
+
+test('a recorded reference is counted once and the count has one meaning (T2)', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/lib.ts'), 'export function libFn(x: number): number {\n  return x;\n}\n');
+  fs.writeFileSync(
+    path.join(root, 'src/app.ts'),
+    "import { libFn } from './lib';\n\nexport function run(x: number): number {\n  return libFn(x);\n}\n",
+  );
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(
+    path.join(root, 'src/lib.ts'),
+    'export function libFn(x: number): number {\n  if (x > 0) {\n    return x;\n  }\n  return 0;\n}\n',
+  );
+
+  const report = await scanRepository(root);
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) return;
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const change = passport.files.find((entry) => entry.path === 'src/lib.ts');
+  assert.ok(change?.impact, 'the changed file has tiered impact');
+  assert.ok(change!.impact!.definite.includes('src/app.ts'), 'app.ts names the changed symbol');
+  assert.ok(change!.impact!.referenceCount >= 1, 'a recorded reference is counted');
+  assert.deepEqual(
+    change!.impactPassport.symbolReferences,
+    { total: change!.impact!.referenceCount, files: change!.impact!.definite.length },
+    'the card row and the tier count agree',
+  );
+  assert.equal(
+    change!.risk!.inputs.recordedReferences,
+    change!.impact!.referenceCount,
+    'the risk signal uses the same reference count as the row',
+  );
+
+  const totals = rollUpImpactPassports(
+    report.graph,
+    passport.files.map((entry) => entry.impactPassport),
+    'change-set',
+    'HEAD',
+    false,
+  ).totals;
+  assert.deepEqual(totals.symbolReferences, { total: change!.impact!.referenceCount, files: 1 });
 });

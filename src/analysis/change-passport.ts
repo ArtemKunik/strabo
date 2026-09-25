@@ -211,7 +211,7 @@ function computeChangeRisk(
   impact: TieredImpact | null,
   isUntestedFile: (file: string) => boolean,
 ): ChangeRisk | null {
-  const recordedReferences = impact?.definite.length ?? 0;
+  const recordedReferences = impact?.referenceCount ?? 0;
   if (functions.length === 0 && recordedReferences === 0) {
     return null;
   }
@@ -263,22 +263,26 @@ function computeTieredImpact(
 
   const definite: string[] = [];
   const possible: string[] = [];
+  let referenceCount = 0;
 
   const importers = backward.get(filePath) ?? [];
   for (const importer of importers) {
-    const edges = graph.edges.filter((e) => e.target === importer && e.source === filePath);
-    let isDefinite = false;
+    // The importer's own recorded edges into the changed file: source is the importer, target is
+    // the changed file. The direction is what makes a specifier the importer's reference; the
+    // reverse edges (the changed file importing the importer) are not references.
+    const edges = graph.edges.filter((e) => e.source === importer && e.target === filePath);
+    let references = 0;
     for (const edge of edges) {
       const specifier = edge.evidence.specifier;
       for (const symbolName of changedFileNames) {
         if (specifier.includes(symbolName) || specifier === symbolName) {
-          isDefinite = true;
+          references += 1;
           break;
         }
       }
-      if (isDefinite) break;
     }
-    if (isDefinite) {
+    referenceCount += references;
+    if (references > 0) {
       definite.push(importer);
     } else {
       possible.push(importer);
@@ -307,6 +311,7 @@ function computeTieredImpact(
     definite,
     possible,
     reachable: [...reachable],
+    referenceCount,
     labels: IMPACT_TIER_LABELS,
   };
 }

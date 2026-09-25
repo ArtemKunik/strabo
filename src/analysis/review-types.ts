@@ -118,8 +118,26 @@ export interface TieredImpact {
   possible: string[];
   /** The transitive set over use edges — reachable impact. */
   reachable: string[];
+  /**
+   * Recorded references: every import or call edge whose specifier names a changed symbol.
+   * One edge is one reference, so a file that names two changed symbols counts twice. This is
+   * the same count the "Symbol references" row and the recorded-references risk signal use.
+   */
+  referenceCount: number;
   /** User-facing labels for each tier; the `definite` key is never displayed. */
   labels: typeof IMPACT_TIER_LABELS;
+}
+
+/**
+ * Recorded symbol references into a changed file: how many references, over how many files.
+ *
+ * `total` counts edges, `files` counts the distinct files they come from, so a file naming two
+ * changed symbols reads "2 references to 1 file". Absent (not zero) when no count could be
+ * recorded, so a row is never invented for a file whose language records no references.
+ */
+export interface SymbolReferences {
+  total: number;
+  files: number;
 }
 
 /** One contributing signal behind the pending-change risk: its value and its threshold. */
@@ -280,6 +298,8 @@ export interface FileImpactPassport {
   mostComplex: ImpactFunction[];
   /** Tiered impact when the file was reviewed against a baseline; null otherwise. */
   impact: TieredImpact | null;
+  /** Recorded references into this file's changed symbols; absent when no count was recorded. */
+  symbolReferences?: SymbolReferences;
   testsToRun: string[];
   untestedDependents: string[];
   /** How `untestedDependents` was decided: measured under threshold, or no test reaches. */
@@ -307,6 +327,9 @@ export interface ImpactTotals {
   directImports: number;
   /** True when the three counts above followed re-export edges (a barrel `index.ts`). */
   countsIncludeReExports?: boolean;
+  /** Recorded references across the changed files: `total` summed, `files` unioned. Absent when
+   * no card could count references. */
+  symbolReferences?: SymbolReferences;
   signals: ImpactSignal[];
   mostComplex: ImpactFunction[];
   functionsUnchanged: number;

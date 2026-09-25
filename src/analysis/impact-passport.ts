@@ -39,6 +39,7 @@ export type {
   ImpactSnapshot,
   ImpactTotals,
   RiskBand,
+  SymbolReferences,
 } from './review-types.ts';
 
 /**
@@ -225,6 +226,11 @@ export function buildFileImpactPassport(input: BuildPassportInput): FileImpactPa
     signals: signalsOf(input.after),
     mostComplex: mostComplexOf(input.before, input.after),
     impact: input.impact,
+    // The card's symbol-references row reads the same count the tier did, so the two never
+    // disagree; a card whose tier could not be computed carries no row rather than a zero.
+    ...(input.impact
+      ? { symbolReferences: { total: input.impact.referenceCount, files: input.impact.definite.length } }
+      : {}),
     testsToRun: [...input.testsToRun],
     untestedDependents: [...input.untestedDependents],
     untestedBasis: input.untestedBasis ?? 'reachable',
@@ -581,6 +587,19 @@ export function rollUpImpactPassports(
     ? summariseFileCoverage([...coverageByFile.keys()], coverageByFile)
     : null;
 
+  // References are summed, the files they come from are unioned: a file that references two
+  // changed files is one referencing file but two references.
+  const referencedFiles = new Set<string>();
+  let referenceTotal = 0;
+  let countedReferences = false;
+  for (const file of files) {
+    if (!file.symbolReferences) continue;
+    countedReferences = true;
+    referenceTotal += file.symbolReferences.total;
+    for (const referenced of file.impact?.definite ?? []) referencedFiles.add(referenced);
+  }
+  const symbolReferences = countedReferences ? { total: referenceTotal, files: referencedFiles.size } : null;
+
   const totals: ImpactTotals = {
     files: files.length,
     risk: worstRisk ? { score: worstRisk.score, band: worstRisk.band } : null,
@@ -593,6 +612,7 @@ export function rollUpImpactPassports(
     directImports: imports.size,
     // Reachability and the direct sets above are built over re-export edges.
     countsIncludeReExports: true,
+    ...(symbolReferences ? { symbolReferences } : {}),
     signals,
     mostComplex: mostComplex
       .sort((a, b) => b.complexity - a.complexity || a.name.localeCompare(b.name))

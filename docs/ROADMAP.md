@@ -32,7 +32,7 @@ record is reported as `unavailable`, never invented.
 | 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
 | 21 | Gate: verification, provenance, benchmark | Partial (G1 CI added, acceptance stays non-blocking; G2 scans Java and Python; G3 provenance audited, human sign-off blank; G4 first-paint added, no committed 20k-50k result) |
-| 22 | Correctness and trust | Done except T2's symbol-reference row, which awaits a recorded count |
+| 22 | Correctness and trust | Done |
 | 23 | Revision-aware change review | Done |
 | 24 | Serve agents over MCP | Done |
 | 25 | Change coupling | Done |
@@ -1464,11 +1464,17 @@ Several items already landed in part; each entry names what remains.
   radius traverse re-exports (`buildAdjacency` `includeReExports`); direct fan-in/fan-out still
   exclude a barrel, and the passport says which (`countsIncludeReExports`).
   Acceptance: A → index.ts ⇢ B lists A at distance 2 (`test/unit/re-export-impact.test.ts`).
-- **T2 - One meaning per count.** *Partial.* A unit test asserts `blastRadius >=
+- **T2 - One meaning per count.** *Done.* A unit test asserts `blastRadius >=
   directImporters` for every node of every fixture (`test/unit/impact-passport.test.ts`), and
   "Direct importers" and "Direct imports" are separate cells (`ui/strabo-impact.js`). The
-  symbol-reference row renders only when the data records a count; no backend exposes one yet,
-  so it stays absent rather than invented. Where a count excludes tests, both say so.
+  symbol-reference row now reads a real count: `TieredImpact.referenceCount` counts each recorded
+  import or call edge whose specifier names a changed symbol, `FileImpactPassport.symbolReferences`
+  carries `{ total, files }`, and the roll-up sums references while unioning files. The card row
+  and the recorded-references risk signal read the same number, so the two never disagree; the row
+  stays absent (never an invented zero) when no count could be recorded. The count includes test
+  files and says only `recorded`, so there is no test-exclusion to note. Fixing the count exposed
+  and corrected a reversed edge filter in `computeTieredImpact`, which had left the
+  recorded-reference tier permanently empty.
 - **T3 - Recorded reference, not definite impact.** *Done.* The user-facing labels read
   "recorded reference to a changed symbol" (`src/analysis/change-passport.ts`,
   `src/analysis/review-types.ts`); "definite" survives only as an internal identifier and is
