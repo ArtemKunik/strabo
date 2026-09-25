@@ -1,7 +1,7 @@
 import type { Graph } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics, relationshipOf } from './analysis.ts';
 import { computeCycles } from './cycles.ts';
-import { fileCoverage } from './file-coverage.ts';
+import { fileCoverage, UNDER_COVERED_THRESHOLD } from './file-coverage.ts';
 import type { MeasuredCoverageSummary } from './measured-coverage.ts';
 
 /** A language and how many scanned source files carry it. */
@@ -103,7 +103,7 @@ export interface PassportUntested {
 }
 
 /** A used file under this measured line coverage is listed as untested. */
-export const PASSPORT_COVERAGE_THRESHOLD = 50;
+export const PASSPORT_COVERAGE_THRESHOLD = UNDER_COVERED_THRESHOLD;
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   '.ts': 'TypeScript',

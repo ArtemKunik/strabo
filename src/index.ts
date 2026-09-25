@@ -177,8 +177,13 @@ export type {
   MetricsHistoryEntry,
 } from './analysis/change-metrics.ts';
 export { computeCoverage } from './analysis/coverage.ts';
-export { fileCoverage } from './analysis/file-coverage.ts';
-export type { FileCoverage } from './analysis/file-coverage.ts';
+export {
+  fileCoverage,
+  summariseFileCoverage,
+  isUntested,
+  UNDER_COVERED_THRESHOLD,
+} from './analysis/file-coverage.ts';
+export type { FileCoverage, FileCoverageAggregate } from './analysis/file-coverage.ts';
 export {
   computeMeasuredCoverage,
   parseCoverageText,

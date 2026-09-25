@@ -5,6 +5,13 @@ import { parse as parseYaml } from 'yaml';
 import { toPosix } from '../boundary/repository-root.ts';
 import { isSourceExtension } from '../scan/scan.ts';
 import { extractCallsFromContent, extractServiceEndpoints } from '../workspace/services.ts';
+import {
+  fileCoverage,
+  summariseFileCoverage,
+  type FileCoverageAggregate,
+} from './file-coverage.ts';
+import type { MeasuredCoverageSummary } from './measured-coverage.ts';
+import type { Graph } from '../types.ts';
 import { assignUnits, detectUnits, DECLARED_GROUPS_FILE } from './units.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -522,12 +529,14 @@ export interface TierUnitReport {
   tiers: Record<Tier, number>;
 }
 
-/** One cell of the tier × unit matrix: file count and directly counted lines. */
+/** One cell of the tier × unit matrix: file count, directly counted lines, and coverage. */
 export interface TierMatrixCell {
   unit: string;
   tier: Tier;
   files: number;
   lines: number;
+  /** Coverage over the cell's files from one source: measured, or the reach fallback. */
+  coverage: FileCoverageAggregate;
 }
 
 export interface TierMatrix {
@@ -535,7 +544,16 @@ export interface TierMatrix {
   tiers: Tier[];
   units: string[];
   cells: TierMatrixCell[];
-  perTier: Array<{ tier: Tier; files: number; lines: number; fileShare: number }>;
+  perTier: Array<{
+    tier: Tier;
+    files: number;
+    lines: number;
+    fileShare: number;
+    /** Coverage over the tier's files from one source: measured, or the reach fallback. */
+    coverage: FileCoverageAggregate;
+  }>;
+  /** Coverage over every classified file, so the matrix names its own basis and report age. */
+  coverage: FileCoverageAggregate;
 }
 
 /** A recorded dependency that runs the wrong way through the tier order. */
@@ -714,7 +732,7 @@ export function buildTierReport(
   root: string,
   repositoryName: string,
   graph: {
-    nodes: Array<{ id: string }>;
+    nodes: Array<{ id: string; kind?: string; directory?: string }>;
     edges?: Array<{
       source: string;
       target: string;
@@ -722,6 +740,7 @@ export function buildTierReport(
       evidence?: { line: number; specifier: string };
     }>;
   },
+  measured: MeasuredCoverageSummary | null = null,
 ): TierReport {
   const all = graph.nodes.map((node) => node.id).sort();
   const selected = all.slice(0, MAX_TIER_FILES);
@@ -730,6 +749,12 @@ export function buildTierReport(
   const files = propagateTiers(classified.files, graph.edges ?? []);
   const { skipped } = classified;
   const tierOf = new Map(files.map((entry) => [entry.file, entry.tier]));
+  // Every matrix cell and per-tier stat reads this one source instead of its own reach count.
+  // The caller may pass a structural graph (tests do); normalise the edge list the helper walks.
+  const coverage = fileCoverage(
+    { nodes: graph.nodes, edges: graph.edges ?? [], diagnostics: [], excluded: [] } as unknown as Graph,
+    measured,
+  );
 
   const units = detectUnits(root, selected, repositoryName);
   // Endpoint documents (OpenAPI) are not graph nodes, but they still sit in a unit; assign
@@ -774,14 +799,15 @@ export function buildTierReport(
     .filter((unit) => unit.files > 0);
 
   const unitIds = [...new Set(selected.map((file) => assignment.get(file) ?? '.'))].sort();
-  const cellMap = new Map<string, { files: number; lines: number }>();
+  const cellMap = new Map<string, { files: number; lines: number; members: string[] }>();
   const unitTiers = new Map<string, Set<Tier>>();
   for (const entry of files) {
     const unit = assignment.get(entry.file) ?? '.';
     const key = `${unit}\u0000${entry.tier}`;
-    const cell = cellMap.get(key) ?? { files: 0, lines: 0 };
+    const cell = cellMap.get(key) ?? { files: 0, lines: 0, members: [] };
     cell.files += 1;
     cell.lines += entry.lines;
+    cell.members.push(entry.file);
     cellMap.set(key, cell);
     const tiers = unitTiers.get(unit) ?? new Set<Tier>();
     tiers.add(entry.tier);
@@ -793,7 +819,13 @@ export function buildTierReport(
     for (const unit of unitIds) {
       const cell = cellMap.get(`${unit}\u0000${tier}`);
       if (cell) {
-        cells.push({ unit, tier, files: cell.files, lines: cell.lines });
+        cells.push({
+          unit,
+          tier,
+          files: cell.files,
+          lines: cell.lines,
+          coverage: summariseFileCoverage(cell.members, coverage),
+        });
       }
     }
   }
@@ -804,6 +836,7 @@ export function buildTierReport(
       files: matching.length,
       lines: matching.reduce((total, entry) => total + entry.lines, 0),
       fileShare: files.length > 0 ? Number((matching.length / files.length).toFixed(3)) : 0,
+      coverage: summariseFileCoverage(matching.map((entry) => entry.file), coverage),
     };
   }).filter((entry) => entry.files > 0);
 
@@ -944,7 +977,13 @@ export function buildTierReport(
   return {
     files,
     units: unitReports,
-    matrix: { tiers: TIER_ORDER, units: unitIds, cells, perTier },
+    matrix: {
+      tiers: TIER_ORDER,
+      units: unitIds,
+      cells,
+      perTier,
+      coverage: summariseFileCoverage(files.map((entry) => entry.file), coverage),
+    },
     directions,
     tables,
     tableTrace,

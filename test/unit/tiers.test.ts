@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 import express from 'express';
 
 import { buildTierReport } from '../../src/analysis/tiers.ts';
-import { createStraboRouter } from '../../src/index.ts';
+import { computeMeasuredCoverage, createStraboRouter, scanRepository } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
 import {
   classifyTierContent,
@@ -272,6 +272,49 @@ test('buildTierReport builds the tier matrix and flags wrong-way edges', () => {
   const kinds = report.directions.map((entry) => entry.kind).sort();
   assert.deepEqual(kinds, ['skip-layer', 'upward']);
   assert.equal(report.directions.find((entry) => entry.kind === 'upward')?.target, 'src/handlers/orders.ts');
+});
+
+test('buildTierReport reads measured coverage for matrix cells and per-tier stats (U2)', async () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "web" }\n');
+  write(root, 'src/data/store.ts', 'export function store(): number {\n  return 1;\n}\n');
+  write(root, 'src/data/store.test.ts', "import { store } from './store';\nexport const t = store();\n");
+  write(root, 'coverage/lcov.info', 'SF:src/data/store.ts\nDA:1,0\nDA:2,0\nLF:2\nLH:0\nend_of_record\n');
+
+  const { graph } = await scanRepository(root);
+  const measured = await computeMeasuredCoverage(root, graph);
+  const report = buildTierReport(root, 'web', graph, measured);
+
+  // The data cell holds only the 0%-measured module, so the aggregate is that file's figure.
+  const cell = report.matrix.cells.find((entry) => entry.tier === 'data');
+  assert.ok(cell, 'the data tier cell holds the module a test imports');
+  assert.equal(cell.coverage.basis, 'measured');
+  assert.equal(cell.coverage.value, 0, 'measured 0%, not the reachable fallback');
+  assert.equal(cell.coverage.filesMeasured, 1);
+  assert.equal(cell.coverage.reached, 1, 'a test imports it, so reach is still counted beside it');
+  assert.equal(cell.coverage.reportAgeMs !== null, true, 'the report age travels with the figure');
+
+  const perTier = report.matrix.perTier.find((entry) => entry.tier === 'data');
+  assert.equal(perTier?.coverage.basis, 'measured');
+  assert.equal(perTier?.coverage.value, 0);
+});
+
+test('buildTierReport falls back to labelled reachability with no report (U2)', async () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "web" }\n');
+  write(root, 'src/data/store.ts', 'export function store(): number {\n  return 1;\n}\n');
+  write(root, 'src/data/store.test.ts', "import { store } from './store';\nexport const t = store();\n");
+
+  const { graph } = await scanRepository(root);
+  const measured = await computeMeasuredCoverage(root, graph);
+  assert.equal(measured.available, false);
+  const report = buildTierReport(root, 'web', graph, measured);
+
+  const cell = report.matrix.cells.find((entry) => entry.tier === 'data');
+  assert.equal(cell?.coverage.basis, 'reachable');
+  assert.equal(cell?.coverage.value, null, 'no report means no measured percent');
+  assert.equal(cell?.coverage.reached, 1, 'the module is reached by its test: the labelled fallback');
+  assert.equal(report.matrix.coverage.reportAgeMs, null);
 });
 
 test('propagateTiers gives an unclassified file its neighbours majority tier', () => {

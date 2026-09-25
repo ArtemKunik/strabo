@@ -9,6 +9,7 @@ import {
   CHANGE_RISK_THRESHOLDS,
   CHANGE_RISK_WEIGHTS,
   computeChangePassport,
+  computeMeasuredCoverage,
   computeStructuralDiff,
   reviewCommit,
   reviewWorkingTree,
@@ -229,6 +230,52 @@ test('computeChangePassport lists the tests to run, untested dependents, and the
   assert.ok(change.risk, 'a touched function carries a pending-change risk');
   assert.ok((change.risk?.inputs.linesTouched ?? 0) > 0);
   assert.equal(typeof change.risk?.score, 'number');
+});
+
+test('computeChangePassport reports a test-imported 0% file as measured 0% (U2)', async () => {
+  const root = tempDir();
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src/lib.ts'), 'export function exported(): number {\n  return 1;\n}\n');
+  fs.writeFileSync(path.join(root, 'src/lib.test.ts'), "import { exported } from './lib';\nexport const t = exported();\n");
+  fs.mkdirSync(path.join(root, 'coverage'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, 'coverage/lcov.info'),
+    'SF:src/lib.ts\nDA:1,0\nDA:2,0\nLF:2\nLH:0\nend_of_record\n',
+  );
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'baseline');
+  fs.writeFileSync(
+    path.join(root, 'src/lib.ts'),
+    'export function exported(): number {\n  if (Math.random() > 0.5) {\n    return 2;\n  }\n  return 1;\n}\n',
+  );
+
+  const report = await scanRepository(root);
+  const measured = await computeMeasuredCoverage(root, report.graph, {
+    modifiedAt: () => '2024-06-01T00:00:00.000Z',
+    lastCommitAt: async () => '2024-01-01T00:00:00.000Z',
+  });
+  const review = await reviewWorkingTree(root, report.graph);
+  assert.equal(review.available, true);
+  if (!review.available) {
+    return;
+  }
+
+  const passport = await computeChangePassport(root, review.files, 'HEAD', report.graph, undefined, measured);
+  const change = passport.files.find((entry) => entry.path === 'src/lib.ts');
+  assert.ok(change, 'the changed file is in the passport');
+  assert.equal(change.coverage?.basis, 'measured');
+  assert.equal(change.coverage?.value, 0, 'measured 0%, not the reachable fallback');
+  assert.equal(change.untestedBasis, 'measured');
+  assert.equal(change.impactPassport.coverage?.value, 0);
+
+  // With no report the figure is the labelled reach fallback, and the file is reached.
+  const fallback = await computeChangePassport(root, review.files, 'HEAD', report.graph);
+  const fallbackChange = fallback.files.find((entry) => entry.path === 'src/lib.ts');
+  assert.equal(fallbackChange?.coverage?.basis, 'reachable');
+  assert.equal(fallbackChange?.coverage?.value, null);
+  assert.equal(fallbackChange?.coverage?.reached, true);
+  assert.equal(fallbackChange?.untestedBasis, 'reachable');
 });
 
 test('computeChangePassport includes tiered impact for importers', async () => {
