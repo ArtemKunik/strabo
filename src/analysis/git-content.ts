@@ -1,8 +1,7 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import { promisify } from 'node:util';
 
 import { assertReadable } from '../boundary/repository-root.ts';
+import { run } from '../process.ts';
 
 /**
  * Reading one version of one file, shared by the analyses that compare two sides.
@@ -12,7 +11,6 @@ import { assertReadable } from '../boundary/repository-root.ts';
  * fabricating an empty one.
  */
 
-const run = promisify(execFile);
 const MAX_BYTES = 4 * 1024 * 1024;
 
 /** The content of one file at a revision, or null when it cannot be read as text. */

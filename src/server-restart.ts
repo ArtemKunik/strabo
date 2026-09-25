@@ -33,7 +33,13 @@ export function createRestart(server: Server, deps: Partial<RestartDeps> = {}): 
 
   return () => {
     server.close(() => {
-      const child = spawnProcess(execPath, [...argv], { cwd, env, detached: true, stdio: 'ignore' });
+      const child = spawnProcess(execPath, [...argv], {
+        cwd,
+        env,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
       child.unref();
       exit(0);
     });

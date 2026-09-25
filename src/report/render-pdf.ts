@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 export type PdfResult = { ok: true } | { ok: false; reason: string };
 

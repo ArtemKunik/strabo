@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { isInside, toPosix } from '../boundary/repository-root.ts';
 import type { Graph } from '../types.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * Read the coverage reports a repository already has. This module never runs a test or a

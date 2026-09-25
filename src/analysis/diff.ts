@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import { readWorkingFile } from './git-content.ts';
 import { isSafeRevision } from './impact.ts';
+import { run } from '../process.ts';
 
 /**
  * Reading one file's change for the in-page viewer.
@@ -13,7 +11,6 @@ import { isSafeRevision } from './impact.ts';
  * empty diff means the two sides are equal, which is a different fact from "could not read".
  */
 
-const run = promisify(execFile);
 
 export type DiffLineKind = 'context' | 'add' | 'del';
 

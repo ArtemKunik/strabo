@@ -1,8 +1,7 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { assertReadable } from '../boundary/repository-root.ts';
 import { cacheRoot } from '../cache/graph-cache.ts';
@@ -18,8 +17,7 @@ import { isSafeRevision } from './impact.ts';
 import { parseNameStatus } from './review.ts';
 import type { ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * Quantitative change impact: what a change set does to complexity and coupling.
@@ -653,7 +651,11 @@ export function readBlobs(root: string, specs: readonly string[]): Promise<Map<s
   const result = new Map<string, string | null>();
   if (unique.length === 0) return Promise.resolve(result);
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['cat-file', '--batch'], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('git', ['cat-file', '--batch'], {
+      cwd: root,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
     const chunks: Buffer[] = [];
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.on('error', reject);

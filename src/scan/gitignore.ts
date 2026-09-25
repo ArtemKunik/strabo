@@ -21,7 +21,7 @@ export async function findGitIgnoredFiles(root: string, files: string[]): Promis
       resolve(result);
     };
 
-    const child = spawn('git', ['check-ignore', '--stdin'], { cwd: root });
+    const child = spawn('git', ['check-ignore', '--stdin'], { cwd: root, windowsHide: true });
     const chunks: Buffer[] = [];
 
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));

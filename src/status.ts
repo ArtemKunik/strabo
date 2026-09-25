@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import { fingerprint } from './cache/graph-cache.ts';
-
-const run = promisify(execFile);
+import { run } from './process.ts';
 
 export interface Freshness {
   indexed: {

@@ -1,6 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import type { Graph } from '../types.ts';
 import { symbolExtractorFor, type SymbolExtractor } from '../scan/languages/registry.ts';
 import type { SymbolExtraction } from '../scan/languages/symbols.ts';
@@ -9,6 +6,7 @@ import { computePublicSurfaceDiff } from './change-passport.ts';
 import { contentAtRevision, readWorkingFile } from './git-content.ts';
 import { isSafeRevision } from './impact.ts';
 import type { SymbolChange } from './review-types.ts';
+import { run } from '../process.ts';
 
 /**
  * The public API a change set adds, removes, or changes, read from Git and the extractors.
@@ -18,7 +16,6 @@ import type { SymbolChange } from './review-types.ts';
  * file's direct importers, so a consumer that names a symbol that moved is named back.
  */
 
-const run = promisify(execFile);
 const DEFAULT_MAX_FILES = 200;
 
 export interface PublicApiDiffFile {

@@ -1,10 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import type { Graph } from '../types.ts';
 import { buildAdjacency } from './analysis.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 export interface ChangedFile {
   path: string;

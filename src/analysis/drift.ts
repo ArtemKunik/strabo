@@ -1,12 +1,8 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import type { Graph } from '../types.ts';
 import { computeGraphMetrics, relationshipOf } from './analysis.ts';
 import { computeCycles } from './cycles.ts';
 import { revisionGraph } from './structural-diff.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * A timeline of structural measures read from the per-commit revision graphs.

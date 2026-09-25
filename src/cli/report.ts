@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
-import { promisify } from 'node:util';
 
 import { buildAdjacency } from '../analysis/analysis.ts';
 import { computeCoverage } from '../analysis/coverage.ts';
@@ -24,8 +22,7 @@ import { renderReportMarkdown } from '../report/render-markdown.ts';
 import { renderReportPdf } from '../report/render-pdf.ts';
 import { computeFreshness, revisionFromFingerprint } from '../status.ts';
 import { collectFailOnValues } from './check.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 export interface ReportIo {
   write?: (text: string) => void;

@@ -1,10 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import { pushBranch } from './branch-actions.ts';
 import { assertRepository, type ReviewResult } from './review.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * Commit the working tree, optionally pushing the current branch, from recorded evidence.

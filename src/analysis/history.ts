@@ -1,7 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * The git history measures behind the quality scorecard, in one bounded pass.

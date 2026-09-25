@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { cacheRoot, getCachedGraph } from '../cache/graph-cache.ts';
 import { scanJsTsCalls } from '../scan/calls.ts';
@@ -19,8 +17,7 @@ import { computeCycles, type CycleGroup } from './cycles.ts';
 import { contentAtRevision } from './git-content.ts';
 import { isSafeRevision } from './impact.ts';
 import { buildTierReport, type TierDirection } from './tiers.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * The structural change between two revisions, read from the two graphs rather than the

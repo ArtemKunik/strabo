@@ -1,6 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import type { Graph } from '../types.ts';
 import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
 import { computeCoverage, computeTestReachByFile } from './coverage.ts';
@@ -20,8 +17,8 @@ import { CHANGE_RISK_SIGNAL_LABELS, CHANGE_RISK_THRESHOLDS } from './signals.ts'
 import type { StructuralDiff } from './structural-diff.ts';
 import { IMPACT_TIER_LABELS } from './review-types.ts';
 import type { ChangeEdge, ChangePassport, ChangeRisk, ChangeRiskSignal, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
+import { run } from '../process.ts';
 
-const run = promisify(execFile);
 const MAX_FILES = 40;
 
 export type { ChangePassport, ChangeRisk, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './review-types.ts';

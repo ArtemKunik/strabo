@@ -1,6 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import type { Graph } from '../types.ts';
 import { buildAdjacency } from './analysis.ts';
 import { impactFromPaths, isSafeRevision } from './impact.ts';
@@ -16,8 +13,7 @@ import {
 } from './review.ts';
 import type { BranchDivergence } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 const FIELD_SEPARATOR = '\u001f';
 const MAX_BRANCHES = 100;

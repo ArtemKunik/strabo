@@ -1,12 +1,11 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { excludedDirectory } from '../scan/exclusions.ts';
+import { run } from '../process.ts';
 
-const run = promisify(execFile);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 
@@ -131,7 +130,11 @@ function readBlobs(root: string, shas: string[]): Promise<Array<Buffer | null>> 
     return Promise.resolve([]);
   }
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['cat-file', '--batch'], { cwd: root, stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawn('git', ['cat-file', '--batch'], {
+      cwd: root,
+      stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
+    });
     const chunks: Buffer[] = [];
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.on('error', reject);

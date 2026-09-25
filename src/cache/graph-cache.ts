@@ -1,14 +1,11 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import { scanRepository } from '../scan/scan.ts';
 import type { ScanReport } from '../types.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /** Bump when the on-disk artifact shape changes. */
 export const CACHE_ARTIFACT_VERSION = 'strabo-cache-5';

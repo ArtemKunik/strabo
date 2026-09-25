@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import type { Exclusion, Graph } from '../types.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
 import { classifyViewExclusion } from '../scan/exclusions.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 export type { BranchDivergence, CohesionChange, ReviewFile, ReviewGroup, ReviewStatus } from './review-types.ts';
 

@@ -1,9 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
 import { assertRepository } from './review.ts';
-
-const run = promisify(execFile);
+import { run } from '../process.ts';
 
 /**
  * The few Git operations Strabo performs on the operator's behalf: fetch, push, and a

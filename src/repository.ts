@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process';
 import path from 'node:path';
-import { promisify } from 'node:util';
 
 import type { RepositoryDescriptor } from './types.ts';
-
-const run = promisify(execFile);
+import { run } from './process.ts';
 
 /** Describe a repository for the API: name, HEAD, dirty state, and Git URL. */
 export async function describeRepository(root: string): Promise<RepositoryDescriptor> {
