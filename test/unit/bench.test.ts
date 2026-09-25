@@ -74,6 +74,21 @@ test('the benchmark formatter is deterministic and covers every stage', () => {
   assert.match(first, /disk/);
 });
 
+test('the benchmark formatter names a synthetic corpus when the result carries one', () => {
+  const result = sampleResult();
+  result.corpus = {
+    kind: 'synthetic',
+    seed: 7,
+    generatedFiles: 20175,
+    regenerate: 'node scripts/bench-corpus.mjs',
+  };
+  const first = formatBenchmark(result);
+
+  assert.match(first, /synthetic/);
+  assert.match(first, /20175 files/);
+  assert.equal(first, formatBenchmark(result));
+});
+
 test('the benchmark formatter reports first paint for the passport and System view', () => {
   const first = formatBenchmark(sampleResult());
 

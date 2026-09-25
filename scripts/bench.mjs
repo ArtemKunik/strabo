@@ -168,12 +168,35 @@ async function measureFirstPaint(root, repository, cached) {
   };
 }
 
-export async function runBenchmark(repoArg, outArg) {
+/**
+ * Read the corpus provenance manifest a generator wrote, when one is given.
+ *
+ * A synthetic corpus is not a repository, so its file count and language mix cannot be
+ * inferred from `revision`; the manifest makes the measured tree and how to regenerate it
+ * part of the committed result instead of an unverifiable claim in prose.
+ */
+function readCorpusManifest(corpusArg) {
+  const configured = typeof corpusArg === 'string' && corpusArg.trim() !== '' ? corpusArg.trim() : null;
+  if (!configured) {
+    return null;
+  }
+  const file = path.resolve(configured);
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read corpus manifest ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { manifestPath: file, ...parsed };
+}
+
+export async function runBenchmark(repoArg, outArg, corpusArg) {
   const root = resolveRoot(repoArg);
   const repository = await describeRepository(root);
   const rev = await fingerprint(root);
   const benchDir = benchDirectory();
   const outputPath = typeof outArg === 'string' && outArg.trim() !== '' ? path.resolve(outArg) : null;
+  const corpus = readCorpusManifest(corpusArg);
 
   // Empty every cache the measured paths read before the cold pass.
   clearMemoryCache(root);
@@ -261,6 +284,7 @@ export async function runBenchmark(repoArg, outArg) {
     rootName: repository.name,
     revision: { head: repository.head, dirty: repository.dirty, gitUrl: repository.gitUrl },
     fingerprint: rev,
+    corpus,
     cacheDir: benchDir,
     outputPath,
     files: {
@@ -282,6 +306,12 @@ export async function runBenchmark(repoArg, outArg) {
     stages,
     firstPaint,
     notes: [
+      ...(corpus
+        ? [
+            `This result was measured on a ${corpus.kind ?? 'synthetic'} corpus, not an operator repository; ` +
+              `seed ${corpus.seed}, ${corpus.generatedFiles} generated source files. Regenerate with: ${corpus.regenerate}.`,
+          ]
+        : []),
       'Stage rows call the nearest production function; scanRepository exposes no per-stage seam.',
       'parse, extract, and resolve overlap: each enclosing edge pass also performs the other two steps, so the rows are not additive.',
       'The cold graph-cache miss is timed after the cold stage pass, so its parser runtime is warm; one-time grammar loading is inside the stage pass, not that number.',
@@ -307,6 +337,12 @@ export function formatBenchmark(result) {
   lines.push(`fingerprint  ${result.fingerprint ?? 'none (no git)'}`);
   lines.push(`generated    ${result.generatedAt}`);
   lines.push(`results      ${result.outputPath ?? result.cacheDir}`);
+  if (result.corpus) {
+    lines.push(
+      `corpus       ${result.corpus.kind ?? 'synthetic'} (seed ${result.corpus.seed}, ` +
+        `${result.corpus.generatedFiles} files)`,
+    );
+  }
   lines.push('');
 
   lines.push('Graph cache (real getCachedGraph):');
@@ -373,6 +409,7 @@ function writeResult(result) {
 function parseArgs(argv) {
   let repo;
   let out = process.env.STRABO_BENCH_OUT;
+  let corpus = process.env.STRABO_BENCH_CORPUS;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--out') {
@@ -380,16 +417,21 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg.startsWith('--out=')) {
       out = arg.slice('--out='.length);
+    } else if (arg === '--corpus') {
+      corpus = argv[index + 1];
+      index += 1;
+    } else if (arg.startsWith('--corpus=')) {
+      corpus = arg.slice('--corpus='.length);
     } else if (repo === undefined) {
       repo = arg;
     }
   }
-  return { repo, out };
+  return { repo, out, corpus };
 }
 
 async function main(args) {
   const options = parseArgs(args);
-  const result = await runBenchmark(options.repo, options.out);
+  const result = await runBenchmark(options.repo, options.out, options.corpus);
   const targetDir = result.outputPath ? path.dirname(result.outputPath) : result.cacheDir;
   if (isInsideRoot(targetDir, result.root)) {
     process.stderr.write(

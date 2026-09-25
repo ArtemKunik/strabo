@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-25T21:00:27.038Z",
+  "root": "C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-bench-corpus",
+  "rootName": "strabo-bench-corpus",
+  "revision": {
+    "head": null,
+    "dirty": false,
+    "gitUrl": null
+  },
+  "fingerprint": null,
+  "corpus": {
+    "manifestPath": "C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-bench-corpus.manifest.json",
+    "kind": "synthetic",
+    "generator": "scripts/bench-corpus.mjs",
+    "seed": 20260925,
+    "requestedFiles": 20000,
+    "generatedFiles": 20175,
+    "languages": {
+      "typescript": 8500,
+      "javascript": 2800,
+      "tsx": 1200,
+      "python": 2050,
+      "java": 1600,
+      "csharp": 1200,
+      "rust": 1025,
+      "cpp": 1000,
+      "kotlin": 400,
+      "sql": 400
+    },
+    "extensions": {
+      ".ts": 8500,
+      ".js": 2800,
+      ".tsx": 1200,
+      ".py": 2050,
+      ".java": 1600,
+      ".cs": 1200,
+      ".rs": 1025,
+      ".h": 500,
+      ".cpp": 500,
+      ".kt": 400,
+      ".sql": 400
+    },
+    "regenerate": "node scripts/bench-corpus.mjs --out C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-bench-corpus --files 20000 --seed 20260925"
+  },
+  "cacheDir": "C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-cache\\bench",
+  "outputPath": "D:\\source\\strabo-g4\\docs\\bench\\synthetic-20k.json",
+  "files": {
+    "scanned": 20175,
+    "edges": 54140,
+    "diagnostics": 0,
+    "excluded": 0
+  },
+  "graphCache": {
+    "cold": {
+      "status": "miss",
+      "ms": 5313.1346
+    },
+    "memory": {
+      "status": "memory",
+      "ms": 125.22760000000017
+    },
+    "disk": {
+      "status": "miss",
+      "ms": 5353.434799999999
+    }
+  },
+  "history": {
+    "available": false,
+    "windowDays": 90,
+    "commitsScanned": 0
+  },
+  "stages": [
+    {
+      "stage": "walk",
+      "coldMs": 199.4099,
+      "warmMs": null,
+      "approximate": false,
+      "source": "collectSourceFiles",
+      "includes": "directory walk"
+    },
+    {
+      "stage": "read",
+      "coldMs": 1568.2276000000002,
+      "warmMs": null,
+      "approximate": true,
+      "source": "harness read loop (mirrors scan.ts:44-76)",
+      "includes": "git check-ignore, stat, size cap, readFileSync, minified check"
+    },
+    {
+      "stage": "parse",
+      "coldMs": 1216.1688,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanPolyglotEdges",
+      "includes": "polyglot extract and resolve"
+    },
+    {
+      "stage": "extract",
+      "coldMs": 161.11180000000013,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanJsTsEdges",
+      "includes": "JS/TS reference extraction and resolve"
+    },
+    {
+      "stage": "resolve",
+      "coldMs": 1206.9204999999997,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanJsTsCalls",
+      "includes": "JS/TS call parse and extract"
+    },
+    {
+      "stage": "metrics",
+      "coldMs": 163.88659999999982,
+      "warmMs": null,
+      "approximate": false,
+      "source": "buildAdjacency + computeGraphMetrics",
+      "includes": "adjacency and transitive reach"
+    },
+    {
+      "stage": "analysis",
+      "coldMs": 274.3582999999999,
+      "warmMs": null,
+      "approximate": false,
+      "source": "computeRepositoryPassport",
+      "includes": "passport; recomputes metrics, cycles, and coverage"
+    },
+    {
+      "stage": "history",
+      "coldMs": 109.45570000000043,
+      "warmMs": 109.77689999999984,
+      "approximate": false,
+      "source": "collectHistory",
+      "includes": "one bounded git log --numstat window"
+    }
+  ],
+  "firstPaint": {
+    "passport": {
+      "coldMs": 245.51980000000003,
+      "warmMs": 266.66149999999834,
+      "approximate": false,
+      "source": "computeRepositoryPassport (GET /analysis/passport)",
+      "includes": "languages, entry points, directories, top files, cycles, unreached files"
+    },
+    "system": {
+      "coldMs": 541.3856000000014,
+      "warmMs": 475.89849999999933,
+      "approximate": false,
+      "source": "buildSystemReport + buildSystemViewModel (GET /graph?system=1)",
+      "includes": "unit roll-up, layers, communities, unit cards, positions"
+    }
+  },
+  "notes": [
+    "This result was measured on a synthetic corpus, not an operator repository; seed 20260925, 20175 generated source files. Regenerate with: node scripts/bench-corpus.mjs --out C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-bench-corpus --files 20000 --seed 20260925.",
+    "Stage rows call the nearest production function; scanRepository exposes no per-stage seam.",
+    "parse, extract, and resolve overlap: each enclosing edge pass also performs the other two steps, so the rows are not additive.",
+    "The cold graph-cache miss is timed after the cold stage pass, so its parser runtime is warm; one-time grammar loading is inside the stage pass, not that number.",
+    "Node construction (entry points, line counts) and external-import collection are not separately measured.",
+    "First paint rows time the builder the server calls for that payload; the System row also builds the report and reads manifests, so it is not a pure in-memory number."
+  ]
+}

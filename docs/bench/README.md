@@ -26,13 +26,67 @@ output is named, the file lands in `cacheRoot()/bench` with a timestamp (overrid
 directory with `STRABO_BENCH_DIR`). A result written inside the scanned tree prints a
 warning, because scanning that tree would then include the result.
 
+`--corpus <manifest.json>` (`STRABO_BENCH_CORPUS`) attaches a corpus provenance manifest
+written by `scripts/bench-corpus.mjs` to the result under `corpus`. Pass it when the scanned
+tree is synthetic, so the committed result says what was measured and how to regenerate it.
+
+## Synthetic corpus (Phase 21 G4)
+
+The G4 gate calls for a run on at least one **operator-supplied repository of 20k-50k
+files, cold and warm**. No such repository was available, so the committed result was
+measured on a **deterministic synthetic corpus** instead. It is *not* an operator
+repository and is *not* committed; the generator is.
+
+Generate it outside the repository (the OS temp directory is the intended home):
+
+```bash
+node scripts/bench-corpus.mjs --out <tmp>/strabo-bench-corpus --files 20000 --seed 20260925
+```
+
+The generator writes the tree plus a sibling `<out>.manifest.json`. The same `--seed` and
+`--files` always produce byte-identical source files and a byte-identical manifest, so the
+run is checkable by regenerating it. Layout and mix:
+
+| Language | Files | Extensions |
+| -------- | ----: | ---------- |
+| TypeScript | 8500 | `.ts` |
+| JavaScript | 2800 | `.js` |
+| TSX | 1200 | `.tsx` |
+| Python | 2050 | `.py` (includes one `__init__.py` per package) |
+| Java | 1600 | `.java` |
+| C# | 1200 | `.cs` |
+| Rust | 1025 | `.rs` (includes one `lib.rs` per crate) |
+| C++ | 1000 | `.h`, `.cpp` |
+| Kotlin | 400 | `.kt` |
+| SQL | 400 | `.sql` |
+| **Total** | **20175** | |
+
+Files carry internal imports in the form each scanned language uses: relative imports for
+JS/TS (plus a shared `shared/kernel` package), package-relative modules for Python,
+packages and imports for Java and Kotlin, namespaces for C#, `mod`/`use crate::` for Rust,
+quoted includes for C++, and standalone schema for SQL. The manifest records the per-language
+and per-extension counts from this run.
+
 ## Committed result
 
-The Phase 21 G4 gate calls for a run on at least one **operator-supplied repository of
-20k-50k files, cold and warm**. No such repository is available to the repository owner in
-this checkout, so **no result is committed yet**: committing one would require inventing
-numbers. Once an operator supplies a repository, run the command above, commit the JSON
-under this directory, and note the repository name, revision, and file count.
+`synthetic-20k.json` is a real run on that corpus:
+
+```bash
+node scripts/bench-corpus.mjs --out <tmp>/strabo-bench-corpus --files 20000 --seed 20260925
+npm run bench -- --out docs/bench/synthetic-20k.json \
+  --corpus <tmp>/strabo-bench-corpus.manifest.json <tmp>/strabo-bench-corpus
+```
+
+Caveats, stated in the result's `notes` as well:
+
+- The corpus is **synthetic, not an operator repository**. It mirrors scale and language
+  mix, not the dependency shape, history, or file sizes of a real codebase.
+- The corpus is **not a Git tree**, so `revision`, `fingerprint`, and `history` are
+  `null`/`unavailable`: `collectHistory` runs and returns quickly, but no commits are
+  mined, and the graph cache has no fingerprint to persist against (the `disk` tier is a
+  real miss, not a stale hit). A result on an operator repository will differ.
+- Timing is host-specific. Every run tells you where time went on *this* machine; the
+  committed numbers are one such run, not a target.
 
 ## JSON shape
 
@@ -43,7 +97,8 @@ under this directory, and note the repository name, revision, and file count.
 | `generatedAt` | ISO timestamp of the run. |
 | `root`, `rootName` | Absolute path scanned and its base name. |
 | `revision` | `head`, `dirty`, `gitUrl` at scan time (null when not a git tree). |
-| `fingerprint` | The cache fingerprint the graph was keyed by. |
+| `fingerprint` | The cache fingerprint the graph was keyed by (null when not a git tree). |
+| `corpus` | Provenance of a synthetic corpus (`kind`, `seed`, `generatedFiles`, `languages`, `extensions`, `regenerate`), or `null` for a real repository. |
 | `cacheDir` | Default cache directory for results. |
 | `outputPath` | Absolute path this run was written to, or `null`. |
 | `files` | `scanned` nodes, `edges`, `diagnostics`, `excluded`. |
