@@ -133,6 +133,8 @@ export {
   parseNumstat,
 } from './analysis/review.ts';
 export type { BranchDivergence, ReviewFile, ReviewResult, ReviewStatus, ReviewGroup, ReviewTotals } from './analysis/review.ts';
+export { listWorktrees, parseWorktrees, resolveWorktree } from './analysis/worktrees.ts';
+export type { WorktreeSummary, WorktreesResult } from './analysis/worktrees.ts';
 export { CHANGE_RISK_WEIGHTS, computeChangePassport } from './analysis/change-passport.ts';
 export type { ChangePassport, CohesionChange, FunctionChange, PublicSurfaceChange, TieredImpact } from './analysis/change-passport.ts';
 export { IMPACT_TIER_LABELS } from './analysis/review-types.ts';

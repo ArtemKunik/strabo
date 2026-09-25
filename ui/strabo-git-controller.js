@@ -32,6 +32,18 @@ export function createGitController(app) {
   /** The review the panel is showing, so the next navigation can push it onto the history. */
   let currentReviewRequest = null;
 
+  /** The linked worktree a working-tree review reads; null reviews the repository's main root. */
+  let selectedWorktree = null;
+
+  /** True once the operator picks a worktree, so the active session stops overriding the choice. */
+  let worktreePinned = false;
+
+  /** The repository whose worktrees are loaded, so a repository switch re-follows the session. */
+  let worktreesFor = null;
+
+  /** The repository's worktrees, its main root first. */
+  let worktrees = [];
+
   /** Show or hide recorded changes; selecting one compares it with the working tree. */
   async function toggleTimeline() {
     if (!elements.timelinePanel.hidden) {
@@ -178,15 +190,37 @@ export function createGitController(app) {
   }
 
   /**
+   * The query string for a review: its own navigation query, the repository, and — for a
+   * working-tree review only — the worktree to read. A commit or branch names its own side,
+   * so a worktree would be meaningless there and is left out.
+   */
+  function reviewQuery(query, worktree) {
+    const params = [];
+    if (query) params.push(query.replace(/^\?/, ''));
+    if (state.repository) params.push(`repository=${encodeURIComponent(state.repository)}`);
+    if (!query && worktree) params.push(`worktree=${encodeURIComponent(worktree)}`);
+    return params.length > 0 ? `?${params.join('&')}` : '';
+  }
+
+  /** A worktree's display name: its branch, or the last path segment when detached. */
+  function worktreeName(worktree) {
+    const match = worktrees.find((entry) => entry.path === worktree);
+    if (match?.branch) return match.branch;
+    return String(worktree).replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? worktree;
+  }
+
+  /**
    * Load a Git review and annotate the map with its change and impact classes.
    *
    * `query` is either empty (working tree) or `?base=<ref>` (that commit's own changes).
    * The review result is rendered verbatim; a file outside the graph is reported as such
    * instead of being drawn as if it had impact. Each navigation pushes the review it
    * replaces, so the panel's Back steps down through the reviews this session has shown.
+   * A working-tree review reads `worktree` when one is selected, so it follows an agent's
+   * linked checkout rather than the repository's main root.
    */
-  async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
-    const entry = { query, commit, branchName };
+  async function showReview(query, commit = null, branchName = null, { fromHistory = false, worktree = selectedWorktree } = {}) {
+    const entry = { query, commit, branchName, worktree };
     if (!fromHistory && currentReviewRequest) {
       reviewHistory.push(currentReviewRequest);
     }
@@ -195,14 +229,12 @@ export function createGitController(app) {
       canGoBack: reviewHistory.length > 0,
       onBack: reviewBack,
     };
-    const separator = query ? '&' : '?';
-    const repository = state.repository ? `${separator}repository=${encodeURIComponent(state.repository)}` : '';
     const ticket = ++reviewTicket;
     elements.reviewPanel.hidden = false;
     renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
     let data;
     try {
-      data = await request(`/analysis/review${query}${repository}`);
+      data = await request(`/analysis/review${reviewQuery(query, worktree)}`);
     } catch (error) {
       if (ticket === reviewTicket) {
         renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
@@ -223,7 +255,8 @@ export function createGitController(app) {
     // structural events. The document is the one `strabo report` prints.
     if (commit) {
       try {
-        data.structural = await request(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
+        data.structural = await request(`/analysis/structural-diff${diffQuery}`);
       } catch (error) {
         data.structural = { available: false, reason: 'git-error', detail: error.message };
       }
@@ -247,7 +280,8 @@ export function createGitController(app) {
       renderReview(elements.reviewScreenBody, data, reviewHandlers(data, navigation, () => app.setScreen('graph')));
     }
     const label = branchName ?? (commit ? commit.shortHash : 'working tree');
-    elements.status.textContent = `Review ${label}: ${overlay.summary}`;
+    const where = !query && worktree ? ` in ${worktreeName(worktree)}` : '';
+    elements.status.textContent = `Review ${label}${where}: ${overlay.summary}`;
   }
 
   /** Step the Review panel down to the review it replaced, if any. */
@@ -257,7 +291,10 @@ export function createGitController(app) {
       return;
     }
     try {
-      await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
+      await showReview(previous.query, previous.commit, previous.branchName, {
+        fromHistory: true,
+        worktree: previous.worktree,
+      });
     } catch (error) {
       elements.status.textContent = `Error: ${error.message}`;
     }
@@ -281,6 +318,92 @@ export function createGitController(app) {
     selectedBranchName = null;
   }
 
+  /** Compare two repository paths, tolerant of separator style and Windows case. */
+  function samePath(a, b) {
+    const left = String(a ?? '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    const right = String(b ?? '').replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+    if (!left || !right) return false;
+    if (left === right) return true;
+    return /^[a-z]:\//i.test(left) && left.toLowerCase() === right.toLowerCase();
+  }
+
+  /** The linked worktree the active terminal session sits in, when it sits in one. */
+  function activeWorktreePath() {
+    const session = app.terminalScreen?.activeSession?.();
+    const cwd = typeof session?.cwd === 'string' ? session.cwd : '';
+    if (!cwd) return null;
+    const match = worktrees.find((entry) => !entry.main && !entry.bare && samePath(entry.path, cwd));
+    return match?.path ?? null;
+  }
+
+  /**
+   * Refresh the worktree list and the picker.
+   *
+   * A coding agent often edits a linked `git worktree add` checkout, so the working-tree
+   * review follows the active terminal session's directory until the operator picks a
+   * worktree by hand. A repository switch re-arms that follow.
+   */
+  async function loadWorktrees() {
+    if (worktreesFor !== state.repository) {
+      worktreesFor = state.repository;
+      worktreePinned = false;
+      selectedWorktree = null;
+    }
+    const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+    const result = await request(`/analysis/worktrees${query}`).catch(() => null);
+    worktrees = result?.available === true && Array.isArray(result.worktrees) ? result.worktrees : [];
+    if (!worktreePinned) {
+      selectedWorktree = activeWorktreePath();
+    }
+    renderWorktreeOptions();
+  }
+
+  /** Fill the Review toolbar's picker: the main root, then each linked checkout. */
+  function renderWorktreeOptions() {
+    const select = elements.reviewWorktree;
+    if (!select) return;
+    const main = worktrees.find((entry) => entry.main) ?? null;
+    select.replaceChildren();
+    const rootOption = document.createElement('option');
+    rootOption.value = '';
+    rootOption.textContent = main?.branch ? `Main · ${main.branch}` : 'Repository root';
+    select.append(rootOption);
+    for (const entry of worktrees) {
+      if (entry.main || entry.bare) continue;
+      const option = document.createElement('option');
+      option.value = entry.path;
+      option.textContent = entry.branch ?? worktreeName(entry.path);
+      option.title = entry.path;
+      select.append(option);
+    }
+    // A pinned worktree that was pruned away falls back to the main root.
+    if (selectedWorktree && !worktrees.some((entry) => !entry.main && entry.path === selectedWorktree)) {
+      selectedWorktree = null;
+    }
+    select.value = selectedWorktree ?? '';
+  }
+
+  /**
+   * Review the changes a terminal session is making, following its working directory.
+   *
+   * An agent that runs `strabo review` from a linked worktree should see its own checkout,
+   * not the repository's main root. When the session is not in a worktree this is the plain
+   * working-tree review.
+   */
+  async function reviewFromSession(sessionId) {
+    await loadWorktrees();
+    const session = app.terminalScreen?.listSessions?.().find((entry) => entry.id === sessionId);
+    const cwd = typeof session?.cwd === 'string' ? session.cwd : '';
+    const match = cwd ? worktrees.find((entry) => !entry.main && !entry.bare && samePath(entry.path, cwd)) : null;
+    if (match) {
+      worktreePinned = true;
+      selectedWorktree = match.path;
+      renderWorktreeOptions();
+    }
+    app.setScreen('graph');
+    await showReview('');
+  }
+
   /** Review pending working-tree changes: staged, unstaged, and untracked. */
   async function toggleReview() {
     if (!elements.reviewPanel.hidden) {
@@ -289,6 +412,7 @@ export function createGitController(app) {
       return;
     }
     try {
+      await loadWorktrees();
       await showReview('');
     } catch (error) {
       elements.status.textContent = `Error: ${error.message}`;
@@ -422,11 +546,12 @@ export function createGitController(app) {
    * loaded into the wider body, so switching tabs never triggers a second Git pass. With
    * nothing reviewed yet it starts the working-tree review.
    */
-  function openReviewScreen() {
+  async function openReviewScreen() {
     const body = elements.reviewScreenBody;
     if (!body) {
       return;
     }
+    await loadWorktrees();
     if (!app.currentReview) {
       body.replaceChildren();
       const note = document.createElement('p');
@@ -447,12 +572,20 @@ export function createGitController(app) {
     }
   }
 
-  /** Recompute the change set currently shown in the full-screen Review tab. */
+  /**
+   * Recompute the change set currently shown in the full-screen Review tab, re-reading the
+   * worktree list first so a worktree an agent just created is picked up.
+   */
   function refreshReviewScreen() {
-    const entry = currentReviewRequest ?? { query: '', commit: null, branchName: null };
-    showReview(entry.query, entry.commit, entry.branchName, { fromHistory: true }).catch((error) => {
-      elements.status.textContent = `Error: ${error.message}`;
-    });
+    const entry = currentReviewRequest ?? { query: '', commit: null, branchName: null, worktree: selectedWorktree };
+    loadWorktrees()
+      .then(() => showReview(entry.query, entry.commit, entry.branchName, {
+        fromHistory: true,
+        worktree: entry.worktree ?? selectedWorktree,
+      }))
+      .catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
   }
 
   elements.reviewScreenPending?.addEventListener('click', () => {
@@ -462,6 +595,16 @@ export function createGitController(app) {
   });
 
   elements.reviewScreenRefresh?.addEventListener('click', refreshReviewScreen);
+
+  // Picking a worktree switches the tab to that checkout's working-tree review; the choice
+  // outranks the active-session follow until the repository changes.
+  elements.reviewWorktree?.addEventListener('change', () => {
+    worktreePinned = true;
+    selectedWorktree = elements.reviewWorktree.value || null;
+    showReview('').catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+  });
 
   elements.historyScreenRefresh?.addEventListener('click', () => {
     loadTimelineScreen().catch((error) => {
@@ -520,6 +663,7 @@ export function createGitController(app) {
     closeRisk,
     openHistoryScreen,
     openReviewScreen,
+    reviewFromSession,
     showReview,
     showRisk,
     toggleBranches,

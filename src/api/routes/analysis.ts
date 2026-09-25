@@ -32,6 +32,7 @@ import { computeFileImpactPassport, rollUpImpactPassports } from '../../analysis
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
+import { listWorktrees, resolveWorktree, type WorktreeSummary } from '../../analysis/worktrees.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
 import { buildCoChangeEdges } from '../../analysis/co-change.ts';
@@ -593,18 +594,41 @@ export function createAnalysisRouter(config: StraboConfig): Router {
   router.get('/analysis/review', async (request, response) => {
     try {
       const repository = resolve(request);
-      const cached = await getCachedGraph(repository.root);
+      const branch = typeof request.query.branch === 'string' ? request.query.branch : '';
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      const requestedWorktree =
+        typeof request.query.worktree === 'string' ? request.query.worktree.trim() : '';
+      // A linked worktree is only meaningful for the working-tree review: a commit names its
+      // own revision and a branch is read from the repository at `root`.
+      let worktree: WorktreeSummary | null = null;
+      if (!branch && !base && requestedWorktree) {
+        worktree = await resolveWorktree(
+          repository.root,
+          requestedWorktree,
+          config.scanCeiling ?? config.workspaceRoot,
+        );
+        if (!worktree) {
+          response.status(400).json({
+            error: `"${requestedWorktree}" is not a worktree of this repository.`,
+          });
+          return;
+        }
+      }
+      // The graph the working-tree review reads: the selected root, or the linked worktree
+      // when one is named. Paths stay repository-relative, so a sibling worktree's files map
+      // onto the same node ids as the selected root's graph.
+      const workingRoot = worktree ? worktree.path : repository.root;
+      const cached = await getCachedGraph(workingRoot);
       // The base-vs-head edge diff, from the two scanned graphs. Reused by the passport so
       // its per-file edge deltas and the panel's structural diff read the same base graph.
       const structuralEdges = async (baseRevision: string) => {
-        const structural = await computeStructuralDiff(repository.root, baseRevision, {
+        const structural = await computeStructuralDiff(workingRoot, baseRevision, {
           headGraph: cached.report.graph,
           headRevision: revisionFromFingerprint(cached.fingerprint),
           repository: repository.name,
         });
         return structural.available ? structural.diff : undefined;
       };
-      const branch = typeof request.query.branch === 'string' ? request.query.branch : '';
       if (branch) {
         const against = typeof request.query.against === 'string' && request.query.against ? request.query.against : undefined;
         const review = await reviewBranch(repository.root, cached.report.graph, branch, against);
@@ -642,10 +666,9 @@ export function createAnalysisRouter(config: StraboConfig): Router {
         });
         return;
       }
-      const base = typeof request.query.base === 'string' ? request.query.base : '';
       const review = base
         ? await reviewCommit(repository.root, cached.report.graph, base)
-        : await reviewWorkingTree(repository.root, cached.report.graph);
+        : await reviewWorkingTree(workingRoot, cached.report.graph);
       if (!review.available) {
         response.json(review);
         return;
@@ -654,11 +677,11 @@ export function createAnalysisRouter(config: StraboConfig): Router {
       // the first parent for a commit (which `^` names for a merge and fails on the root).
       const baseline = base ? `${base}^` : 'HEAD';
       const edges = await structuralEdges(baseline);
-      const cohesion = await computeChangePassport(repository.root, review.files, baseline, cached.report.graph, edges);
+      const cohesion = await computeChangePassport(workingRoot, review.files, baseline, cached.report.graph, edges);
       const metrics = base
         ? await computeCommitMetrics(repository.root, base)
-        : await computeWorkingTreeMetrics(repository.root, review.files);
-      const provenance = await graphProvenance(repository.root, cached);
+        : await computeWorkingTreeMetrics(workingRoot, review.files);
+      const provenance = await graphProvenance(workingRoot, cached);
       const impactPassport = {
         ...rollUpImpactPassports(
           cached.report.graph,
@@ -681,7 +704,33 @@ export function createAnalysisRouter(config: StraboConfig): Router {
               importers: buildAdjacency(cached.report.graph).backward,
             })
           : undefined;
-      response.json({ ...review, cohesion, metrics, impactPassport, provenance, ...(scopeFence ? { scopeFence } : {}) });
+      response.json({
+        ...review,
+        ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}),
+        cohesion,
+        metrics,
+        impactPassport,
+        provenance,
+        ...(scopeFence ? { scopeFence } : {}),
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The repository's working trees: the checked-out root and every linked `git worktree add`
+   * checkout, which is where a coding agent may be editing rather than the selected root.
+   * The Review screen uses this to choose which tree to diff.
+   */
+  router.get('/analysis/worktrees', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      response.json({
+        repository: repository.name,
+        root: repository.root,
+        ...(await listWorktrees(repository.root)),
+      });
     } catch (error) {
       sendError(response, error);
     }

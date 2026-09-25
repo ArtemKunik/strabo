@@ -1001,6 +1001,11 @@ export function initTerminalScreen(container, hooks = {}) {
     openAgentSession,
     runPreset,
     listSessions,
+    /** The session in the active pane, or null. Lets the Review screen follow its working dir. */
+    activeSession() {
+      const id = activeSessionId();
+      return id ? (metas.get(id) ?? null) : null;
+    },
     openSession,
 
     destroy() {

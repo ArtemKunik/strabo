@@ -87,6 +87,7 @@ export function queryElements(doc = document) {
     reviewScreenBody: doc.getElementById('review-screen-body'),
     reviewScreenRefresh: doc.getElementById('review-screen-refresh'),
     reviewScreenPending: doc.getElementById('review-screen-pending'),
+    reviewWorktree: doc.getElementById('review-worktree'),
     historyScreen: doc.getElementById('history-screen'),
     historyScreenBody: doc.getElementById('history-screen-body'),
     historyScreenRefresh: doc.getElementById('history-screen-refresh'),

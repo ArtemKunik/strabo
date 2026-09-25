@@ -20,7 +20,7 @@ export function createTerminalBridge(app) {
    * unknown is ignored; node and file arguments are matched against the current map, so a
    * directive can never reach a path the source viewer would not already allow.
    */
-  function handleTerminalControl(directive) {
+  function handleTerminalControl(directive, sessionId) {
     const verb = directive?.verb;
     const args = Array.isArray(directive?.args) ? directive.args : [];
     switch (verb) {
@@ -51,9 +51,11 @@ export function createTerminalBridge(app) {
       case 'review': {
         app.setScreen('graph');
         const ref = args[0];
+        // With no ref this reviews the session's own checkout, so an agent working in a
+        // linked worktree sees its changes rather than the repository's main root.
         const pending = ref
           ? app.git.showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref })
-          : app.git.showReview('');
+          : app.git.reviewFromSession(sessionId);
         Promise.resolve(pending).catch((error) => {
           showToast(`Review failed (${error.message}).`);
         });

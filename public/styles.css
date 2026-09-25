@@ -1118,6 +1118,32 @@ button.primary {
   color: var(--ink-1);
 }
 
+/* The Review toolbar's worktree picker: a linked `git worktree add` checkout an agent may be
+   editing. Kept compact so it sits beside Pending/Refresh without wrapping the toolbar. */
+.worktree-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-label {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+
+.worktree-field select {
+  max-width: 22ch;
+  background: var(--bg-0);
+  color: var(--ink-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  padding: 5px 9px;
+  font: inherit;
+}
+
 .git-screen-body {
   flex: 1 1 auto;
   min-height: 0;

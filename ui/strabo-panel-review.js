@@ -261,6 +261,18 @@ export function renderReview(container, result, handlers = {}) {
     container.append(line);
   }
 
+  // A working-tree review taken from a linked worktree names it, so the change set is not
+  // mistaken for the repository's main checkout.
+  if (result.worktree) {
+    const line = document.createElement('p');
+    line.className = 'evidence';
+    line.dataset.role = 'review-worktree';
+    line.textContent = result.worktree.branch
+      ? `Worktree ${result.worktree.branch} · ${result.worktree.path}`
+      : `Worktree ${result.worktree.path}`;
+    container.append(line);
+  }
+
   const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
   const summary = document.createElement('p');
   summary.className = 'overlay-summary';

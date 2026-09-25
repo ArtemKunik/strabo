@@ -8048,6 +8048,13 @@ function renderReview(container, result, handlers = {}) {
     line.textContent = provenance;
     container.append(line);
   }
+  if (result.worktree) {
+    const line = document.createElement("p");
+    line.className = "evidence";
+    line.dataset.role = "review-worktree";
+    line.textContent = result.worktree.branch ? `Worktree ${result.worktree.branch} \xB7 ${result.worktree.path}` : `Worktree ${result.worktree.path}`;
+    container.append(line);
+  }
   const totals = result.totals ?? { files: 0, insertions: 0, deletions: 0, uncounted: 0 };
   const summary = document.createElement("p");
   summary.className = "overlay-summary";
@@ -10441,6 +10448,7 @@ function queryElements(doc = document) {
     reviewScreenBody: doc.getElementById("review-screen-body"),
     reviewScreenRefresh: doc.getElementById("review-screen-refresh"),
     reviewScreenPending: doc.getElementById("review-screen-pending"),
+    reviewWorktree: doc.getElementById("review-worktree"),
     historyScreen: doc.getElementById("history-screen"),
     historyScreenBody: doc.getElementById("history-screen-body"),
     historyScreenRefresh: doc.getElementById("history-screen-refresh")
@@ -11005,6 +11013,10 @@ function createGitController(app2) {
   let branchesBusy = false;
   let reviewHistory = [];
   let currentReviewRequest = null;
+  let selectedWorktree = null;
+  let worktreePinned = false;
+  let worktreesFor = null;
+  let worktrees = [];
   async function toggleTimeline() {
     if (!elements2.timelinePanel.hidden) {
       elements2.timelinePanel.hidden = true;
@@ -11122,8 +11134,20 @@ function createGitController(app2) {
     selectedCommitHash = commit.hash;
     await showReview(`?base=${encodeURIComponent(commit.hash)}`, commit);
   }
-  async function showReview(query, commit = null, branchName = null, { fromHistory = false } = {}) {
-    const entry = { query, commit, branchName };
+  function reviewQuery(query, worktree) {
+    const params = [];
+    if (query) params.push(query.replace(/^\?/, ""));
+    if (state2.repository) params.push(`repository=${encodeURIComponent(state2.repository)}`);
+    if (!query && worktree) params.push(`worktree=${encodeURIComponent(worktree)}`);
+    return params.length > 0 ? `?${params.join("&")}` : "";
+  }
+  function worktreeName(worktree) {
+    const match = worktrees.find((entry) => entry.path === worktree);
+    if (match?.branch) return match.branch;
+    return String(worktree).replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? worktree;
+  }
+  async function showReview(query, commit = null, branchName = null, { fromHistory = false, worktree = selectedWorktree } = {}) {
+    const entry = { query, commit, branchName, worktree };
     if (!fromHistory && currentReviewRequest) {
       reviewHistory.push(currentReviewRequest);
     }
@@ -11132,14 +11156,12 @@ function createGitController(app2) {
       canGoBack: reviewHistory.length > 0,
       onBack: reviewBack
     };
-    const separator = query ? "&" : "?";
-    const repository = state2.repository ? `${separator}repository=${encodeURIComponent(state2.repository)}` : "";
     const ticket = ++reviewTicket;
     elements2.reviewPanel.hidden = false;
     renderReviewLoading(elements2.reviewPanel, { onClose: closeReview, ...navigation });
     let data;
     try {
-      data = await request2(`/analysis/review${query}${repository}`);
+      data = await request2(`/analysis/review${reviewQuery(query, worktree)}`);
     } catch (error) {
       if (ticket === reviewTicket) {
         renderReview(elements2.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
@@ -11155,7 +11177,8 @@ function createGitController(app2) {
     }
     if (commit) {
       try {
-        data.structural = await request2(`/analysis/structural-diff?base=${encodeURIComponent(commit.hash)}${repository}`);
+        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
+        data.structural = await request2(`/analysis/structural-diff${diffQuery}`);
       } catch (error) {
         data.structural = { available: false, reason: "git-error", detail: error.message };
       }
@@ -11173,7 +11196,8 @@ function createGitController(app2) {
       renderReview(elements2.reviewScreenBody, data, reviewHandlers(data, navigation, () => app2.setScreen("graph")));
     }
     const label = branchName ?? (commit ? commit.shortHash : "working tree");
-    elements2.status.textContent = `Review ${label}: ${overlay2.summary}`;
+    const where = !query && worktree ? ` in ${worktreeName(worktree)}` : "";
+    elements2.status.textContent = `Review ${label}${where}: ${overlay2.summary}`;
   }
   async function reviewBack() {
     const previous = reviewHistory.pop();
@@ -11181,7 +11205,10 @@ function createGitController(app2) {
       return;
     }
     try {
-      await showReview(previous.query, previous.commit, previous.branchName, { fromHistory: true });
+      await showReview(previous.query, previous.commit, previous.branchName, {
+        fromHistory: true,
+        worktree: previous.worktree
+      });
     } catch (error) {
       elements2.status.textContent = `Error: ${error.message}`;
     }
@@ -11199,6 +11226,69 @@ function createGitController(app2) {
     selectedCommitHash = null;
     selectedBranchName = null;
   }
+  function samePath(a, b2) {
+    const left = String(a ?? "").replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+    const right = String(b2 ?? "").replace(/[\\/]+/g, "/").replace(/\/+$/, "");
+    if (!left || !right) return false;
+    if (left === right) return true;
+    return /^[a-z]:\//i.test(left) && left.toLowerCase() === right.toLowerCase();
+  }
+  function activeWorktreePath() {
+    const session = app2.terminalScreen?.activeSession?.();
+    const cwd = typeof session?.cwd === "string" ? session.cwd : "";
+    if (!cwd) return null;
+    const match = worktrees.find((entry) => !entry.main && !entry.bare && samePath(entry.path, cwd));
+    return match?.path ?? null;
+  }
+  async function loadWorktrees() {
+    if (worktreesFor !== state2.repository) {
+      worktreesFor = state2.repository;
+      worktreePinned = false;
+      selectedWorktree = null;
+    }
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const result = await request2(`/analysis/worktrees${query}`).catch(() => null);
+    worktrees = result?.available === true && Array.isArray(result.worktrees) ? result.worktrees : [];
+    if (!worktreePinned) {
+      selectedWorktree = activeWorktreePath();
+    }
+    renderWorktreeOptions();
+  }
+  function renderWorktreeOptions() {
+    const select = elements2.reviewWorktree;
+    if (!select) return;
+    const main = worktrees.find((entry) => entry.main) ?? null;
+    select.replaceChildren();
+    const rootOption = document.createElement("option");
+    rootOption.value = "";
+    rootOption.textContent = main?.branch ? `Main \xB7 ${main.branch}` : "Repository root";
+    select.append(rootOption);
+    for (const entry of worktrees) {
+      if (entry.main || entry.bare) continue;
+      const option = document.createElement("option");
+      option.value = entry.path;
+      option.textContent = entry.branch ?? worktreeName(entry.path);
+      option.title = entry.path;
+      select.append(option);
+    }
+    if (selectedWorktree && !worktrees.some((entry) => !entry.main && entry.path === selectedWorktree)) {
+      selectedWorktree = null;
+    }
+    select.value = selectedWorktree ?? "";
+  }
+  async function reviewFromSession(sessionId) {
+    await loadWorktrees();
+    const session = app2.terminalScreen?.listSessions?.().find((entry) => entry.id === sessionId);
+    const cwd = typeof session?.cwd === "string" ? session.cwd : "";
+    const match = cwd ? worktrees.find((entry) => !entry.main && !entry.bare && samePath(entry.path, cwd)) : null;
+    if (match) {
+      worktreePinned = true;
+      selectedWorktree = match.path;
+      renderWorktreeOptions();
+    }
+    app2.setScreen("graph");
+    await showReview("");
+  }
   async function toggleReview() {
     if (!elements2.reviewPanel.hidden) {
       closeReview();
@@ -11206,6 +11296,7 @@ function createGitController(app2) {
       return;
     }
     try {
+      await loadWorktrees();
       await showReview("");
     } catch (error) {
       elements2.status.textContent = `Error: ${error.message}`;
@@ -11294,11 +11385,12 @@ function createGitController(app2) {
     }
     app2.source.viewDiff(file, reviewDiffSpec(data, entry), { status: entry.status });
   }
-  function openReviewScreen() {
+  async function openReviewScreen() {
     const body = elements2.reviewScreenBody;
     if (!body) {
       return;
     }
+    await loadWorktrees();
     if (!app2.currentReview) {
       body.replaceChildren();
       const note3 = document.createElement("p");
@@ -11318,8 +11410,11 @@ function createGitController(app2) {
     }
   }
   function refreshReviewScreen() {
-    const entry = currentReviewRequest ?? { query: "", commit: null, branchName: null };
-    showReview(entry.query, entry.commit, entry.branchName, { fromHistory: true }).catch((error) => {
+    const entry = currentReviewRequest ?? { query: "", commit: null, branchName: null, worktree: selectedWorktree };
+    loadWorktrees().then(() => showReview(entry.query, entry.commit, entry.branchName, {
+      fromHistory: true,
+      worktree: entry.worktree ?? selectedWorktree
+    })).catch((error) => {
       elements2.status.textContent = `Error: ${error.message}`;
     });
   }
@@ -11329,6 +11424,13 @@ function createGitController(app2) {
     });
   });
   elements2.reviewScreenRefresh?.addEventListener("click", refreshReviewScreen);
+  elements2.reviewWorktree?.addEventListener("change", () => {
+    worktreePinned = true;
+    selectedWorktree = elements2.reviewWorktree.value || null;
+    showReview("").catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+  });
   elements2.historyScreenRefresh?.addEventListener("click", () => {
     loadTimelineScreen().catch((error) => {
       elements2.status.textContent = `Error: ${error.message}`;
@@ -11372,6 +11474,7 @@ function createGitController(app2) {
     closeRisk,
     openHistoryScreen,
     openReviewScreen,
+    reviewFromSession,
     showReview,
     showRisk,
     toggleBranches,
@@ -13402,7 +13505,7 @@ function createSourceViewer(app2) {
   };
 }
 
-// ../strabo/node_modules/@xterm/xterm/lib/xterm.mjs
+// node_modules/@xterm/xterm/lib/xterm.mjs
 var zs = Object.defineProperty;
 var Rl = Object.getOwnPropertyDescriptor;
 var Ll = (s15, t) => {
@@ -22516,7 +22619,7 @@ var Dl = class extends D {
   }
 };
 
-// ../strabo/node_modules/@xterm/addon-fit/lib/addon-fit.mjs
+// node_modules/@xterm/addon-fit/lib/addon-fit.mjs
 var h2 = 2;
 var _ = 1;
 var o = class {
@@ -24304,6 +24407,11 @@ function initTerminalScreen(container, hooks = {}) {
     openAgentSession,
     runPreset,
     listSessions,
+    /** The session in the active pane, or null. Lets the Review screen follow its working dir. */
+    activeSession() {
+      const id = activeSessionId();
+      return id ? metas.get(id) ?? null : null;
+    },
     openSession,
     destroy() {
       clearTimeout(persistTimer);
@@ -24353,7 +24461,7 @@ function createTerminalBridge(app2) {
   function isMappedNode(id) {
     return Boolean(id) && (app2.current?.nodes ?? []).some((candidate) => candidate.id === id);
   }
-  function handleTerminalControl(directive) {
+  function handleTerminalControl(directive, sessionId) {
     const verb = directive?.verb;
     const args = Array.isArray(directive?.args) ? directive.args : [];
     switch (verb) {
@@ -24384,7 +24492,7 @@ function createTerminalBridge(app2) {
       case "review": {
         app2.setScreen("graph");
         const ref = args[0];
-        const pending = ref ? app2.git.showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref }) : app2.git.showReview("");
+        const pending = ref ? app2.git.showReview(`?base=${encodeURIComponent(ref)}`, { hash: ref }) : app2.git.reviewFromSession(sessionId);
         Promise.resolve(pending).catch((error) => {
           showToast(`Review failed (${error.message}).`);
         });

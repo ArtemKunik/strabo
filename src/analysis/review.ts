@@ -46,6 +46,11 @@ export type ReviewResult =
       excluded?: Exclusion[];
       /** Cohesion before/after for the changed files, when the caller computed it. */
       cohesion?: ChangePassport;
+      /**
+       * The linked worktree this working-tree review was taken from. Absent for the main
+       * root and for commit or branch reviews. `branch` is null when HEAD is detached.
+       */
+      worktree?: { path: string; branch: string | null };
     }
   | {
       available: false;
