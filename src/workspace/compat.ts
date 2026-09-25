@@ -392,7 +392,7 @@ function diffTable(before: SchemaTable, after: SchemaTable, uses: CodeDataUse[])
       .map((use) => ({ repository: use.repository, file: use.file, line: use.line }));
     return found.length > 0 ? { references: found } : {};
   };
-  const writes = (use: CodeDataUse): boolean => /\((?:INSERT|UPDATE)\)|ORM/.test(use.evidence) && !/SELECT/.test(use.evidence);
+  const writes = (use: CodeDataUse): boolean => use.access === 'write';
 
   const columns = new Map(before.columns.map((column) => [column.name, column]));
   const nextColumns = new Map(after.columns.map((column) => [column.name, column]));

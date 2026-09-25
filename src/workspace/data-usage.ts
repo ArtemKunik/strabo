@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import type { CodeDataUse } from '../types.ts';
+import type { CodeDataUse, DataAccess } from '../types.ts';
 import { findSourceFiles } from './dto.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -43,6 +43,7 @@ export function extractDataUsesFromSource(file: string, content: string): RawDat
   }
   if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extension)) {
     uses.push(...typeOrmUses(file, content));
+    uses.push(...prismaUses(file, content));
   }
   if (extension === '.py') {
     uses.push(...sqlAlchemyUses(file, content));
@@ -80,13 +81,19 @@ const SYSTEM_TABLE = /^(?:information_schema|pg_catalog|pg_temp|sys|mysql|perfor
 function* sqlLiteralUses(file: string, content: string): Generator<RawDataUse> {
   for (const literal of content.matchAll(LITERAL)) {
     const raw = literal[0];
-    if (!/\b(?:select|insert|update|delete)\b/i.test(raw)) {
+    if (!SQL_KEYWORD.test(raw)) {
       continue;
     }
     const line = lineAt(content, literal.index ?? 0);
     yield* statementsIn(file, line, raw);
   }
 }
+
+/**
+ * The statement keywords that make a string literal worth reading. DDL is included so a
+ * literal `CREATE`/`ALTER`/`TRUNCATE`/`GRANT` is classified, not only row statements.
+ */
+const SQL_KEYWORD = /\b(?:select|insert|update|delete|merge|upsert|create|alter|truncate|grant)\b/i;
 
 function* statementsIn(file: string, startLine: number, text: string): Generator<RawDataUse> {
   const ctes = new Set(
@@ -98,17 +105,32 @@ function* statementsIn(file: string, startLine: number, text: string): Generator
     columns: string[],
     evidence: string,
     confidence: CodeDataUse['confidence'],
+    access: DataAccess,
   ): RawDataUse | null => {
     const table = normalizeTable(rawTable);
     if (!table || ctes.has(table) || NOT_TABLES.has(table) || SYSTEM_TABLE.test(table)) {
       return null;
     }
-    return { file, line: startLine + newlinesBefore(text, index), table, columns, evidence, confidence };
+    return { file, line: startLine + newlinesBefore(text, index), table, columns, evidence, confidence, access };
   };
 
   for (const match of text.matchAll(new RegExp(String.raw`\binsert\s+(?:or\s+\w+\s+)?into\s+${QUALIFIED}\s*(\([^)]*\))?`, 'gi'))) {
     const columns = match[2] ? simpleIdentifiers(match[2].slice(1, -1)) : [];
-    const use = emit(match[1], match.index ?? 0, columns, 'string-literal SQL (INSERT)', 'strong');
+    const use = emit(match[1], match.index ?? 0, columns, 'string-literal SQL (INSERT)', 'strong', 'write');
+    if (use) {
+      yield use;
+    }
+  }
+
+  for (const match of text.matchAll(new RegExp(String.raw`\b(merge|upsert)\s+into\s+${QUALIFIED}`, 'gi'))) {
+    const use = emit(
+      match[2],
+      match.index ?? 0,
+      [],
+      `string-literal SQL (${(match[1] ?? '').toUpperCase()})`,
+      'strong',
+      'write',
+    );
     if (use) {
       yield use;
     }
@@ -119,21 +141,21 @@ function* statementsIn(file: string, startLine: number, text: string): Generator
       .map((assignment) => /^\s*(?:[\w$"`]+\.)?["`]?([A-Za-z_][\w$]*)["`]?\s*=/.exec(assignment)?.[1])
       .filter((column): column is string => typeof column === 'string')
       .map((column) => column.toLowerCase());
-    const use = emit(match[1], match.index ?? 0, columns, 'string-literal SQL (UPDATE)', 'strong');
+    const use = emit(match[1], match.index ?? 0, columns, 'string-literal SQL (UPDATE)', 'strong', 'write');
     if (use) {
       yield use;
     }
   }
 
   for (const match of text.matchAll(new RegExp(String.raw`\bdelete\s+from\s+${QUALIFIED}`, 'gi'))) {
-    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (DELETE)', 'strong');
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (DELETE)', 'strong', 'write');
     if (use) {
       yield use;
     }
   }
 
   for (const match of text.matchAll(new RegExp(String.raw`\bjoin\s+${QUALIFIED}`, 'gi'))) {
-    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (JOIN)', 'weak');
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (JOIN)', 'weak', 'read');
     if (use) {
       yield use;
     }
@@ -144,7 +166,36 @@ function* statementsIn(file: string, startLine: number, text: string): Generator
     const after = text.slice((match.index ?? 0) + match[0].length);
     const tablesOnly = Boolean(match[3]) || /^\s*(?:(?:inner|left|right|full|cross|natural)\s+)*join\b/i.test(after);
     const columns = tablesOnly ? [] : selectColumns(match[1] ?? '');
-    const use = emit(match[2], match.index ?? 0, columns, 'string-literal SQL (SELECT)', 'weak');
+    const use = emit(match[2], match.index ?? 0, columns, 'string-literal SQL (SELECT)', 'weak', 'read');
+    if (use) {
+      yield use;
+    }
+  }
+
+  // DDL names a table without reading or writing a row, so it is its own direction.
+  for (const match of text.matchAll(new RegExp(String.raw`\bcreate\s+(?:or\s+replace\s+)?(?:temporary\s+|temp\s+|materialized\s+)?(?:table|view)\s+(?:if\s+not\s+exists\s+)?${QUALIFIED}`, 'gi'))) {
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (CREATE)', 'strong', 'ddl');
+    if (use) {
+      yield use;
+    }
+  }
+
+  for (const match of text.matchAll(new RegExp(String.raw`\balter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?${QUALIFIED}`, 'gi'))) {
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (ALTER)', 'strong', 'ddl');
+    if (use) {
+      yield use;
+    }
+  }
+
+  for (const match of text.matchAll(new RegExp(String.raw`\btruncate\s+(?:table\s+)?(?:only\s+)?${QUALIFIED}`, 'gi'))) {
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (TRUNCATE)', 'strong', 'ddl');
+    if (use) {
+      yield use;
+    }
+  }
+
+  for (const match of text.matchAll(new RegExp(String.raw`\bgrant\s+[^;]*?\bon\s+(?:table\s+)?${QUALIFIED}`, 'gi'))) {
+    const use = emit(match[1], match.index ?? 0, [], 'string-literal SQL (GRANT)', 'strong', 'ddl');
     if (use) {
       yield use;
     }
@@ -235,6 +286,64 @@ function braceBody(content: string, from: number): { text: string; start: number
   return null;
 }
 
+/**
+ * One per-ecosystem ORM rule: the method and annotation names that record a write.
+ *
+ * An ORM mapping names a table but not what the code does with it, so the mapping alone stays
+ * `unknown`. When a method from this table is recorded in the mapping's scope, the table is
+ * recorded as written. The table is data, like the tier rules, so an ecosystem can grow a
+ * method without a new branch.
+ */
+export interface OrmAccessRule {
+  access: DataAccess;
+  /** Whole method names that record this direction, as written before their `(`. */
+  methods?: string[];
+  /** Annotation forms that record this direction, as written. */
+  annotations?: RegExp;
+}
+
+export type OrmEcosystem = 'java' | 'kotlin' | 'javascript' | 'python' | 'rust';
+
+/** The per-ecosystem write methods and annotations of the ORM scanners below. */
+export const ORM_ACCESS_RULES: Partial<Record<OrmEcosystem, OrmAccessRule[]>> = {
+  java: [{ access: 'write', methods: ['save', 'saveAll', 'saveAndFlush', 'delete', 'deleteAll', 'deleteById', 'deleteInBatch', 'insert', 'update'] }],
+  kotlin: [
+    { access: 'write', methods: ['save', 'saveAll', 'delete', 'deleteAll', 'deleteById', 'insert', 'update', 'upsert'] },
+    { access: 'write', annotations: /@(?:Insert|Update|Delete|Upsert|Replace)\b/ },
+  ],
+  javascript: [{ access: 'write', methods: ['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany', 'save', 'insert', 'remove'] }],
+  python: [{ access: 'write', methods: ['add', 'add_all', 'delete', 'merge', 'bulk_save_objects'] }],
+  rust: [{ access: 'write', methods: ['insert', 'insert_into', 'update', 'delete', 'save'] }],
+};
+
+/** The access a named ORM method records, or `unknown` when no rule names it. */
+export function ormMethodAccess(ecosystem: OrmEcosystem, method: string): DataAccess {
+  for (const rule of ORM_ACCESS_RULES[ecosystem] ?? []) {
+    if ((rule.methods ?? []).includes(method)) {
+      return rule.access;
+    }
+  }
+  return 'unknown';
+}
+
+/** The access a scope's method calls and annotations record, or `unknown` when none match. */
+function ormScopeAccess(ecosystem: OrmEcosystem, text: string): DataAccess {
+  for (const rule of ORM_ACCESS_RULES[ecosystem] ?? []) {
+    if (rule.annotations?.test(text)) {
+      return rule.access;
+    }
+    if ((rule.methods ?? []).some((method) => new RegExp(String.raw`\b${method}\s*\(`).test(text))) {
+      return rule.access;
+    }
+  }
+  return 'unknown';
+}
+
+/** The ORM evidence label, marking a write when a rule method in scope supplied the direction. */
+function ormEvidence(label: string, access: DataAccess): string {
+  return access === 'write' ? `${label}; write method in scope` : label;
+}
+
 function jpaUses(file: string, content: string): RawDataUse[] {
   const uses: RawDataUse[] = [];
   for (const match of content.matchAll(/@Table\s*\(\s*(?:name\s*=\s*)?"([^"]+)"/g)) {
@@ -246,13 +355,16 @@ function jpaUses(file: string, content: string): RawDataUse[] {
     const columns = body
       ? [...body.text.matchAll(/@Column\s*\([^)]*?\bname\s*=\s*"([^"]+)"/g)].map((column) => (column[1] ?? '').toLowerCase())
       : [];
+    const ecosystem: OrmEcosystem = path.extname(file).toLowerCase() === '.java' ? 'java' : 'kotlin';
+    const access = ormScopeAccess(ecosystem, body?.text ?? '');
     uses.push({
       file,
       line: lineAt(content, match.index ?? 0),
       table,
       columns,
-      evidence: 'ORM annotation (@Table)',
+      evidence: ormEvidence('ORM annotation (@Table)', access),
       confidence: 'strong',
+      access,
     });
   }
   return uses;
@@ -275,13 +387,44 @@ function typeOrmUses(file: string, content: string): RawDataUse[] {
         columns.push((explicit ?? found[2] ?? '').toLowerCase());
       }
     }
+    const access = ormScopeAccess('javascript', body?.text ?? '');
     uses.push({
       file,
       line: lineAt(content, match.index ?? 0),
       table,
       columns: columns.filter(Boolean),
-      evidence: 'ORM annotation (@Entity)',
+      evidence: ormEvidence('ORM annotation (@Entity)', access),
       confidence: 'strong',
+      access,
+    });
+  }
+  return uses;
+}
+
+/**
+ * Prisma client calls: `prisma.user.create(...)` names the model's table and the method. The
+ * direction comes from the same rule table as the mapping declarations; a method it does not
+ * name records the table as `unknown`.
+ */
+function prismaUses(file: string, content: string): RawDataUse[] {
+  const uses: RawDataUse[] = [];
+  // Only the generated client's own name is read: a `db` or `tx` alias is a guess, and an
+  // aliased client is a use the scan did not record rather than one it mislabels as Prisma.
+  const call = /\bprisma\s*\.\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\(/g;
+  for (const match of content.matchAll(call)) {
+    const table = normalizeTable(match[1]);
+    if (!table || NOT_TABLES.has(table) || SYSTEM_TABLE.test(table)) {
+      continue;
+    }
+    const method = match[2] ?? '';
+    uses.push({
+      file,
+      line: lineAt(content, match.index ?? 0),
+      table,
+      columns: [],
+      evidence: `ORM method (Prisma ${method})`,
+      confidence: 'strong',
+      access: ormMethodAccess('javascript', method),
     });
   }
   return uses;
@@ -313,13 +456,15 @@ function sqlAlchemyUses(file: string, content: string): RawDataUse[] {
         columns.push((column[2] ?? column[1] ?? '').toLowerCase());
       }
     }
+    const access = ormScopeAccess('python', lines.slice(start, end).join('\n'));
     uses.push({
       file,
       line: index + 1,
       table,
       columns,
-      evidence: 'ORM declaration (__tablename__)',
+      evidence: ormEvidence('ORM declaration (__tablename__)', access),
       confidence: 'strong',
+      access,
     });
   }
   return uses;
@@ -335,13 +480,15 @@ function rustUses(file: string, content: string): RawDataUse[] {
       continue;
     }
     const columns = [...(match[2] ?? '').matchAll(/([A-Za-z_]\w*)\s*->/g)].map((column) => (column[1] ?? '').toLowerCase());
+    const access = ormScopeAccess('rust', match[2] ?? '');
     uses.push({
       file,
       line: lineAt(content, match.index ?? 0),
       table,
       columns,
-      evidence: 'ORM macro (table!)',
+      evidence: ormEvidence('ORM macro (table!)', access),
       confidence: 'strong',
+      access,
     });
   }
 
@@ -355,13 +502,15 @@ function rustUses(file: string, content: string): RawDataUse[] {
     const columns = body
       ? [...body.text.matchAll(/\bpub\s+([a-z_]\w*)\s*:/g)].map((column) => (column[1] ?? '').toLowerCase())
       : [];
+    const access = ormScopeAccess('rust', body?.text ?? '');
     uses.push({
       file,
       line: lineAt(content, match.index ?? 0),
       table,
       columns,
-      evidence: 'ORM macro (sea_orm)',
+      evidence: ormEvidence('ORM macro (sea_orm)', access),
       confidence: 'strong',
+      access,
     });
   }
   return uses;

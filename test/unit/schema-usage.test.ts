@@ -125,6 +125,7 @@ function use(repository: string, table: string, columns: string[], overrides: Pa
     columns,
     evidence: 'string-literal SQL (INSERT)',
     confidence: 'strong',
+    access: 'write',
     ...overrides,
   };
 }

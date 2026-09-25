@@ -96,8 +96,8 @@ CREATE UNIQUE INDEX idx_orders_user ON orders (user_id) WHERE total > 0;`;
 
 test('drops count the data that would be lost and name the code that still uses it', () => {
   const uses: CodeDataUse[] = [
-    { repository: 'api', file: 'src/a.ts', line: 3, table: 'users', columns: ['legacy'], evidence: 'string-literal SQL (SELECT)', confidence: 'weak' },
-    { repository: 'api', file: 'src/b.ts', line: 9, table: 'audit', columns: [], evidence: 'string-literal SQL (INSERT)', confidence: 'strong' },
+    { repository: 'api', file: 'src/a.ts', line: 3, table: 'users', columns: ['legacy'], evidence: 'string-literal SQL (SELECT)', confidence: 'weak', access: 'read' },
+    { repository: 'api', file: 'src/b.ts', line: 9, table: 'audit', columns: [], evidence: 'string-literal SQL (INSERT)', confidence: 'strong', access: 'write' },
   ];
   const { checks } = checksFor(
     BASE,
