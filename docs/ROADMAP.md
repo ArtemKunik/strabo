@@ -31,7 +31,7 @@ record is reported as `unavailable`, never invented.
 | 18 | Scan and analysis performance | Planned (P1-P7; the benchmark gate is Phase 21 G4) |
 | 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
-| 21 | Gate: verification, provenance, benchmark | Partial (G1 CI added, acceptance stays non-blocking; G2 scans Java and Python; G3 provenance audited, human sign-off blank; G4 first-paint added, no committed 20k-50k result) |
+| 21 | Gate: verification, provenance, benchmark | Partial (G1 CI required, including acceptance; G2 scans Java and Python; G3 provenance audited, human sign-off blank; G4 first-paint added, no committed 20k-50k result) |
 | 22 | Correctness and trust | Done |
 | 23 | Revision-aware change review | Done |
 | 24 | Serve agents over MCP | Done |
@@ -1428,10 +1428,11 @@ The MCP follow-up that was tracked here (tool aliases, bounded results, edge evi
 
 Finish the release-readiness work that already exists instead of starting a new initiative.
 
-- **G1 - One green suite.** *Partial.* `.github/workflows/ci.yml` runs `npm ci`, `npm run
+- **G1 - One green suite.** *Done.* `.github/workflows/ci.yml` runs `npm ci`, `npm run
   typecheck`, `npm test`, `npm run build`, and `npm run test:pack` on every push and pull
-  request. Acceptance is a separate `continue-on-error` job, so it does not yet gate; make it
-  required once it is stable.
+  request, and a separate acceptance job installs Playwright Chromium and runs `npm run
+  acceptance`. Acceptance now gates: its `continue-on-error` flag is gone, so a failing browser
+  scenario fails CI. The suite was stable at 89 scenarios (658 steps) before the switch.
 - **G2 - Clean-tarball proof.** *Partial.* `test:pack` (`scripts/verify-package.mjs`) packs a
   real tarball, installs it in a clean consumer, starts the shipped server entry
   (`/health`), and runs `strabo report` from the installed package (`scripts/verify-package.mjs:35-145`).
