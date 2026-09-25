@@ -138,6 +138,37 @@ test('asset imports are out of scope and are not reported as unresolved', async 
   assert.equal(asset, undefined);
 });
 
+test('import-looking text in comments, strings, and template literals is not a reference', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-literal-imports-'));
+  try {
+    fs.writeFileSync(
+      path.join(root, 'generate.ts'),
+      [
+        '// import commented from "commented-package";',
+        '/*',
+        'import blocked from "block-package";',
+        '*/',
+        'const generated = `',
+        "import templated from 'templated-package';",
+        '`;',
+        'const example = "require(\'quoted-package\')";',
+        "const dynamic = `${import('interpolated-package')}`;",
+        "import real from 'real-package';",
+        'export { real, generated, example, dynamic };',
+        '',
+      ].join('\n'),
+    );
+
+    const report = await scanRepository(root);
+    const packages = (report.graph.externalImports ?? []).map((entry) => entry.package);
+
+    // The interpolated dynamic import is code and is kept; the rest are data.
+    assert.deepEqual(packages.sort(), ['interpolated-package', 'real-package']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('scanRepository excludes generated and vendored directories', async () => {
   const report = await scanRepository(fixture);
   const ids = report.graph.nodes.map((node) => node.id);
