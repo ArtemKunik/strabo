@@ -1,10 +1,20 @@
 # Strabo
 
+[![npm version](https://img.shields.io/npm/v/strabo-map.svg)](https://www.npmjs.com/package/strabo-map)
+[![CI](https://img.shields.io/github/actions/workflow/status/ArtemKunik/strabo/ci.yml?label=CI)](https://github.com/ArtemKunik/strabo/actions/workflows/ci.yml)
+[![license](https://img.shields.io/npm/l/strabo-map.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/strabo-map.svg)](package.json)
+
 A standalone app for understanding repository structure, dependencies, and change impact.
 
 Strabo turns a local source repository into an interactive map of its files and
 dependencies. Engineers explore the structure, trace relationships, and inspect the
 source evidence behind every connection.
+
+![Strabo's map of this repository's src modules, sized by dependents and joined by the imports the scan recorded](docs/assets/map.png)
+
+*The map of `src`: each box is a directory sized by its dependents, each arrow a recorded
+import. Select a module to open its passport.*
 
 > **Guiding principle: evidence over speculation.**
 > The map draws only edges it can resolve inside the repository. Anything uncertain is
@@ -91,6 +101,38 @@ in [docs/USAGE.md](docs/USAGE.md).
   narrative layer over evidence, both inert until configured.
   See [docs/FEATURES.md](docs/FEATURES.md#commit-narrator-opt-in) and
   [docs/FEATURES.md](docs/FEATURES.md#llm-narrator-opt-in).
+
+### A closer look
+
+Selecting a module opens its passport: direct importers, blast radius, the dependencies it
+records with their source evidence, and the panels one step from there.
+
+![A selected module with the Module passport open, listing recorded dependencies and their source evidence](docs/assets/module-passport.png)
+
+## How it works
+
+```mermaid
+flowchart TD
+    boundary["Repository boundary — resolveRepositoryRoot + scanCeiling"]
+    scanner["Scanner — JS/TS and polyglot resolvers"]
+    graph["Graph contract — nodes · edges · diagnostics · excluded"]
+    cache[("Graph cache — memory + disk artifact")]
+    analysis["Analysis & layout — impact · cycles · blocks · depth · ownership · passports"]
+    api["HTTP API — /api/strabo"]
+    ui["Browser app — Cytoscape map · floating panels"]
+    headless["Headless — export · check · report · MCP"]
+
+    boundary --> scanner --> graph
+    graph --> cache
+    graph --> analysis
+    cache --> api
+    analysis --> api
+    api --> ui
+    graph --> headless
+```
+
+Every surface reads the same recorded graph: the map, the headless reports, and the MCP
+tools. Anything the scan cannot resolve stays a diagnostic, never an invented edge.
 
 ## Headless use
 
