@@ -283,6 +283,27 @@ Then('the overlay panel lists health axes', async function () {
   assert.match(text, /Coverage/);
 });
 
+Then('the overlay panel reports the declared rule {string}', async function (id) {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.match(text, /Declared rules/);
+  assert.match(text, new RegExp(id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(text, /\d+ violation/);
+});
+
+Then('the overlay panel reports the violating edge from {string} to {string}', async function (source, target) {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.match(text, new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(text, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+When('I select the overlay row for {string}', async function (id) {
+  const row = this.page
+    .locator('#overlay-panel .overlay-list-row button')
+    .filter({ hasText: id })
+    .first();
+  await row.click();
+});
+
 When('I open the timeline', async function () {
   await clickToolbarAction(this.page, 'tb-timeline');
   await this.page.waitForFunction(
@@ -667,4 +688,46 @@ Then('the Graph tab is the active screen', async function () {
   const selected = await this.page.getAttribute('#screen-tab-graph', 'aria-selected');
   assert.equal(selected, 'true');
   assert.equal(await this.page.evaluate(() => window.straboTest?.screen?.()), 'graph');
+});
+
+/* ------------------------------------------------------- Scope fence (Phase 29 E1) */
+
+/**
+ * Open the working-tree review with a declared zone.
+ *
+ * The Review panel predates the scope fence and has no zone control, so the panel only shows
+ * the server's Scope fence when the review is asked for one. `?expect=` is the published
+ * query the report, `check`, and the route all accept; adding it at the browser's network
+ * boundary drives the same computation a `--expect` caller gets while the assertion below
+ * still reads the panel an operator sees.
+ */
+When('I review the working tree declaring the zone {string}', async function (zone) {
+  await this.page.route(
+    (url) => url.pathname.endsWith('/analysis/review'),
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (!url.searchParams.has('expect')) {
+        url.searchParams.set('expect', zone);
+      }
+      await route.continue({ url: url.toString() });
+    },
+  );
+  await this.page.click('#screen-tab-review');
+});
+
+Then('the Review screen shows the scope fence section', async function () {
+  await this.page.waitForSelector('#review-screen-body [data-role="review-scope-fence"]', {
+    timeout: 20_000,
+  });
+  const section = (await this.page.textContent('#review-screen-body [data-role="review-scope-fence"]')) ?? '';
+  assert.match(section, /Scope fence/);
+});
+
+Then('the scope fence lists {string} outside the declared zone with importer {string}', async function (path, importer) {
+  await this.page.waitForSelector('#review-screen-body [data-role="review-scope-fence-outside"]', {
+    timeout: 20_000,
+  });
+  const list = (await this.page.textContent('#review-screen-body [data-role="review-scope-fence-outside"]')) ?? '';
+  assert.match(list, new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(list, new RegExp(importer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });

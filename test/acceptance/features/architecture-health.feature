@@ -13,3 +13,16 @@ Feature: Architecture health
     When I select the review overlay "architecture"
     Then the overlay panel reports a health score
     And the overlay panel lists health axes
+
+  @declared-rules
+  Scenario: The Declared rules overlay lists the rules and their violations
+    When I open the folder dialog
+    And I go up one folder
+    And I choose the "declared-repo" folder
+    And I use the selected folder
+    And I select the review overlay "declared-rules"
+    Then the overlay panel reports the declared rule "domain-no-infra"
+    And the overlay panel reports the violating edge from "domain/service.ts" to "infra/config.properties"
+    And the overlay panel reports the violating edge from "domain/service.ts" to "infra/server.ts"
+    When I select the overlay row for "domain/service.ts"
+    Then the inspector is shown for "domain/service.ts"

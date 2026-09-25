@@ -1,0 +1,5 @@
+rules:
+  - id: domain-no-infra
+    from: domain/**
+    to: infra/**
+    allow: never
