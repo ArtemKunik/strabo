@@ -31,3 +31,10 @@ Feature: Review and History tabs
     Then the "history" tab is the active screen
     When I leave the screen tab with Escape
     Then the Graph tab is the active screen
+
+  @scope-fence
+  Scenario: The Review screen fences the change set against its declared zone
+    When I review the working tree declaring the zone "src/a.ts"
+    Then the "review" tab is the active screen
+    And the Review screen shows the scope fence section
+    And the scope fence lists "src/b.ts" outside the declared zone with importer "src/a.ts"
