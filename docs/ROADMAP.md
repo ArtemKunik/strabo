@@ -31,7 +31,7 @@ record is reported as `unavailable`, never invented.
 | 18 | Scan and analysis performance | Planned (P1-P7; the benchmark gate is Phase 21 G4) |
 | 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
-| 21 | Gate: verification, provenance, benchmark | Partial (G1 CI required, including acceptance; G2 scans Java and Python; G3 provenance audited, human sign-off blank; G4 first-paint added, no committed 20k-50k result) |
+| 21 | Gate: verification, provenance, benchmark | Partial (G1 required CI including acceptance; G2 scans all nine supported languages from the tarball; G3 provenance audited, human sign-off blank; G4 synthetic 20k-file result committed, no operator repository) |
 | 22 | Correctness and trust | Done |
 | 23 | Revision-aware change review | Done |
 | 24 | Serve agents over MCP | Done |
@@ -1433,21 +1433,27 @@ Finish the release-readiness work that already exists instead of starting a new 
   request, and a separate acceptance job installs Playwright Chromium and runs `npm run
   acceptance`. Acceptance now gates: its `continue-on-error` flag is gone, so a failing browser
   scenario fails CI. The suite was stable at 89 scenarios (658 steps) before the switch.
-- **G2 - Clean-tarball proof.** *Partial.* `test:pack` (`scripts/verify-package.mjs`) packs a
+- **G2 - Clean-tarball proof.** *Done.* `test:pack` (`scripts/verify-package.mjs`) packs a
   real tarball, installs it in a clean consumer, starts the shipped server entry
-  (`/health`), and runs `strabo report` from the installed package (`scripts/verify-package.mjs:35-145`).
-  The installed package now scans and resolves Java and Python; the extraction checklist's
-  "one scan per supported language" is not yet met for the other seven.
+  (`/health`), and runs `strabo report` from the installed package. The installed package now
+  scans and resolves one representative file for all nine supported languages — TypeScript and
+  JavaScript (lexical scanner) and Java, Kotlin, Rust, C#, Python, C++, and SQL (grammar
+  resolvers) — asserting both the node and the resolved internal edge per language, and that all
+  nine shipped grammar `.wasm` assets are present.
 - **G3 - Provenance.** *Partial.* `docs/PROVENANCE.md` audits the runtime dependencies, dev
   dependencies, vendored grammar `.wasm` files, and binary assets, and states the MIT question.
   Its "Pending human sign-off" table is intentionally blank; a person must confirm before the
   repository is published.
-- **G4 - Benchmark (Phase 18 P1).** *Partial.* `scripts/bench.mjs` (`npm run bench`) reports
-  walk, read, parse, extract, resolve, metrics, analysis, and history cold, with history also
-  warm (`scripts/bench.mjs:39,146-195`), and now first paint of the passport and System view,
-  cold and warm; `--out` (or `STRABO_BENCH_OUT`) writes a result under `docs/bench/`, whose
-  format `docs/bench/README.md` documents. No 20k-50k-file operator repository was available,
-  so no result is committed. If a number is unusable, Phase 18 P2-P5 precede Phase 24.
+- **G4 - Benchmark (Phase 18 P1).** *Done for a synthetic corpus.* `scripts/bench.mjs`
+  (`npm run bench`) reports walk, read, parse, extract, resolve, metrics, and analysis cold, with
+  history also warm, and first paint of the passport and System view, cold and warm; `--out` (or
+  `STRABO_BENCH_OUT`) writes a result under `docs/bench/`, whose format `docs/bench/README.md`
+  documents. Because no 20k-50k-file operator repository was available, the committed result comes
+  from a deterministic synthetic corpus instead: `scripts/bench-corpus.mjs` generates 20,175 files
+  across nine languages, and `docs/bench/synthetic-20k.json` records one real run, labelled
+  synthetic with its corpus shape and a regeneration command. History is not measured, because the
+  corpus is not a git tree. The operator-repository number is still open; if a figure is unusable,
+  Phase 18 P2-P5 precede Phase 24.
 
 Acceptance: CI green on main; `docs/PROVENANCE.md` exists (sign-off pending); the benchmark
 result is committed under `docs/bench/` (not yet run on an operator repository).
