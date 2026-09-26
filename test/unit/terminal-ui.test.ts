@@ -21,6 +21,7 @@ import {
 import {
   cycleSessionId,
   digitSessionId,
+  inactiveSessionIds,
   moveInOrder,
   orderSessions,
   sessionTabLabel,
@@ -154,6 +155,23 @@ test('sanitizeLayout rejects corrupt storage and falls back to one pane', () => 
 });
 
 /* ------------------------------------------------------------------- tabs */
+
+test('inactiveSessionIds picks the exited sessions, sparing the active and the kept panes', () => {
+  const sessions = [
+    { id: 'a', status: 'running' },
+    { id: 'b', status: 'exited', exitCode: 0 },
+    { id: 'c', status: 'exited', exitCode: 130 },
+    { id: 'd', status: 'running' },
+    { id: 'e', status: 'exited', exitCode: 0 },
+  ];
+  // The active session ('a') and the other visible pane ('d') stay, running or not.
+  assert.deepEqual(inactiveSessionIds(sessions, 'a', ['d']), ['b', 'c', 'e']);
+  // With no active session and nothing kept, every non-running session goes.
+  assert.deepEqual(inactiveSessionIds(sessions, null), ['b', 'c', 'e']);
+  assert.deepEqual(inactiveSessionIds([], 'a'), []);
+  // A running session is never inactive, even when it is neither active nor kept.
+  assert.deepEqual(inactiveSessionIds([{ id: 'z', status: 'running' }], null), []);
+});
 
 test('orderSessions follows the saved order and appends unknown sessions', () => {
   const sessions = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];

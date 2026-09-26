@@ -70,6 +70,21 @@ export function tabBadge(meta) {
   return { className: 'is-running', label: 'running' };
 }
 
+/**
+ * The ids of the sessions a "kill all inactive" should close.
+ *
+ * A session is inactive when it is not the active one and is not running — an exited or
+ * failed session whose tab is still open. The running sessions behind the other panes are
+ * left alone, since the operator is showing them on purpose; `keepIds` names the sessions
+ * to spare beyond the active one (the other visible panes), so a split is never torn down.
+ */
+export function inactiveSessionIds(sessions, activeId, keepIds = []) {
+  const keep = new Set([activeId, ...keepIds]);
+  return (sessions ?? [])
+    .filter((session) => session?.id && session.status !== 'running' && !keep.has(session.id))
+    .map((session) => session.id);
+}
+
 /** Order sessions by the saved id list, appending anything the list does not know about. */
 export function orderSessions(sessions, order) {
   const byId = new Map((sessions ?? []).map((session) => [session.id, session]));

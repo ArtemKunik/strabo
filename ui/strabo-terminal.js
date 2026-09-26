@@ -38,6 +38,7 @@ import {
 import {
   cycleSessionId,
   digitSessionId,
+  inactiveSessionIds,
   moveInOrder,
   orderSessions,
   renderTabs,
@@ -749,6 +750,27 @@ export function initTerminalScreen(container, hooks = {}) {
     }
   }
 
+  /**
+   * Close every inactive session — each exited or failed tab — in one pass, leaving the
+   * active session and the running sessions shown in the other split panes untouched.
+   * `closeSession` tears the whole batch down in a single render, so the strip updates once.
+   */
+  function closeInactiveSessions() {
+    const keepPanes = panes(layout)
+      .map((leaf) => leaf.sessionId)
+      .filter((id) => id && id !== activeSessionId());
+    const ids = inactiveSessionIds(listSessions(), activeSessionId(), keepPanes);
+    if (ids.length === 0) {
+      notify('No inactive sessions to close.');
+      return 0;
+    }
+    for (const id of ids) {
+      closeSession(id);
+    }
+    notify(`Closed ${ids.length} inactive session${ids.length === 1 ? '' : 's'}.`);
+    return ids.length;
+  }
+
   async function splitActive(direction) {
     ensureRestored();
     const target = findPane(layout, activePaneId) ? activePaneId : panes(layout)[0]?.paneId;
@@ -856,7 +878,11 @@ export function initTerminalScreen(container, hooks = {}) {
     const splitButton = toolbarButton('◫', 'Split pane', 'Ctrl+Shift+E', () => {
       splitActive('row').catch(handleError);
     });
-    toolbarEl.append(newButton, runButton, spacer, splitButton);
+    const closeInactiveButton = toolbarButton('⌫', 'Close inactive sessions', 'exited or failed', () => {
+      closeInactiveSessions();
+    });
+    closeInactiveButton.classList.add('terminal-close-inactive');
+    toolbarEl.append(newButton, runButton, spacer, splitButton, closeInactiveButton);
   }
 
   function openRunMenu(anchor) {
@@ -1007,6 +1033,8 @@ export function initTerminalScreen(container, hooks = {}) {
       return id ? (metas.get(id) ?? null) : null;
     },
     openSession,
+    /** Close every exited or failed session in one pass, sparing the active and visible ones. */
+    closeInactiveSessions,
 
     destroy() {
       clearTimeout(persistTimer);
