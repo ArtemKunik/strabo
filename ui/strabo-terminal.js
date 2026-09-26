@@ -25,8 +25,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { copyText, showContextMenu, showToast } from './strabo-delegate.js';
 import { createTerminalMultiplexer } from './terminal-multiplexer.js';
 import {
+  closePane,
+  countPanes,
   createLayout,
   detachSession,
+  emptyPaneIds,
   findPane,
   paneForSession,
   panes,
@@ -771,6 +774,54 @@ export function initTerminalScreen(container, hooks = {}) {
     return ids.length;
   }
 
+  /**
+   * Close every empty pane — the "No session" slots left over from splitting — collapsing
+   * the split tree around them so the remaining panes share the space. The last pane is never
+   * removed: when the screen is nothing but empty slots one is kept to open a shell in.
+   */
+  function closeEmptyPanes() {
+    const ids = emptyPaneIds(layout);
+    const removable = ids.length >= countPanes(layout) ? ids.slice(0, -1) : ids;
+    if (removable.length === 0) {
+      return 0;
+    }
+    for (const paneId of removable) {
+      const next = closePane(layout, paneId);
+      if (!next) {
+        break;
+      }
+      layout = next;
+    }
+    const active = findPane(layout, activePaneId);
+    if (!active) {
+      activePaneId = panes(layout)[0]?.paneId ?? activePaneId;
+    }
+    renderLayoutDom();
+    render();
+    fitVisible();
+    persistSoon();
+    return removable.length;
+  }
+
+  /**
+   * The toolbar's cleanup: close inactive sessions *and* collapse the empty panes they leave.
+   * One click clears both a strip full of dead tabs and the blank "No session" slots a stray
+   * split produced, which is what "tidy the terminal" means in practice.
+   */
+  function closeInactiveAndEmpty() {
+    const sessions = closeInactiveSessions();
+    const panesClosed = closeEmptyPanes();
+    if (sessions === 0 && panesClosed === 0) {
+      notify('No inactive sessions or empty panes to close.');
+      return 0;
+    }
+    const parts = [];
+    if (sessions > 0) parts.push(`${sessions} inactive session${sessions === 1 ? '' : 's'}`);
+    if (panesClosed > 0) parts.push(`${panesClosed} empty pane${panesClosed === 1 ? '' : 's'}`);
+    notify(`Closed ${parts.join(' and ')}.`);
+    return sessions + panesClosed;
+  }
+
   async function splitActive(direction) {
     ensureRestored();
     const target = findPane(layout, activePaneId) ? activePaneId : panes(layout)[0]?.paneId;
@@ -878,8 +929,8 @@ export function initTerminalScreen(container, hooks = {}) {
     const splitButton = toolbarButton('◫', 'Split pane', 'Ctrl+Shift+E', () => {
       splitActive('row').catch(handleError);
     });
-    const closeInactiveButton = toolbarButton('⌫', 'Close inactive sessions', 'exited or failed', () => {
-      closeInactiveSessions();
+    const closeInactiveButton = toolbarButton('⌫', 'Close inactive sessions and empty panes', 'exited, failed, or empty', () => {
+      closeInactiveAndEmpty();
     });
     closeInactiveButton.classList.add('terminal-close-inactive');
     toolbarEl.append(newButton, runButton, spacer, splitButton, closeInactiveButton);
@@ -1035,6 +1086,10 @@ export function initTerminalScreen(container, hooks = {}) {
     openSession,
     /** Close every exited or failed session in one pass, sparing the active and visible ones. */
     closeInactiveSessions,
+    /** Collapse every empty "No session" pane, keeping one when nothing else is left. */
+    closeEmptyPanes,
+    /** Tidy up in one click: inactive sessions, then the empty panes they leave behind. */
+    closeInactiveAndEmpty,
 
     destroy() {
       clearTimeout(persistTimer);

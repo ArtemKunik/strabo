@@ -98,6 +98,13 @@ export function firstEmptyPane(root) {
   return panes(root).find((leaf) => !leaf.sessionId) ?? null;
 }
 
+/** The ids of every pane that holds no session — the empty "No session" slots. */
+export function emptyPaneIds(root) {
+  return panes(root)
+    .filter((leaf) => !leaf.sessionId)
+    .map((leaf) => leaf.paneId);
+}
+
 /** Split `paneId` in two, returning the new tree or null when the pane is not present. */
 export function splitPane(root, paneId, direction, newPaneId) {
   const result = replaceLeaf(root, paneId, (leaf) => ({

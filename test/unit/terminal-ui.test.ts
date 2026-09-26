@@ -6,6 +6,7 @@ import {
   countPanes,
   createLayout,
   detachSession,
+  emptyPaneIds,
   findPane,
   firstEmptyPane,
   geometry,
@@ -171,6 +172,23 @@ test('inactiveSessionIds picks the exited sessions, sparing the active and the k
   assert.deepEqual(inactiveSessionIds([], 'a'), []);
   // A running session is never inactive, even when it is neither active nor kept.
   assert.deepEqual(inactiveSessionIds([{ id: 'z', status: 'running' }], null), []);
+});
+
+test('emptyPaneIds names the unbound slots and closePane collapses them away', () => {
+  // Two sessions bound and two blank slots, the shape a few stray splits leave behind.
+  let root = createLayout('p1');
+  root = setPaneSession(root, 'p1', 's1');
+  root = splitPane(root, 'p1', 'row', 'p2');
+  root = splitPane(root, 'p2', 'column', 'p3');
+  root = splitPane(root, 'p3', 'row', 'p4');
+  assert.deepEqual(emptyPaneIds(root), ['p2', 'p3', 'p4']);
+
+  let collapsed = root;
+  for (const paneId of emptyPaneIds(root)) {
+    collapsed = closePane(collapsed, paneId);
+  }
+  assert.equal(countPanes(collapsed), 1);
+  assert.equal(findPane(collapsed, 'p1')?.sessionId, 's1');
 });
 
 test('orderSessions follows the saved order and appends unknown sessions', () => {
