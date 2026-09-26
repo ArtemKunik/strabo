@@ -5727,3 +5727,108 @@ table.change-metrics td:first-child .link {
   font-size: var(--text-sm);
   color: var(--ink-3);
 }
+/* Coverage panel and the Module Passport's Coverage section. */
+
+.coverage-panel {
+  padding: 10px 12px;
+}
+
+.coverage-provenance {
+  margin: 4px 0 8px;
+}
+
+.coverage-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 4px 0 6px;
+  font-size: 12px;
+}
+
+.coverage-crumb-sep {
+  color: var(--ink-3);
+}
+
+.coverage-crumb-current {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+.coverage-totals {
+  margin: 6px 0 10px;
+}
+
+.coverage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.coverage-table th,
+.coverage-table td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.coverage-table th {
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.coverage-count {
+  font-family: var(--font-mono);
+}
+
+.coverage-figure {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.coverage-figure[data-basis='reachable'] {
+  color: var(--ink-3);
+}
+
+.coverage-files .coverage-figure,
+.coverage-file-figure {
+  margin-left: 8px;
+}
+
+.coverage-file-figure {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coverage-basis {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.coverage-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 10px;
+  margin: 6px 0 10px;
+  font-size: 12px;
+}
+
+.coverage-facts dt {
+  color: var(--ink-3);
+}
+
+.coverage-facts dd {
+  margin: 0;
+}
+
+.coverage-link-list {
+  margin-top: 8px;
+}
+
+.coverage-link-list h4,
+.coverage-folders h4,
+.coverage-files-section h4 {
+  margin: 10px 0 4px;
+}

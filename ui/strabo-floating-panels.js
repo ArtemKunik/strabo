@@ -291,6 +291,21 @@ export function createFloatingPanels(app) {
           elements.blocksPanel.hidden = true;
         },
       },
+      {
+        key: 'coverage',
+        element: elements.coveragePanel,
+        title: 'Coverage',
+        dockLabel: 'Coverage',
+        glyph: '◔',
+        width: 580,
+        height: 640,
+        onOpen: () => {
+          app.coverage.showCoverage().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        },
+        onClose: () => app.coverage.closeCoverage(),
+      },
     ],
   });
 

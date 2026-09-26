@@ -186,6 +186,20 @@ export {
 } from './analysis/file-coverage.ts';
 export type { FileCoverage, FileCoverageAggregate } from './analysis/file-coverage.ts';
 export {
+  projectCoverageReport,
+  folderCoverageReport,
+  fileCoverageReport,
+  normaliseFolder,
+  ROOT_FOLDER,
+} from './analysis/coverage-report.ts';
+export type {
+  CoverageScope,
+  CoverageReport,
+  CoverageTotals,
+  CoverageFileEntry,
+  CoverageFolderEntry,
+} from './analysis/coverage-report.ts';
+export {
   computeMeasuredCoverage,
   parseCoverageText,
   parseLcov,
@@ -522,6 +536,8 @@ export { runExportCommand } from './cli/export.ts';
 export type { ExportIo } from './cli/export.ts';
 export { runCheckCommand } from './cli/check.ts';
 export type { CheckIo } from './cli/check.ts';
+export { runCoverageCommand } from './cli/coverage.ts';
+export type { CoverageIo } from './cli/coverage.ts';
 export { runReportCommand, renderMarkdown } from './cli/report.ts';
 export type { ReportDocument, ReportChange, ReportHotspot, ReportIo } from './cli/report.ts';
 

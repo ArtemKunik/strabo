@@ -181,12 +181,23 @@ export function renderInspector(container, model, id, handlers = {}) {
   impactBody.textContent = 'Loading impact…';
   impact.append(impactBody);
 
+  const coverage = document.createElement('section');
+  coverage.dataset.role = 'coverage';
+  const coverageTitle = document.createElement('h3');
+  coverageTitle.textContent = 'Coverage';
+  coverage.append(coverageTitle);
+  const coverageBody = document.createElement('p');
+  coverageBody.className = 'unavailable';
+  coverageBody.textContent = 'Loading coverage…';
+  coverage.append(coverageBody);
+
   const tabDefs = [
     ['deps', `Dependencies (${passport.imports.length} file(s))`, depsSection],
     ['dependents', `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
     ['members', 'Members', members],
     ['functions', 'Functions', functions],
     ['impact', 'Impact', impact],
+    ['coverage', 'Coverage', coverage],
   ];
   const base = `inspector-${(inspectorSeq += 1)}`;
   const tabButtons = [];

@@ -80,6 +80,32 @@ why — a missing renderer is named, not a silent empty file. `--no-change`, `--
 `--no-hotspots`, `--no-ownership`, and `--no-drift` skip an analysis; a skipped section is
 named as not computed. `--format` and `--out` use the `--flag=value` form.
 
+## Test coverage
+
+`strabo coverage [path]` reads the repository's existing coverage report — an `lcov.info`, a
+Cobertura XML, or a JaCoCo XML already on disk — and reports it at three scopes. It never runs
+a test or a coverage tool. The measured report is the basis when one is found; otherwise the
+static test-reach graph is the labelled fallback.
+
+```sh
+# the whole project: totals, per-top-level-folder roll-up, provenance
+node bin/strabo.js coverage
+
+# one folder and its subtree
+node bin/strabo.js coverage --folder=src/api
+
+# one file, with the tests that reach it and the files that import it
+node bin/strabo.js coverage --file=src/api/routes/analysis-git.ts
+
+node bin/strabo.js coverage --format=json --out=coverage.json
+```
+
+A file the report does not name is `not in report`, never 0%; a named file with no recorded
+line counts is `unavailable`, never 0%. `--threshold=<pct>` sets the under-covered cut-off
+(default 50). An explicit report path (or comma-separated list) can be set with
+`STRABO_COVERAGE_REPORT=...`, still read only inside the scan ceiling. The same facts are on
+the HTTP surface at `GET /analysis/coverage/project|folder|file`.
+
 ## Change report: scope fence and public API
 
 `strabo report --base <ref>` is the change report. Two Phase 29 sections answer "did an agent

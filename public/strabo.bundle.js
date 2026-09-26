@@ -307,19 +307,19 @@ function positionOf(position) {
 
 // ui/strabo-graph-diff.js
 function diffElements(previous = [], next = []) {
-  const before = new Map(previous.map((element2) => [element2.data.id, element2]));
+  const before = new Map(previous.map((element3) => [element3.data.id, element3]));
   const added = [];
   const updated = [];
-  for (const element2 of next) {
-    const id = element2.data.id;
+  for (const element3 of next) {
+    const id = element3.data.id;
     const prior = before.get(id);
     if (!prior) {
-      added.push(element2);
+      added.push(element3);
       continue;
     }
     before.delete(id);
-    if (elementSignature(prior) !== elementSignature(element2)) {
-      updated.push({ before: prior, after: element2 });
+    if (elementSignature(prior) !== elementSignature(element3)) {
+      updated.push({ before: prior, after: element3 });
     }
   }
   return { added, removed: [...before.keys()], updated };
@@ -330,11 +330,11 @@ function diffGraph(previous = { nodes: [], edges: [] }, next = { nodes: [], edge
     edges: diffElements(previous.edges, next.edges)
   };
 }
-function elementSignature(element2) {
+function elementSignature(element3) {
   return JSON.stringify({
-    classes: element2.classes ?? "",
-    data: element2.data,
-    position: element2.position ?? null
+    classes: element3.classes ?? "",
+    data: element3.data,
+    position: element3.position ?? null
   });
 }
 
@@ -706,6 +706,7 @@ function shortcutSheet() {
     { keys: "N", action: "Branches" },
     { keys: "R", action: "Review working-tree changes" },
     { keys: "V", action: "Dependency risk" },
+    { keys: "D", action: "Test coverage by project, folder, and file" },
     { keys: "G", action: "Delegate the selected files" },
     { keys: "\u2318K / ctrl-K", action: "Filter paths" },
     { keys: "Esc", action: "Clear the selection or close a panel" },
@@ -2760,19 +2761,19 @@ function createUnitCardLayer(container, cy, onOpen) {
       if (signatures.get(card.id) === signature) {
         continue;
       }
-      const element2 = unitCardElement(card, { onOpen });
+      const element3 = unitCardElement(card, { onOpen });
       const existing = elements2.get(card.id);
       if (existing) {
-        existing.replaceWith(element2);
+        existing.replaceWith(element3);
       } else {
-        layer.append(element2);
+        layer.append(element3);
       }
-      elements2.set(card.id, element2);
+      elements2.set(card.id, element3);
       signatures.set(card.id, signature);
     }
-    for (const [id, element2] of [...elements2]) {
+    for (const [id, element3] of [...elements2]) {
       if (!seen.has(id)) {
-        element2.remove();
+        element3.remove();
         elements2.delete(id);
         signatures.delete(id);
       }
@@ -3324,12 +3325,12 @@ function createView(container) {
     const members = new Set(ids);
     cy.batch(() => {
       for (const id of ids) {
-        const element2 = cy.getElementById(id);
-        if (element2.empty()) {
+        const element3 = cy.getElementById(id);
+        if (element3.empty()) {
           continue;
         }
-        const position = element2.position();
-        element2.position({ x: position.x + dx, y: position.y + dy });
+        const position = element3.position();
+        element3.position({ x: position.x + dx, y: position.y + dy });
       }
     });
     islandModel = {
@@ -3717,8 +3718,8 @@ function writeIslandLayout(repository, offsets, storage = globalThis.localStorag
 }
 
 // ui/strabo-freshness.js
-function createFreshnessBadge(element2, options = {}) {
-  if (!element2) {
+function createFreshnessBadge(element3, options = {}) {
+  if (!element3) {
     return { refresh: async () => null, render: () => {
     }, status: () => null };
   }
@@ -3731,16 +3732,16 @@ function createFreshnessBadge(element2, options = {}) {
     last = status;
     const revision = status?.indexed?.revision;
     if (!revision) {
-      element2.hidden = true;
-      element2.textContent = "";
+      element3.hidden = true;
+      element3.textContent = "";
       return;
     }
     const behind = typeof status.behind === "number" ? status.behind : null;
     const stale = Boolean(status.stale);
-    element2.hidden = false;
-    element2.classList.toggle("is-stale", stale);
-    element2.textContent = stale ? `indexed at ${short(revision)}${behind ? ` (${behind} behind)` : ""} \xB7 Rebuild` : `indexed at ${short(revision)}`;
-    element2.title = stale ? "HEAD moved since this map was indexed; click to rebuild." : "The map matches the indexed revision.";
+    element3.hidden = false;
+    element3.classList.toggle("is-stale", stale);
+    element3.textContent = stale ? `indexed at ${short(revision)}${behind ? ` (${behind} behind)` : ""} \xB7 Rebuild` : `indexed at ${short(revision)}`;
+    element3.title = stale ? "HEAD moved since this map was indexed; click to rebuild." : "The map matches the indexed revision.";
   }
   async function refresh({ repository } = {}) {
     if (typeof request2 !== "function") {
@@ -3750,21 +3751,21 @@ function createFreshnessBadge(element2, options = {}) {
       const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
       render(await request2(`/status${query}`));
     } catch {
-      element2.hidden = true;
+      element3.hidden = true;
     }
     return last;
   }
-  element2.addEventListener("click", async () => {
-    if (!element2.classList.contains("is-stale")) {
+  element3.addEventListener("click", async () => {
+    if (!element3.classList.contains("is-stale")) {
       return;
     }
-    element2.disabled = true;
-    element2.textContent = "Rebuilding\u2026";
+    element3.disabled = true;
+    element3.textContent = "Rebuilding\u2026";
     try {
       await options.onRebuild?.();
       await refresh({ repository: options.repository?.() });
     } finally {
-      element2.disabled = false;
+      element3.disabled = false;
     }
   });
   return { refresh, render, status: () => last };
@@ -3798,20 +3799,20 @@ function wiring(text) {
   return span;
 }
 function unavailableNote(text) {
-  const note3 = document.createElement("p");
-  note3.className = "unavailable";
-  note3.textContent = text;
-  return note3;
+  const note4 = document.createElement("p");
+  note4.className = "unavailable";
+  note4.textContent = text;
+  return note4;
 }
 function matches(name, needle) {
   return !needle || name.toLowerCase().includes(needle);
 }
 function svgElement(name, attributes) {
-  const element2 = document.createElementNS("http://www.w3.org/2000/svg", name);
+  const element3 = document.createElementNS("http://www.w3.org/2000/svg", name);
   for (const [key, value] of Object.entries(attributes)) {
-    element2.setAttribute(key, value);
+    element3.setAttribute(key, value);
   }
-  return element2;
+  return element3;
 }
 
 // ui/strabo-narrator.js
@@ -4163,9 +4164,9 @@ function renderNarrativeReply(target, reply) {
       if (!run.code && !run.strong) {
         return document.createTextNode(run.text);
       }
-      const element2 = document.createElement(run.code ? "code" : "strong");
-      element2.textContent = run.text;
-      return element2;
+      const element3 = document.createElement(run.code ? "code" : "strong");
+      element3.textContent = run.text;
+      return element3;
     });
     if (block.type === "p") {
       const paragraph = document.createElement("p");
@@ -4216,10 +4217,10 @@ function appendNarratorBlock(container, handlers, { id, label }) {
   }
   const block = document.createElement("div");
   block.className = "narrator-block";
-  const note3 = document.createElement("p");
-  note3.className = "narrator-note";
-  note3.textContent = narratorStatusLabel(handlers.narratorStatus);
-  block.append(note3);
+  const note4 = document.createElement("p");
+  note4.className = "narrator-note";
+  note4.textContent = narratorStatusLabel(handlers.narratorStatus);
+  block.append(note4);
   if (narratorNeedsSetup(handlers.narratorStatus) && handlers.onOpenNarratorSettings) {
     const setup = document.createElement("button");
     setup.type = "button";
@@ -4411,12 +4412,22 @@ function renderInspector(container, model, id, handlers = {}) {
   impactBody.className = "unavailable";
   impactBody.textContent = "Loading impact\u2026";
   impact.append(impactBody);
+  const coverage = document.createElement("section");
+  coverage.dataset.role = "coverage";
+  const coverageTitle = document.createElement("h3");
+  coverageTitle.textContent = "Coverage";
+  coverage.append(coverageTitle);
+  const coverageBody = document.createElement("p");
+  coverageBody.className = "unavailable";
+  coverageBody.textContent = "Loading coverage\u2026";
+  coverage.append(coverageBody);
   const tabDefs = [
     ["deps", `Dependencies (${passport.imports.length} file(s))`, depsSection],
     ["dependents", `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
     ["members", "Members", members],
     ["functions", "Functions", functions],
-    ["impact", "Impact", impact]
+    ["impact", "Impact", impact],
+    ["coverage", "Coverage", coverage]
   ];
   const base = `inspector-${inspectorSeq += 1}`;
   const tabButtons = [];
@@ -4519,18 +4530,18 @@ function renderChangesWith(container, result, handlers = {}) {
   title.textContent = "Changes with";
   container.append(title);
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Co-change is unavailable: no Git history was read.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = result?.detail ?? "Co-change is unavailable: no Git history was read.";
+    container.append(note4);
     return;
   }
   const partners = result.partners ?? [];
   if (partners.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No recorded commits changed this file together with another in the window.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No recorded commits changed this file together with another in the window.";
+    container.append(note4);
     return;
   }
   const list = document.createElement("ul");
@@ -4617,24 +4628,24 @@ function renderFunctions(container, result, handlers = {}) {
   title.textContent = `Functions (${report?.functions?.length ?? 0})`;
   container.append(title);
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Functions are not recorded for this file.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = result?.detail ?? "Functions are not recorded for this file.";
+    container.append(note4);
     return;
   }
   if (!report || report.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = report?.detail ?? "Functions are not recorded for this file.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = report?.detail ?? "Functions are not recorded for this file.";
+    container.append(note4);
     return;
   }
   if (report.functions.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No functions declared.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No functions declared.";
+    container.append(note4);
     return;
   }
   const summary = document.createElement("p");
@@ -5058,6 +5069,343 @@ function renderFunctionTableVirtual(report) {
   return wrapper;
 }
 
+// ui/strabo-panel-coverage.js
+var ROOT_FOLDER = ".";
+function element2(tagName, className, text) {
+  const node = document.createElement(tagName);
+  if (className) {
+    node.className = className;
+  }
+  if (text !== void 0) {
+    node.textContent = text;
+  }
+  return node;
+}
+function coverageEntryLabel(entry) {
+  if (!entry) {
+    return "unavailable";
+  }
+  if (entry.notInReport === true) {
+    return "not in report";
+  }
+  if (entry.basis === "measured") {
+    return entry.value === null || entry.value === void 0 ? "unavailable" : `${Math.round(entry.value)}%`;
+  }
+  return entry.reached ? "reachable (test-reach)" : "no test reaches it";
+}
+function coverageTotalsLabel(totals) {
+  if (!totals) {
+    return "unavailable";
+  }
+  if (totals.basis === "measured") {
+    return totals.value === null || totals.value === void 0 ? "unavailable" : `${Math.round(totals.value)}%`;
+  }
+  return `${totals.reached ?? 0}/${totals.files ?? 0} reached`;
+}
+function coverageProvenanceText(provenance) {
+  if (!provenance) {
+    return "Coverage provenance unavailable.";
+  }
+  if (provenance.available) {
+    const parts = ["measured basis"];
+    if (provenance.format) {
+      parts.push(provenance.format);
+    }
+    if (provenance.reportPath) {
+      parts.push(provenance.reportPath);
+    }
+    const age = provenance.reportAgeMs;
+    if (age !== null && age !== void 0) {
+      parts.push(`report ${coverageAge(age)} old`);
+    }
+    const stale = provenance.stale?.length ?? 0;
+    if (stale > 0) {
+      parts.push(`${stale} stale`);
+    }
+    return parts.join(" \xB7 ");
+  }
+  const reason = provenance.reason ?? "no-report-found";
+  const detail = provenance.detail ? ` \u2014 ${provenance.detail}` : "";
+  return `reachable basis (static test-reach, not executed coverage): ${reason}${detail}`;
+}
+function coverageSubjectLabel(report) {
+  if (!report) {
+    return "coverage";
+  }
+  if (report.scope === "project") {
+    return "project";
+  }
+  return report.subject ?? report.scope;
+}
+function figureCell(label, basis) {
+  const cell = element2("span", "coverage-figure", label);
+  cell.dataset.basis = basis ?? "unavailable";
+  return cell;
+}
+function note(text) {
+  return element2("p", "unavailable", text);
+}
+function renderCoverageReport(container, report, handlers = {}) {
+  container.replaceChildren();
+  if (report?.loading) {
+    container.append(element2("h3", null, "Coverage"));
+    container.append(note("Loading coverage\u2026"));
+    return;
+  }
+  container.append(element2("h3", null, `Coverage \u2014 ${coverageSubjectLabel(report)}`));
+  if (report?.error) {
+    container.append(note(report.error));
+    if (handlers.onRetry) {
+      const retry = element2("button", "link", "Retry");
+      retry.type = "button";
+      retry.dataset.role = "coverage-retry";
+      retry.addEventListener("click", () => handlers.onRetry());
+      container.append(retry);
+    }
+    return;
+  }
+  if (!report) {
+    container.append(note("No coverage report was returned."));
+    return;
+  }
+  container.append(coverageBreadcrumb(report.subject, handlers));
+  container.append(provenanceLine(report.provenance));
+  container.append(coverageTotals(report.totals, report.threshold));
+  container.append(coverageFolders(report.folders ?? [], handlers));
+  if (Array.isArray(report.files)) {
+    container.append(coverageFiles(report.files, handlers));
+  }
+}
+function provenanceLine(provenance) {
+  const line = element2("p", "evidence coverage-provenance", coverageProvenanceText(provenance));
+  line.dataset.role = "coverage-provenance";
+  return line;
+}
+function coverageBreadcrumb(subject, handlers) {
+  const nav = element2("nav", "coverage-breadcrumb");
+  nav.setAttribute("aria-label", "Coverage scope");
+  const root = element2("button", "link", "Project");
+  root.type = "button";
+  root.dataset.folder = ROOT_FOLDER;
+  root.addEventListener("click", () => handlers.onOpenProject?.());
+  nav.append(root);
+  const segments = subject && subject !== ROOT_FOLDER ? subject.split("/").filter(Boolean) : [];
+  let path = "";
+  for (const segment of segments) {
+    path = path ? `${path}/${segment}` : segment;
+    nav.append(element2("span", "coverage-crumb-sep", "/"));
+    const current = path === subject;
+    if (current) {
+      const here = element2("span", "coverage-crumb-current", segment);
+      here.setAttribute("aria-current", "page");
+      nav.append(here);
+    } else {
+      const crumb = element2("button", "link", segment);
+      crumb.type = "button";
+      crumb.dataset.folder = path;
+      const target = path;
+      crumb.addEventListener("click", () => handlers.onOpenFolder?.(target));
+      nav.append(crumb);
+    }
+  }
+  return nav;
+}
+function statCard(value, label, { role, basis } = {}) {
+  const card = element2("div", "stat-card");
+  const valueNode = element2("div", "stat-value", value);
+  if (role) {
+    valueNode.dataset.role = role;
+  }
+  if (basis) {
+    valueNode.dataset.basis = basis;
+  }
+  card.append(valueNode, element2("div", "stat-label", label));
+  return card;
+}
+function coverageTotals(totals, threshold) {
+  const cards = element2("div", "stat-cards coverage-totals");
+  cards.dataset.role = "coverage-totals";
+  if (!totals) {
+    cards.append(note("No totals were recorded."));
+    return cards;
+  }
+  cards.append(
+    statCard(String(totals.files ?? 0), "Files"),
+    statCard(String(totals.filesMeasured ?? 0), "Measured"),
+    statCard(String(totals.notInReport ?? 0), "Not in report"),
+    statCard(String(totals.reached ?? 0), "Reached by a test"),
+    statCard(String(totals.untested ?? 0), `Under ${threshold ?? 50}% / unreached`),
+    statCard(`${totals.linesHit ?? 0}/${totals.linesFound ?? 0}`, "Lines hit / found"),
+    statCard(coverageTotalsLabel(totals), "Coverage", {
+      role: "coverage-value",
+      basis: totals.basis
+    })
+  );
+  return cards;
+}
+function coverageFolders(folders, handlers) {
+  const section2 = element2("section", "coverage-folders");
+  section2.append(element2("h4", null, `Folders (${folders.length})`));
+  if (folders.length === 0) {
+    section2.append(note("No subfolders recorded at this scope."));
+    return section2;
+  }
+  const table = element2("table", "coverage-table");
+  const head = element2("thead");
+  const headRow = element2("tr");
+  for (const label of ["Folder", "Files", "Measured", "Not in report", "Reached", "Untested", "Coverage"]) {
+    const cell = element2("th", null, label);
+    cell.scope = "col";
+    headRow.append(cell);
+  }
+  head.append(headRow);
+  const body = element2("tbody");
+  for (const folder of folders) {
+    const row = element2("tr", "coverage-folder-row");
+    row.dataset.folder = folder.folder;
+    const nameCell = element2("td");
+    const open = element2("button", "link coverage-folder-link", folder.folder);
+    open.type = "button";
+    open.addEventListener("click", () => handlers.onOpenFolder?.(folder.folder));
+    nameCell.append(open);
+    row.append(nameCell);
+    row.append(element2("td", "coverage-count", String(folder.files ?? 0)));
+    row.append(element2("td", "coverage-count", String(folder.filesMeasured ?? 0)));
+    row.append(element2("td", "coverage-count", String(folder.notInReport ?? 0)));
+    row.append(element2("td", "coverage-count", String(folder.reached ?? 0)));
+    row.append(element2("td", "coverage-count", String(folder.untested ?? 0)));
+    const coverageCell = element2("td");
+    coverageCell.append(figureCell(coverageEntryLabel(folder), folder.basis));
+    row.append(coverageCell);
+    body.append(row);
+  }
+  table.append(head, body);
+  section2.append(table);
+  return section2;
+}
+function coverageFiles(files, handlers) {
+  const section2 = element2("section", "coverage-files-section");
+  section2.append(element2("h4", null, `Files (${files.length})`));
+  if (files.length === 0) {
+    section2.append(note("No files sit directly in this folder."));
+    return section2;
+  }
+  const list = element2("ul", "passport-list coverage-files");
+  for (const file of files) {
+    const item = element2("li", "coverage-file-row");
+    item.dataset.file = file.file;
+    item.dataset.delegateNode = file.file;
+    const open = element2("button", "link", file.file);
+    open.type = "button";
+    open.addEventListener("click", () => handlers.onSelect?.(file.file));
+    item.append(open);
+    item.append(figureCell(coverageEntryLabel(file), file.basis));
+    const facts = [];
+    if (file.linesFound !== null && file.linesFound !== void 0) {
+      facts.push(`${file.linesHit ?? 0}/${file.linesFound} lines`);
+    }
+    if (file.notInReport) {
+      facts.push("not in report");
+    }
+    if (file.untested) {
+      facts.push("untested");
+    }
+    if (file.stale === true) {
+      facts.push("stale");
+    }
+    if (facts.length > 0) {
+      item.append(element2("span", "evidence", facts.join(" \xB7 ")));
+    }
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
+}
+function renderCoverageFile(container, report, handlers = {}) {
+  container.replaceChildren();
+  container.append(element2("h3", null, "Coverage"));
+  if (report?.unsupported) {
+    container.append(note(report.unsupported));
+    return;
+  }
+  if (report?.error) {
+    container.append(note(report.error));
+    if (handlers.onRetry) {
+      const retry = element2("button", "link", "Retry");
+      retry.type = "button";
+      retry.dataset.role = "coverage-retry";
+      retry.addEventListener("click", () => handlers.onRetry());
+      container.append(retry);
+    }
+    return;
+  }
+  const entry = report?.file;
+  if (!entry) {
+    container.append(note("Coverage is unavailable for this selection."));
+    return;
+  }
+  container.append(provenanceLine(report.provenance));
+  const figure = element2("p", "coverage-file-figure");
+  figure.dataset.role = "coverage-file-figure";
+  figure.dataset.basis = entry.basis ?? "unavailable";
+  figure.append(
+    element2("span", "coverage-basis", entry.basis === "measured" ? "measured coverage" : "static test-reach"),
+    document.createTextNode(" \xB7 "),
+    figureCell(coverageEntryLabel(entry), entry.basis)
+  );
+  container.append(figure);
+  const facts = element2("dl", "coverage-facts");
+  const fact = (term, value) => {
+    facts.append(element2("dt", null, term), element2("dd", null, value));
+  };
+  fact("Basis", entry.basis === "measured" ? "measured (a report was read)" : "reachable (test-reach, not executed coverage)");
+  if (entry.notInReport) {
+    fact("Report", "the report does not name this file");
+  }
+  if (entry.basis === "measured" && (entry.value === null || entry.value === void 0)) {
+    fact("Lines", "unavailable \u2014 the report records no line counts for this file");
+  } else if (entry.linesFound !== null && entry.linesFound !== void 0) {
+    fact("Lines", `${entry.linesHit ?? 0} hit / ${entry.linesFound} found`);
+  }
+  if (entry.stale === true) {
+    fact("Freshness", "stale \u2014 the report predates this file\u2019s last commit");
+  } else if (entry.stale === false) {
+    fact("Freshness", "unchanged since the report");
+  }
+  const age = report.provenance?.reportAgeMs;
+  if (age !== null && age !== void 0) {
+    fact("Report age", `${coverageAge(age)} old`);
+  }
+  fact("Untested", entry.untested ? `yes \u2014 under the ${report.threshold ?? 50}% / reached cut-off` : "no");
+  container.append(facts);
+  container.append(
+    fileLinkList("Tests that reach it", entry.tests ?? [], handlers, "No test reaches this file.")
+  );
+  container.append(
+    fileLinkList("Importers", entry.importers ?? [], handlers, "No file imports this one.")
+  );
+}
+function fileLinkList(title, files, handlers, emptyText) {
+  const section2 = element2("section", "coverage-link-list");
+  section2.append(element2("h4", null, `${title} (${files.length})`));
+  if (files.length === 0) {
+    section2.append(note(emptyText));
+    return section2;
+  }
+  const list = element2("ul", "passport-list");
+  for (const file of files) {
+    const item = element2("li");
+    item.dataset.delegateNode = file;
+    const open = element2("button", "link", file);
+    open.type = "button";
+    open.addEventListener("click", () => handlers.onSelect?.(file));
+    item.append(open);
+    list.append(item);
+  }
+  section2.append(list);
+  return section2;
+}
+
 // ui/strabo-workspace.js
 function workspaceSummary(report) {
   const summary = report?.summary;
@@ -5317,10 +5665,10 @@ function workspaceHeading(text, count) {
   return heading2;
 }
 function workspaceNote(text) {
-  const note3 = document.createElement("p");
-  note3.className = "unavailable";
-  note3.textContent = text;
-  return note3;
+  const note4 = document.createElement("p");
+  note4.className = "unavailable";
+  note4.textContent = text;
+  return note4;
 }
 function workspaceList(className, rows, fill) {
   const list = document.createElement("ul");
@@ -5675,10 +6023,10 @@ function passportSection(title, count) {
   return heading2;
 }
 function passportNote(text) {
-  const note3 = document.createElement("p");
-  note3.className = "unavailable";
-  note3.textContent = text;
-  return note3;
+  const note4 = document.createElement("p");
+  note4.className = "unavailable";
+  note4.textContent = text;
+  return note4;
 }
 function passportFileList(entries, handlers, label) {
   const list = document.createElement("ul");
@@ -6136,17 +6484,17 @@ function renderMembers(container, result) {
   title.textContent = reExports.length > 0 ? `Members (${symbols.length}) \xB7 ${reExports.length} re-export(s)` : `Members (${symbols.length})`;
   container.append(title);
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ?? "Not recorded by the scan.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = result?.detail ?? "Not recorded by the scan.";
+    container.append(note4);
     return;
   }
   if (symbols.length === 0 && reExports.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No members declared.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No members declared.";
+    container.append(note4);
     return;
   }
   const types = memberMap?.types ?? [];
@@ -6214,10 +6562,10 @@ function renderMemberType(type) {
     section2.append(list);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No members declared.";
-    section2.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No members declared.";
+    section2.append(note4);
   }
   return section2;
 }
@@ -6234,11 +6582,11 @@ function renderDataFlow(dataFlow) {
   title.textContent = "Data flow";
   section2.append(title);
   if (!dataFlow || dataFlow.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "flow-unavailable";
-    note3.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
-    section2.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "flow-unavailable";
+    note4.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
+    section2.append(note4);
     return section2;
   }
   for (const [key, label] of DATA_FLOW_PANELS) {
@@ -6647,39 +6995,39 @@ function staggerFor(clusterIndex) {
 }
 function buildFieldCard(field2, clusterIndex, related) {
   const card = fieldCard(field2);
-  const element2 = document.createElement("article");
-  element2.className = "member-card field-card";
-  element2.dataset.member = field2.name;
-  element2.dataset.cluster = String(clusterIndex ?? 0);
-  element2.dataset.related = related ? [...related].join(" ") : "";
-  element2.setAttribute("role", "group");
-  element2.setAttribute("aria-label", card.signature);
-  element2.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element2.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element2.append(cardLine("card-signature", card.signature));
+  const element3 = document.createElement("article");
+  element3.className = "member-card field-card";
+  element3.dataset.member = field2.name;
+  element3.dataset.cluster = String(clusterIndex ?? 0);
+  element3.dataset.related = related ? [...related].join(" ") : "";
+  element3.setAttribute("role", "group");
+  element3.setAttribute("aria-label", card.signature);
+  element3.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element3.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element3.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag !== "unconnected") tag.classList.add("is-wired");
-  element2.append(tag);
-  element2.append(cardLine("card-metrics", card.metrics));
-  return element2;
+  element3.append(tag);
+  element3.append(cardLine("card-metrics", card.metrics));
+  return element3;
 }
 function buildMethodCard(method, clusterIndex, related) {
   const card = methodCard(method);
-  const element2 = document.createElement("article");
-  element2.className = "member-card method-card";
-  element2.dataset.member = method.name;
-  element2.dataset.cluster = String(clusterIndex ?? 0);
-  element2.dataset.related = related ? [...related].join(" ") : "";
-  element2.setAttribute("role", "group");
-  element2.setAttribute("aria-label", card.signature);
-  element2.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element2.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element2.append(cardLine("card-signature", card.signature));
+  const element3 = document.createElement("article");
+  element3.className = "member-card method-card";
+  element3.dataset.member = method.name;
+  element3.dataset.cluster = String(clusterIndex ?? 0);
+  element3.dataset.related = related ? [...related].join(" ") : "";
+  element3.setAttribute("role", "group");
+  element3.setAttribute("aria-label", card.signature);
+  element3.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element3.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element3.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag === "wired") tag.classList.add("is-wired");
-  element2.append(tag);
-  element2.append(cardLine("card-metrics", card.metrics));
-  return element2;
+  element3.append(tag);
+  element3.append(cardLine("card-metrics", card.metrics));
+  return element3;
 }
 function cardLine(className, text) {
   const span = document.createElement("span");
@@ -6898,9 +7246,9 @@ function buildDataFlow(memberMap, consumerIds) {
   section2.append(title);
   const flow = memberMap?.dataFlow;
   if (!flow || flow.available === false) {
-    const note3 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
-    note3.dataset.role = "flow-unavailable";
-    section2.append(note3);
+    const note4 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
+    note4.dataset.role = "flow-unavailable";
+    section2.append(note4);
     return section2;
   }
   const diagram = buildFlowDiagram(memberMap);
@@ -7315,11 +7663,11 @@ function renderBranches(container, result, handlers = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "branches-unavailable";
-    note3.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "branches-unavailable";
+    note4.textContent = result?.detail ? `No branches: ${result.detail}` : "No Git branches available.";
+    container.append(note4);
     return;
   }
   const baseLine = document.createElement("p");
@@ -7536,16 +7884,16 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     (entry) => `changed on the base \xB7 imported by ${entry.via}${entry.distance > 1 ? ` (distance ${entry.distance})` : ""}`
   );
   if (!branch.checkedOut) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-branch-graph";
-    note3.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "review-branch-graph";
+    note4.textContent = "Impact is traced through the checked-out graph, not this branch\u2019s own; check the branch out for its Change passport.";
+    container.append(note4);
   }
 }
 
 // ui/strabo-panel-risk.js
-function provenanceLine(provenance) {
+function provenanceLine2(provenance) {
   if (!provenance || !provenance.fingerprint) {
     return null;
   }
@@ -7571,23 +7919,23 @@ function renderImpactPassport(container, set, handlers = {}) {
   container.append(caption);
   const provenance = set.provenance ?? set.files[0]?.provenance ?? set.totals?.provenance ?? null;
   const approximate = set.graphApproximation === true;
-  const line = provenanceLine(provenance);
+  const line = provenanceLine2(provenance);
   if (line) {
-    const note3 = document.createElement("p");
-    note3.className = "evidence";
-    note3.dataset.role = "impact-provenance";
-    note3.textContent = line;
+    const note4 = document.createElement("p");
+    note4.className = "evidence";
+    note4.dataset.role = "impact-provenance";
+    note4.textContent = line;
     if (provenance.stale === true) {
-      note3.classList.add("is-stale");
+      note4.classList.add("is-stale");
     }
-    container.append(note3);
+    container.append(note4);
   }
   if (approximate) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "impact-approximation";
-    note3.textContent = "approximation: current graph";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "impact-approximation";
+    note4.textContent = "approximation: current graph";
+    container.append(note4);
   }
   if (set.scope === "file") {
     container.append(impactCard({ ...set.files[0], provenance }, false, approximate));
@@ -7744,11 +8092,11 @@ function renderRisk(container, report, handlers = {}) {
     title.append(dismiss);
   }
   if (!report || report.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-unavailable";
-    note3.textContent = "Risk report unavailable.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "risk-unavailable";
+    note4.textContent = "Risk report unavailable.";
+    container.append(note4);
     return;
   }
   const summary = document.createElement("p");
@@ -7773,11 +8121,11 @@ function renderRisk(container, report, handlers = {}) {
   heading2.textContent = `Advisories (${advisories.length})`;
   container.append(heading2);
   if (advisories.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-advisories-empty";
-    note3.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "risk-advisories-empty";
+    note4.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
+    container.append(note4);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-advisories";
@@ -7856,11 +8204,11 @@ function renderRisk(container, report, handlers = {}) {
   licenseHeading.textContent = `Licenses needing review (${flagged.length})`;
   container.append(licenseHeading);
   if (flagged.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "risk-licenses-empty";
-    note3.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "risk-licenses-empty";
+    note4.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
+    container.append(note4);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "risk-licenses";
@@ -7905,11 +8253,11 @@ function renderReviewLoading(container, handlers = {}) {
     dismiss.addEventListener("click", () => handlers.onClose());
     title.append(dismiss);
   }
-  const note3 = document.createElement("p");
-  note3.className = "evidence";
-  note3.dataset.role = "review-loading";
-  note3.textContent = "Reviewing changes\u2026";
-  container.append(note3);
+  const note4 = document.createElement("p");
+  note4.className = "evidence";
+  note4.dataset.role = "review-loading";
+  note4.textContent = "Reviewing changes\u2026";
+  container.append(note4);
 }
 function structuralDiffGroups(structural) {
   if (!structural || structural.available === false) {
@@ -7978,20 +8326,20 @@ function renderStructuralDiff(container, structural) {
   heading2.textContent = "Structure";
   container.append(heading2);
   if (!structural || structural.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-structure-unavailable";
-    note3.textContent = structural?.detail ? `Structure unavailable: ${structural.detail}` : "Structure unavailable: no base revision to compare.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "review-structure-unavailable";
+    note4.textContent = structural?.detail ? `Structure unavailable: ${structural.detail}` : "Structure unavailable: no base revision to compare.";
+    container.append(note4);
     return;
   }
   const groups = structuralDiffGroups(structural);
   if (groups.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-structure-empty";
-    note3.textContent = "No structural change between the base and HEAD.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "review-structure-empty";
+    note4.textContent = "No structural change between the base and HEAD.";
+    container.append(note4);
     return;
   }
   for (const group of groups) {
@@ -8026,11 +8374,11 @@ function renderReview(container, result, handlers = {}) {
     title.append(dismiss);
   }
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-unavailable";
-    note3.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "review-unavailable";
+    note4.textContent = result?.detail ? `Review unavailable: ${result.detail}` : "Review unavailable: no Git metadata.";
+    container.append(note4);
     return;
   }
   if (result.commit) {
@@ -8071,10 +8419,10 @@ function renderReview(container, result, handlers = {}) {
     renderBranchDivergence(container, result.branch, handlers);
   }
   if ((result.files ?? []).length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = result.kind === "commit" ? "This commit recorded no file changes." : result.kind === "branch" ? "This branch has no changes the base lacks." : "No pending changes.";
+    container.append(note4);
   }
   for (const [group, files] of reviewGroups(result.files)) {
     const heading2 = document.createElement("h4");
@@ -8135,11 +8483,11 @@ function renderReview(container, result, handlers = {}) {
   impactHeading.textContent = `Potentially affected (${affected.length})`;
   container.append(impactHeading);
   if (affected.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "review-impact-empty";
-    note3.textContent = "Nothing depends on the changed files.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "review-impact-empty";
+    note4.textContent = "Nothing depends on the changed files.";
+    container.append(note4);
   } else {
     const list = document.createElement("ul");
     list.dataset.role = "review-impact";
@@ -8245,10 +8593,10 @@ function renderChangeMetrics(container, metrics, handlers = {}) {
   }
   container.append(table);
   if (metrics.capped) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "Only the first files in the change set were measured.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "Only the first files in the change set were measured.";
+    container.append(note4);
   }
 }
 function metricCell(delta, title) {
@@ -8307,10 +8655,10 @@ function renderChangePassport(container, passport) {
   }
   container.append(list);
   if (passport.capped) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "Only the first files in the change set were measured.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "Only the first files in the change set were measured.";
+    container.append(note4);
   }
 }
 function changeRiskBlock(change) {
@@ -8399,10 +8747,10 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     container.append(counts);
   }
   if ((!overlay2.items || overlay2.items.length === 0) && overlay2.emptyNote) {
-    const note3 = document.createElement("p");
-    note3.className = "overlay-empty";
-    note3.textContent = overlay2.emptyNote;
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "overlay-empty";
+    note4.textContent = overlay2.emptyNote;
+    container.append(note4);
   }
   if (Array.isArray(overlay2.items) && overlay2.items.length > 0) {
     const needsSearch = overlay2.items.length > 8;
@@ -8621,11 +8969,11 @@ function renderDriftChart(container, drift) {
     return;
   }
   if (drift.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.dataset.role = "drift-unavailable";
-    note3.textContent = `Architecture drift unavailable: ${drift.reason ?? "not recorded"}`;
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.dataset.role = "drift-unavailable";
+    note4.textContent = `Architecture drift unavailable: ${drift.reason ?? "not recorded"}`;
+    container.append(note4);
     return;
   }
   const points = drift.points ?? [];
@@ -8714,17 +9062,17 @@ function renderTimeline(container, result, onSelect, options = {}) {
   }
   renderDriftChart(container, options.drift);
   if (!result || result.available === false) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = result?.detail ? `No history: ${result.detail}` : "No Git history available.";
+    container.append(note4);
     return;
   }
   if (result.commits.length === 0) {
-    const note3 = document.createElement("p");
-    note3.className = "unavailable";
-    note3.textContent = "No commits recorded.";
-    container.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No commits recorded.";
+    container.append(note4);
     return;
   }
   const list = document.createElement("ul");
@@ -9303,11 +9651,11 @@ function sourceModeButton(label, mode, handler) {
   return button3;
 }
 function sourceNote(text, className, role) {
-  const note3 = document.createElement("p");
-  note3.className = className;
-  if (role) note3.dataset.role = role;
-  note3.textContent = text;
-  return note3;
+  const note4 = document.createElement("p");
+  note4.className = className;
+  if (role) note4.dataset.role = role;
+  note4.textContent = text;
+  return note4;
 }
 function sourceLine(kind, gutters, text, mark, tokens) {
   const row = document.createElement("div");
@@ -9891,7 +10239,7 @@ function section(title) {
   group.append(heading2);
   return group;
 }
-function note(text) {
+function note2(text) {
   const paragraph = document.createElement("p");
   paragraph.className = "setting-note";
   paragraph.textContent = text;
@@ -9905,11 +10253,11 @@ function button2(text, onClick) {
   return control;
 }
 function lockedNote(envVar, what) {
-  const element2 = document.createElement("span");
-  element2.className = "setting-locked";
-  element2.textContent = `set by ${envVar}`;
-  element2.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
-  return element2;
+  const element3 = document.createElement("span");
+  element3.className = "setting-locked";
+  element3.textContent = `set by ${envVar}`;
+  element3.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
+  return element3;
 }
 function narratorSection(handlers = {}) {
   const group = section("Narrator");
@@ -9917,7 +10265,7 @@ function narratorSection(handlers = {}) {
   const view2 = handlers.narrator;
   const state2 = handlers.narratorState ?? {};
   if (!view2) {
-    group.append(note("Loading narrator settings\u2026"));
+    group.append(note2("Loading narrator settings\u2026"));
     return group;
   }
   const locked = view2.locked ?? {};
@@ -9980,7 +10328,7 @@ function narratorSection(handlers = {}) {
   modelRow.append(modelInput, fetchButton);
   group.append(field("Model", modelRow), modelList);
   if (state2.modelsNote) {
-    group.append(note(state2.modelsNote));
+    group.append(note2(state2.modelsNote));
   }
   if (locked.model) {
     group.append(lockedNote(locked.model, "The model"));
@@ -10001,7 +10349,7 @@ function narratorSection(handlers = {}) {
   keySelect.id = "narrator-key-source";
   keySelect.disabled = Boolean(locked.apiKeyEnv);
   group.append(field("API key source", keySelect));
-  group.append(note(narratorKeyLabel(view2.key)));
+  group.append(note2(narratorKeyLabel(view2.key)));
   if (keyMode === "env") {
     const envInput = textInput(view2.apiKeyEnv ?? "STRABO_NARRATOR_API_KEY", {
       placeholder: "STRABO_NARRATOR_API_KEY",
@@ -10014,7 +10362,7 @@ function narratorSection(handlers = {}) {
     envRow.className = "setting-row";
     envRow.append(envInput, saveEnv);
     group.append(field("Variable name", envRow));
-    group.append(note("The panel only shows whether the variable is set, never its value."));
+    group.append(note2("The panel only shows whether the variable is set, never its value."));
   } else if (keyMode === "stored") {
     const keyInput = document.createElement("input");
     keyInput.type = "password";
@@ -10041,12 +10389,12 @@ function narratorSection(handlers = {}) {
     keyRow.append(keyInput, storeButton, clearButton);
     group.append(field("Stored key", keyRow));
     group.append(
-      note(
+      note2(
         "Stored in the state directory with owner-only permissions, bound to this host. It is never shown again, logged, or sent anywhere but the endpoint."
       )
     );
   } else {
-    group.append(note("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
+    group.append(note2("No key is sent. Use this for a local Ollama or LM Studio endpoint."));
   }
   keySelect.addEventListener("change", () => {
     const next = keySelect.value;
@@ -10060,7 +10408,7 @@ function narratorSection(handlers = {}) {
   sendSourceToggle.disabled = Boolean(locked.sendSource);
   group.append(field("Send source", sendSourceToggle));
   group.append(
-    note("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
+    note2("Off: only recorded facts are sent. On: recorded source snippets are sent too, framed as untrusted data.")
   );
   if (locked.sendSource) {
     group.append(lockedNote(locked.sendSource, "The Send source toggle"));
@@ -10092,7 +10440,7 @@ function narratorSection(handlers = {}) {
   });
   testButton.id = "narrator-test";
   group.append(field("Connection", testButton));
-  group.append(note(narratorTestLabel(state2.test)));
+  group.append(note2(narratorTestLabel(state2.test)));
   const saveButton = button2(
     "Save endpoint and model",
     () => handlers.onNarratorChange?.({
@@ -10103,7 +10451,7 @@ function narratorSection(handlers = {}) {
   saveButton.id = "narrator-save";
   group.append(saveButton);
   group.append(
-    note("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
+    note2("The narrator is opt-in. Nothing is contacted until an endpoint and model are set and a request is made.")
   );
   return group;
 }
@@ -10119,20 +10467,20 @@ function renderingSection() {
   group.append(field("GPU rendering (WebGL2)", toggle));
   if (!available) {
     group.append(
-      note("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
+      note2("This browser exposes no WebGL2 context, so the map draws on the 2D canvas.")
     );
     return group;
   }
   if (armed && webglRefused()) {
     group.append(
-      note(
+      note2(
         "WebGL failed to start in this tab and the map fell back to the 2D canvas. Open a new tab to try again."
       )
     );
     return group;
   }
   group.append(
-    note(
+    note2(
       "Draws the map on the GPU. Changing this reloads the page. Diagnostics reports the renderer actually in use."
     )
   );
@@ -10144,7 +10492,7 @@ function commitSection(prefs, handlers) {
     field("Narrator commit", checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.("commitEnabled", value)))
   );
   group.append(
-    note(
+    note2(
       "Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default."
     )
   );
@@ -10177,15 +10525,15 @@ function renderSettings(container, handlers = {}) {
       "Large-file threshold (lines)",
       numberInput(prefs.locThreshold, LOC_THRESHOLD_DEFAULT, (value) => handlers.onPref?.("locThreshold", value))
     ),
-    note("The large-file lens (canvas \u201CZ\u201D) keeps files at or above this line count and sizes them by lines of code."),
-    note("Preferences are stored in this browser.")
+    note2("The large-file lens (canvas \u201CZ\u201D) keeps files at or above this line count and sizes them by lines of code."),
+    note2("Preferences are stored in this browser.")
   );
   container.append(local);
   container.append(renderingSection());
   container.append(commitSection(prefs, handlers));
   const remote = section("Server");
   if (!server) {
-    remote.append(note("Loading server settings\u2026"));
+    remote.append(note2("Loading server settings\u2026"));
   } else {
     remote.append(field("Start root", textInput(server.workspaceRoot, { readOnly: true })));
     const ceilingInput = textInput(server.scanCeiling);
@@ -10201,7 +10549,7 @@ function renderSettings(container, handlers = {}) {
     ceilingRow.append(ceilingInput, saveButton, resetButton);
     remote.append(field("Scan ceiling", ceilingRow));
     remote.append(
-      note(
+      note2(
         server.allowCeilingWidening ? "Widening is enabled for this process (startup flag), so the ceiling may also be raised above the start boundary." : "Widening is off for this process: the ceiling can only be narrowed. Restart with STRABO_ALLOW_CEILING_WIDENING=1 (or --allow-ceiling-widening) to permit raising it."
       )
     );
@@ -10227,7 +10575,7 @@ function renderSettings(container, handlers = {}) {
       });
     });
     remote.append(
-      note(
+      note2(
         "Whether widening is permitted is a startup-only setting, shown here read-only. It is never accepted from the browser, so this panel cannot widen what the server may read."
       )
     );
@@ -10242,10 +10590,10 @@ function renderSettings(container, handlers = {}) {
       )
     );
     if (server.riskDeniedLicenses && server.riskDeniedLicenses.length > 0) {
-      remote.append(note(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
+      remote.append(note2(`Denied licenses: ${server.riskDeniedLicenses.join(", ")}`));
     }
     remote.append(
-      note("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
+      note2("Enabling the lookup contacts OSV.dev and deps.dev; inventory works without it.")
     );
     if (server.restartAvailable) {
       const restartButton = button2("Restart Strabo", () => {
@@ -10258,7 +10606,7 @@ function renderSettings(container, handlers = {}) {
       restartButton.title = "Relaunch the server process with the same arguments";
       remote.append(field("Server process", restartButton));
       remote.append(
-        note(
+        note2(
           "Stops this server process and starts a new one with the same arguments, so a code change takes effect. The page reloads once it is back."
         )
       );
@@ -10410,6 +10758,7 @@ function queryElements(doc = document) {
     tbReview: doc.getElementById("tb-review"),
     tbRisk: doc.getElementById("tb-risk"),
     tbBranches: doc.getElementById("tb-branches"),
+    tbCoverage: doc.getElementById("tb-coverage"),
     tbClear: doc.getElementById("tb-clear"),
     tbOverflow: doc.getElementById("tb-overflow"),
     tbOverflowMenu: doc.getElementById("tb-overflow-menu"),
@@ -10436,6 +10785,7 @@ function queryElements(doc = document) {
     passportPanel: doc.getElementById("passport-panel"),
     routePanel: doc.getElementById("route-panel"),
     blocksPanel: doc.getElementById("blocks-panel"),
+    coveragePanel: doc.getElementById("coverage-panel"),
     sourcePanel: doc.getElementById("source-panel"),
     screenTabGraph: doc.getElementById("screen-tab-graph"),
     screenTabTerminal: doc.getElementById("screen-tab-terminal"),
@@ -11393,10 +11743,10 @@ function createGitController(app2) {
     await loadWorktrees();
     if (!app2.currentReview) {
       body.replaceChildren();
-      const note3 = document.createElement("p");
-      note3.className = "evidence";
-      note3.textContent = "Reviewing the working tree\u2026";
-      body.append(note3);
+      const note4 = document.createElement("p");
+      note4.className = "evidence";
+      note4.textContent = "Reviewing the working tree\u2026";
+      body.append(note4);
       showReview("").catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
@@ -11442,10 +11792,10 @@ function createGitController(app2) {
       return;
     }
     body.replaceChildren();
-    const note3 = document.createElement("p");
-    note3.className = "evidence";
-    note3.textContent = "Loading recorded history\u2026";
-    body.append(note3);
+    const note4 = document.createElement("p");
+    note4.className = "evidence";
+    note4.textContent = "Loading recorded history\u2026";
+    body.append(note4);
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
     const [result, history, drift] = await Promise.all([
@@ -12128,7 +12478,7 @@ function heading(level, text) {
   node.textContent = text;
   return node;
 }
-function note2(text, className = "overlay-note") {
+function note3(text, className = "overlay-note") {
   const node = document.createElement("p");
   node.className = className;
   node.textContent = text;
@@ -12139,8 +12489,8 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
   container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
   if (!route) {
     if (state2.error) {
-      container.append(note2("The reading route could not be loaded.", "unavailable"));
-      container.append(note2(state2.error, "route-error-detail"));
+      container.append(note3("The reading route could not be loaded.", "unavailable"));
+      container.append(note3(state2.error, "route-error-detail"));
       if (handlers.onRetry) {
         const retry = document.createElement("button");
         retry.type = "button";
@@ -12151,14 +12501,14 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
         container.append(retry);
       }
     } else {
-      container.append(note2("No reading route was recorded for this repository.", "unavailable"));
+      container.append(note3("No reading route was recorded for this repository.", "unavailable"));
     }
     return;
   }
   const steps = routeSteps(route);
   const index = clampRouteIndex(state2.index ?? 0, steps.length);
   if (route.truncated) {
-    container.append(note2(route.truncated, "route-truncated"));
+    container.append(note3(route.truncated, "route-truncated"));
   }
   const controls = document.createElement("div");
   controls.className = "route-controls";
@@ -12241,7 +12591,7 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
   }
   const summary = route.summary ?? {};
   container.append(
-    note2(
+    note3(
       `${summary.entryPoints ?? 0} entry point(s) \xB7 ${summary.routed ?? 0} routed \xB7 ${summary.unreached ?? 0} no entry point reaches \xB7 ${summary.units ?? 0} unit(s)`,
       "route-summary"
     )
@@ -12256,7 +12606,7 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
       heading("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
     );
     if (unit.summary?.roleEvidence) {
-      section2.append(note2(unit.summary.roleEvidence, "route-unit-why"));
+      section2.append(note3(unit.summary.roleEvidence, "route-unit-why"));
     }
     for (const step of unit.files ?? []) {
       const row = document.createElement("button");
@@ -12317,10 +12667,10 @@ function createRepositoryPanels(app2) {
     } catch (error) {
       workspaceReport = null;
       renderWorkspace(elements2.workspacePanel, null, { onClose: closeWorkspace });
-      const note3 = document.createElement("p");
-      note3.className = "unavailable";
-      note3.textContent = error.message;
-      elements2.workspacePanel.append(note3);
+      const note4 = document.createElement("p");
+      note4.className = "unavailable";
+      note4.textContent = error.message;
+      elements2.workspacePanel.append(note4);
     }
     app2.windows.refreshDock();
   }
@@ -12435,10 +12785,10 @@ function createRepositoryPanels(app2) {
       });
     } catch (error) {
       renderRepositoryPassport(elements2.passportPanel, null, { onClose: closePassport });
-      const note3 = document.createElement("p");
-      note3.className = "unavailable";
-      note3.textContent = error.message;
-      elements2.passportPanel.append(note3);
+      const note4 = document.createElement("p");
+      note4.className = "unavailable";
+      note4.textContent = error.message;
+      elements2.passportPanel.append(note4);
     }
     app2.windows.refreshDock();
   }
@@ -12570,6 +12920,130 @@ function createRepositoryPanels(app2) {
   };
 }
 
+// ui/strabo-coverage.js
+function createCoverage(app2) {
+  const { state: state2, elements: elements2 } = app2;
+  let subject = { scope: "project", folder: null };
+  let panelReport = null;
+  let panelToken = 0;
+  let fileToken = 0;
+  function coverageQuery(extra = {}) {
+    const params = new URLSearchParams(extra);
+    if (state2.repository) {
+      params.set("repository", state2.repository);
+    }
+    const query = params.toString();
+    return query ? `?${query}` : "";
+  }
+  const handlers = {
+    onOpenProject: () => {
+      loadProject();
+    },
+    onOpenFolder: (folder) => {
+      loadFolder(folder);
+    },
+    onSelect: (id) => app2.selection?.selectNode(id),
+    onRetry: () => {
+      if (subject.scope === "folder" && subject.folder) {
+        loadFolder(subject.folder);
+      } else {
+        loadProject();
+      }
+    }
+  };
+  function renderPanel() {
+    renderCoverageReport(elements2.coveragePanel, panelReport, handlers);
+  }
+  async function showCoverage() {
+    elements2.coveragePanel.hidden = false;
+    await loadProject();
+    app2.windows?.refreshDock();
+  }
+  async function loadProject() {
+    subject = { scope: "project", folder: null };
+    const token = panelToken += 1;
+    panelReport = { loading: true };
+    renderPanel();
+    try {
+      const report = await app2.request(`/analysis/coverage/project${coverageQuery()}`);
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = report;
+    } catch (error) {
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = { error: error.message };
+    }
+    renderPanel();
+  }
+  async function loadFolder(folder) {
+    subject = { scope: "folder", folder };
+    const token = panelToken += 1;
+    panelReport = { loading: true };
+    renderPanel();
+    try {
+      const report = await app2.request(
+        `/analysis/coverage/folder${coverageQuery({ folder })}`
+      );
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = report;
+    } catch (error) {
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = { error: error.message };
+    }
+    renderPanel();
+  }
+  async function loadFileCoverage(id, asFile = true) {
+    const section2 = elements2.inspector?.querySelector('[data-role="coverage"]');
+    if (!section2 || !id) {
+      return;
+    }
+    if (!asFile) {
+      renderCoverageFile(section2, {
+        unsupported: "Coverage is measured per file. Open the Coverage panel, or select a file on the map."
+      });
+      return;
+    }
+    const token = fileToken += 1;
+    try {
+      const report = await app2.request(
+        `/analysis/coverage/file${coverageQuery({ file: id })}`
+      );
+      if (token !== fileToken || app2.selected !== id) {
+        return;
+      }
+      renderCoverageFile(section2, report, { onSelect: (target) => app2.selection?.selectNode(target) });
+    } catch (error) {
+      if (token !== fileToken || app2.selected !== id) {
+        return;
+      }
+      renderCoverageFile(section2, { error: error.message }, {
+        onRetry: () => loadFileCoverage(id)
+      });
+    }
+  }
+  function closeCoverage() {
+    elements2.coveragePanel.hidden = true;
+    app2.windows?.refreshDock();
+  }
+  elements2.tbCoverage?.addEventListener("click", () => {
+    app2.floatingWindows?.find?.((controller) => controller.key === "coverage")?.toggle();
+  });
+  return {
+    closeCoverage,
+    loadFileCoverage,
+    loadFolder,
+    loadProject,
+    showCoverage
+  };
+}
+
 // ui/strabo-tier-panel.js
 function headerCell(text) {
   const cell = document.createElement("th");
@@ -12589,10 +13063,10 @@ function renderTierPanel(container, report, filter = "all") {
   const title = document.createElement("h3");
   title.textContent = "Tier lens";
   container.append(title);
-  const note3 = document.createElement("p");
-  note3.className = "overlay-note";
-  note3.textContent = tierSummaryLabel(report);
-  container.append(note3);
+  const note4 = document.createElement("p");
+  note4.className = "overlay-note";
+  note4.textContent = tierSummaryLabel(report);
+  container.append(note4);
   const rows = tierMatrixRows(report);
   if (rows.length === 0) {
     const empty = document.createElement("p");
@@ -12738,10 +13212,10 @@ function ensureDialog() {
   if (dialog) {
     return dialog;
   }
-  const element2 = document.createElement("dialog");
-  element2.id = "commit-dialog";
-  element2.className = "dialog prompt-dialog commit-dialog";
-  element2.setAttribute("aria-label", "Review the commit message before committing");
+  const element3 = document.createElement("dialog");
+  element3.id = "commit-dialog";
+  element3.className = "dialog prompt-dialog commit-dialog";
+  element3.setAttribute("aria-label", "Review the commit message before committing");
   const header = document.createElement("header");
   header.className = "dialog-header";
   const heading2 = document.createElement("strong");
@@ -12752,7 +13226,7 @@ function ensureDialog() {
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
-  close.addEventListener("click", () => element2.close());
+  close.addEventListener("click", () => element3.close());
   header.append(heading2, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
@@ -12785,7 +13259,7 @@ function ensureDialog() {
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => element2.close());
+  cancel.addEventListener("click", () => element3.close());
   const confirm2 = document.createElement("button");
   confirm2.type = "button";
   confirm2.className = "primary commit-confirm";
@@ -12793,10 +13267,10 @@ function ensureDialog() {
   confirm2.addEventListener("click", () => void submit());
   actions.append(cancel, confirm2);
   footer.append(left, actions);
-  element2.append(header, target, status, text, footer);
-  document.body.append(element2);
-  dialog = element2;
-  return element2;
+  element3.append(header, target, status, text, footer);
+  document.body.append(element3);
+  dialog = element3;
+  return element3;
 }
 async function generateMessage() {
   if (!dialog || !context) {
@@ -12871,15 +13345,15 @@ async function submit() {
   }
 }
 function openCommitDialog({ repository, onCommitted } = {}) {
-  const element2 = ensureDialog();
+  const element3 = ensureDialog();
   context = { repository: repository ?? null, onCommitted };
-  element2.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
-  element2.querySelector(".commit-message").value = "";
-  const status = element2.querySelector(".commit-status");
+  element3.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
+  element3.querySelector(".commit-message").value = "";
+  const status = element3.querySelector(".commit-status");
   status.classList.remove("is-error");
   status.textContent = "Generating a message with the narrator\u2026";
-  if (!element2.open) {
-    element2.showModal();
+  if (!element3.open) {
+    element3.showModal();
   }
   void generateMessage();
 }
@@ -22995,11 +23469,17 @@ function panes(root) {
   walk(root);
   return out;
 }
+function countPanes(root) {
+  return panes(root).length;
+}
 function findPane(root, paneId) {
   return panes(root).find((leaf) => leaf.paneId === paneId) ?? null;
 }
 function paneForSession(root, sessionId) {
   return panes(root).find((leaf) => leaf.sessionId === sessionId) ?? null;
+}
+function emptyPaneIds(root) {
+  return panes(root).filter((leaf) => !leaf.sessionId).map((leaf) => leaf.paneId);
 }
 function splitPane(root, paneId, direction, newPaneId) {
   const result = replaceLeaf(root, paneId, (leaf) => ({
@@ -23021,6 +23501,30 @@ function detachSession(root, sessionId) {
     root,
     (node) => node.type === "leaf" && node.sessionId === sessionId ? { ...node, sessionId: null } : node
   );
+}
+function closePane(root, paneId) {
+  const close = (node) => {
+    if (!node) {
+      return { node: null, changed: false };
+    }
+    if (node.type === "leaf") {
+      return node.paneId === paneId ? { node: null, changed: true } : { node, changed: false };
+    }
+    const a = close(node.a);
+    const b2 = close(node.b);
+    if (!a.changed && !b2.changed) {
+      return { node, changed: false };
+    }
+    if (!a.node) {
+      return { node: b2.node, changed: true };
+    }
+    if (!b2.node) {
+      return { node: a.node, changed: true };
+    }
+    return { node: { ...node, a: a.node, b: b2.node }, changed: true };
+  };
+  const result = close(root);
+  return result.changed ? result.node : null;
 }
 function setRatio(root, splitId, ratio) {
   const value = Number(ratio);
@@ -23107,6 +23611,10 @@ function tabBadge(meta) {
     return { className: "is-watch", label: "watching" };
   }
   return { className: "is-running", label: "running" };
+}
+function inactiveSessionIds(sessions, activeId, keepIds = []) {
+  const keep = /* @__PURE__ */ new Set([activeId, ...keepIds]);
+  return (sessions ?? []).filter((session) => session?.id && session.status !== "running" && !keep.has(session.id)).map((session) => session.id);
 }
 function orderSessions(sessions, order) {
   const byId = new Map((sessions ?? []).map((session) => [session.id, session]));
@@ -24193,6 +24701,55 @@ function initTerminalScreen(container, hooks = {}) {
       hooks.closeTerminal();
     }
   }
+  function closeInactiveSessions() {
+    const keepPanes = panes(layout).map((leaf) => leaf.sessionId).filter((id) => id && id !== activeSessionId());
+    const ids = inactiveSessionIds(listSessions(), activeSessionId(), keepPanes);
+    if (ids.length === 0) {
+      notify("No inactive sessions to close.");
+      return 0;
+    }
+    for (const id of ids) {
+      closeSession(id);
+    }
+    notify(`Closed ${ids.length} inactive session${ids.length === 1 ? "" : "s"}.`);
+    return ids.length;
+  }
+  function closeEmptyPanes() {
+    const ids = emptyPaneIds(layout);
+    const removable = ids.length >= countPanes(layout) ? ids.slice(0, -1) : ids;
+    if (removable.length === 0) {
+      return 0;
+    }
+    for (const paneId of removable) {
+      const next = closePane(layout, paneId);
+      if (!next) {
+        break;
+      }
+      layout = next;
+    }
+    const active = findPane(layout, activePaneId);
+    if (!active) {
+      activePaneId = panes(layout)[0]?.paneId ?? activePaneId;
+    }
+    renderLayoutDom();
+    render();
+    fitVisible();
+    persistSoon();
+    return removable.length;
+  }
+  function closeInactiveAndEmpty() {
+    const sessions = closeInactiveSessions();
+    const panesClosed = closeEmptyPanes();
+    if (sessions === 0 && panesClosed === 0) {
+      notify("No inactive sessions or empty panes to close.");
+      return 0;
+    }
+    const parts = [];
+    if (sessions > 0) parts.push(`${sessions} inactive session${sessions === 1 ? "" : "s"}`);
+    if (panesClosed > 0) parts.push(`${panesClosed} empty pane${panesClosed === 1 ? "" : "s"}`);
+    notify(`Closed ${parts.join(" and ")}.`);
+    return sessions + panesClosed;
+  }
   async function splitActive(direction) {
     ensureRestored();
     const target = findPane(layout, activePaneId) ? activePaneId : panes(layout)[0]?.paneId;
@@ -24279,7 +24836,11 @@ function initTerminalScreen(container, hooks = {}) {
     const splitButton = toolbarButton("\u25EB", "Split pane", "Ctrl+Shift+E", () => {
       splitActive("row").catch(handleError);
     });
-    toolbarEl.append(newButton, runButton, spacer, splitButton);
+    const closeInactiveButton = toolbarButton("\u232B", "Close inactive sessions and empty panes", "exited, failed, or empty", () => {
+      closeInactiveAndEmpty();
+    });
+    closeInactiveButton.classList.add("terminal-close-inactive");
+    toolbarEl.append(newButton, runButton, spacer, splitButton, closeInactiveButton);
   }
   function openRunMenu(anchor) {
     loadPresets(resolveRepo().root).then(
@@ -24413,6 +24974,12 @@ function initTerminalScreen(container, hooks = {}) {
       return id ? metas.get(id) ?? null : null;
     },
     openSession,
+    /** Close every exited or failed session in one pass, sparing the active and visible ones. */
+    closeInactiveSessions,
+    /** Collapse every empty "No session" pane, keeping one when nothing else is left. */
+    closeEmptyPanes,
+    /** Tidy up in one click: inactive sessions, then the empty panes they leave behind. */
+    closeInactiveAndEmpty,
     destroy() {
       clearTimeout(persistTimer);
       persistTimer = null;
@@ -24448,11 +25015,11 @@ function ensureElement(container, id, className) {
   if (existing) {
     return existing;
   }
-  const element2 = document.createElement("div");
-  element2.id = id;
-  element2.className = className;
-  container.append(element2);
-  return element2;
+  const element3 = document.createElement("div");
+  element3.id = id;
+  element3.className = className;
+  container.append(element3);
+  return element3;
 }
 
 // ui/strabo-terminal-bridge.js
@@ -24588,33 +25155,33 @@ function writeStore(key, value) {
   } catch {
   }
 }
-function initFloatingToolbar(element2, options = {}) {
-  if (!element2) return null;
+function initFloatingToolbar(element3, options = {}) {
+  if (!element3) return null;
   const storageKey = options.storageKey ?? STORAGE_KEY;
   const minWidth = options.minWidth ?? MIN_WIDTH;
   const dock = options.dock ?? null;
   const dockReach = options.dockReach ?? DOCK_REACH;
-  const floatParent = element2.parentElement ?? document.body;
+  const floatParent = element3.parentElement ?? document.body;
   const saved = readStore(storageKey);
   const grip = document.createElement("span");
   grip.className = "tb-grip";
   grip.setAttribute("aria-hidden", "true");
   grip.title = "Drag to move the toolbar";
   grip.textContent = "\u283F";
-  element2.prepend(grip);
+  element3.prepend(grip);
   const resize = document.createElement("span");
   resize.className = "tb-resize";
   resize.setAttribute("aria-hidden", "true");
   resize.title = "Drag to resize";
-  element2.append(resize);
+  element3.append(resize);
   let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
-  const isDocked = () => element2.classList.contains("is-docked");
+  const isDocked = () => element3.classList.contains("is-docked");
   const applyWidth = () => {
     if (isDocked()) {
-      element2.style.width = "";
+      element3.style.width = "";
       return;
     }
-    if (width) element2.style.width = `${width}px`;
+    if (width) element3.style.width = `${width}px`;
   };
   const containerSize = () => {
     const rail = floatParent.querySelector?.(":scope > .float-dock");
@@ -24626,35 +25193,35 @@ function initFloatingToolbar(element2, options = {}) {
     };
   };
   const place = (left, top) => {
-    const rect = element2.getBoundingClientRect();
+    const rect = element3.getBoundingClientRect();
     const { boundWidth, boundHeight } = containerSize();
     const clamped = clampToolbarPosition(left, top, {
-      width: element2.offsetWidth || rect.width,
-      height: element2.offsetHeight || rect.height,
+      width: element3.offsetWidth || rect.width,
+      height: element3.offsetHeight || rect.height,
       boundWidth,
       boundHeight
     });
-    element2.style.left = `${clamped.left}px`;
-    element2.style.top = `${clamped.top}px`;
-    element2.style.bottom = "auto";
-    element2.style.right = "auto";
-    element2.style.transform = "none";
+    element3.style.left = `${clamped.left}px`;
+    element3.style.top = `${clamped.top}px`;
+    element3.style.bottom = "auto";
+    element3.style.right = "auto";
+    element3.style.transform = "none";
     updateMenuDirection();
   };
   const updateMenuDirection = () => {
     if (isDocked()) {
-      element2.classList.add("opens-up");
+      element3.classList.add("opens-up");
       return;
     }
-    const rect = element2.getBoundingClientRect();
+    const rect = element3.getBoundingClientRect();
     const parentRect = floatParent.getBoundingClientRect();
     const center = rect.top - parentRect.top + rect.height / 2;
     const { boundHeight } = containerSize();
-    element2.classList.toggle("opens-up", center > boundHeight / 2);
+    element3.classList.toggle("opens-up", center > boundHeight / 2);
   };
   function persist() {
-    const left = parseFloat(element2.style.left);
-    const top = parseFloat(element2.style.top);
+    const left = parseFloat(element3.style.left);
+    const top = parseFloat(element3.style.top);
     writeStore(storageKey, {
       docked: isDocked(),
       left: Number.isFinite(left) ? left : null,
@@ -24664,22 +25231,22 @@ function initFloatingToolbar(element2, options = {}) {
   }
   function dockElement() {
     if (!dock || isDocked()) return;
-    element2.classList.add("is-docked");
-    element2.style.left = "";
-    element2.style.top = "";
-    element2.style.bottom = "";
-    element2.style.right = "";
+    element3.classList.add("is-docked");
+    element3.style.left = "";
+    element3.style.top = "";
+    element3.style.bottom = "";
+    element3.style.right = "";
     const meta = dock.querySelector(".bottom-meta");
-    if (meta) dock.insertBefore(element2, meta);
-    else dock.append(element2);
+    if (meta) dock.insertBefore(element3, meta);
+    else dock.append(element3);
     applyWidth();
     updateMenuDirection();
     persist();
   }
   function undockElement() {
     if (!isDocked()) return;
-    element2.classList.remove("is-docked");
-    floatParent.append(element2);
+    element3.classList.remove("is-docked");
+    floatParent.append(element3);
     applyWidth();
   }
   if (saved.docked && dock) {
@@ -24692,7 +25259,7 @@ function initFloatingToolbar(element2, options = {}) {
   applyWidth();
   grip.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    const rect = element2.getBoundingClientRect();
+    const rect = element3.getBoundingClientRect();
     const grabOffsetX = event.clientX - rect.left;
     const grabOffsetY = event.clientY - rect.top;
     let overDock = false;
@@ -24737,9 +25304,9 @@ function initFloatingToolbar(element2, options = {}) {
   resize.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || isDocked()) return;
     const startX = event.clientX;
-    const startWidth = element2.getBoundingClientRect().width;
+    const startWidth = element3.getBoundingClientRect().width;
     const { boundWidth } = containerSize();
-    const left = parseFloat(element2.style.left);
+    const left = parseFloat(element3.style.left);
     const maxWidth = Math.max(minWidth, boundWidth - (Number.isFinite(left) ? left : 0) - GAP);
     resize.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
@@ -24760,13 +25327,13 @@ function initFloatingToolbar(element2, options = {}) {
   });
   window.addEventListener("resize", () => {
     if (isDocked()) return;
-    if (Number.isFinite(parseFloat(element2.style.left))) {
-      place(parseFloat(element2.style.left), parseFloat(element2.style.top));
+    if (Number.isFinite(parseFloat(element3.style.left))) {
+      place(parseFloat(element3.style.left), parseFloat(element3.style.top));
     } else {
       updateMenuDirection();
     }
   });
-  return { element: element2, grip, resize, dock, isDocked, undock: undockElement };
+  return { element: element3, grip, resize, dock, isDocked, undock: undockElement };
 }
 
 // ui/strabo-chrome-menus.js
@@ -24836,7 +25403,7 @@ function createChromeMenus(app2) {
       });
       items[next].focus();
     });
-    for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk"]) {
+    for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk", "tb-coverage"]) {
       document.getElementById(id)?.addEventListener("click", () => closeOverflowMenu({ restoreFocus: true }));
     }
     document.addEventListener("click", (event) => {
@@ -25335,6 +25902,7 @@ function createSelectionController(app2) {
     });
     if (!app2.current?.system) {
       loadMembers(id);
+      app2.coverage?.loadFileCoverage(id, isFileNode(id));
     }
     app2.windows.refreshDock();
   }
@@ -25755,7 +26323,7 @@ function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP2 } 
 
 // ui/strabo-float-chrome.js
 function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, height = null }) {
-  const element2 = config.element;
+  const element3 = config.element;
   const win = document.createElement("section");
   win.className = "float-window";
   win.dataset.panel = config.key;
@@ -25797,8 +26365,8 @@ function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, heig
   resizeHandle.title = "Drag to resize";
   header.append(grip, title, spacer, collapseButton, closeButton);
   win.append(header, body, resizeHandle);
-  element2.parentNode.insertBefore(win, element2);
-  body.append(element2);
+  element3.parentNode.insertBefore(win, element3);
+  body.append(element3);
   return { win, header, title, collapseButton, closeButton, resizeHandle };
 }
 
@@ -25930,7 +26498,7 @@ function wireWindowGestures({
 
 // ui/strabo-float-window.js
 function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
-  const element2 = config.element;
+  const element3 = config.element;
   const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
   let size = sanitizeSize(saved.size);
   const width = size.width ?? config.width ?? DEFAULT_WIDTH;
@@ -25963,10 +26531,10 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     win.style.zIndex = String(nextZ());
   };
   const sync2 = () => {
-    const hidden = element2.hidden === true;
+    const hidden = element3.hidden === true;
     win.hidden = hidden;
     if (!hidden && config.titleFrom) {
-      const heading2 = config.titleFrom(element2);
+      const heading2 = config.titleFrom(element3);
       if (heading2) {
         title.textContent = heading2;
       }
@@ -25982,7 +26550,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       }
     }
   };
-  new MutationObserver(sync2).observe(element2, {
+  new MutationObserver(sync2).observe(element3, {
     attributes: true,
     attributeFilter: ["hidden"],
     childList: true,
@@ -25996,7 +26564,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
     pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
     window: win,
-    element: element2,
+    element: element3,
     isOpen: () => !win.hidden,
     isCollapsed,
     // Bring an already-open window to the top of the stack without the focus shift and
@@ -26008,7 +26576,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
         return false;
       }
       config.onOpen?.();
-      element2.hidden = false;
+      element3.hidden = false;
       win.hidden = false;
       if (!hasPosition()) {
         placeInRail();
@@ -26022,7 +26590,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     close() {
       const hadFocus = win.contains(document.activeElement);
       if (config.onClose) config.onClose();
-      else element2.hidden = true;
+      else element3.hidden = true;
       win.hidden = true;
       lastHidden = true;
       renderDock();
@@ -26111,7 +26679,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
   });
   win.addEventListener("pointerdown", raise, true);
   win.addEventListener("contextmenu", raise, true);
-  if (!hasPosition() && element2.hidden !== true) {
+  if (!hasPosition() && element3.hidden !== true) {
     placeInRail();
   }
   controllers.push(controller);
@@ -26471,6 +27039,21 @@ function createFloatingPanels(app2) {
         onClose: () => {
           elements2.blocksPanel.hidden = true;
         }
+      },
+      {
+        key: "coverage",
+        element: elements2.coveragePanel,
+        title: "Coverage",
+        dockLabel: "Coverage",
+        glyph: "\u25D4",
+        width: 580,
+        height: 640,
+        onOpen: () => {
+          app2.coverage.showCoverage().catch((error) => {
+            elements2.status.textContent = `Error: ${error.message}`;
+          });
+        },
+        onClose: () => app2.coverage.closeCoverage()
       }
     ]
   });
@@ -26579,6 +27162,7 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "r") elements2.tbReview.click();
     else if (key === "v") elements2.tbRisk.click();
     else if (key === "n") elements2.tbBranches.click();
+    else if (key === "d") elements2.tbCoverage?.click();
     else if (key === "g" && app2.groupSelection.length >= 2) elements2.tbDelegateGroup.click();
   });
 }
@@ -26695,6 +27279,7 @@ app.memberMap = createMemberMapController(app);
 app.git = createGitController(app);
 app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
+app.coverage = createCoverage(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
@@ -26998,6 +27583,8 @@ if (window.STRABO_TEST) {
     passport: () => app.panels.showPassport(),
     route: (file) => app.panels.showRoute(file),
     blocks: () => app.panels.showBlocks(),
+    coverage: () => app.coverage.showCoverage(),
+    coverageFolder: (folder) => app.coverage.loadFolder(folder),
     brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,

@@ -111,6 +111,8 @@ export function createSelectionController(app) {
     });
     if (!app.current?.system) {
       loadMembers(id);
+      // The Coverage tab loads on demand, like Members and Functions; a directory says so.
+      app.coverage?.loadFileCoverage(id, isFileNode(id));
     }
     app.windows.refreshDock();
   }

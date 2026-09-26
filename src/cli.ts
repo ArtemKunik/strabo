@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
 import { runCheckCommand } from './cli/check.ts';
+import { runCoverageCommand } from './cli/coverage.ts';
 import { runExportCommand } from './cli/export.ts';
 import { runReportCommand, runSummaryCommand } from './cli/report.ts';
 import { configFromEnv, readEnv } from './config.ts';
@@ -19,6 +20,7 @@ Usage:
   strabo report [path] --base <ref>   report a change against a base revision
   strabo report [path]                report the whole repository
   strabo summary [path]               the repository report, always repository-scoped
+  strabo coverage [path]              test coverage at project, folder (--folder), or file (--file)
   strabo mcp                          serve the recorded analysis over MCP (stdio)
 
 Export options:
@@ -36,6 +38,13 @@ Report options:
   --no-smells / --no-hotspots / --no-ownership / --no-drift   skip an analysis (named as not computed)
   --fail-on <rules>               fail only for these rules (cycle, tier, … or a strabo.rules id)
 
+Coverage options:
+  --file=<path>                   coverage for one file, with the tests that reach it
+  --folder=<path>                 coverage for a folder and its subtree
+  --threshold=<pct>               under-covered cut-off percent (default 50)
+  --format=json                   machine-readable result
+  --out=<file>                    write to a file instead of stdout
+
 Check rules (only the ones named can fail the build):
   --fail-on-cycles
   --fail-on-layer-violations
@@ -47,7 +56,7 @@ Check rules (only the ones named can fail the build):
   --format=json                   machine-readable result
 
 Environment: STRABO_ROOT, STRABO_CONFIG, STRABO_SCAN_CEILING, STRABO_STATE_DIR,
-STRABO_AUTO_REBUILD, PORT, STRABO_HOST
+STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, PORT, STRABO_HOST
 `;
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -61,6 +70,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return runReportCommand(rest);
     case 'summary':
       return runSummaryCommand(rest);
+    case 'coverage':
+      return runCoverageCommand(rest);
     case 'mcp':
       return runMcp(rest);
     case 'serve':

@@ -17,6 +17,15 @@ export {
 } from './strabo-panel-functions.js';
 
 export {
+  renderCoverageReport,
+  renderCoverageFile,
+  coverageEntryLabel,
+  coverageTotalsLabel,
+  coverageProvenanceText,
+  coverageSubjectLabel,
+} from './strabo-panel-coverage.js';
+
+export {
   renderNarrativeReply,
   renderNarrationPanel,
 } from './strabo-panel-narrative.js';

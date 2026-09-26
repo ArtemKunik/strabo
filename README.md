@@ -137,7 +137,7 @@ tools. Anything the scan cannot resolve stays a diagnostic, never an invented ed
 ## Headless use
 
 The same scan backs a CLI and an agent tool surface: `strabo export`, `strabo check`,
-`strabo report`, and `strabo mcp`. See [docs/CLI.md](docs/CLI.md); the MCP tools and their
+`strabo report`, `strabo coverage`, and `strabo mcp`. See [docs/CLI.md](docs/CLI.md); the MCP tools and their
 read-only boundary are in [docs/MCP.md](docs/MCP.md).
 
 ## Docs
@@ -146,7 +146,7 @@ read-only boundary are in [docs/MCP.md](docs/MCP.md).
 | -------- | ------ |
 | [docs/USAGE.md](docs/USAGE.md) | Install, run, environment, repository picker, Settings |
 | [docs/FEATURES.md](docs/FEATURES.md) | The map and every panel, with the evidence each reads |
-| [docs/CLI.md](docs/CLI.md) | `export`, `check`, `report`, `summary`, and MCP |
+| [docs/CLI.md](docs/CLI.md) | `export`, `check`, `report`, `summary`, `coverage`, and MCP |
 | [docs/MCP.md](docs/MCP.md) | MCP client config, tools, and the read-only boundary |
 | [docs/DESIGN.md](docs/DESIGN.md) | Boundary, architecture, graph contract, parsers, layout, non-goals |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | The phased plan and what is still pending |

@@ -92,6 +92,7 @@ export function shortcutSheet() {
     { keys: 'N', action: 'Branches' },
     { keys: 'R', action: 'Review working-tree changes' },
     { keys: 'V', action: 'Dependency risk' },
+    { keys: 'D', action: 'Test coverage by project, folder, and file' },
     { keys: 'G', action: 'Delegate the selected files' },
     { keys: '⌘K / ctrl-K', action: 'Filter paths' },
     { keys: 'Esc', action: 'Clear the selection or close a panel' },

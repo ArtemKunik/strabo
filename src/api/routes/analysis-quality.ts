@@ -2,7 +2,14 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { computeCoverage } from '../../analysis/coverage.ts';
+import {
+  fileCoverageReport,
+  folderCoverageReport,
+  normaliseFolder,
+  projectCoverageReport,
+} from '../../analysis/coverage-report.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
+import { UNDER_COVERED_THRESHOLD } from '../../analysis/file-coverage.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
 import { coverageProvenance } from '../../analysis/measured-coverage.ts';
@@ -48,6 +55,81 @@ export function createQualityRouter(context: AnalysisContext): Router {
         measured,
         reachable: { basis: 'reachable', ...computeCoverage(cached.report.graph) },
       });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Coverage at the three scopes: project, a folder subtree, and one file.
+   *
+   * Every figure comes from the same measured-or-reachable reading the map uses, so a file
+   * cannot be `measured` here and `reachable` elsewhere. A file the report does not name is
+   * `not in report`, never 0%. The optional `threshold` (percent) overrides the under-covered
+   * cut-off; it defaults to the published one.
+   */
+  router.get('/analysis/coverage/project', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      response.json(
+        projectCoverageReport(cached.report.graph, measured, coverageThreshold(request.query.threshold)),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.get('/analysis/coverage/folder', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const raw = typeof request.query.folder === 'string' ? request.query.folder : '';
+      if (!raw.trim()) {
+        response.status(400).json({ error: 'folder query parameter is required.' });
+        return;
+      }
+      const folder = normaliseFolder(raw);
+      const cached = await getCachedGraph(repository.root);
+      const hasFolder =
+        folder === '.' ||
+        cached.report.graph.nodes.some(
+          (node) => node.id === folder || node.id.startsWith(`${folder}/`),
+        );
+      if (!hasFolder) {
+        response.status(404).json({ error: `no scanned file sits in folder "${folder}".` });
+        return;
+      }
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      response.json(
+        folderCoverageReport(cached.report.graph, measured, folder, coverageThreshold(request.query.threshold)),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  router.get('/analysis/coverage/file', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const file = typeof request.query.file === 'string' ? request.query.file : '';
+      if (!file.trim()) {
+        response.status(400).json({ error: 'file query parameter is required.' });
+        return;
+      }
+      const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph, [file]);
+      const report = fileCoverageReport(
+        cached.report.graph,
+        measured,
+        file,
+        coverageThreshold(request.query.threshold),
+      );
+      if (!report) {
+        response.status(404).json({ error: `"${file}" is not a scanned file in this repository.` });
+        return;
+      }
+      response.json(report);
     } catch (error) {
       sendError(response, error);
     }
@@ -191,4 +273,10 @@ export function createQualityRouter(context: AnalysisContext): Router {
   });
 
   return router;
+}
+
+/** A 0-100 coverage threshold from the query, or the published default. */
+function coverageThreshold(value: unknown): number {
+  const parsed = typeof value === 'string' ? Number(value) : Number.NaN;
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : UNDER_COVERED_THRESHOLD;
 }

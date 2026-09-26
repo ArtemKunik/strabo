@@ -70,6 +70,7 @@ Canonical names and aliases share one implementation, so they cannot drift.
 | `strabo_impact` | `get_impact` | reverse-dependency impact of the pending change set or a revision, each affected file with its tier and unit |
 | `strabo_review` | `get_change_risk` | the pending working-tree change set and its rolled-up risk |
 | `strabo_path` | `get_dependency_path` | the shortest recorded path between two files, each hop with evidence |
+| `strabo_coverage` | `get_coverage` | test coverage at the project, folder, or file scope from the repository's own measured report, with test-reach as the labelled fallback |
 
 Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_dead_code`,
 `get_scope_fence` (changed paths outside a declared zone, plus inside changes imported from

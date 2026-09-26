@@ -56,6 +56,7 @@ const TOOL_ALIASES: ReadonlyArray<{ name: string; target: string }> = [
   { name: 'strabo_impact', target: 'get_impact' },
   { name: 'strabo_review', target: 'get_change_risk' },
   { name: 'strabo_path', target: 'get_dependency_path' },
+  { name: 'strabo_coverage', target: 'get_coverage' },
 ];
 
 interface PageOptions {
@@ -83,6 +84,12 @@ function baseQuery(args: Record<string, unknown>): Record<string, string> {
     query.repository = repository;
   }
   return query;
+}
+
+/** A numeric coverage threshold as a query value, or nothing so the endpoint default stands. */
+function thresholdExtra(args: Record<string, unknown>): Record<string, string> {
+  const value = args.threshold;
+  return typeof value === 'number' && Number.isFinite(value) ? { threshold: String(value) } : {};
 }
 
 function requiredArg(args: Record<string, unknown>, key: string): string {
@@ -539,6 +546,39 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         additionalProperties: false,
       },
       call: (args) => get(dispatch, '/analysis/passport', args),
+    },
+    {
+      name: 'get_coverage',
+      description:
+        'Test coverage at the project, folder, or file scope, read from the repository\'s own measured report (lcov, Cobertura, JaCoCo) with static test reach as the labelled fallback. Pass `file` for one file and the tests that reach it, `folder` for a subtree roll-up, or neither for the whole project. A file the report does not name is reported as not-in-report, never 0%.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file: { type: 'string', description: 'One file path for file-scope coverage.' },
+          folder: { type: 'string', description: 'A folder path for subtree coverage.' },
+          threshold: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            description: 'Under-covered cut-off percent; defaults to the published threshold (50).',
+          },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        additionalProperties: false,
+      },
+      call: (args) => {
+        const file = stringArg(args, 'file');
+        if (file) {
+          return get(dispatch, '/analysis/coverage/file', args, { file });
+        }
+        const folder = stringArg(args, 'folder');
+        if (folder) {
+          return get(dispatch, '/analysis/coverage/folder', args, { folder });
+        }
+        return get(dispatch, '/analysis/coverage/project', args, thresholdExtra(args));
+      },
     },
     {
       name: 'get_context',

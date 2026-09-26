@@ -34,6 +34,7 @@ import { createMemberMapController } from './strabo-member-map-controller.js';
 import { createGitController } from './strabo-git-controller.js';
 import { createSettingsController } from './strabo-settings-controller.js';
 import { createRepositoryPanels } from './strabo-repo-panels.js';
+import { createCoverage } from './strabo-coverage.js';
 import { createLensController } from './strabo-lens-controller.js';
 import { createRepositoryPicker } from './strabo-repositories.js';
 import { createSystemUnits } from './strabo-system-units.js';
@@ -189,6 +190,7 @@ app.memberMap = createMemberMapController(app);
 app.git = createGitController(app);
 app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
+app.coverage = createCoverage(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
@@ -552,6 +554,8 @@ if (window.STRABO_TEST) {
     passport: () => app.panels.showPassport(),
     route: (file) => app.panels.showRoute(file),
     blocks: () => app.panels.showBlocks(),
+    coverage: () => app.coverage.showCoverage(),
+    coverageFolder: (folder) => app.coverage.loadFolder(folder),
     brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,

@@ -82,7 +82,7 @@ export function createChromeMenus(app) {
       });
       items[next].focus();
     });
-    for (const id of ['tb-timeline', 'tb-branches', 'tb-review', 'tb-risk']) {
+    for (const id of ['tb-timeline', 'tb-branches', 'tb-review', 'tb-risk', 'tb-coverage']) {
       document.getElementById(id)?.addEventListener('click', () => closeOverflowMenu({ restoreFocus: true }));
     }
     document.addEventListener('click', (event) => {
