@@ -312,3 +312,97 @@ test('a Kotlin call on a value receiver is not claimed', async () => {
 
   assert.deepEqual(callPairs(edges), []);
 });
+
+test('extractKotlinFacts indexes type aliases and importable top-level members', async () => {
+  const source = [
+    'package com.acme.util',
+    '',
+    'typealias Rates = Map<String, Double>',
+    'val defaultPrefix = "acme"',
+    'private val hiddenPrefix = "secret"',
+    'fun helper() {}',
+    'private fun secret() {}',
+    'fun Builder.extensionFn() {}',
+    'class Holder { fun member() {} }',
+  ].join('\n');
+
+  const { facts } = await extractKotlinFacts('Util.kt', source);
+
+  assert.deepEqual(
+    facts.types.map((type) => type.name),
+    ['Rates', 'Holder'],
+  );
+  assert.deepEqual(
+    [...facts.members].sort(),
+    ['defaultPrefix', 'extensionFn', 'helper'].sort(),
+  );
+});
+
+test('a Kotlin top-level function import resolves to its file and wires the call', async () => {
+  const { edges, diagnostics } = await resolveSources({
+    'app/Main.kt': [
+      'package com.acme.app',
+      'import com.acme.util.jsonPrefsStore',
+      'fun run() {',
+      '    jsonPrefsStore<String>("k")',
+      '}',
+    ].join('\n'),
+    'util/Prefs.kt': [
+      'package com.acme.util',
+      'inline fun <reified T : Any> jsonPrefsStore(prefsName: String): List<T> = emptyList()',
+    ].join('\n'),
+  });
+
+  assert.ok(pairs(edges).has('app/Main.kt->util/Prefs.kt'));
+  assert.ok(callPairs(edges).includes('app/Main.kt->util/Prefs.kt'));
+  assert.equal(
+    diagnostics.some((item) => item.specifier === 'com.acme.util.jsonPrefsStore'),
+    false,
+  );
+});
+
+test('a Kotlin type alias import resolves to its file', async () => {
+  const { edges, diagnostics } = await resolveSources({
+    'api/Service.kt': [
+      'package com.acme.api',
+      'import com.acme.model.ExchangeRates',
+      'fun load(): ExchangeRates? = null',
+    ].join('\n'),
+    'model/CurrencyModels.kt': [
+      'package com.acme.model',
+      'typealias ExchangeRates = Map<String, Double>',
+    ].join('\n'),
+  });
+
+  assert.ok(pairs(edges).has('api/Service.kt->model/CurrencyModels.kt'));
+  assert.equal(diagnostics.length, 0);
+});
+
+test('a private Kotlin top-level member is not importable, so its import stays unresolved', async () => {
+  const { diagnostics } = await resolveSources({
+    'app/Main.kt': [
+      'package com.acme.app',
+      'import com.acme.util.hiddenPrefix',
+      'fun run(): String = hiddenPrefix',
+    ].join('\n'),
+    'util/Prefs.kt': [
+      'package com.acme.util',
+      'private val hiddenPrefix = "secret"',
+    ].join('\n'),
+  });
+
+  assert.ok(diagnostics.some((item) => item.specifier === 'com.acme.util.hiddenPrefix'));
+});
+
+test('scanRepository resolves Kotlin function, property, and type-alias imports', async () => {
+  const report = await scanRepository(fixture);
+  const resolved = pairs(report.graph.edges);
+  const settings = 'src/main/kotlin/com/acme/app/Settings.kt';
+  const prefs = 'src/main/kotlin/com/acme/util/Prefs.kt';
+
+  assert.ok(resolved.has(`${settings}->${prefs}`));
+  assert.equal(
+    report.graph.diagnostics.some((item) => item.specifier?.startsWith('com.acme.util.')),
+    false,
+  );
+});

@@ -53,6 +53,8 @@ export interface KotlinFileFacts {
   typeReferences: KotlinTypeReference[];
   /** Function names the file declares, so a call can be proven against this file. */
   functions: string[];
+  /** Importable top-level `fun` (including extensions) and `val`/`var` names. */
+  members: string[];
   calls: KotlinCall[];
 }
 
@@ -63,10 +65,12 @@ export interface KotlinExtraction {
 
 const PACKAGE_PATTERN = /^package\s+([\w.]+)/;
 
+// Type aliases bind a type-like name at the top level, so they resolve like a declaration.
 const KOTLIN_TYPE_DECLARATIONS = new Set([
   'class_declaration',
   'interface_declaration',
   'object_declaration',
+  'type_alias',
 ]);
 
 /** Parse one Kotlin file into its package, imports, declared types, and type references. */
@@ -79,6 +83,7 @@ export async function extractKotlinFacts(file: string, content: string): Promise
       types: [],
       typeReferences: [],
       functions: [],
+      members: [],
       calls: [],
     };
     const diagnostics: Diagnostic[] = [];
@@ -115,6 +120,7 @@ export async function extractKotlinFacts(file: string, content: string): Promise
     collectTypeReferences(tree.rootNode, references);
     facts.typeReferences = dedupeReferences(references);
     collectFunctions(tree.rootNode, facts.functions);
+    collectTopLevelMembers(tree.rootNode, facts.members);
     collectCalls(tree.rootNode, facts.calls);
 
     if (tree.rootNode.hasError) {
@@ -220,6 +226,37 @@ function collectFunctions(node: Node, out: string[]): void {
 }
 
 /**
+ * Collect the top-level declarations another file can import: `fun` (including extension
+ * functions) and `val`/`var`. `private` members are not importable, so they are skipped.
+ *
+ * A top-level import names one of these by its simple name (`pkg.name`), which is why the
+ * resolver needs them indexed separately from class/interface/object types.
+ */
+function collectTopLevelMembers(node: Node, out: string[]): void {
+  for (const child of node.namedChildren) {
+    if (child.type === 'function_declaration') {
+      if (visibilityOf(child) === 'private') {
+        continue;
+      }
+      const name = child.namedChildren.find((entry) => entry.type === 'simple_identifier')?.text;
+      if (name) {
+        out.push(name);
+      }
+    } else if (child.type === 'property_declaration') {
+      if (visibilityOf(child) === 'private') {
+        continue;
+      }
+      const name = child.namedChildren
+        .find((entry) => entry.type === 'variable_declaration')
+        ?.namedChildren.find((entry) => entry.type === 'simple_identifier')?.text;
+      if (name) {
+        out.push(name);
+      }
+    }
+  }
+}
+
+/**
  * Collect the call sites whose callee the syntax proves.
  *
  * `foo(...)` is bare; `Type.foo(...)` names the receiver. `this.foo()` is skipped (same-file)
@@ -251,6 +288,7 @@ function collectCalls(node: Node, out: KotlinCall[]): void {
 
 interface KotlinIndex {
   qualifiedTypes: Map<string, string>;
+  qualifiedMembers: Map<string, string>;
   packages: Map<string, Set<string>>;
   namespaces: Set<string>;
   simpleTypesByPackage: Map<string, Map<string, Set<string>>>;
@@ -258,6 +296,7 @@ interface KotlinIndex {
 
 function buildIndex(facts: KotlinFileFacts[]): KotlinIndex {
   const qualifiedTypes = new Map<string, string>();
+  const qualifiedMembers = new Map<string, string>();
   const packages = new Map<string, Set<string>>();
   const namespaces = new Set<string>();
   const simpleTypesByPackage = new Map<string, Map<string, Set<string>>>();
@@ -283,9 +322,13 @@ function buildIndex(facts: KotlinFileFacts[]): KotlinIndex {
         files.add(fileFacts.file);
       }
     }
+
+    for (const member of fileFacts.members ?? []) {
+      qualifiedMembers.set(`${fileFacts.package}.${member}`, fileFacts.file);
+    }
   }
 
-  return { qualifiedTypes, packages, namespaces, simpleTypesByPackage };
+  return { qualifiedTypes, qualifiedMembers, packages, namespaces, simpleTypesByPackage };
 }
 
 export interface KotlinResolution {
@@ -350,7 +393,10 @@ export function resolveKotlin(facts: KotlinFileFacts[]): KotlinResolution {
         reference.name,
         reference.name.slice(0, reference.name.lastIndexOf('.')),
       ].filter(Boolean);
-      const target = candidates.map((candidate) => index.qualifiedTypes.get(candidate)).find(Boolean);
+      // A type wins over a top-level member of the same name; both resolve to a file.
+      const target =
+        candidates.map((candidate) => index.qualifiedTypes.get(candidate)).find(Boolean) ??
+        candidates.map((candidate) => index.qualifiedMembers.get(candidate)).find(Boolean);
       if (target) {
         push(fileFacts.file, target, reference.line, reference.name, 'exact');
         continue;
@@ -445,10 +491,14 @@ function appendCallEdges(
           if (entry.wildcard || kotlinLocalName(entry) !== call.name) {
             continue;
           }
-          // A top-level function import names the function; its file is the parent path's type
-          // or module, which the import resolver already matched.
+          // A top-level function import names the function directly (`pkg.fn`); an import of a
+          // member function names a type then the function (`pkg.Type.fn`), whose parent is the
+          // type the import already matched.
           const parent = entry.name.slice(0, entry.name.lastIndexOf('.'));
-          const candidate = index.qualifiedTypes.get(entry.name) ?? index.qualifiedTypes.get(parent);
+          const candidate =
+            index.qualifiedMembers.get(entry.name) ??
+            index.qualifiedTypes.get(entry.name) ??
+            index.qualifiedTypes.get(parent);
           if (candidate && declares(candidate, call.name)) {
             target = candidate;
           }
