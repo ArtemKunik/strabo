@@ -10809,7 +10809,9 @@ function queryElements(doc = document) {
     reviewWorktree: doc.getElementById("review-worktree"),
     historyScreen: doc.getElementById("history-screen"),
     historyScreenBody: doc.getElementById("history-screen-body"),
-    historyScreenRefresh: doc.getElementById("history-screen-refresh")
+    historyScreenRefresh: doc.getElementById("history-screen-refresh"),
+    historyList: doc.getElementById("history-list"),
+    historyReview: doc.getElementById("history-review")
   };
 }
 
@@ -11375,6 +11377,9 @@ function createGitController(app2) {
   let worktreePinned = false;
   let worktreesFor = null;
   let worktrees = [];
+  let historyReviewTicket = 0;
+  let historyDiffTicket = 0;
+  let historyReviewData = null;
   async function toggleTimeline() {
     if (!elements2.timelinePanel.hidden) {
       elements2.timelinePanel.hidden = true;
@@ -11504,6 +11509,21 @@ function createGitController(app2) {
     if (match?.branch) return match.branch;
     return String(worktree).replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? worktree;
   }
+  async function fetchReview(query, commit = null, worktree = null) {
+    const data = await request2(`/analysis/review${reviewQuery(query, worktree)}`);
+    if (data.available === false) {
+      return data;
+    }
+    if (commit) {
+      try {
+        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
+        data.structural = await request2(`/analysis/structural-diff${diffQuery}`);
+      } catch (error) {
+        data.structural = { available: false, reason: "git-error", detail: error.message };
+      }
+    }
+    return data;
+  }
   async function showReview(query, commit = null, branchName = null, { fromHistory = false, worktree = selectedWorktree } = {}) {
     const entry = { query, commit, branchName, worktree };
     if (!fromHistory && currentReviewRequest) {
@@ -11519,7 +11539,7 @@ function createGitController(app2) {
     renderReviewLoading(elements2.reviewPanel, { onClose: closeReview, ...navigation });
     let data;
     try {
-      data = await request2(`/analysis/review${reviewQuery(query, worktree)}`);
+      data = await fetchReview(query, commit, worktree);
     } catch (error) {
       if (ticket === reviewTicket) {
         renderReview(elements2.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
@@ -11532,15 +11552,6 @@ function createGitController(app2) {
       elements2.reviewPanel.hidden = false;
       renderReview(elements2.reviewPanel, data, { onClose: closeReview, ...navigation });
       return;
-    }
-    if (commit) {
-      try {
-        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
-        data.structural = await request2(`/analysis/structural-diff${diffQuery}`);
-      } catch (error) {
-        data.structural = { available: false, reason: "git-error", detail: error.message };
-      }
-      if (ticket !== reviewTicket) return;
     }
     if (app2.narratorStatus === null) {
       app2.narratorStatus = await app2.narration.fetchNarratorStatus();
@@ -11795,15 +11806,16 @@ function createGitController(app2) {
     });
   });
   async function loadTimelineScreen() {
-    const body = elements2.historyScreenBody;
-    if (!body) {
+    const list = elements2.historyList;
+    if (!list) {
       return;
     }
-    body.replaceChildren();
+    closeHistoryReview();
+    list.replaceChildren();
     const note4 = document.createElement("p");
     note4.className = "evidence";
     note4.textContent = "Loading recorded history\u2026";
-    body.append(note4);
+    list.append(note4);
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
     const [result, history, drift] = await Promise.all([
@@ -11811,8 +11823,8 @@ function createGitController(app2) {
       request2(`/analysis/change-metrics/history${query}`).catch(() => null),
       request2(`/analysis/drift${driftQuery}`).catch(() => null)
     ]);
-    renderTimeline(body, result, (commit) => {
-      selectCommit(commit).catch((error) => {
+    renderTimeline(list, result, (commit) => {
+      selectHistoryCommit(commit).catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
     }, {
@@ -11820,6 +11832,128 @@ function createGitController(app2) {
       metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
       drift
     });
+  }
+  async function selectHistoryCommit(commit) {
+    selectedCommitHash = commit.hash;
+    markHistoryCommit(commit.hash);
+    await showHistoryReview(commit);
+  }
+  function markHistoryCommit(hash2) {
+    for (const item of elements2.historyList?.querySelectorAll("li") ?? []) {
+      const button3 = item.querySelector(".commit");
+      item.classList.toggle("selected-commit", Boolean(hash2) && button3?.dataset.hash === hash2);
+    }
+  }
+  async function showHistoryReview(commit) {
+    const pane = elements2.historyReview;
+    if (!pane) {
+      return;
+    }
+    historyReviewData = null;
+    historyDiffTicket += 1;
+    const ticket = ++historyReviewTicket;
+    elements2.historyScreenBody?.classList.add("is-split");
+    pane.hidden = false;
+    renderReviewLoading(pane, { onClose: closeHistoryReview });
+    let data;
+    try {
+      data = await fetchReview(`?base=${encodeURIComponent(commit.hash)}`, commit, null);
+    } catch (error) {
+      if (ticket !== historyReviewTicket) return;
+      renderReview(pane, { available: false, detail: error.message }, { onClose: closeHistoryReview });
+      elements2.status.textContent = `Error: ${error.message}`;
+      return;
+    }
+    if (ticket !== historyReviewTicket) return;
+    if (data.available !== false) {
+      if (app2.narratorStatus === null) {
+        app2.narratorStatus = await app2.narration.fetchNarratorStatus();
+      }
+      if (ticket !== historyReviewTicket) return;
+    }
+    historyReviewData = data;
+    renderReview(pane, data, historyReviewHandlers(data));
+    pane.scrollTop = 0;
+    if (data.available !== false) {
+      elements2.status.textContent = `Review ${commit.shortHash}: ${reviewOverlay(data).summary}`;
+    }
+  }
+  function historyReviewHandlers(data) {
+    return {
+      onClose: closeHistoryReview,
+      onSelect: (id) => selectFromReview(id),
+      onOpenDiff: (file, entry) => showHistoryDiff(data, file, entry),
+      narratorStatus: app2.narratorStatus,
+      onNarrate: () => app2.narration.narrateReview(data),
+      onOpenNarratorSettings: app2.settings.openNarratorSettings
+    };
+  }
+  function showHistoryDiff(data, file, entry) {
+    const pane = elements2.historyReview;
+    if (!pane) {
+      return;
+    }
+    const ticket = ++historyDiffTicket;
+    const spec = reviewDiffSpec(data, file);
+    pane.replaceChildren();
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "link";
+    back.dataset.role = "history-diff-back";
+    back.textContent = "\u2190 Back to review";
+    back.addEventListener("click", () => {
+      if (!historyReviewData) return;
+      historyDiffTicket += 1;
+      renderReview(pane, historyReviewData, historyReviewHandlers(historyReviewData));
+      pane.scrollTop = 0;
+    });
+    pane.append(back);
+    const host2 = document.createElement("div");
+    pane.append(host2);
+    const view3 = {
+      file,
+      ref: spec.ref ?? null,
+      status: entry?.status ?? null,
+      mode: "diff",
+      loading: true,
+      error: null,
+      diff: null,
+      hasDiff: false
+    };
+    renderSource(host2, view3, { onClose: closeHistoryReview });
+    const query = new URLSearchParams({ file });
+    if (state2.repository) {
+      query.set("repository", state2.repository);
+    }
+    for (const [key, value] of Object.entries(spec)) {
+      query.set(key, String(value));
+    }
+    request2(`/diff?${query.toString()}`).then((body) => {
+      if (ticket !== historyDiffTicket) return;
+      if (body.available === false) view3.error = body.detail ?? body.reason;
+      else view3.diff = body.diff;
+      view3.loading = false;
+      renderSource(host2, view3, { onClose: closeHistoryReview });
+      pane.scrollTop = 0;
+    }).catch((error) => {
+      if (ticket !== historyDiffTicket) return;
+      view3.error = error.message;
+      view3.loading = false;
+      renderSource(host2, view3, { onClose: closeHistoryReview });
+    });
+  }
+  function closeHistoryReview() {
+    historyReviewTicket += 1;
+    historyDiffTicket += 1;
+    historyReviewData = null;
+    selectedCommitHash = null;
+    const pane = elements2.historyReview;
+    if (pane) {
+      pane.hidden = true;
+      pane.replaceChildren();
+    }
+    elements2.historyScreenBody?.classList.remove("is-split");
+    markHistoryCommit(null);
   }
   function openHistoryScreen() {
     loadTimelineScreen().catch((error) => {

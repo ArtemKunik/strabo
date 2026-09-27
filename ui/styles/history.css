@@ -58,6 +58,38 @@
   word-break: break-word;
 }
 
+/* The History screen as a split view: the recorded commits stay on the left while the
+   selected commit's full review opens on the right, so a commit is reviewed in place
+   instead of in a floating window that the full-screen tab would hide. */
+.git-screen-body.history-screen-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  overflow: hidden;             /* each pane is its own scroll container */
+}
+
+.git-screen-body.history-screen-body.is-split {
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 1.6fr);
+}
+
+.history-list,
+.history-review {
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.history-review {
+  border-left: 1px solid var(--line);
+  background: var(--bg-0);
+}
+
+.history-review[hidden] {
+  display: none;
+}
+
 /* Architecture drift: one line per structural measure, then a bounded key that names each
    line, shows its newest and oldest value, and never overflows the screen. */
 .drift-chart {

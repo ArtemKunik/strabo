@@ -10,6 +10,7 @@ import {
   renderReview,
   renderReviewLoading,
   renderRisk,
+  renderSource,
   renderTimeline,
 } from './strabo-panels.js';
 import { API_PATH, reviewOverlay, riskSummary } from './strabo-core.js';
@@ -43,6 +44,15 @@ export function createGitController(app) {
 
   /** The repository's worktrees, its main root first. */
   let worktrees = [];
+
+  /** Bumped by every inline History review and by closing, so a late response is dropped. */
+  let historyReviewTicket = 0;
+
+  /** Bumped by every inline History diff, so a late diff does not replace a newer view. */
+  let historyDiffTicket = 0;
+
+  /** The review shown in the History screen's right pane, so a diff can step back to it. */
+  let historyReviewData = null;
 
   /** Show or hide recorded changes; selecting one compares it with the working tree. */
   async function toggleTimeline() {
@@ -210,6 +220,27 @@ export function createGitController(app) {
   }
 
   /**
+   * Load a Git review, plus — for a commit — its structural diff, which compares two
+   * revisions and so can name the structural events. Shared by the floating Review panel
+   * and the inline History review, so both read the same evidence.
+   */
+  async function fetchReview(query, commit = null, worktree = null) {
+    const data = await request(`/analysis/review${reviewQuery(query, worktree)}`);
+    if (data.available === false) {
+      return data;
+    }
+    if (commit) {
+      try {
+        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
+        data.structural = await request(`/analysis/structural-diff${diffQuery}`);
+      } catch (error) {
+        data.structural = { available: false, reason: 'git-error', detail: error.message };
+      }
+    }
+    return data;
+  }
+
+  /**
    * Load a Git review and annotate the map with its change and impact classes.
    *
    * `query` is either empty (working tree) or `?base=<ref>` (that commit's own changes).
@@ -234,7 +265,7 @@ export function createGitController(app) {
     renderReviewLoading(elements.reviewPanel, { onClose: closeReview, ...navigation });
     let data;
     try {
-      data = await request(`/analysis/review${reviewQuery(query, worktree)}`);
+      data = await fetchReview(query, commit, worktree);
     } catch (error) {
       if (ticket === reviewTicket) {
         renderReview(elements.reviewPanel, { available: false, detail: error.message }, { onClose: closeReview, ...navigation });
@@ -249,18 +280,6 @@ export function createGitController(app) {
       elements.reviewPanel.hidden = false;
       renderReview(elements.reviewPanel, data, { onClose: closeReview, ...navigation });
       return;
-    }
-
-    // A commit review compares two revisions, so the Structure section can name the
-    // structural events. The document is the one `strabo report` prints.
-    if (commit) {
-      try {
-        const diffQuery = reviewQuery(`?base=${encodeURIComponent(commit.hash)}`, null);
-        data.structural = await request(`/analysis/structural-diff${diffQuery}`);
-      } catch (error) {
-        data.structural = { available: false, reason: 'git-error', detail: error.message };
-      }
-      if (ticket !== reviewTicket) return;
     }
 
     // The review's narrator affordance needs the status before it renders.
@@ -613,20 +632,21 @@ export function createGitController(app) {
   });
 
   /**
-   * The full-screen History tab: the recorded commits and the architecture-drift chart,
-   * rendered at full width and kept separate from the floating Timeline panel so opening the
-   * tab never triggers a second history pass for the same repository.
+   * The full-screen History tab: the recorded commits and the architecture-drift chart on the
+   * left, and — once a commit is picked — its full review on the right. Kept separate from the
+   * floating Timeline panel so opening the tab never triggers a second history pass.
    */
   async function loadTimelineScreen() {
-    const body = elements.historyScreenBody;
-    if (!body) {
+    const list = elements.historyList;
+    if (!list) {
       return;
     }
-    body.replaceChildren();
+    closeHistoryReview();
+    list.replaceChildren();
     const note = document.createElement('p');
     note.className = 'evidence';
     note.textContent = 'Loading recorded history…';
-    body.append(note);
+    list.append(note);
     const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
     const driftQuery = state.repository
       ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
@@ -636,8 +656,8 @@ export function createGitController(app) {
       request(`/analysis/change-metrics/history${query}`).catch(() => null),
       request(`/analysis/drift${driftQuery}`).catch(() => null),
     ]);
-    renderTimeline(body, result, (commit) => {
-      selectCommit(commit).catch((error) => {
+    renderTimeline(list, result, (commit) => {
+      selectHistoryCommit(commit).catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
       });
     }, {
@@ -645,6 +665,151 @@ export function createGitController(app) {
       metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
       drift,
     });
+  }
+
+  /** Select a commit in the History list and open its full review in the pane beside it. */
+  async function selectHistoryCommit(commit) {
+    selectedCommitHash = commit.hash;
+    markHistoryCommit(commit.hash);
+    await showHistoryReview(commit);
+  }
+
+  /** Mark which commit the History list shows as selected, without re-rendering the list. */
+  function markHistoryCommit(hash) {
+    for (const item of elements.historyList?.querySelectorAll('li') ?? []) {
+      const button = item.querySelector('.commit');
+      item.classList.toggle('selected-commit', Boolean(hash) && button?.dataset.hash === hash);
+    }
+  }
+
+  /**
+   * Load and render a commit's full review in the History screen's right pane. This mirrors the
+   * floating Review panel's evidence, but renders in place so the commit is reviewed without
+   * leaving the History tab (whose full-screen layout hides the floating panel).
+   */
+  async function showHistoryReview(commit) {
+    const pane = elements.historyReview;
+    if (!pane) {
+      return;
+    }
+    historyReviewData = null;
+    historyDiffTicket += 1;
+    const ticket = ++historyReviewTicket;
+    elements.historyScreenBody?.classList.add('is-split');
+    pane.hidden = false;
+    renderReviewLoading(pane, { onClose: closeHistoryReview });
+    let data;
+    try {
+      data = await fetchReview(`?base=${encodeURIComponent(commit.hash)}`, commit, null);
+    } catch (error) {
+      if (ticket !== historyReviewTicket) return;
+      renderReview(pane, { available: false, detail: error.message }, { onClose: closeHistoryReview });
+      elements.status.textContent = `Error: ${error.message}`;
+      return;
+    }
+    if (ticket !== historyReviewTicket) return;
+    if (data.available !== false) {
+      // The review's narrator affordance needs the status before it renders.
+      if (app.narratorStatus === null) {
+        app.narratorStatus = await app.narration.fetchNarratorStatus();
+      }
+      if (ticket !== historyReviewTicket) return;
+    }
+    historyReviewData = data;
+    renderReview(pane, data, historyReviewHandlers(data));
+    pane.scrollTop = 0;
+    if (data.available !== false) {
+      elements.status.textContent = `Review ${commit.shortHash}: ${reviewOverlay(data).summary}`;
+    }
+  }
+
+  /** The handler set the inline History review needs; its Diff opens in the same pane. */
+  function historyReviewHandlers(data) {
+    return {
+      onClose: closeHistoryReview,
+      onSelect: (id) => selectFromReview(id),
+      onOpenDiff: (file, entry) => showHistoryDiff(data, file, entry),
+      narratorStatus: app.narratorStatus,
+      onNarrate: () => app.narration.narrateReview(data),
+      onOpenNarratorSettings: app.settings.openNarratorSettings,
+    };
+  }
+
+  /**
+   * Render one changed file's diff into the History pane, over the review. A Back control
+   * restores the review from the loaded result, so stepping between them costs no re-fetch.
+   */
+  function showHistoryDiff(data, file, entry) {
+    const pane = elements.historyReview;
+    if (!pane) {
+      return;
+    }
+    const ticket = ++historyDiffTicket;
+    const spec = reviewDiffSpec(data, file);
+    pane.replaceChildren();
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'link';
+    back.dataset.role = 'history-diff-back';
+    back.textContent = '← Back to review';
+    back.addEventListener('click', () => {
+      if (!historyReviewData) return;
+      historyDiffTicket += 1;
+      renderReview(pane, historyReviewData, historyReviewHandlers(historyReviewData));
+      pane.scrollTop = 0;
+    });
+    pane.append(back);
+
+    const host = document.createElement('div');
+    pane.append(host);
+    const view = {
+      file,
+      ref: spec.ref ?? null,
+      status: entry?.status ?? null,
+      mode: 'diff',
+      loading: true,
+      error: null,
+      diff: null,
+      hasDiff: false,
+    };
+    renderSource(host, view, { onClose: closeHistoryReview });
+    const query = new URLSearchParams({ file });
+    if (state.repository) {
+      query.set('repository', state.repository);
+    }
+    for (const [key, value] of Object.entries(spec)) {
+      query.set(key, String(value));
+    }
+    request(`/diff?${query.toString()}`)
+      .then((body) => {
+        if (ticket !== historyDiffTicket) return;
+        if (body.available === false) view.error = body.detail ?? body.reason;
+        else view.diff = body.diff;
+        view.loading = false;
+        renderSource(host, view, { onClose: closeHistoryReview });
+        pane.scrollTop = 0;
+      })
+      .catch((error) => {
+        if (ticket !== historyDiffTicket) return;
+        view.error = error.message;
+        view.loading = false;
+        renderSource(host, view, { onClose: closeHistoryReview });
+      });
+  }
+
+  /** Close the inline History review and return the commit list to full width. */
+  function closeHistoryReview() {
+    historyReviewTicket += 1;
+    historyDiffTicket += 1;
+    historyReviewData = null;
+    selectedCommitHash = null;
+    const pane = elements.historyReview;
+    if (pane) {
+      pane.hidden = true;
+      pane.replaceChildren();
+    }
+    elements.historyScreenBody?.classList.remove('is-split');
+    markHistoryCommit(null);
   }
 
   /**

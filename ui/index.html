@@ -376,7 +376,10 @@
           <span class="tb-spacer"></span>
           <button id="history-screen-refresh" type="button" title="Reload the recorded history">Refresh</button>
         </div>
-        <div id="history-screen-body" class="git-screen-body" role="tabpanel" aria-label="Recorded Git history"></div>
+        <div id="history-screen-body" class="git-screen-body history-screen-body" role="tabpanel" aria-label="Recorded Git history">
+          <div id="history-list" class="history-list"></div>
+          <div id="history-review" class="history-review" role="region" aria-label="Commit review" hidden></div>
+        </div>
       </section>
       <div id="float-layer" class="float-layer">
         <div id="overlay-panel" class="overlay-panel" hidden></div>

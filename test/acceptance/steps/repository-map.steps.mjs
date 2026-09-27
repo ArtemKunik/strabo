@@ -677,6 +677,47 @@ Then('the History screen lists recorded changes', async function () {
   );
 });
 
+When('I select the first recorded commit in the History list', async function () {
+  await this.page.locator('#history-list .commit').first().click();
+  await this.page.waitForFunction(
+    () => {
+      const pane = document.getElementById('history-review');
+      return Boolean(pane) && !pane.hidden && pane.querySelector('[data-role="review-commit"]');
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the History screen reviews that commit beside the list', async function () {
+  const state = await this.page.evaluate(() => ({
+    listVisible: document.querySelectorAll('#history-list .commit').length > 0,
+    reviewVisible: !document.getElementById('history-review').hidden,
+    split: document.getElementById('history-screen-body').classList.contains('is-split'),
+  }));
+  assert.equal(state.reviewVisible, true, 'the commit review pane should be open');
+  assert.equal(state.split, true, 'the History body should be a split view');
+  assert.equal(state.listVisible, true, 'the commit list should stay visible beside the review');
+  const text = (await this.page.textContent('#history-review')) ?? '';
+  assert.match(text, /Commit review/);
+  assert.match(text, /file\(s\)/);
+});
+
+When('I open the first changed file diff in the History review', async function () {
+  await this.page.locator('#history-review .review-diff').first().click();
+  await this.page.waitForSelector('#history-review [data-role="history-diff-back"]', { timeout: 20_000 });
+  await this.page.waitForSelector('#history-review .src-line', { timeout: 20_000 });
+});
+
+Then('the History review shows the diff in place', async function () {
+  const state = await this.page.evaluate(() => ({
+    reviewVisible: !document.getElementById('history-review').hidden,
+    lines: document.querySelectorAll('#history-review .src-line').length,
+  }));
+  assert.equal(state.reviewVisible, true, 'the diff should render in the History pane');
+  assert.ok(state.lines > 0, 'the diff should show its changed lines');
+});
+
 When('I leave the screen tab with Escape', async function () {
   await this.page.keyboard.press('Escape');
   await this.page.waitForFunction(() => window.straboTest?.screen?.() === 'graph', undefined, {

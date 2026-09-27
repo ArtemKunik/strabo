@@ -93,5 +93,7 @@ export function queryElements(doc = document) {
     historyScreen: doc.getElementById('history-screen'),
     historyScreenBody: doc.getElementById('history-screen-body'),
     historyScreenRefresh: doc.getElementById('history-screen-refresh'),
+    historyList: doc.getElementById('history-list'),
+    historyReview: doc.getElementById('history-review'),
   };
 }

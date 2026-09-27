@@ -25,6 +25,16 @@ Feature: Review and History tabs
     Then the "history" tab is the active screen
     And the History screen lists recorded changes
 
+  @history @inline-review
+  Scenario: Reviewing a recorded commit beside the list on the History tab
+    When I open the "history" screen tab
+    Then the "history" tab is the active screen
+    And the History screen lists recorded changes
+    When I select the first recorded commit in the History list
+    Then the History screen reviews that commit beside the list
+    When I open the first changed file diff in the History review
+    Then the History review shows the diff in place
+
   @navigation
   Scenario: Escape returns a tab to the map
     When I open the "history" screen tab
