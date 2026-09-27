@@ -29,13 +29,19 @@ function cleanString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
 }
 
+/** The env var that locks `field`, or null when it is unset or blank. */
+function lockOf(env: NodeJS.ProcessEnv, field: NarratorField): string | null {
+  return cleanString(env[NARRATOR_ENV_VARS[field]]) ? NARRATOR_ENV_VARS[field] : null;
+}
+
 /** Which narrator fields the environment locks. Never throws. */
 export function narratorLocks(env: NodeJS.ProcessEnv = process.env): NarratorLocks {
   return {
-    endpoint: cleanString(env[NARRATOR_ENV_VARS.endpoint]) ? NARRATOR_ENV_VARS.endpoint : null,
-    model: cleanString(env[NARRATOR_ENV_VARS.model]) ? NARRATOR_ENV_VARS.model : null,
-    apiKeyEnv: cleanString(env[NARRATOR_ENV_VARS.apiKeyEnv]) ? NARRATOR_ENV_VARS.apiKeyEnv : null,
-    budget: cleanString(env[NARRATOR_ENV_VARS.budget]) ? NARRATOR_ENV_VARS.budget : null,
+    endpoint: lockOf(env, 'endpoint'),
+    model: lockOf(env, 'model'),
+    apiKeyEnv: lockOf(env, 'apiKeyEnv'),
+    budget: lockOf(env, 'budget'),
+    // `sendSource` is locked by presence alone: "0" still means the environment chose.
     sendSource: env[NARRATOR_ENV_VARS.sendSource] !== undefined ? NARRATOR_ENV_VARS.sendSource : null,
   };
 }
@@ -68,9 +74,11 @@ export function effectiveNarratorConfig(
   if (!endpoint && !model) {
     // Mirror configFromEnv: without either, there is no narrator section at all.
     // A caller that needs validation of a half-filled form should build the object directly.
+    const keyEnv = persisted?.narratorKeyEnv?.trim();
+    const budget = positiveInt(persisted?.narratorBudget);
     const fallback = {
-      ...(persisted?.narratorKeyEnv?.trim() ? { apiKeyEnv: persisted.narratorKeyEnv.trim() } : {}),
-      ...(positiveInt(persisted?.narratorBudget) ? { requestBudget: persisted!.narratorBudget as number } : {}),
+      ...(keyEnv ? { apiKeyEnv: keyEnv } : {}),
+      ...(budget ? { requestBudget: budget } : {}),
       ...(persisted?.narratorSendSource === true ? { sendSource: true as const } : {}),
     };
     return Object.keys(fallback).length > 0 ? fallback : undefined;
