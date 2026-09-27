@@ -109,10 +109,12 @@ export function createFloatingPanels(app) {
         pinned: 5,
         width: 360,
         titleFrom: (panel) => (panel.querySelector('h3')?.textContent ?? '').split(' · ')[0].trim(),
-        canOpen: () => state.overlay !== 'none',
-        blockedTitle: 'Select an overlay (Review dropdown) to open Overlay',
+        // The panel carries whichever lens is active: an analysis overlay, or the tier lens
+        // when "Color by tier" is on with no overlay. It stays disabled only with both off.
+        canOpen: () => state.overlay !== 'none' || state.tier !== 'off',
+        blockedTitle: 'Select an overlay or a tier colour (View menu) to open this panel',
         onBlocked: () => {
-          elements.status.textContent = 'Select an overlay first — Overlay has nothing to show.';
+          elements.status.textContent = 'Select an overlay or a tier colour first — the panel has nothing to show.';
         },
         onClose: () => app.lenses.clearOverlay(),
       },

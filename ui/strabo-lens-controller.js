@@ -33,6 +33,10 @@ export function createLensController(app) {
     if (state.tier === 'off' || !app.current || app.current.system || app.current.prefixLength !== undefined) {
       view.applyTier(null);
       view.applyTierDirections(null);
+      // Turning the lens off hands the shared panel back to the overlay (or blanks it).
+      if (state.overlay === 'none') {
+        renderOverlayPanel(elements.overlayPanel, '', null);
+      }
       return;
     }
     const generation = state.renderedGeneration;
@@ -51,11 +55,18 @@ export function createLensController(app) {
     if (!app.current || state.tier === 'off' || state.renderedGeneration !== generation) {
       view.applyTier(null);
       view.applyTierDirections(null);
+      if (state.overlay === 'none') {
+        renderOverlayPanel(elements.overlayPanel, '', null);
+      }
       return;
     }
     view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
     view.applyTierDirections(tierDirectionClasses(tierReportCache.report));
-    renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
+    // The panel is shared with the analysis overlays, which take precedence when one is on.
+    // With no overlay, the tier matrix is what the panel shows.
+    if (state.overlay === 'none') {
+      renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
+    }
   }
 
   /**
@@ -87,6 +98,10 @@ export function createLensController(app) {
     view.overlay(null);
     view.setHiddenCoupling(null, false);
     renderOverlayPanel(elements.overlayPanel, '', null);
+    // Clearing the overlay hands the shared panel back to the tier lens when one is on.
+    if (state.tier !== 'off') {
+      void applyTierLens();
+    }
     app.windows.refreshDock();
   }
 
@@ -99,6 +114,10 @@ export function createLensController(app) {
     if (kind === 'none') {
       view.overlay(null);
       renderOverlayPanel(elements.overlayPanel, '', null);
+      // With no overlay, the shared panel falls back to the tier lens when one is on.
+      if (state.tier !== 'off') {
+        void applyTierLens();
+      }
       app.windows.refreshDock();
       return;
     }
@@ -313,6 +332,8 @@ export function createLensController(app) {
       }
       app.prefs.writeViewPrefs();
       applyTierLens();
+      // The Overlay dock chip is enabled by the tier lens too, so its state must re-read.
+      app.windows.refreshDock();
     });
   }
 

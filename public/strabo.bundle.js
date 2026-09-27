@@ -3245,6 +3245,9 @@ function createView(container) {
   let coChangeOn = false;
   let hiddenCouplingReport = null;
   let hiddenCouplingOn = false;
+  let tierByFile = null;
+  let tierFilter = "all";
+  let tierDirections = null;
   function renderModel() {
     if (!baseModel) {
       return;
@@ -3278,6 +3281,8 @@ function createView(container) {
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
     applyHiddenCoupling(cy, hiddenCouplingOn);
+    applyTier(cy, tierByFile, tierFilter);
+    applyTierDirections(cy, tierDirections);
     clearTimeout(labelTimer);
     labelTimer = 0;
     labelsFrozen = false;
@@ -3591,8 +3596,10 @@ function createView(container) {
      * without filtering. `tier-hidden` is separate from the text filter's `filtered-out`, so
      * the two filters compose instead of clearing each other.
      */
-    applyTier(tierByFile, filterTier = "all") {
-      applyTier(cy, tierByFile, filterTier);
+    applyTier(tierByFileArg, filterTier = "all") {
+      tierByFile = tierByFileArg;
+      tierFilter = filterTier;
+      applyTier(cy, tierByFile, tierFilter);
     },
     /**
      * The large-file lens: keep only files at or above `threshold` lines and size them by
@@ -3609,6 +3616,7 @@ function createView(container) {
      * and skip-layer use different classes, so the two differ by border/line shape, not hue.
      */
     applyTierDirections(directions) {
+      tierDirections = directions;
       applyTierDirections(cy, directions);
     },
     /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */
@@ -13060,6 +13068,8 @@ function numberCell(text, title) {
 }
 function renderTierPanel(container, report, filter = "all") {
   container.replaceChildren();
+  container.hidden = false;
+  container.className = "overlay-panel";
   const title = document.createElement("h3");
   title.textContent = "Tier lens";
   container.append(title);
@@ -13366,6 +13376,9 @@ function createLensController(app2) {
     if (state2.tier === "off" || !app2.current || app2.current.system || app2.current.prefixLength !== void 0) {
       view2.applyTier(null);
       view2.applyTierDirections(null);
+      if (state2.overlay === "none") {
+        renderOverlayPanel(elements2.overlayPanel, "", null);
+      }
       return;
     }
     const generation = state2.renderedGeneration;
@@ -13384,11 +13397,16 @@ function createLensController(app2) {
     if (!app2.current || state2.tier === "off" || state2.renderedGeneration !== generation) {
       view2.applyTier(null);
       view2.applyTierDirections(null);
+      if (state2.overlay === "none") {
+        renderOverlayPanel(elements2.overlayPanel, "", null);
+      }
       return;
     }
     view2.applyTier(tierOfFile(tierReportCache.report), state2.tier === "all" ? "all" : state2.tier);
     view2.applyTierDirections(tierDirectionClasses(tierReportCache.report));
-    renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier);
+    if (state2.overlay === "none") {
+      renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier);
+    }
   }
   async function loadChangesWith(id) {
     const repository = state2.repository ?? null;
@@ -13412,6 +13430,9 @@ function createLensController(app2) {
     view2.overlay(null);
     view2.setHiddenCoupling(null, false);
     renderOverlayPanel(elements2.overlayPanel, "", null);
+    if (state2.tier !== "off") {
+      void applyTierLens();
+    }
     app2.windows.refreshDock();
   }
   async function applyOverlay(generation) {
@@ -13419,6 +13440,9 @@ function createLensController(app2) {
     if (kind === "none") {
       view2.overlay(null);
       renderOverlayPanel(elements2.overlayPanel, "", null);
+      if (state2.tier !== "off") {
+        void applyTierLens();
+      }
       app2.windows.refreshDock();
       return;
     }
@@ -13574,6 +13598,7 @@ function createLensController(app2) {
       }
       app2.prefs.writeViewPrefs();
       applyTierLens();
+      app2.windows.refreshDock();
     });
   }
   elements2.overlay.addEventListener("change", () => {
@@ -26968,10 +26993,12 @@ function createFloatingPanels(app2) {
         pinned: 5,
         width: 360,
         titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
-        canOpen: () => state2.overlay !== "none",
-        blockedTitle: "Select an overlay (Review dropdown) to open Overlay",
+        // The panel carries whichever lens is active: an analysis overlay, or the tier lens
+        // when "Color by tier" is on with no overlay. It stays disabled only with both off.
+        canOpen: () => state2.overlay !== "none" || state2.tier !== "off",
+        blockedTitle: "Select an overlay or a tier colour (View menu) to open this panel",
         onBlocked: () => {
-          elements2.status.textContent = "Select an overlay first \u2014 Overlay has nothing to show.";
+          elements2.status.textContent = "Select an overlay or a tier colour first \u2014 the panel has nothing to show.";
         },
         onClose: () => app2.lenses.clearOverlay()
       },

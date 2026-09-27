@@ -93,6 +93,12 @@ export function createView(container) {
   // lens never double-draw a pair. Off unless the hidden-coupling review overlay is active.
   let hiddenCouplingReport = null;
   let hiddenCouplingOn = false;
+  // The tier lens state, held here so an incremental re-render (an overlay or co-change
+  // change) can re-apply it: a render clears the classes the lens put on the nodes, exactly
+  // as it does for the edge kind.
+  let tierByFile = null;
+  let tierFilter = 'all';
+  let tierDirections = null;
 
   /** Rebuild the rendered model, replaying the operator's island moves over `baseModel`. */
   function renderModel() {
@@ -136,6 +142,10 @@ export function createView(container) {
     applyEdgeKind(cy, edgeKind);
     applyCoChange(cy, coChangeOn);
     applyHiddenCoupling(cy, hiddenCouplingOn);
+    // The tier lens rides the same incremental diff, so re-apply it here or the colour
+    // would drop the moment an overlay or co-change change rebuilds the elements.
+    applyTier(cy, tierByFile, tierFilter);
+    applyTierDirections(cy, tierDirections);
     // A render forces the label and edge-LOD pass; drop any pending settle and un-freeze.
     clearTimeout(labelTimer);
     labelTimer = 0;
@@ -510,8 +520,10 @@ export function createView(container) {
      * without filtering. `tier-hidden` is separate from the text filter's `filtered-out`, so
      * the two filters compose instead of clearing each other.
      */
-    applyTier(tierByFile, filterTier = 'all') {
-      applyTier(cy, tierByFile, filterTier);
+    applyTier(tierByFileArg, filterTier = 'all') {
+      tierByFile = tierByFileArg;
+      tierFilter = filterTier;
+      applyTier(cy, tierByFile, tierFilter);
     },
     /**
      * The large-file lens: keep only files at or above `threshold` lines and size them by
@@ -529,6 +541,7 @@ export function createView(container) {
      * and skip-layer use different classes, so the two differ by border/line shape, not hue.
      */
     applyTierDirections(directions) {
+      tierDirections = directions;
       applyTierDirections(cy, directions);
     },
     /** Replace the L0 unit cards, e.g. after the hotspot report fills their counts (L22). */

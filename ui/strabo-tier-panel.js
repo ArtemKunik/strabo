@@ -35,6 +35,10 @@ function numberCell(text, title) {
 
 export function renderTierPanel(container, report, filter = 'all') {
   container.replaceChildren();
+  // The panel is shared with the analysis overlays, whose render hides it when their report
+  // is absent; taking it over means showing it.
+  container.hidden = false;
+  container.className = 'overlay-panel';
 
   const title = document.createElement('h3');
   title.textContent = 'Tier lens';
