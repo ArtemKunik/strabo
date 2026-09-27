@@ -25,7 +25,12 @@ after(() => {
     server.close();
   }
   for (const directory of created) {
-    fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    // Best-effort: a lingering git child on Windows can hold the tree past the retries.
+    try {
+      fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {
+      // The OS reclaims the temp directory.
+    }
   }
 });
 

@@ -1,6 +1,7 @@
 import type { Graph } from '../types.ts';
 import { computeGraphMetrics, relationshipOf } from './analysis.ts';
 import { computeCycles } from './cycles.ts';
+import { COMMIT_LOG_FORMAT, COMMIT_LOG_MAX_BUFFER, parseCommitLog } from './git-log.ts';
 import { revisionGraph } from './structural-diff.ts';
 import { run } from '../process.ts';
 
@@ -68,7 +69,6 @@ export const DRIFT_MEASURES: ReadonlyArray<{ key: string; label: string }> = [
 const DEFAULT_LIMIT = 20;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 100;
-const MAX_BUFFER = 32 * 1024 * 1024;
 
 /** The eight measures for one revision graph: six counts, two honest `null`s. */
 export function computeDriftMeasures(graph: Graph): DriftMeasure[] {
@@ -134,14 +134,14 @@ export async function collectDrift(
   try {
     ({ stdout } = await run(
       'git',
-      ['log', '--format=%H%x1f%h%x1f%aI%x1f%s', '-z', '-n', String(limit), base ?? 'HEAD'],
-      { cwd: root, maxBuffer: MAX_BUFFER },
+      ['log', `--format=${COMMIT_LOG_FORMAT}`, '-z', '-n', String(limit), base ?? 'HEAD'],
+      { cwd: root, maxBuffer: COMMIT_LOG_MAX_BUFFER },
     ));
   } catch (error) {
     return unavailable(repository, base, gitFailureReason(error));
   }
 
-  const commits = parseLog(stdout);
+  const commits = parseCommitLog(stdout);
   if (commits.length === 0) {
     return unavailable(repository, base, 'no-commits');
   }
@@ -162,33 +162,6 @@ export async function collectDrift(
 function clampLimit(limit: number | undefined): number {
   if (limit === undefined) return DEFAULT_LIMIT;
   return Math.min(MAX_LIMIT, Math.max(MIN_LIMIT, Math.trunc(limit)));
-}
-
-interface DriftCommit {
-  revision: string;
-  short: string;
-  date: string | null;
-  subject: string | null;
-}
-
-/**
- * Parse `git log --format=%H%x1f%h%x1f%aI%x1f%s -z`: records are NUL-separated (a trailing
- * NUL ends the last one), and fields inside a record are unit-separator separated.
- */
-function parseLog(stdout: string): DriftCommit[] {
-  const commits: DriftCommit[] = [];
-  for (const record of stdout.split('\0')) {
-    if (record === '') continue;
-    const [revision = '', short = '', date = '', ...subjectParts] = record.split('\u001f');
-    if (revision === '') continue;
-    commits.push({
-      revision,
-      short,
-      date: date === '' ? null : date,
-      subject: subjectParts.length === 0 ? null : subjectParts.join('\u001f'),
-    });
-  }
-  return commits;
 }
 
 function emptyMeasures(): DriftMeasure[] {

@@ -618,3 +618,7 @@ layer over recorded evidence; `GET /narrator/models`, `POST /narrator/test`,
   file under the measured threshold, or reached by no test on the reachability fallback — by
   blast radius, cycle membership, and recorded function signals, and asks the model for a
   prioritised test plan. A file the report does not name is listed as unrecorded, never as 0%.
+- `POST /narrator/coverage-weekly` measures the same reach-based coverage at each commit in a
+  window (default 7 days) and asks for a short weekly trend summary. It reads past revisions
+  through the per-commit cache `analysis/drift` uses, so the trend is the static test reach at
+  each commit and never a measured report invented for history.

@@ -1,6 +1,9 @@
 import { Router } from 'express';
 
 import { buildCommitEvidence } from '../../analysis/commit.ts';
+import { computeCoverageGaps, type CoverageGapOptions } from '../../analysis/coverage-gaps.ts';
+import { collectCoverageTrend, type CoverageTrendOptions } from '../../analysis/coverage-trend.ts';
+import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { reviewWorkingTree } from '../../analysis/review.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
@@ -8,6 +11,8 @@ import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { createNarratorClient, type NarratorClient } from '../../narrator/client.ts';
 import { resolveNarratorConfig } from '../../narrator/config.ts';
+import { buildCoveragePlanRequest } from '../../narrator/coverage-plan.ts';
+import { buildCoverageWeeklyRequest } from '../../narrator/coverage-weekly.ts';
 import { buildTourRequest } from '../../narrator/tour.ts';
 import {
   effectiveNarratorConfig,
@@ -181,6 +186,61 @@ export function createNarratorRouter(
       );
       const route = computeReadingRoute(repository.root, repository.name, cached.report.graph);
       response.json(await narrator.narrate(buildTourRequest(passport, route)));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The opt-in coverage plan: the ranked weak coverage points — measured from the repository's
+   * own report when one exists, otherwise the static test reach — become the recorded evidence
+   * for a prioritised test plan. The evidence is built server-side, so a caller cannot steer what
+   * is described. Like every narrator call it is inert until an endpoint and model are configured
+   * and it writes nothing.
+   */
+  router.post('/narrator/coverage-plan', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const measured = await computeMeasuredCoverage(repository.root, cached.report.graph, {
+        ...(config.coverageReports ? { reportPaths: config.coverageReports } : {}),
+        ceiling: config.scanCeiling ?? config.workspaceRoot,
+      });
+      const report = computeCoverageGaps(
+        cached.report.graph,
+        measured,
+        coverageGapOptions(request.query.threshold),
+      );
+      response.json(
+        await narrator.narrate(
+          buildCoveragePlanRequest({ repository: repository.name, report, measured }),
+        ),
+      );
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The opt-in weekly coverage summary: the static test reach measured at each commit in the
+   * window becomes the recorded evidence for a short trend narrative. It reads each past revision
+   * graph through the same per-commit cache the drift timeline reads, so no measured report is
+   * invented for past commits. Like every narrator call it is inert until an endpoint and model
+   * are configured and it writes nothing.
+   */
+  router.post('/narrator/coverage-weekly', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const report = await collectCoverageTrend(
+        repository.root,
+        repository.name,
+        coverageTrendOptions(request.query),
+      );
+      response.json(
+        await narrator.narrate(
+          buildCoverageWeeklyRequest({ repository: repository.name, report }),
+        ),
+      );
     } catch (error) {
       sendError(response, error);
     }
@@ -505,4 +565,27 @@ export function createNarratorRouter(
   });
 
   return router;
+}
+
+/** A 0-100 `threshold` query value, or an empty options object so the published default stands. */
+function coverageGapOptions(value: unknown): CoverageGapOptions {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return {};
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? { threshold: parsed } : {};
+}
+
+/** Positive `days` / `limit` query values; the collector clamps them to their own bounds. */
+function coverageTrendOptions(query: Record<string, unknown>): CoverageTrendOptions {
+  const options: CoverageTrendOptions = {};
+  const days = Number(query.days);
+  if (Number.isFinite(days) && days > 0) {
+    options.days = Math.trunc(days);
+  }
+  const limit = Number(query.limit);
+  if (Number.isFinite(limit) && limit > 0) {
+    options.limit = Math.trunc(limit);
+  }
+  return options;
 }

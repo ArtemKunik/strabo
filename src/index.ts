@@ -199,6 +199,26 @@ export type {
   CoverageFileEntry,
   CoverageFolderEntry,
 } from './analysis/coverage-report.ts';
+export { computeCoverageGaps } from './analysis/coverage-gaps.ts';
+export type {
+  CoverageGap,
+  CoverageGapReport,
+  CoverageGapOptions,
+} from './analysis/coverage-gaps.ts';
+export {
+  collectCoverageTrend,
+  computeCoverageTrendMeasures,
+  COVERAGE_TREND_MEASURES,
+} from './analysis/coverage-trend.ts';
+export type {
+  CoverageTrendReport,
+  CoverageTrendPoint,
+  CoverageTrendMeasure,
+  CoverageTrendDelta,
+  CoverageTrendOptions,
+} from './analysis/coverage-trend.ts';
+export { parseCommitLog, readCommits, COMMIT_LOG_FORMAT } from './analysis/git-log.ts';
+export type { CommitRow, CommitLogResult } from './analysis/git-log.ts';
 export {
   computeMeasuredCoverage,
   parseCoverageText,
@@ -473,6 +493,19 @@ export type {
 export { collectPolyglotExternalImports, mavenCoordinateMatches } from './scan/external-polyglot.ts';
 export { buildTourRequest, TOUR_INSTRUCTION } from './narrator/tour.ts';
 export type { TourRequest } from './narrator/tour.ts';
+export {
+  buildCoveragePlanRequest,
+  COVERAGE_PLAN_INSTRUCTION,
+  COVERAGE_PLAN_GAP_LIMIT,
+  COVERAGE_PLAN_EVIDENCE_LIMIT,
+} from './narrator/coverage-plan.ts';
+export type { CoveragePlanRequest, CoveragePlanInput } from './narrator/coverage-plan.ts';
+export {
+  buildCoverageWeeklyRequest,
+  COVERAGE_WEEKLY_INSTRUCTION,
+  COVERAGE_WEEKLY_EVIDENCE_LIMIT,
+} from './narrator/coverage-weekly.ts';
+export type { CoverageWeeklyRequest, CoverageWeeklyInput } from './narrator/coverage-weekly.ts';
 
 export { buildViewModel, buildSystemViewModel, buildSystemUnitViewModel } from './view/view-model.ts';
 
