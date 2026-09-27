@@ -57,11 +57,46 @@ test('computeFileHealth scopes the graph axes and counts connections and blast r
 
   assert.equal(report.found, true);
   assert.deepEqual(report.metrics, { directImports: 0, directImporters: 2, blastRadius: 2, reExports: 0 });
-  assert.equal(axisValue(report, 'lowCoupling'), 83);
+  assert.equal(axisValue(report, 'lowCoupling'), 100, 'dependency-free, so no two-way coupling');
   assert.equal(axisValue(report, 'lowFanOut'), 100);
   assert.equal(axisValue(report, 'lowComplexity'), 100);
   assert.equal(axisValue(report, 'coverage'), 100);
-  assert.equal(report.score, 93);
+  assert.equal(report.score, 96);
+});
+
+test('a stable foundation is not charged coupling for being depended upon', () => {
+  const foundation = node('src/base.ts');
+  const consumers = Array.from({ length: 20 }, (_, i) => node(`src/c${i}.ts`));
+  const dependedUpon: Graph = {
+    nodes: [foundation, ...consumers],
+    edges: consumers.map((consumer) => edge(consumer.id, 'src/base.ts')),
+  };
+  const report = computeFileHealth(dependedUpon, 'src/base.ts');
+
+  assert.equal(report.metrics.directImporters, 20);
+  assert.equal(report.metrics.directImports, 0);
+  assert.equal(axisValue(report, 'lowCoupling'), 100, 'inbound-only coupling is stability, not a cost');
+  assert.match(
+    report.axes.find((axis) => axis.key === 'lowCoupling')?.detail ?? '',
+    /two-way coupling 0%/,
+  );
+});
+
+test('two-way coupling is what lowers the coupling axis', () => {
+  const hub = node('src/hub.ts');
+  const leaves = Array.from({ length: 20 }, (_, i) => node(`src/leaf${i}.ts`));
+  const dependencies = Array.from({ length: 10 }, (_, i) => node(`src/dep${i}.ts`));
+  const graph: Graph = {
+    nodes: [hub, ...leaves, ...dependencies],
+    edges: [
+      ...leaves.map((leaf) => edge(leaf.id, 'src/hub.ts')),
+      ...dependencies.map((dep) => edge('src/hub.ts', dep.id)),
+    ],
+  };
+  const report = computeFileHealth(graph, 'src/hub.ts');
+
+  // 20/25 afferent x 10/10 efferent = 0.8 -> 20.
+  assert.equal(axisValue(report, 'lowCoupling'), 20);
 });
 
 test('cohesion is derived from member wiring, and an unconnected field lowers it', () => {

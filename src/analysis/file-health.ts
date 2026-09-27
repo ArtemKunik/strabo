@@ -11,6 +11,14 @@ import {
   type MeasuredCoverageSummary,
 } from './measured-coverage.ts';
 
+/**
+ * The degree at which each coupling direction counts as fully saturated. Coupling is charged
+ * on the product of the two, so a file needs a busy both sides before the axis moves; the
+ * efferent ceiling matches the low fan-out axis so the two agree on what "many" means.
+ */
+const AFFERENT_CEILING = 25;
+const EFFERENT_CEILING = 10;
+
 export interface FileHealthMetrics {
   directImports: number;
   directImporters: number;
@@ -67,11 +75,21 @@ export function computeFileHealth(
 
   if (node) {
     const connections = importsWithReExports + directImporters;
+    // Coupling is a cost only when it runs both ways. A stable foundation (many importers,
+    // no dependencies) and a plain consumer (dependencies, no importers) are not entangled;
+    // only a file that both depends on others and is depended on by them is — the shape the
+    // `hub-dependency` smell already names (`src/analysis/quality.ts`). Summing the two
+    // directions charged a widely-used types module the same as a god-file and pinned both
+    // at 0 past a fixed ceiling, so the directions multiply instead: one empty side frees the
+    // axis, and it falls only as both sides fill.
+    const afferent = Math.min(1, directImporters / AFFERENT_CEILING);
+    const efferent = Math.min(1, importsWithReExports / EFFERENT_CEILING);
+    const twoWayCoupling = afferent * efferent;
     axes.push({
       key: 'lowCoupling',
       label: 'Low coupling',
-      value: score(1 - normalise(connections, 12)),
-      detail: `${connections} connection(s) (${directImports} out, ${directImporters} in${reExports > 0 ? `, ${reExports} re-exported` : ''})`,
+      value: score(1 - twoWayCoupling),
+      detail: `${connections} connection(s) (${directImports} out, ${directImporters} in${reExports > 0 ? `, ${reExports} re-exported` : ''}); two-way coupling ${score(twoWayCoupling)}%`,
     });
     axes.push({
       key: 'lowFanOut',
