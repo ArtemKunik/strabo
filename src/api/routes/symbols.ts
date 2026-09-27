@@ -2,7 +2,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { computeCoverage } from '../../analysis/coverage.ts';
+import { computeCoverage, reachedFiles } from '../../analysis/coverage.ts';
 import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
 import { computeMeasuredCoverage, measuredFileFigure } from '../../analysis/measured-coverage.ts';
@@ -66,10 +66,11 @@ export function createSymbolsRouter(config: StraboConfig): Router {
       const measuredEntry = measured.files.find((entry) => entry.inGraph && entry.file === file);
       // Measured when a report names the file; otherwise the static reach, labelled as such.
       const reach = computeCoverage(graph);
+      const reached = reachedFiles(reach);
       const reachable =
         reach.testFiles.length === 0
           ? { value: null, detail: 'no test files identified' }
-          : reach.reached.includes(file) || reach.testFiles.includes(file)
+          : reached.has(file)
             ? { value: 100, detail: `reachable from ${reach.testFiles.length} test file(s)` }
             : { value: 0, detail: 'no path from a test' };
       response.json({

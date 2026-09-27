@@ -1,5 +1,5 @@
 import type { Graph } from '../types.ts';
-import { computeCoverage } from './coverage.ts';
+import { computeCoverage, reachedFiles } from './coverage.ts';
 import { percent, type MeasuredCoverageSummary } from './measured-coverage.ts';
 
 /**
@@ -142,8 +142,7 @@ export function fileCoverage(
   graph: Graph,
   measured?: MeasuredCoverageSummary | null,
 ): Map<string, FileCoverage> {
-  const reach = computeCoverage(graph);
-  const reached = new Set([...reach.reached, ...reach.testFiles]);
+  const reached = reachedFiles(computeCoverage(graph));
   const report = measured?.available ? measured : null;
   const reportModified = report?.reportModified ?? null;
   const reportAgeMs = report?.reportAgeMs ?? null;

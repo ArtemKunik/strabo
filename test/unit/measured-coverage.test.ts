@@ -127,6 +127,9 @@ test('mapReportPath maps an absolute path under root and keeps an outside one li
   const root = path.resolve('/work/repo');
   assert.equal(mapReportPath(root, 'src/a.ts'), 'src/a.ts');
   assert.equal(mapReportPath(root, './src/a.ts'), 'src/a.ts');
+  // `.` and `..` segments fold, so a report written relative to a subdirectory still maps.
+  assert.equal(mapReportPath(root, 'src/./a.ts'), 'src/a.ts');
+  assert.equal(mapReportPath(root, 'src/../src/a.ts'), 'src/a.ts');
   assert.equal(mapReportPath(root, path.join(root, 'src', 'a.ts')), 'src/a.ts');
   assert.equal(mapReportPath(root, path.join('/', 'elsewhere', 'a.ts')).replace(/\\/g, '/'), '/elsewhere/a.ts');
 });

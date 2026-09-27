@@ -299,8 +299,12 @@ test('overlayFor maps cycles and test reach onto their node classes', () => {
   assert.equal(reach.summary, '1 unreached · 1 reached · 1 test files');
   assert.deepEqual(reach.items, ['d.ts']);
 
-  const reachEmpty = overlayFor('test-reach', { testFiles: [], reached: [], unreachedWithDependents: [] });
+  // No test file: reachability cannot be derived, so even a server that lists candidates
+  // must not dash a single node — the summary alone carries that verdict.
+  const reachEmpty = overlayFor('test-reach', { testFiles: [], reached: [], unreachedWithDependents: ['d.ts', 'e.ts'] });
   assert.equal(reachEmpty.summary, 'no test files identified');
+  assert.equal(reachEmpty.classes.size, 0);
+  assert.equal(reachEmpty.items.length, 0);
 
   const reachAll = overlayFor('test-reach', { testFiles: ['t.ts'], reached: ['a.ts'], unreachedWithDependents: [] });
   assert.equal(reachAll.items.length, 0);

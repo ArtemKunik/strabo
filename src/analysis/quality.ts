@@ -141,7 +141,9 @@ export async function computeQualityScorecard(
   const metrics = computeGraphMetrics(graph);
   const cycles = computeCycles(graph);
   const cycleMembers = new Set(cycles.flatMap((g) => g.members));
-  const coverage = computeCoverage(graph);
+  // One Set for the per-module lookups: `reached` is consulted once per module and once per
+  // dependent, so an array `includes` would make this O(files^2) on a large graph.
+  const reached = new Set(computeCoverage(graph).reached);
   const nodes = graph.nodes;
 
   const depthResults = analyzeModuleDepth(root, nodes.map((n) => n.id));
@@ -169,7 +171,7 @@ export async function computeQualityScorecard(
     const complexity = await computeComplexity(file, content);
     const shape = await computeShape(file, content, depthByFile, centrality);
     const evolution = computeEvolution(file, churnMap, authorMap, coChangeMap, importGraph);
-    const protection = computeProtection(file, coverage, backward);
+    const protection = computeProtection(file, reached, backward);
     const classification = content === null ? null : classifyTierContent(file, content);
 
     moduleQualities.push({
@@ -339,12 +341,12 @@ function computeEvolution(
 
 function computeProtection(
   file: string,
-  coverage: ReturnType<typeof computeCoverage>,
+  reached: ReadonlySet<string>,
   backward: Map<string, string[]>,
 ): ProtectionMeasures {
-  const testReach = coverage.reached.includes(file);
+  const testReach = reached.has(file);
   const dependents = backward.get(file) ?? [];
-  const testedDependents = dependents.filter((d) => coverage.reached.includes(d)).length;
+  const testedDependents = dependents.filter((d) => reached.has(d)).length;
   const testedDependentsShare = dependents.length > 0 ? testedDependents / dependents.length : 1;
 
   return { testReach, testedDependentsShare };
@@ -352,9 +354,16 @@ function computeProtection(
 
 function buildImportGraph(graph: Graph): Map<string, Set<string>> {
   const { forward } = buildAdjacency(graph);
+  // Index the non-declare edges once. Scanning `graph.edges` per target made this O(edges^2).
+  const nonDeclare = new Set<string>();
+  for (const edge of graph.edges) {
+    if (edge.role !== 'declare') {
+      nonDeclare.add(`${edge.source}\u0000${edge.target}`);
+    }
+  }
   const importGraph = new Map<string, Set<string>>();
   for (const [source, targets] of forward) {
-    const filtered = new Set(targets.filter((t) => graph.edges.some((e) => e.source === source && e.target === t && e.role !== 'declare')));
+    const filtered = new Set(targets.filter((t) => nonDeclare.has(`${source}\u0000${t}`)));
     importGraph.set(source, filtered);
   }
   return importGraph;
@@ -380,18 +389,30 @@ function emptyScores(): CompositeScores {
   return { complexity: 0, churn: 0, hotspot: 0, blastRadius: 0, testReach: 0, risk: 0 };
 }
 
-/** Share of the values below this one, 0-100; the maximum is 100 and the minimum is 0. */
-function rankPercentile(values: readonly number[], value: number): number {
-  if (values.length <= 1) {
-    return 100;
+/**
+ * A rank lookup over one metric's sample: value -> share of the sample below it, 0-100
+ * (the maximum is 100, the minimum 0). Sorting once and indexing by value keeps ranking
+ * every module O(n log n) instead of rescanning the whole sample per module, which made the
+ * scorecard O(modules^2) across its eight metrics.
+ */
+function percentileRanker(values: readonly number[]): (value: number) => number {
+  const count = values.length;
+  if (count <= 1) {
+    return () => 100;
   }
-  let less = 0;
-  for (const candidate of values) {
-    if (candidate < value) {
-      less += 1;
+  const sorted = [...values].sort((a, b) => a - b);
+  const ranks = new Map<number, number>();
+  let index = 0;
+  while (index < count) {
+    const value = sorted[index] as number;
+    let next = index;
+    while (next < count && sorted[next] === value) {
+      next += 1;
     }
+    ranks.set(value, Math.round((index / (count - 1)) * 100));
+    index = next;
   }
-  return Math.round((less / (values.length - 1)) * 100);
+  return (value: number) => ranks.get(value) ?? 0;
 }
 
 function mean(values: readonly number[]): number {
@@ -412,20 +433,29 @@ function computeCompositeScores(modules: readonly ModuleQuality[]): Map<string, 
   const churn = modules.map((m) => m.evolution.churn90d);
   const blast = modules.map((m) => m.centrality.blastRadius);
 
+  const rankLoc = percentileRanker(loc);
+  const rankFunctions = percentileRanker(functions);
+  const rankSumDecision = percentileRanker(sumDecision);
+  const rankMaxDecision = percentileRanker(maxDecision);
+  const rankNesting = percentileRanker(nesting);
+  const rankSignals = percentileRanker(signals);
+  const rankChurn = percentileRanker(churn);
+  const rankBlast = percentileRanker(blast);
+
   const scores = new Map<string, CompositeScores>();
   for (const module of modules) {
     const complexity = Math.round(
       mean([
-        rankPercentile(loc, module.complexity.loc),
-        rankPercentile(functions, module.complexity.functionCount),
-        rankPercentile(sumDecision, module.complexity.sumDecisionPoints),
-        rankPercentile(maxDecision, module.complexity.maxDecisionPoints),
-        rankPercentile(nesting, module.complexity.maxNestingDepth),
-        rankPercentile(signals, module.complexity.signalShare),
+        rankLoc(module.complexity.loc),
+        rankFunctions(module.complexity.functionCount),
+        rankSumDecision(module.complexity.sumDecisionPoints),
+        rankMaxDecision(module.complexity.maxDecisionPoints),
+        rankNesting(module.complexity.maxNestingDepth),
+        rankSignals(module.complexity.signalShare),
       ]),
     );
-    const churnScore = rankPercentile(churn, module.evolution.churn90d);
-    const blastScore = rankPercentile(blast, module.centrality.blastRadius);
+    const churnScore = rankChurn(module.evolution.churn90d);
+    const blastScore = rankBlast(module.centrality.blastRadius);
     const testReach = module.protection.testReach ? 100 : 0;
     const hotspot = Math.round((complexity * churnScore) / 100);
     const risk = Math.round((hotspot * blastScore * (100 - testReach)) / 10000);
@@ -460,12 +490,10 @@ function buildSmellContext(
     const outgoing = (importGraph.get(module.file) ?? new Set()).size;
     stability.set(module.file, incoming + outgoing > 0 ? outgoing / (incoming + outgoing) : null);
   }
-  const importers = modules.map((m) => m.centrality.directImporters);
-  const dependencies = modules.map((m) => m.centrality.transitiveDependencies);
-  const inRank = new Map(modules.map((m) => [m.file, rankPercentile(importers, m.centrality.directImporters)]));
-  const outRank = new Map(
-    modules.map((m) => [m.file, rankPercentile(dependencies, m.centrality.transitiveDependencies)]),
-  );
+  const rankImporters = percentileRanker(modules.map((m) => m.centrality.directImporters));
+  const rankDependencies = percentileRanker(modules.map((m) => m.centrality.transitiveDependencies));
+  const inRank = new Map(modules.map((m) => [m.file, rankImporters(m.centrality.directImporters)]));
+  const outRank = new Map(modules.map((m) => [m.file, rankDependencies(m.centrality.transitiveDependencies)]));
   return { kind, importGraph, tierOf, stability, inRank, outRank };
 }
 

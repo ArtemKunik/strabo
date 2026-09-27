@@ -10,9 +10,12 @@ import { classifyExclusion } from '../../src/scan/exclusions.ts';
 import {
   MAX_FILE_BYTES,
   MAX_PARSE_BYTES,
+  classifyFileKind,
   classifyFileSize,
   countLines,
+  isTestLike,
 } from '../../src/scan/scan.ts';
+import { isTestFile } from '../../src/analysis/tiers/rules.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.resolve(here, '..', 'fixtures', 'sample-repo');
@@ -179,6 +182,59 @@ test('scanRepository excludes generated and vendored directories', async () => {
       (exclusion) => exclusion.reason === 'generated' && exclusion.path.startsWith('node_modules/'),
     ),
   );
+});
+
+// Every arm of the convention: a test/spec directory, a dotted suffix, a prefix, and the
+// `_test`/`_spec`/`-test` suffix that Go, Python, and Rust use.
+const TEST_LIKE = [
+  'src/__tests__/a.ts',
+  'src/tests/a.ts',
+  'src/test/a.ts',
+  'specs/a.ts',
+  'src/a.test.ts',
+  'src/a.spec.tsx',
+  'src/a.tests.ts',
+  'src/test_a.py',
+  'src/spec_a.rb',
+  'src/test-a.ts',
+  'pkg/user_test.go',
+  'app/user_test.py',
+  'src/api/discovery_tests.rs',
+  'src/a-test.ts',
+];
+
+const NOT_TEST_LIKE = [
+  'src/mytest.ts',
+  'src/contested.ts',
+  'src/latest.ts',
+  'src/system.ts',
+  'src/specification.ts',
+  'src/testimonials/a.ts',
+];
+
+test('isTestLike recognises directory, dotted, prefix, and suffix conventions', () => {
+  for (const file of TEST_LIKE) {
+    assert.equal(isTestLike(file), true, `${file} is a test`);
+  }
+});
+
+test('isTestLike does not mark near-miss names as tests', () => {
+  for (const file of NOT_TEST_LIKE) {
+    assert.equal(isTestLike(file), false, `${file} is not a test`);
+  }
+});
+
+test('the tiers isTestFile agrees with the scanner isTestLike on every convention', () => {
+  for (const file of [...TEST_LIKE, ...NOT_TEST_LIKE]) {
+    assert.equal(isTestFile(file), isTestLike(file), `${file} classified the same in both`);
+  }
+});
+
+test('classifyFileKind gives a test path precedence over an entry declaration', () => {
+  const entries = new Set(['src/index.ts', 'app/user_test.go']);
+  assert.equal(classifyFileKind('src/index.ts', entries), 'entry');
+  assert.equal(classifyFileKind('app/user_test.go', entries), 'test');
+  assert.equal(classifyFileKind('src/util.ts', entries), 'module');
 });
 
 test('a built bundle and its source map are classified generated', () => {

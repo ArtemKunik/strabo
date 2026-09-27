@@ -771,18 +771,20 @@ function candidateReportPaths(
 /**
  * Map a report path onto a repository-relative POSIX path.
  *
- * A relative path (the common CI case) is used as written. An absolute path under `root`
- * is made relative; one outside is kept literally so the caller can report it rather than
- * silently dropping it. Nothing is resolved against a filename that is not in the report.
+ * A relative path (the common CI case) is normalised — `./`, `.`, and `..` segments are
+ * folded — so `./src/a.ts` and `src/../src/a.ts` both land on `src/a.ts` instead of being
+ * reported as outside the graph. An absolute path under `root` is made relative; one outside
+ * is kept literally so the caller can report it rather than silently dropping it. Nothing is
+ * resolved against a filename that is not in the report.
  */
 export function mapReportPath(root: string, rawPath: string): string {
-  const normalised = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');
-  if (!path.isAbsolute(normalised)) {
-    return normalised;
+  const slashed = rawPath.replace(/\\/g, '/');
+  if (!path.isAbsolute(slashed)) {
+    return path.posix.normalize(slashed);
   }
-  const relative = toPosix(path.relative(path.resolve(root), path.resolve(normalised)));
-  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
-    return normalised;
+  const relative = toPosix(path.relative(path.resolve(root), path.resolve(slashed)));
+  if (relative === '' || relative === '.' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return slashed;
   }
   return relative;
 }

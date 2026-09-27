@@ -62,6 +62,28 @@ test('computeCoverage reports used-but-untested modules, not orphans', () => {
   assert.deepEqual(result.unreachedWithDependents, ['d.ts']);
 });
 
+test('computeCoverage reports nothing unreached when no test file exists', () => {
+  const graph: Graph = {
+    nodes: ['a.ts', 'b.ts', 'orphan.ts'].map((id) => ({
+      id,
+      kind: 'module' as const,
+      directory: '.',
+    })),
+    edges: [
+      { source: 'a.ts', target: 'b.ts', kind: 'import', evidence: { line: 1, specifier: 'b', resolution: 'exact' } },
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+
+  const result = computeCoverage(graph);
+  assert.deepEqual(result.testFiles, []);
+  assert.deepEqual(result.reached, []);
+  // Every used file is technically unreached, but that is "there are no tests", not a
+  // finding about this file: the list stays empty so the map is not dashed end to end.
+  assert.deepEqual(result.unreachedWithDependents, []);
+});
+
 test('computeImpact walks reverse edges and reports distance from the change', async () => {
   const root = tempDir();
   fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");

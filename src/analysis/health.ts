@@ -82,6 +82,8 @@ export function computeArchitectureHealth(
 
   // Coverage: measured lines when a report exists, else modules reachable from a test.
   const reach = computeCoverage(graph);
+  // A Set for the per-module lookup below: an array `includes` in the filter would be O(n^2).
+  const reached = new Set(reach.reached);
   const modules = graph.nodes.filter((node) => node.kind !== 'test');
   const measuredLine = measured?.available ? measured.summary.lineCoverage : null;
   if (measured?.available && measuredLine !== null && measured.summary.filesMeasured > 0) {
@@ -103,7 +105,7 @@ export function computeArchitectureHealth(
       basis: 'reachable',
     });
   } else {
-    const covered = modules.filter((node) => reach.reached.includes(node.id)).length;
+    const covered = modules.filter((node) => reached.has(node.id)).length;
     const noLines = measured?.available ? '; the measured report records no line counts' : '';
     axes.push({
       key: 'coverage',

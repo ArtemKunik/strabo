@@ -1,3 +1,5 @@
+import { isTestLike } from '../../scan/scan.ts';
+
 import type { Tier } from './types.ts';
 
 export type Language = 'js' | 'rust' | 'java' | 'kotlin' | 'csharp' | 'python' | 'go' | 'cpp' | 'sql' | 'proto' | 'other';
@@ -108,9 +110,15 @@ export const ROUTE_RULES: Partial<Record<Language, Rule[]>> = {
   ],
 };
 
-/** A test path or suffix, kept out of the file-name conventions below. */
+/**
+ * A test path or suffix, kept out of the file-name conventions below.
+ *
+ * Delegates to the scanner's {@link isTestLike} so the `tests` tier and the graph's
+ * `kind === 'test'` can never disagree about the same file. Coverage and the tests strip
+ * read the graph kind, so a divergence here would silently move files between tiers.
+ */
 export function isTestFile(file: string): boolean {
-  return /(^|\/)(tests?|__tests__|specs?)\//i.test(file) || /\.(test|spec)\.[^/]+$/i.test(file);
+  return isTestLike(file);
 }
 
 /** File kinds: path and extension, stronger than a bare token but weaker than a framework. */

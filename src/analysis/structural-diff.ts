@@ -9,7 +9,7 @@ import { classifyExclusion, excludedDirectory, looksMinified } from '../scan/exc
 import { collectPolyglotExternalImports } from '../scan/external-polyglot.ts';
 import { scanJsTsEdges } from '../scan/scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from '../scan/scan-polyglot.ts';
-import { countLines, directoryOf, isSourceExtension, isTestLike } from '../scan/scan.ts';
+import { classifyFileKind, countLines, directoryOf, isSourceExtension } from '../scan/scan.ts';
 import { revisionFromFingerprint } from '../status.ts';
 import type { Diagnostic, Exclusion, Graph } from '../types.ts';
 import { computeCoverage } from './coverage.ts';
@@ -464,7 +464,7 @@ async function assembleRevisionGraph(
   const entryByFile = new Map(detectEntryPoints(root, files).map((entry) => [entry.file, entry.reason]));
   const nodes: Graph['nodes'] = files.map((id) => ({
     id,
-    kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
+    kind: classifyFileKind(id, entryByFile),
     directory: directoryOf(id),
     ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
     lines: countLines(contentByFile.get(id) as string),

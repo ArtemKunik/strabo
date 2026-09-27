@@ -2,7 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { toPosix } from '../boundary/repository-root.ts';
-import type { Diagnostic, Exclusion, ExternalImport, Graph, GraphNode, ScanReport } from '../types.ts';
+import type {
+  Diagnostic,
+  Exclusion,
+  ExternalImport,
+  Graph,
+  GraphNode,
+  NodeKind,
+  ScanReport,
+} from '../types.ts';
 import { classifyExclusion, excludedDirectory, looksMinified } from './exclusions.ts';
 import { collectPolyglotExternalImports } from './external-polyglot.ts';
 import { detectEntryPoints } from './entry-points.ts';
@@ -138,9 +146,7 @@ export async function scanRepository(root: string): Promise<ScanReport> {
   const entryByFile = new Map(detectEntryPoints(root, files).map((entry) => [entry.file, entry.reason]));
   const nodes: GraphNode[] = files.map((id) => ({
     id,
-    // A test-like path stays a test even if a manifest names it; coverage and the tests
-    // strip key off `kind === 'test'`, so that classification must not be displaced.
-    kind: isTestLike(id) ? 'test' : entryByFile.has(id) ? 'entry' : 'module',
+    kind: classifyFileKind(id, entryByFile),
     directory: directoryOf(id),
     ...(entryByFile.has(id) ? { entryReason: entryByFile.get(id) as string } : {}),
     lines: linesByFile.get(id) ?? 0,
@@ -266,12 +272,32 @@ export function directoryOf(file: string): string {
   return index === -1 ? '.' : file.slice(0, index);
 }
 
+/**
+ * Whether a path is a test file by convention: a test/spec directory, a `foo.test.ts`-style
+ * dotted suffix, a `test_foo.py`-style prefix, or a `foo_test.go`-style suffix. The suffix
+ * arm is what makes Go (`user_test.go`) and Python (`user_test.py`) tests count; without it
+ * their tests are invisible to coverage and the test strip.
+ */
 export function isTestLike(file: string): boolean {
   const lower = file.toLowerCase();
   return (
     /(^|\/)(__tests__|tests?|specs?)(\/|$)/.test(lower) ||
-    /\.(test|spec)\.[^.]+$/.test(lower) ||
-    /(^|\/)(test|spec)_/.test(lower) ||
-    /(^|\/)test-/i.test(lower)
+    /(?:^|[._-])(?:test|spec)s?\.[^.]+$/.test(lower) ||
+    /(^|\/)(?:test|spec)[._-]/.test(lower)
   );
+}
+
+/**
+ * A file's graph kind: a test-like path is always a test, a manifest- or convention-declared
+ * entry is an entry, and everything else is a module.
+ *
+ * Shared by the scanner and the structural diff so both revisions classify a path the same
+ * way; the `test` answer must not be displaced by an entry declaration because coverage and
+ * the tests strip key off `kind === 'test'`.
+ */
+export function classifyFileKind(
+  file: string,
+  entryFiles: { has(id: string): boolean },
+): NodeKind {
+  return isTestLike(file) ? 'test' : entryFiles.has(file) ? 'entry' : 'module';
 }

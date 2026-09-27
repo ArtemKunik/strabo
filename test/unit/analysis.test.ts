@@ -10,6 +10,7 @@ import {
   neighbourhood,
   rankHubs,
 } from '../../src/analysis/analysis.ts';
+import { computeTestReachByFile, reachedFiles } from '../../src/analysis/coverage.ts';
 import { computeCoverage } from '../../src/index.ts';
 import { computeCycles } from '../../src/index.ts';
 import { buildPositions } from '../../src/index.ts';
@@ -67,6 +68,65 @@ test('computeCoverage reports reachability from test files, not execution covera
   assert.ok(result.testFiles.includes('src/feature.test.ts'));
   assert.ok(result.reached.includes('src/feature.ts'));
   assert.ok(result.reached.includes('src/util.ts'));
+});
+
+test('computeCoverage and computeTestReachByFile agree on which files tests reach', async () => {
+  const graph = await loadGraph();
+  const reach = computeCoverage(graph);
+  const byFile = computeTestReachByFile(graph);
+
+  const tests = new Set(reach.testFiles);
+  const viaMap = [...byFile.keys()].filter((id) => !tests.has(id)).sort();
+  assert.deepEqual(viaMap, [...reach.reached].sort(), 'both name the same reached files');
+
+  for (const [file, list] of byFile) {
+    assert.ok(list.length > 0, `${file} has a reaching test`);
+    assert.equal(new Set(list).size, list.length, `${file} lists each test once`);
+  }
+  for (const testFile of reach.testFiles) {
+    assert.ok(byFile.get(testFile)?.includes(testFile), `${testFile} reaches itself`);
+  }
+});
+
+test('computeTestReachByFile derives the per-test map once per graph', async () => {
+  const graph = await loadGraph();
+  const first = computeTestReachByFile(graph);
+  // The same graph object is reused across requests, so the expensive per-test closure is
+  // computed once and shared; a second call must not redo it.
+  assert.equal(computeTestReachByFile(graph), first);
+  assert.deepEqual(computeTestReachByFile(graph), first);
+});
+
+test('reachedFiles unites the reached files with the test files', () => {
+  const reached = reachedFiles({ testFiles: ['t.test.ts'], reached: ['a.ts'], unreachedWithDependents: [] });
+  assert.ok(reached.has('a.ts'));
+  assert.ok(reached.has('t.test.ts'));
+  assert.equal(reached.has('b.ts'), false);
+});
+
+test('computeTestReachByFile lists a test once against a file reachable through a cycle', () => {
+  const nodes = ['t.test.ts', 'a.ts', 'b.ts'].map((id) => ({
+    id,
+    kind: (id === 't.test.ts' ? 'test' : 'module') as 'test' | 'module',
+    directory: '.',
+  }));
+  const edge = (source: string, target: string) => ({
+    source,
+    target,
+    kind: 'import' as const,
+    evidence: { line: 1, specifier: `./${target}`, resolution: 'exact' as const },
+    role: 'use' as const,
+  });
+  const graph = {
+    nodes,
+    edges: [edge('t.test.ts', 'a.ts'), edge('a.ts', 'b.ts'), edge('b.ts', 'a.ts')],
+    diagnostics: [],
+    excluded: [],
+  };
+
+  const byFile = computeTestReachByFile(graph);
+  assert.deepEqual(byFile.get('a.ts'), ['t.test.ts']);
+  assert.deepEqual(byFile.get('b.ts'), ['t.test.ts']);
 });
 
 test('buildPositions shelf-packs directories into a roughly rectangular map', () => {

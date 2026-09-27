@@ -413,18 +413,20 @@ function testReachOverlay(data) {
   const unreached = data?.unreachedWithDependents ?? [];
   const testFiles = data?.testFiles ?? [];
   const reached = data?.reached ?? [];
-  const classes = new Map();
-  for (const id of unreached) {
-    classes.set(id, 'ov-unreached');
-  }
+  // With no test file, reachability cannot be derived, so no node is annotated: marking the
+  // list unreached here would dash the whole map while the panel says the opposite.
   if (testFiles.length === 0) {
     return {
-      classes,
+      classes: new Map(),
       summary: 'no test files identified',
       items: [],
       meta: { testFiles: 0, reached: reached.length, unreached: unreached.length },
       emptyNote: 'No test files matched the scan heuristics, so reachability cannot be derived.',
     };
+  }
+  const classes = new Map();
+  for (const id of unreached) {
+    classes.set(id, 'ov-unreached');
   }
   if (unreached.length === 0) {
     return {

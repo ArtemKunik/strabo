@@ -1,6 +1,6 @@
 import type { Graph } from '../types.ts';
 import { computeGraphMetrics } from './analysis.ts';
-import { computeCoverage } from './coverage.ts';
+import { computeCoverage, reachedFiles } from './coverage.ts';
 import { readCommits, type CommitRow } from './git-log.ts';
 import { revisionGraph } from './structural-diff.ts';
 
@@ -78,8 +78,7 @@ const MAX_LIMIT = 100;
  */
 export function computeCoverageTrendMeasures(graph: Graph): CoverageTrendMeasure[] {
   const metrics = computeGraphMetrics(graph);
-  const reach = computeCoverage(graph);
-  const reached = new Set([...reach.reached, ...reach.testFiles]);
+  const reached = reachedFiles(computeCoverage(graph));
   const used = graph.nodes.filter(
     (node) =>
       node.kind !== 'test' &&
