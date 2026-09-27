@@ -131,6 +131,62 @@ export function detachSession(root, sessionId) {
   );
 }
 
+/** Swap the sessions two panes show, leaving the geometry alone. Missing panes are a no-op. */
+export function swapPaneSessions(root, paneIdA, paneIdB) {
+  const a = findPane(root, paneIdA);
+  const b = findPane(root, paneIdB);
+  if (!a || !b || paneIdA === paneIdB) {
+    return root;
+  }
+  return setPaneSession(setPaneSession(root, paneIdA, b.sessionId ?? null), paneIdB, a.sessionId ?? null);
+}
+
+/**
+ * Show `sessionId` in `targetPaneId`, dragging it out of whichever pane held it.
+ *
+ * The target keeps working when it is already showing a session: the two swap, so a move
+ * never duplicates a session into two panes. A no-op when the session is not on screen, the
+ * target is missing, or it already lives in the target.
+ */
+export function transferSession(root, sessionId, targetPaneId) {
+  const source = paneForSession(root, sessionId);
+  if (!source || !targetPaneId || source.paneId === targetPaneId || !findPane(root, targetPaneId)) {
+    return root;
+  }
+  return swapPaneSessions(root, source.paneId, targetPaneId);
+}
+
+/** The deepest split that directly sits above `paneId`, or null when the pane is not nested. */
+function parentSplit(node, paneId) {
+  if (!node || node.type === 'leaf') {
+    return null;
+  }
+  if (panes(node.a).some((leaf) => leaf.paneId === paneId)) {
+    return parentSplit(node.a, paneId) ?? node;
+  }
+  if (panes(node.b).some((leaf) => leaf.paneId === paneId)) {
+    return parentSplit(node.b, paneId) ?? node;
+  }
+  return null;
+}
+
+/**
+ * Collapse the split directly above a pane, so the pane reclaims the space it and its sibling
+ * shared. Sessions in the removed sibling stay open as tabs; only the layout shrinks. A
+ * single-pane layout, or a pane that is not present, is returned unchanged.
+ */
+export function collapseToPane(root, paneId) {
+  const leaf = findPane(root, paneId);
+  if (!leaf || root.type === 'leaf') {
+    return root;
+  }
+  const parent = parentSplit(root, paneId);
+  if (!parent) {
+    return root;
+  }
+  return mapTree(root, (node) => (node === parent ? { type: 'leaf', paneId, sessionId: leaf.sessionId ?? null } : node));
+}
+
 /**
  * Close a pane. The parent split collapses into its surviving child, so no empty split is
  * left behind. Returns the new tree, or null when the closed pane was the last one.

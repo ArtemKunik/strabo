@@ -26,6 +26,7 @@ import { copyText, showContextMenu, showToast } from './strabo-delegate.js';
 import { createTerminalMultiplexer } from './terminal-multiplexer.js';
 import {
   closePane,
+  collapseToPane,
   countPanes,
   createLayout,
   detachSession,
@@ -37,6 +38,7 @@ import {
   setPaneSession,
   setRatio,
   splitPane,
+  transferSession,
 } from './strabo-terminal-split.js';
 import {
   cycleSessionId,
@@ -45,6 +47,7 @@ import {
   moveInOrder,
   orderSessions,
   renderTabs,
+  SESSION_DRAG_TYPE,
 } from './strabo-terminal-tabs.js';
 import { openSessionSwitcher } from './strabo-terminal-switcher.js';
 import { registerCitationLinks } from './strabo-terminal-linkify.js';
@@ -493,6 +496,7 @@ export function initTerminalScreen(container, hooks = {}) {
       paneEl.className = 'terminal-pane';
       paneEl.dataset.paneId = node.paneId;
       paneEl.addEventListener('pointerdown', () => setActivePane(node.paneId));
+      wirePaneDrop(paneEl, node.paneId);
       return paneEl;
     }
     const wrap = document.createElement('div');
@@ -551,6 +555,55 @@ export function initTerminalScreen(container, hooks = {}) {
       splitter.addEventListener('pointercancel', end);
       event.preventDefault();
     });
+  }
+
+  /**
+   * Accept a session tab dropped on a pane, so a session can be dragged from the strip between
+   * the split panes. The dragged tab sets `SESSION_DRAG_TYPE`; checking `types` on `dragenter`
+   * (the data itself is unreadable until drop) lets the pane light up only for a session drag.
+   */
+  function wirePaneDrop(paneEl, paneId) {
+    const carriesSession = (event) => Array.from(event.dataTransfer?.types ?? []).includes(SESSION_DRAG_TYPE);
+    paneEl.addEventListener('dragenter', (event) => {
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      paneEl.classList.add('is-drop-target');
+    });
+    paneEl.addEventListener('dragover', (event) => {
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+    });
+    paneEl.addEventListener('dragleave', (event) => {
+      if (!paneEl.contains(event.relatedTarget)) {
+        paneEl.classList.remove('is-drop-target');
+      }
+    });
+    paneEl.addEventListener('drop', (event) => {
+      paneEl.classList.remove('is-drop-target');
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionId = event.dataTransfer?.getData(SESSION_DRAG_TYPE);
+      if (sessionId) {
+        moveSessionToPane(sessionId, paneId);
+      }
+    });
+  }
+
+  /** Drop the drop-target wash everywhere; a drag can end without a drop (Escape, drop outside). */
+  function clearDropTargets() {
+    for (const paneEl of panesEl.querySelectorAll('.terminal-pane.is-drop-target')) {
+      paneEl.classList.remove('is-drop-target');
+    }
   }
 
   function renderLayoutDom() {
@@ -677,6 +730,21 @@ export function initTerminalScreen(container, hooks = {}) {
     layout = setPaneSession(layout, target, sessionId);
     setActivePane(target);
     mountSurfaces();
+  }
+
+  /**
+   * Show a session in another pane after a tab is dropped on it. The session leaves its old
+   * pane and either fills the target or swaps with whatever the target already showed, so the
+   * same session is never drawn twice.
+   */
+  function moveSessionToPane(sessionId, paneId) {
+    const next = transferSession(layout, sessionId, paneId);
+    if (next === layout) {
+      return;
+    }
+    layout = next;
+    setActivePane(paneId);
+    persistSoon();
   }
 
   function openSession(id) {
@@ -837,6 +905,25 @@ export function initTerminalScreen(container, hooks = {}) {
     await newSession();
   }
 
+  /**
+   * Collapse the split above the active pane, so the pane fills the space it shared. The
+   * session in the removed sibling is not killed — it stays open as a tab — so unsplitting is
+   * only about the layout. A single pane is already unsplit, so the action is a no-op there.
+   */
+  function unsplitActive() {
+    ensureRestored();
+    const next = collapseToPane(layout, activePaneId);
+    if (next === layout) {
+      return;
+    }
+    layout = next;
+    activePaneId = findPane(layout, activePaneId)?.paneId ?? panes(layout)[0]?.paneId ?? activePaneId;
+    renderLayoutDom();
+    render();
+    fitVisible();
+    persistSoon();
+  }
+
   function openSwitcher() {
     openSessionSwitcher({
       sessions: listSessions(),
@@ -912,9 +999,9 @@ export function initTerminalScreen(container, hooks = {}) {
 
   /**
    * The actions sit at the end of the session tab strip rather than in a row of their own:
-   * `+` opens a shell, the chevron beside it runs a preset, and split is an icon on the far
-   * side. The session switcher has no button; the tabs already list the sessions and Ctrl+K
-   * opens it.
+   * `+` opens a shell, the chevron beside it runs a preset, and split/unsplit are icons on the
+   * far side. The session switcher has no button; the tabs already list the sessions and
+   * Ctrl+K opens it.
    */
   function buildToolbar() {
     toolbarEl.replaceChildren();
@@ -929,11 +1016,15 @@ export function initTerminalScreen(container, hooks = {}) {
     const splitButton = toolbarButton('◫', 'Split pane', 'Ctrl+Shift+E', () => {
       splitActive('row').catch(handleError);
     });
+    const unsplitButton = toolbarButton('⊟', 'Unsplit pane', 'Ctrl+Shift+U', () => {
+      unsplitActive();
+    });
+    unsplitButton.classList.add('terminal-unsplit');
     const closeInactiveButton = toolbarButton('⌫', 'Close inactive sessions and empty panes', 'exited, failed, or empty', () => {
       closeInactiveAndEmpty();
     });
     closeInactiveButton.classList.add('terminal-close-inactive');
-    toolbarEl.append(newButton, runButton, spacer, splitButton, closeInactiveButton);
+    toolbarEl.append(newButton, runButton, spacer, splitButton, unsplitButton, closeInactiveButton);
   }
 
   function openRunMenu(anchor) {
@@ -987,6 +1078,10 @@ export function initTerminalScreen(container, hooks = {}) {
     }
     if (event.shiftKey && key === 'o') {
       act(() => splitActive('column').catch(handleError));
+      return;
+    }
+    if (event.shiftKey && key === 'u') {
+      act(unsplitActive);
       return;
     }
     if (key === 'tab') {
@@ -1043,6 +1138,7 @@ export function initTerminalScreen(container, hooks = {}) {
   renderLayoutDom();
   screen.addEventListener('keydown', onKeydown, true);
   screen.addEventListener('contextmenu', onContextMenu);
+  screen.addEventListener('dragend', clearDropTargets);
   window.addEventListener('resize', onWindowResize);
   window.addEventListener('beforeunload', persistNow);
   repoSelect?.addEventListener('change', onRepoChange);
@@ -1088,6 +1184,8 @@ export function initTerminalScreen(container, hooks = {}) {
     closeInactiveSessions,
     /** Collapse every empty "No session" pane, keeping one when nothing else is left. */
     closeEmptyPanes,
+    /** Collapse the split above the active pane, leaving the session visible in one pane. */
+    unsplitActive,
     /** Tidy up in one click: inactive sessions, then the empty panes they leave behind. */
     closeInactiveAndEmpty,
 
@@ -1113,6 +1211,7 @@ export function initTerminalScreen(container, hooks = {}) {
       resizeObserver = null;
       screen.removeEventListener('keydown', onKeydown, true);
       screen.removeEventListener('contextmenu', onContextMenu);
+      screen.removeEventListener('dragend', clearDropTargets);
       window.removeEventListener('resize', onWindowResize);
       window.removeEventListener('beforeunload', persistNow);
       repoSelect?.removeEventListener('change', onRepoChange);

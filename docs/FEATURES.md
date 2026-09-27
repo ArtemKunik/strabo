@@ -445,7 +445,10 @@ has one of four kinds:
 | `watch` | A long-running command (a dev server, a test watcher). |
 
 Sessions are **tabs** across the top of the screen, with a **switcher** once there are more
-than fit and a **split** view that shows two at once. A shell can name its own tab with an
+than fit and a **split** view that shows two at once. A session moves between panes by
+dragging its tab onto a pane — an empty pane takes it, an occupied one trades places — and
+**unsplit** (`Ctrl+Shift+U`, or the ⊟ action) collapses the split above the active pane so it
+fills the space, the other session staying open as a tab. A shell can name its own tab with an
 **OSC title** escape (`\e]0;name\a`); Strabo shows the title the process sets rather than the
 command line. Every session keeps a bounded replay buffer keyed by sequence number, so a
 reconnect — or a **resume** after the socket drops — replays only the output the client
@@ -611,3 +614,7 @@ layer over recorded evidence; `GET /narrator/models`, `POST /narrator/test`,
   recorded functions (line, metrics, signals, same-file calls) from `buildNarratorEvidence`
   and renders the reply under a "model-generated narrative" attribution — or the reason it is
   unavailable, which is `not-configured` until the operator sets an endpoint and model.
+- `POST /narrator/coverage-plan` ranks the repository's weak coverage points — a used, non-test
+  file under the measured threshold, or reached by no test on the reachability fallback — by
+  blast radius, cycle membership, and recorded function signals, and asks the model for a
+  prioritised test plan. A file the report does not name is listed as unrecorded, never as 0%.

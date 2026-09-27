@@ -226,6 +226,17 @@
   border-color: var(--accent);
 }
 
+/* A session tab dragged over a pane: an inset wash marks where the drop will land. */
+.terminal-pane.is-drop-target::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+
 .terminal-pane-empty {
   display: flex;
   align-items: center;

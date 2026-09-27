@@ -16,6 +16,12 @@ export const KIND_LABELS = {
   watch: 'Watch',
 };
 
+/**
+ * The drag MIME a session tab carries so a pane can tell a session drag from any other
+ * draggable on the page and accept a drop that moves the session between panes.
+ */
+export const SESSION_DRAG_TYPE = 'application/x-strabo-terminal-session';
+
 /** The tab's visible name: the shell-set title when present, else the kind. */
 export function sessionTabLabel(meta) {
   const title = typeof meta?.title === 'string' ? meta.title.trim() : '';
@@ -178,6 +184,7 @@ function tabButton(session, active, handlers, label = sessionTabLabel(session)) 
   button.addEventListener('click', () => handlers.onSelect?.(session.id));
   button.addEventListener('dragstart', (event) => {
     event.dataTransfer?.setData('text/plain', session.id);
+    event.dataTransfer?.setData(SESSION_DRAG_TYPE, session.id);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move';
     }

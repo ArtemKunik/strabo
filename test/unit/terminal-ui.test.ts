@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   closePane,
+  collapseToPane,
   countPanes,
   createLayout,
   detachSession,
@@ -18,6 +19,8 @@ import {
   setPaneSession,
   setRatio,
   splitPane,
+  swapPaneSessions,
+  transferSession,
 } from '../../ui/strabo-terminal-split.js';
 import {
   cycleSessionId,
@@ -127,6 +130,65 @@ test('movePane refuses to strand a target that lived in the removed subtree', ()
   assert.equal(movePane(root, 'p1', 'p1', 'row'), root);
   const moved = movePane(root, 'p1', 'p2', 'column', 'p1');
   assert.deepEqual(paneIds(moved).sort(), ['p1', 'p2']);
+});
+
+test('swapPaneSessions exchanges what two panes show and ignores missing panes', () => {
+  let root = createLayout('p1');
+  root = setPaneSession(root, 'p1', 's1');
+  root = splitPane(root, 'p1', 'row', 'p2');
+  root = setPaneSession(root, 'p2', 's2');
+
+  const swapped = swapPaneSessions(root, 'p1', 'p2');
+  assert.equal(findPane(swapped, 'p1')?.sessionId, 's2');
+  assert.equal(findPane(swapped, 'p2')?.sessionId, 's1');
+
+  assert.equal(swapPaneSessions(root, 'p1', 'p1'), root);
+  assert.equal(swapPaneSessions(root, 'p1', 'nope'), root);
+});
+
+test('transferSession moves into an empty pane and swaps into a full one', () => {
+  let root = createLayout('p1');
+  root = setPaneSession(root, 'p1', 's1');
+  root = splitPane(root, 'p1', 'row', 'p2');
+
+  // The target is empty, so the session moves and the source pane is left blank.
+  const moved = transferSession(root, 's1', 'p2');
+  assert.equal(findPane(moved, 'p2')?.sessionId, 's1');
+  assert.equal(findPane(moved, 'p1')?.sessionId, null);
+
+  // The target already shows s2, so the two swap rather than duplicating s1.
+  const filled = setPaneSession(moved, 'p1', 's2');
+  const swapped = transferSession(filled, 's1', 'p1');
+  assert.equal(findPane(swapped, 'p1')?.sessionId, 's1');
+  assert.equal(findPane(swapped, 'p2')?.sessionId, 's2');
+
+  // A session that is not on screen, or already in the target, is a no-op.
+  assert.equal(transferSession(root, 'ghost', 'p2'), root);
+  assert.equal(transferSession(root, 's1', 'p1'), root);
+});
+
+test('collapseToPane removes the split above a pane and keeps its session', () => {
+  // split(p1 | split(p2 | p3)); collapsing p2 removes only the inner split.
+  let root = createLayout('p1');
+  root = splitPane(root, 'p1', 'row', 'p2');
+  root = splitPane(root, 'p2', 'column', 'p3');
+  root = setPaneSession(root, 'p2', 's2');
+
+  const nested = collapseToPane(root, 'p2');
+  assert.deepEqual(paneIds(nested), ['p1', 'p2']);
+  assert.equal(findPane(nested, 'p2')?.sessionId, 's2');
+
+  // Collapsing either side of a two-pane split leaves a single leaf.
+  const flat = splitPane(createLayout('p1'), 'p1', 'row', 'p2');
+  const collapsed = collapseToPane(flat, 'p1');
+  assert.equal(countPanes(collapsed), 1);
+  assert.equal(collapsed.type, 'leaf');
+  assert.equal(collapsed.paneId, 'p1');
+
+  // A single pane is already unsplit, and a missing pane is untouchable.
+  const single = createLayout('p9');
+  assert.equal(collapseToPane(single, 'p9'), single);
+  assert.equal(collapseToPane(flat, 'nope'), flat);
 });
 
 test('sanitizeLayout rejects corrupt storage and falls back to one pane', () => {

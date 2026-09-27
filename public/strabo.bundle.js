@@ -23502,6 +23502,44 @@ function detachSession(root, sessionId) {
     (node) => node.type === "leaf" && node.sessionId === sessionId ? { ...node, sessionId: null } : node
   );
 }
+function swapPaneSessions(root, paneIdA, paneIdB) {
+  const a = findPane(root, paneIdA);
+  const b2 = findPane(root, paneIdB);
+  if (!a || !b2 || paneIdA === paneIdB) {
+    return root;
+  }
+  return setPaneSession(setPaneSession(root, paneIdA, b2.sessionId ?? null), paneIdB, a.sessionId ?? null);
+}
+function transferSession(root, sessionId, targetPaneId) {
+  const source = paneForSession(root, sessionId);
+  if (!source || !targetPaneId || source.paneId === targetPaneId || !findPane(root, targetPaneId)) {
+    return root;
+  }
+  return swapPaneSessions(root, source.paneId, targetPaneId);
+}
+function parentSplit(node, paneId) {
+  if (!node || node.type === "leaf") {
+    return null;
+  }
+  if (panes(node.a).some((leaf) => leaf.paneId === paneId)) {
+    return parentSplit(node.a, paneId) ?? node;
+  }
+  if (panes(node.b).some((leaf) => leaf.paneId === paneId)) {
+    return parentSplit(node.b, paneId) ?? node;
+  }
+  return null;
+}
+function collapseToPane(root, paneId) {
+  const leaf = findPane(root, paneId);
+  if (!leaf || root.type === "leaf") {
+    return root;
+  }
+  const parent = parentSplit(root, paneId);
+  if (!parent) {
+    return root;
+  }
+  return mapTree(root, (node) => node === parent ? { type: "leaf", paneId, sessionId: leaf.sessionId ?? null } : node);
+}
 function closePane(root, paneId) {
   const close = (node) => {
     if (!node) {
@@ -23571,6 +23609,7 @@ var KIND_LABELS = {
   task: "Task",
   watch: "Watch"
 };
+var SESSION_DRAG_TYPE = "application/x-strabo-terminal-session";
 function sessionTabLabel(meta) {
   const title = typeof meta?.title === "string" ? meta.title.trim() : "";
   if (title) {
@@ -23695,6 +23734,7 @@ function tabButton(session, active, handlers, label = sessionTabLabel(session)) 
   button3.addEventListener("click", () => handlers.onSelect?.(session.id));
   button3.addEventListener("dragstart", (event) => {
     event.dataTransfer?.setData("text/plain", session.id);
+    event.dataTransfer?.setData(SESSION_DRAG_TYPE, session.id);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move";
     }
@@ -24480,6 +24520,7 @@ function initTerminalScreen(container, hooks = {}) {
       paneEl.className = "terminal-pane";
       paneEl.dataset.paneId = node.paneId;
       paneEl.addEventListener("pointerdown", () => setActivePane(node.paneId));
+      wirePaneDrop(paneEl, node.paneId);
       return paneEl;
     }
     const wrap = document.createElement("div");
@@ -24530,6 +24571,47 @@ function initTerminalScreen(container, hooks = {}) {
       splitter.addEventListener("pointercancel", end);
       event.preventDefault();
     });
+  }
+  function wirePaneDrop(paneEl, paneId) {
+    const carriesSession = (event) => Array.from(event.dataTransfer?.types ?? []).includes(SESSION_DRAG_TYPE);
+    paneEl.addEventListener("dragenter", (event) => {
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      paneEl.classList.add("is-drop-target");
+    });
+    paneEl.addEventListener("dragover", (event) => {
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+    });
+    paneEl.addEventListener("dragleave", (event) => {
+      if (!paneEl.contains(event.relatedTarget)) {
+        paneEl.classList.remove("is-drop-target");
+      }
+    });
+    paneEl.addEventListener("drop", (event) => {
+      paneEl.classList.remove("is-drop-target");
+      if (!carriesSession(event)) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionId = event.dataTransfer?.getData(SESSION_DRAG_TYPE);
+      if (sessionId) {
+        moveSessionToPane(sessionId, paneId);
+      }
+    });
+  }
+  function clearDropTargets() {
+    for (const paneEl of panesEl.querySelectorAll(".terminal-pane.is-drop-target")) {
+      paneEl.classList.remove("is-drop-target");
+    }
   }
   function renderLayoutDom() {
     panesEl.replaceChildren(buildNode(layout));
@@ -24636,6 +24718,15 @@ function initTerminalScreen(container, hooks = {}) {
     layout = setPaneSession(layout, target, sessionId);
     setActivePane(target);
     mountSurfaces();
+  }
+  function moveSessionToPane(sessionId, paneId) {
+    const next = transferSession(layout, sessionId, paneId);
+    if (next === layout) {
+      return;
+    }
+    layout = next;
+    setActivePane(paneId);
+    persistSoon();
   }
   function openSession(id) {
     if (typeof id !== "string" || id === "") {
@@ -24763,6 +24854,19 @@ function initTerminalScreen(container, hooks = {}) {
     persistSoon();
     await newSession();
   }
+  function unsplitActive() {
+    ensureRestored();
+    const next = collapseToPane(layout, activePaneId);
+    if (next === layout) {
+      return;
+    }
+    layout = next;
+    activePaneId = findPane(layout, activePaneId)?.paneId ?? panes(layout)[0]?.paneId ?? activePaneId;
+    renderLayoutDom();
+    render();
+    fitVisible();
+    persistSoon();
+  }
   function openSwitcher() {
     openSessionSwitcher({
       sessions: listSessions(),
@@ -24836,11 +24940,15 @@ function initTerminalScreen(container, hooks = {}) {
     const splitButton = toolbarButton("\u25EB", "Split pane", "Ctrl+Shift+E", () => {
       splitActive("row").catch(handleError);
     });
+    const unsplitButton = toolbarButton("\u229F", "Unsplit pane", "Ctrl+Shift+U", () => {
+      unsplitActive();
+    });
+    unsplitButton.classList.add("terminal-unsplit");
     const closeInactiveButton = toolbarButton("\u232B", "Close inactive sessions and empty panes", "exited, failed, or empty", () => {
       closeInactiveAndEmpty();
     });
     closeInactiveButton.classList.add("terminal-close-inactive");
-    toolbarEl.append(newButton, runButton, spacer, splitButton, closeInactiveButton);
+    toolbarEl.append(newButton, runButton, spacer, splitButton, unsplitButton, closeInactiveButton);
   }
   function openRunMenu(anchor) {
     loadPresets(resolveRepo().root).then(
@@ -24887,6 +24995,10 @@ function initTerminalScreen(container, hooks = {}) {
     }
     if (event.shiftKey && key === "o") {
       act(() => splitActive("column").catch(handleError));
+      return;
+    }
+    if (event.shiftKey && key === "u") {
+      act(unsplitActive);
       return;
     }
     if (key === "tab") {
@@ -24936,6 +25048,7 @@ function initTerminalScreen(container, hooks = {}) {
   renderLayoutDom();
   screen.addEventListener("keydown", onKeydown, true);
   screen.addEventListener("contextmenu", onContextMenu);
+  screen.addEventListener("dragend", clearDropTargets);
   window.addEventListener("resize", onWindowResize);
   window.addEventListener("beforeunload", persistNow);
   repoSelect?.addEventListener("change", onRepoChange);
@@ -24978,6 +25091,8 @@ function initTerminalScreen(container, hooks = {}) {
     closeInactiveSessions,
     /** Collapse every empty "No session" pane, keeping one when nothing else is left. */
     closeEmptyPanes,
+    /** Collapse the split above the active pane, leaving the session visible in one pane. */
+    unsplitActive,
     /** Tidy up in one click: inactive sessions, then the empty panes they leave behind. */
     closeInactiveAndEmpty,
     destroy() {
@@ -25001,6 +25116,7 @@ function initTerminalScreen(container, hooks = {}) {
       resizeObserver = null;
       screen.removeEventListener("keydown", onKeydown, true);
       screen.removeEventListener("contextmenu", onContextMenu);
+      screen.removeEventListener("dragend", clearDropTargets);
       window.removeEventListener("resize", onWindowResize);
       window.removeEventListener("beforeunload", persistNow);
       repoSelect?.removeEventListener("change", onRepoChange);
