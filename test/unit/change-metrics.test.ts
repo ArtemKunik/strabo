@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,9 @@ import {
   reviewWorkingTree,
   scanRepository,
 } from '../../src/index.ts';
+import { CHANGE_METRICS_VERSION } from '../../src/analysis/change-metrics.ts';
 import { getTimeline } from '../../src/analysis/timeline.ts';
+import { cacheRoot } from '../../src/cache/graph-cache.ts';
 import {
   changeMetricSummary,
   commitMetricBadge,
@@ -146,6 +149,42 @@ test('commit metrics are served from the on-disk cache on a second request', asy
   const second = await computeCommitMetrics(root, 'HEAD~1');
   assert.equal(second.available && second.cached, true);
   assert.deepEqual(second.available && second.totals, first.available && first.totals);
+});
+
+test('a full commit hash is served from the cache without resolving it through git', async () => {
+  const root = tempRepo();
+  // An entry under a hash the repository does not contain: only the cache can answer it, so
+  // a git resolution would report the revision unknown and the fast path is the difference.
+  const hash = 'a'.repeat(40);
+  const file = path.join(
+    cacheRoot(),
+    `strabo-${CHANGE_METRICS_VERSION}-${createHash('sha256').update(path.resolve(root)).digest('hex').slice(0, 16)}.json`,
+  );
+  const totals = {
+    files: 0,
+    measured: 0,
+    complexity: { before: 0, after: 0, added: 0, removed: 0 },
+    functions: { before: 0, after: 0 },
+    signals: { before: 0, after: 0 },
+    lines: { before: 0, after: 0 },
+    coupling: { added: 0, removed: 0 },
+  };
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: CHANGE_METRICS_VERSION,
+      entries: {
+        [hash]: { available: true, kind: 'commit', ref: hash, baseline: null, files: [], totals, capped: false },
+      },
+    }),
+  );
+  clearChangeMetricsCache();
+
+  const result = await computeCommitMetrics(root, hash);
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.cached, true);
+  assert.deepEqual(result.totals, totals);
 });
 
 test('an unsafe or unknown revision is reported, never passed to git as an option', async () => {

@@ -129,10 +129,23 @@ export interface MetricsHistoryEntry {
 
 /* ------------------------------------------------------------------ Entry points */
 
+/** A resolved, full 40-character commit hash: already the commit store's own key. */
+const FULL_HASH = /^[0-9a-f]{40}$/i;
+
 /** Metrics for a commit's own changes, against its first parent. Cached by commit hash. */
 export async function computeCommitMetrics(root: string, ref: string): Promise<ChangeMetricsResult> {
   if (!ref.trim() || !isSafeRevision(ref)) {
     return { available: false, reason: 'unknown-revision', detail: `Unknown revision "${ref}".` };
+  }
+  const store = commitStore(root);
+  // A full commit hash is already the store's key, so a hit needs no `git` call. The history
+  // view asks by full hash, and resolving each one through `git show` cost a subprocess per
+  // commit — a warm load was as slow as a cold one, defeating the cache entirely.
+  if (FULL_HASH.test(ref)) {
+    const cached = store.get(ref.toLowerCase());
+    if (cached) {
+      return { ...cached, cached: true };
+    }
   }
   let hash: string;
   let parent: string | null;
@@ -148,7 +161,6 @@ export async function computeCommitMetrics(root: string, ref: string): Promise<C
     return gitFailure(error, ref);
   }
 
-  const store = commitStore(root);
   const hit = store.get(hash);
   if (hit) {
     return { ...hit, cached: true };
