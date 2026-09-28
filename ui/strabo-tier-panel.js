@@ -10,6 +10,7 @@ import {
   tierCallSites,
   tierDirectionLabel,
   tierEndpointSites,
+  tierLimits,
   tierMatrixRows,
   tierPerTierRows,
   tierSummaryLabel,
@@ -48,6 +49,18 @@ export function renderTierPanel(container, report, filter = 'all') {
   note.className = 'overlay-note';
   note.textContent = tierSummaryLabel(report);
   container.append(note);
+
+  // The named limits (Y9): what this reading cannot claim, said plainly rather than hidden.
+  const limits = document.createElement('ul');
+  limits.className = 'tier-limits';
+  limits.dataset.role = 'tier-limits';
+  for (const limit of tierLimits(report)) {
+    const item = document.createElement('li');
+    item.className = 'tier-limit';
+    item.textContent = limit;
+    limits.append(item);
+  }
+  container.append(limits);
 
   const rows = tierMatrixRows(report);
   if (rows.length === 0) {

@@ -45,7 +45,7 @@ record is reported as `unavailable`, never invented.
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
 | 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
-| 35 | Application logical structure from the tier lens | In progress (Y0-Y4 done: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 Structure lens, unit-by-tier grid with cross-unit edges; Y5-Y9 planned: unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
+| 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2319,14 +2319,7 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   beyond the scan ceiling was not read, an upward edge can be a shared type imported by an upper
   tier and misread as a violation, and a mostly intra-tier ratio means the repository is not
   layered. The eight tier hues stay inside the Phase 13 budget, which the colour test enforces.
-  Coverage in `test/unit/{tier-panel,browser-core}.test.ts`. Original text:
-  Bound the drawing by the Phase 16 file ceiling (`MAX_TIER_FILES`,
-  `report.ts:26`): a band the scan did not classify is drawn as `unclassified`, not as empty, and
-  the truncated count is shown. Keep the colour count inside the Phase 13 budget (the eight tier
-  hues already conflict; resolve in the rules, not by exception — see *Removed or frozen*). State
-  the two known limits in the panel: an upward edge can be a shared type imported by an upper
-  tier and misread as a violation, and a mostly-intra-tier ratio means the repository simply is not
-  layered, which the panel reports rather than decorating.
+  Coverage in `test/unit/{tier-panel,browser-core}.test.ts`.
 
 Slice order: **Y0** first (the working agreement), then **Y1** and **Y2**, which every drawing
 reads. **Y3** is the smallest honest picture; **Y4** reuses it for the monorepo case. **Y5**

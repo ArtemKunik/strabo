@@ -491,6 +491,28 @@ test('a structure grid counts cells and drops the axis headers (Y4)', () => {
   );
 });
 
+test('the structure legend names the files beyond the scan ceiling (Y9)', () => {
+  const legend = readingLegend({
+    structure: true,
+    structureSummary: { total: 0, intraRatio: 0, truncated: 7 },
+  });
+  assert.ok(legend.some((line) => /7 file\(s\) beyond the scan ceiling/.test(line)));
+  const clean = readingLegend({ structure: true, structureSummary: { total: 0, intraRatio: 0, truncated: 0 } });
+  assert.ok(!clean.some((line) => /beyond the scan ceiling/.test(line)));
+});
+
+test('tierLimits names what the tier reading cannot claim (Y9)', async () => {
+  const { tierLimits } = await import('../../ui/strabo-tiers.js');
+  const limits = tierLimits({ truncated: 3, tierFlow: { intraRatio: 0.75 } });
+  assert.ok(limits.some((line) => /3 file\(s\) sit beyond the scan ceiling/.test(line)));
+  assert.ok(limits.some((line) => /shared type imported by an upper tier/.test(line)));
+  assert.ok(limits.some((line) => /75% of recorded imports stay inside one tier/.test(line)));
+
+  const layered = tierLimits({ truncated: 0, tierFlow: { intraRatio: 0.1 } });
+  assert.ok(!layered.some((line) => /beyond the scan ceiling/.test(line)));
+  assert.ok(layered.some((line) => /not layered/.test(line)));
+});
+
 test('a grid cell edge carries the cross-unit class (Y4)', async () => {
   const { buildElements } = await import('../../ui/strabo-graph.js');
   const model = {

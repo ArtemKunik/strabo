@@ -205,6 +205,38 @@ export function tierTraces(report) {
   return (report?.traces ?? []).slice();
 }
 
+/**
+ * The named limits of the tier reading (Phase 35 Y9): what the picture cannot claim.
+ *
+ * Stated rather than hidden. A file beyond the scan ceiling was never read, so it is named as
+ * unread instead of drawn as `unclassified`; an upward edge can be a shared type imported by
+ * an upper tier and misread as a violation; and a mostly intra-tier ratio means the repository
+ * is simply not layered, which is reported rather than decorated.
+ */
+export function tierLimits(report) {
+  const limits = [];
+  const truncated = Number(report?.truncated ?? 0);
+  if (truncated > 0) {
+    limits.push(
+      `${truncated} file(s) sit beyond the scan ceiling and were not read; they are not drawn as unclassified.`,
+    );
+  }
+  limits.push(
+    'An upward edge can be a shared type imported by an upper tier and misread as a violation.',
+  );
+  const intraRatio = Number(report?.tierFlow?.intraRatio ?? 0);
+  if (intraRatio >= 0.5) {
+    limits.push(
+      `${Math.round(intraRatio * 100)}% of recorded imports stay inside one tier, so this repository is not strongly layered.`,
+    );
+  } else {
+    limits.push(
+      'A mostly intra-tier ratio means the repository is not layered; the ratio is reported, never decorated.',
+    );
+  }
+  return limits;
+}
+
 /** The one-line caption for the tier filter, or an explicit no-evidence note. */
 export function tierSummaryLabel(report) {
   const total = Number(report?.summary?.total ?? 0);

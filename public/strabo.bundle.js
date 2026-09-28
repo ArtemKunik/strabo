@@ -760,24 +760,30 @@ function readingLegend(model, locLens = false) {
     ];
   }
   if (model?.structure && model.structureLevel === "grid") {
-    return [
-      "column = build unit",
-      "row = tier",
-      "cell = files",
-      "edge = recorded import",
-      "cross-unit = heavier",
-      "wrong-way = red or dashed",
-      "shelf = support tiers"
-    ];
+    return withStructureLimits(
+      [
+        "column = build unit",
+        "row = tier",
+        "cell = files",
+        "edge = recorded import",
+        "cross-unit = heavier",
+        "wrong-way = red or dashed",
+        "shelf = support tiers"
+      ],
+      model
+    );
   }
   if (model?.structure) {
-    return [
-      "band = tier",
-      "size = files",
-      "edge = recorded import",
-      "wrong-way = red or dashed",
-      "shelf = support tiers"
-    ];
+    return withStructureLimits(
+      [
+        "band = tier",
+        "size = files",
+        "edge = recorded import",
+        "wrong-way = red or dashed",
+        "shelf = support tiers"
+      ],
+      model
+    );
   }
   return [
     locLens ? "size = lines of code" : "size = dependents",
@@ -785,6 +791,13 @@ function readingLegend(model, locLens = false) {
     "diamond = test",
     "star = entry"
   ];
+}
+function withStructureLimits(lines, model) {
+  const truncated = Number(model?.structureSummary?.truncated ?? 0);
+  if (truncated > 0) {
+    lines.push(`${truncated} file(s) beyond the scan ceiling, not read`);
+  }
+  return lines;
 }
 function shortcutSheet() {
   return [
@@ -1187,6 +1200,29 @@ function tierEndpointSites(report) {
 }
 function tierTraces(report) {
   return (report?.traces ?? []).slice();
+}
+function tierLimits(report) {
+  const limits = [];
+  const truncated = Number(report?.truncated ?? 0);
+  if (truncated > 0) {
+    limits.push(
+      `${truncated} file(s) sit beyond the scan ceiling and were not read; they are not drawn as unclassified.`
+    );
+  }
+  limits.push(
+    "An upward edge can be a shared type imported by an upper tier and misread as a violation."
+  );
+  const intraRatio = Number(report?.tierFlow?.intraRatio ?? 0);
+  if (intraRatio >= 0.5) {
+    limits.push(
+      `${Math.round(intraRatio * 100)}% of recorded imports stay inside one tier, so this repository is not strongly layered.`
+    );
+  } else {
+    limits.push(
+      "A mostly intra-tier ratio means the repository is not layered; the ratio is reported, never decorated."
+    );
+  }
+  return limits;
 }
 function tierSummaryLabel(report) {
   const total = Number(report?.summary?.total ?? 0);
@@ -14104,6 +14140,16 @@ function renderTierPanel(container, report, filter = "all") {
   note4.className = "overlay-note";
   note4.textContent = tierSummaryLabel(report);
   container.append(note4);
+  const limits = document.createElement("ul");
+  limits.className = "tier-limits";
+  limits.dataset.role = "tier-limits";
+  for (const limit of tierLimits(report)) {
+    const item = document.createElement("li");
+    item.className = "tier-limit";
+    item.textContent = limit;
+    limits.append(item);
+  }
+  container.append(limits);
   const rows = tierMatrixRows(report);
   if (rows.length === 0) {
     const empty = document.createElement("p");

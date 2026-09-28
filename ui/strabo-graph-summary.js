@@ -100,24 +100,30 @@ export function readingLegend(model, locLens = false) {
     ];
   }
   if (model?.structure && model.structureLevel === 'grid') {
-    return [
-      'column = build unit',
-      'row = tier',
-      'cell = files',
-      'edge = recorded import',
-      'cross-unit = heavier',
-      'wrong-way = red or dashed',
-      'shelf = support tiers',
-    ];
+    return withStructureLimits(
+      [
+        'column = build unit',
+        'row = tier',
+        'cell = files',
+        'edge = recorded import',
+        'cross-unit = heavier',
+        'wrong-way = red or dashed',
+        'shelf = support tiers',
+      ],
+      model,
+    );
   }
   if (model?.structure) {
-    return [
-      'band = tier',
-      'size = files',
-      'edge = recorded import',
-      'wrong-way = red or dashed',
-      'shelf = support tiers',
-    ];
+    return withStructureLimits(
+      [
+        'band = tier',
+        'size = files',
+        'edge = recorded import',
+        'wrong-way = red or dashed',
+        'shelf = support tiers',
+      ],
+      model,
+    );
   }
   return [
     locLens ? 'size = lines of code' : 'size = dependents',
@@ -125,6 +131,18 @@ export function readingLegend(model, locLens = false) {
     'diamond = test',
     'star = entry',
   ];
+}
+
+/**
+ * Append the Structure lens's own honesty line (Y9): files beyond the scan ceiling were not
+ * read, so they are named rather than drawn as an empty band.
+ */
+function withStructureLimits(lines, model) {
+  const truncated = Number(model?.structureSummary?.truncated ?? 0);
+  if (truncated > 0) {
+    lines.push(`${truncated} file(s) beyond the scan ceiling, not read`);
+  }
+  return lines;
 }
 
 /** The shortcut sheet shown on `?`: gestures, not encodings. */

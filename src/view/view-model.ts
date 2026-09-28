@@ -595,6 +595,20 @@ function layoutUnitLanes(
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
+/**
+ * The reading numbers every Structure drawing shares (Y9): the ranked edge total, the
+ * same-tier ratio, and the honesty counts the legend and panel name rather than hide.
+ */
+function structureSummaryOf(report: TierReport): NonNullable<ViewModel['structureSummary']> {
+  return {
+    total: report.tierFlow.total,
+    intraRatio: report.tierFlow.intraRatio,
+    truncated: report.truncated,
+    mixed: report.summary.mixed,
+    unclassified: report.summary.unclassified,
+  };
+}
+
 /** The display name of each role tier, matching the tier panel's own labels. */
 const STRUCTURE_LABELS: Record<string, string> = {
   frontend: 'Frontend',
@@ -730,7 +744,7 @@ export function buildStructureViewModel(
     excluded: [],
     cache,
     structure: true,
-    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
     structureIntent: report.intent,
   };
@@ -872,7 +886,7 @@ export function buildStructureGridViewModel(
     cache,
     structure: true,
     structureLevel: 'grid',
-    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureSummary: structureSummaryOf(report),
     structureGrid: {
       tiers: grid.tiers,
       units: grid.units,
@@ -1019,7 +1033,7 @@ export function buildStructureCellViewModel(
     structureUnitName: unitName,
     structureTier: options.tier,
     structureCell: cellId,
-    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
     structureIntent: report.intent,
   };

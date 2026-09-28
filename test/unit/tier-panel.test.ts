@@ -114,6 +114,27 @@ test('renderTierPanel draws the matrix, direction check, and table trace', () =>
   assert.match(joined, /src\/api\/orders\.ts:3 → GET \/orders \(openapi\.yaml\)/);
 });
 
+test('renderTierPanel states the named limits, including truncation (Y9)', () => {
+  const container = document.createElement('div');
+  renderTierPanel(container, sampleReport());
+  const limits = [...container.querySelectorAll('[data-role="tier-limits"] .tier-limit')].map(
+    (item) => item.textContent ?? '',
+  );
+  assert.ok(limits.some((text) => /shared type imported by an upper tier/.test(text)));
+  assert.ok(limits.some((text) => /not layered/.test(text)));
+
+  const truncated = document.createElement('div');
+  renderTierPanel(
+    truncated,
+    { ...sampleReport(), truncated: 12, tierFlow: { total: 10, intraRatio: 0.8, edges: [], tiers: [], intraByTier: [] } },
+  );
+  const truncatedLimits = [...truncated.querySelectorAll('[data-role="tier-limits"] .tier-limit')].map(
+    (item) => item.textContent ?? '',
+  );
+  assert.ok(truncatedLimits.some((text) => /12 file\(s\) sit beyond the scan ceiling/.test(text)));
+  assert.ok(truncatedLimits.some((text) => /80% of recorded imports stay inside one tier/.test(text)));
+});
+
 test('renderTierPanel says so when nothing was classified', () => {
   const container = document.createElement('div');
   renderTierPanel(container, { files: [], matrix: { tiers: [], units: [], cells: [], perTier: [] }, summary: { total: 0 } });
