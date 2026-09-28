@@ -63,3 +63,10 @@ Feature: Application logical structure from the tier lens
     And I open the recorded call from the "frontend" band
     Then the spine follows the call to its declared endpoint
     And the spine reaches the table "orders"
+
+  @intent
+  Scenario: The Structure view draws declared intent as ghost elements and violations against it
+    Given I open the structure fixture repository
+    When I switch to structure detail
+    Then the Structure view draws an intended ghost edge from "api" to "integration"
+    And the flow from "data" to "domain" is marked as a violation

@@ -184,7 +184,17 @@ export interface ViewModel {
   /** True when the model is a role-tier structure (Phase 35 Y3), not files or units. */
   structure?: boolean;
   /** The structure's own reading numbers: ranked edges read and the same-tier share. */
-  structureSummary?: { total: number; intraRatio: number };
+  /** The structure's own reading numbers, plus files the scan ceiling left unread (Y9). */
+  structureSummary?: {
+    total: number;
+    intraRatio: number;
+    /** Files beyond `MAX_TIER_FILES`: not read, so never drawn as unclassified (Y9). */
+    truncated?: number;
+    /** Files the classifier pinned while flagging them mixed, for the honesty note. */
+    mixed?: number;
+    /** Files with no recorded tier evidence; a real answer, never an empty band (Y9). */
+    unclassified?: number;
+  };
   /**
    * The structure drawing on screen: `bands` is the tier stack (Y3), `grid` the unit × tier
    * grid (Y4). Absent means `bands`, so an older client still reads.

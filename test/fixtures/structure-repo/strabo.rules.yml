@@ -1,0 +1,9 @@
+rules:
+  - id: api-to-integration
+    from: "orders/src/handlers/**"
+    to: "orders/src/integration/**"
+    allow: import
+  - id: no-data-to-domain
+    from: "orders/src/data/**"
+    to: "orders/src/domain/**"
+    allow: never

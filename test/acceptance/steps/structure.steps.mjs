@@ -299,3 +299,46 @@ Then('the spine reaches the table {string}', async function (tableName) {
     { timeout: 15_000 },
   );
 });
+
+Then(
+  'the Structure view draws an intended ghost edge from {string} to {string}',
+  async function (source, target) {
+    await this.page.waitForFunction(
+      ({ from, to }) => {
+        const model = window.straboTest?.model();
+        return Boolean(
+          model?.edges.some(
+            (edge) =>
+              edge.source === from &&
+              edge.target === to &&
+              edge.ghost === true &&
+              edge.intended === true,
+          ),
+        );
+      },
+      { from: source, to: target },
+      { timeout: 15_000 },
+    );
+  },
+);
+
+Then(
+  'the flow from {string} to {string} is marked as a violation',
+  async function (source, target) {
+    await this.page.waitForFunction(
+      ({ from, to }) => {
+        const model = window.straboTest?.model();
+        return Boolean(
+          model?.edges.some(
+            (edge) =>
+              edge.source === from &&
+              edge.target === to &&
+              edge.violation === true,
+          ),
+        );
+      },
+      { from: source, to: target },
+      { timeout: 15_000 },
+    );
+  },
+);

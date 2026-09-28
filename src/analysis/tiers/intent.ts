@@ -1,6 +1,6 @@
 import { matchesGlob } from '../glob.ts';
 import { readDeclaredRules, type DeclaredRule } from '../rules.ts';
-import type { Tier, TierClassification, TierFlow, TierFlowEdge } from './types.ts';
+import type { Tier, TierClassification, TierFlow, TierFlowEdge, TierGrid } from './types.ts';
 import { tierRank } from './types.ts';
 
 export interface TierIntentGhostEdge {
@@ -47,6 +47,7 @@ export function buildTierIntent(
   tierFlow: TierFlow,
   graphEdges: Array<{ source: string; target: string; kind?: string }>,
   assignment: Map<string, string>,
+  grid?: TierGrid,
 ): TierIntentReport {
   const rules = readDeclaredRules(root);
   const tierOfFile = new Map(files.map((f) => [f.file, f.tier]));
@@ -56,7 +57,7 @@ export function buildTierIntent(
   const ghostBands: TierIntentGhostBand[] = [];
   const violations: TierIntentViolation[] = [];
 
-  // 1. Mark existing upward edges in tierFlow as layer violations
+  // 1. Mark existing upward edges in tierFlow and grid as layer violations
   for (const edge of tierFlow.edges) {
     if (edge.kind === 'upward') {
       edge.violation = true;
@@ -66,6 +67,14 @@ export function buildTierIntent(
         kind: 'upward',
         detail: `${edge.source} depends on ${edge.target} (upward layer violation)`,
       });
+    }
+  }
+
+  if (grid) {
+    for (const edge of grid.edges) {
+      if (edge.kind === 'upward') {
+        edge.violation = true;
+      }
     }
   }
 
@@ -86,6 +95,18 @@ export function buildTierIntent(
     return matchesGlob(file, pattern);
   };
 
+  const inferTierFromPattern = (pattern: string): Tier | null => {
+    if (pattern.startsWith('tier:')) {
+      return pattern.slice(5) as Tier;
+    }
+    for (const t of ['frontend', 'api', 'domain', 'integration', 'data', 'infra', 'build', 'tests'] as Tier[]) {
+      if (pattern.includes(`/${t}/`) || pattern.endsWith(`/${t}/**`) || pattern.endsWith(`/${t}/*`)) {
+        return t;
+      }
+    }
+    return null;
+  };
+
   for (const rule of rules) {
     const fromFiles = files.filter((f) => fileMatches(f.file, f.tier, rule.from));
     const toFiles = files.filter((f) => fileMatches(f.file, f.tier, rule.to));
@@ -93,11 +114,13 @@ export function buildTierIntent(
     const fromTiers = new Set<Tier>(fromFiles.map((f) => f.tier));
     const toTiers = new Set<Tier>(toFiles.map((f) => f.tier));
 
-    if (rule.from.startsWith('tier:')) {
-      fromTiers.add(rule.from.slice(5) as Tier);
+    const inferredFrom = inferTierFromPattern(rule.from);
+    if (inferredFrom) {
+      fromTiers.add(inferredFrom);
     }
-    if (rule.to.startsWith('tier:')) {
-      toTiers.add(rule.to.slice(5) as Tier);
+    const inferredTo = inferTierFromPattern(rule.to);
+    if (inferredTo) {
+      toTiers.add(inferredTo);
     }
 
     if (rule.allow === 'never') {
@@ -111,6 +134,21 @@ export function buildTierIntent(
           if (tierEdge) {
             tierEdge.violation = true;
             tierEdge.ruleId = rule.id;
+          }
+          if (grid) {
+            const sourceUnit = assignment.get(edge.source) ?? '.';
+            const targetUnit = assignment.get(edge.target) ?? '.';
+            for (const gridEdge of grid.edges) {
+              if (
+                gridEdge.sourceTier === sourceTier &&
+                gridEdge.targetTier === targetTier &&
+                gridEdge.sourceUnit === sourceUnit &&
+                gridEdge.targetUnit === targetUnit
+              ) {
+                gridEdge.violation = true;
+                gridEdge.ruleId = rule.id;
+              }
+            }
           }
           violations.push({
             source: sourceTier,
@@ -130,6 +168,14 @@ export function buildTierIntent(
           if (observedEdge) {
             observedEdge.intended = true;
             observedEdge.ruleId = rule.id;
+            if (grid) {
+              for (const gridEdge of grid.edges) {
+                if (gridEdge.sourceTier === sourceTier && gridEdge.targetTier === targetTier) {
+                  gridEdge.intended = true;
+                  gridEdge.ruleId = rule.id;
+                }
+              }
+            }
           } else {
             const sourceRank = tierRank(sourceTier);
             const targetRank = tierRank(targetTier);
@@ -154,15 +200,12 @@ export function buildTierIntent(
         }
       }
 
-      if (rule.to.startsWith('tier:')) {
-        const targetTier = rule.to.slice(5) as Tier;
-        if (!presentTiers.has(targetTier) && !ghostBands.some((gb) => gb.tier === targetTier)) {
-          ghostBands.push({
-            tier: targetTier,
-            label: targetTier.charAt(0).toUpperCase() + targetTier.slice(1),
-            ruleId: rule.id,
-          });
-        }
+      if (inferredTo && !presentTiers.has(inferredTo) && !ghostBands.some((gb) => gb.tier === inferredTo)) {
+        ghostBands.push({
+          tier: inferredTo,
+          label: inferredTo.charAt(0).toUpperCase() + inferredTo.slice(1),
+          ruleId: rule.id,
+        });
       }
     }
   }

@@ -44,7 +44,13 @@ test('buildStructureViewModel draws bands in rank order and shelves the support 
 
   assert.equal(model.structure, true);
   assert.deepEqual(model.hubs, []);
-  assert.deepEqual(model.structureSummary, { total: 6, intraRatio: 0 });
+  assert.deepEqual(model.structureSummary, {
+    total: 6,
+    intraRatio: 0,
+    truncated: 0,
+    mixed: 0,
+    unclassified: 0,
+  });
 
   // Ranked tiers are bands; the tests tier has no rank, so it is a shelf node, not a band.
   const kindOf = new Map(model.nodes.map((node) => [node.id, node.kind]));
@@ -341,5 +347,71 @@ test('the tier report carries end-to-end spines connecting call → endpoint →
     { unit: 'orders', tier: 'data' },
   );
   assert.ok(cellModel?.structureSpines && cellModel.structureSpines.length >= 1);
+});
+
+test('the tier report and view models carry intended vs observed architecture (Y7)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+
+  assert.ok(report.intent);
+  assert.equal(report.intent.available, true);
+  assert.equal(report.intent.rules.length, 2);
+
+  // Ghost edge: declared api -> integration with 0 observed imports
+  const ghostEdge = report.intent.ghostEdges.find(
+    (e) => e.source === 'api' && e.target === 'integration',
+  );
+  assert.ok(ghostEdge);
+  assert.equal(ghostEdge.ruleId, 'api-to-integration');
+  assert.equal(ghostEdge.kind, 'down');
+
+  // Violations: upward (data -> domain) and declared never rule (no-data-to-domain)
+  assert.ok(report.intent.violations.length >= 2);
+  const ruleViolation = report.intent.violations.find((v) => v.ruleId === 'no-data-to-domain');
+  assert.ok(ruleViolation);
+  assert.equal(ruleViolation.source, 'data');
+  assert.equal(ruleViolation.target, 'domain');
+  assert.equal(ruleViolation.kind, 'rule');
+
+  // Structure view model carries ghost edge and marked violations
+  const model = buildStructureViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+  );
+
+  assert.ok(model.structureIntent);
+  assert.equal(model.structureIntent.available, true);
+
+  // Model edges contain ghost edge
+  const modelGhost = model.edges.find((e) => e.ghost && e.source === 'api' && e.target === 'integration');
+  assert.ok(modelGhost);
+  assert.equal(modelGhost.intended, true);
+  assert.equal(modelGhost.weight, 0);
+  assert.equal(modelGhost.ruleId, 'api-to-integration');
+
+  // Model edges contain violation
+  const modelViolation = model.edges.find((e) => e.source === 'data' && e.target === 'domain');
+  assert.ok(modelViolation);
+  assert.equal(modelViolation.violation, true);
+  assert.equal(modelViolation.ruleId, 'no-data-to-domain');
+
+  // Ghost band support
+  const syntheticReport = {
+    ...report,
+    intent: {
+      ...report.intent,
+      ghostBands: [{ tier: 'infra' as const, label: 'Infra', ruleId: 'domain-to-infra' }],
+    },
+  };
+  const ghostBandModel = buildStructureViewModel(
+    syntheticReport,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+  );
+  const ghostBand = ghostBandModel.nodes.find((n) => n.id === 'infra');
+  assert.ok(ghostBand);
+  assert.equal(ghostBand.ghost, true);
+  assert.equal(ghostBand.files, 0);
 });
 

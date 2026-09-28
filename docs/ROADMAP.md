@@ -2300,17 +2300,27 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   The inspector renders behavioral spines for tier bands and cells with 4-hop cards (`[data-role="spine-view"]`)
   and dangling stubs for missing hops. Tested in `test/unit/structure.test.ts` and the acceptance
   scenario `@spine` in `structure.feature`.
-- **Y7 - Intended vs observed.** `strabo.rules.yml` (`src/analysis/rules.ts`) already states the
-  architecture an operator intends. Draw intent as a ghost band/edge and the observed `tierFlow`
-  solid, so a mismatch reads as a violation on the same picture; the findings stay the same
-  `layer-violations` rule `strabo check` already reports (`src/check/check.ts:134`).
+- **Y7 - Intended vs observed.** *Done.* `strabo.rules.yml` (`src/analysis/rules.ts`) states the
+  architecture an operator intends. `buildTierIntent` evaluates declared rules against classified files and `tierFlow`:
+  declared flows with 0 observed imports become ghost edges (`ghost: true`, dashed), unrepresented tiers become ghost bands,
+  and mismatches (both `allow: never` and upward layer order) are highlighted as violations in the cycle hue. Carried in
+  `TierReport.intent` and `ViewModel.structureIntent`. Coverage in `test/unit/structure.test.ts` and the acceptance
+  scenario `@intent` in `structure.feature`.
 - **Y8 - Agent and report surface (done).** MCP `get_tier_flow` (`GET /analysis/tiers/flow`,
   returning nodes, edges, kinds, shelf, and intra-tier ratio with basis and scan ceiling), a
   **Structure** section in the repository report (`RepositoryStructureSection`, JSON, Markdown, HTML),
   and the `tierFlow` counts in the existing `layer-violations` finding text (`[tierFlow: N cross-tier edges, intra-ratio N%]`).
   The `strabo check` rule is unchanged; only its explanation gains the aggregate. Coverage in
   `test/unit/{coverage-mcp,interop-check,repository-report}.test.ts`.
-- **Y9 - Honesty and limits.** Bound the drawing by the Phase 16 file ceiling (`MAX_TIER_FILES`,
+- **Y9 - Honesty and limits.** *Done.* Every Structure drawing carries the honesty counts on
+  `structureSummary` (`truncated`, `mixed`, `unclassified`), so the legend names the files beyond
+  `MAX_TIER_FILES` rather than drawing them as an empty band. `tierLimits` (`ui/strabo-tiers.js`)
+  states the named limits in the tier panel (`tierLimits` list, `data-role="tier-limits"`): a file
+  beyond the scan ceiling was not read, an upward edge can be a shared type imported by an upper
+  tier and misread as a violation, and a mostly intra-tier ratio means the repository is not
+  layered. The eight tier hues stay inside the Phase 13 budget, which the colour test enforces.
+  Coverage in `test/unit/{tier-panel,browser-core}.test.ts`. Original text:
+  Bound the drawing by the Phase 16 file ceiling (`MAX_TIER_FILES`,
   `report.ts:26`): a band the scan did not classify is drawn as `unclassified`, not as empty, and
   the truncated count is shown. Keep the colour count inside the Phase 13 budget (the eight tier
   hues already conflict; resolve in the rules, not by exception — see *Removed or frozen*). State

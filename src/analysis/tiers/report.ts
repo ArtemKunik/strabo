@@ -528,7 +528,7 @@ export function buildTierReport(
   }));
 
   const spines = buildSpines(traces, tableTrace, files, graph.edges ?? [], assignment);
-  const intent = buildTierIntent(root, files, tierFlow, graph.edges ?? [], assignment);
+  const intent = buildTierIntent(root, files, tierFlow, graph.edges ?? [], assignment, grid);
 
   return {
     files,
