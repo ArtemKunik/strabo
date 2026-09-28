@@ -95,6 +95,7 @@ export function bindKeyboardShortcuts(app) {
     else if (key === 'u' && state.mode === 'system' && state.systemUnit) app.units.closeUnit();
     else if (key === 'p') elements.tbPath.click();
     else if (key === 'b') elements.tbBoundaries.click();
+    else if (key === 'x' && state.mode === 'structure') elements.tbGrid?.click();
     else if (key === 'c' && state.mode === 'file') elements.tbCalls?.click();
     else if (key === 'h' && state.mode === 'file') elements.tbCoChange?.click();
     else if (key === 'l' && state.mode === 'file') elements.tbLabels?.click();

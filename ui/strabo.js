@@ -114,6 +114,8 @@ const store = createStore({
     expandedUnits: [],
     /** Set once a single-unit repository has auto-opened, so L0 is not re-entered (L19). */
     systemAutoOpened: false,
+    /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
+    structureGrid: false,
   },
   member: {
     order: 'source',
@@ -422,6 +424,13 @@ function applyStripFilter(filter) {
  */
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
+  // The grid toggle belongs to Structure mode only; its pressed state follows the sub-level.
+  if (elements.tbGrid) {
+    const inStructure = state.mode === 'structure';
+    elements.tbGrid.hidden = !inStructure;
+    elements.tbGrid.classList.toggle('active', inStructure && state.structureGrid);
+    elements.tbGrid.setAttribute('aria-pressed', String(inStructure && state.structureGrid));
+  }
 }
 
 elements.detail.addEventListener('change', () => {
@@ -435,6 +444,10 @@ elements.detail.addEventListener('change', () => {
     state.unitFile = null;
     state.showOutside = false;
     state.expandedUnits = [];
+  }
+  // The grid is a Structure sub-level; leaving Structure returns to the bands next visit.
+  if (state.mode !== 'structure') {
+    state.structureGrid = false;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -480,6 +493,18 @@ elements.tbBoundaries.addEventListener('click', () => {
   state.prefix = '';
   scan();
 });
+// The grid is a Structure sub-level: a change of drawing, so no rescan beyond the graph fetch.
+if (elements.tbGrid) {
+  elements.tbGrid.addEventListener('click', () => {
+    if (state.mode !== 'structure') {
+      return;
+    }
+    state.structureGrid = !state.structureGrid;
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
 
 function setScreen(screen) {
   store.set('ui', { screen });

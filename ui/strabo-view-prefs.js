@@ -57,6 +57,9 @@ export function createViewPrefs(app) {
       if (parsed.locLens === true) {
         prefs.locLens = true;
       }
+      if (parsed.structureGrid === true) {
+        prefs.structureGrid = true;
+      }
       return prefs;
     } catch {
       return null;
@@ -75,6 +78,7 @@ export function createViewPrefs(app) {
           coChange: state.coChange,
           locLens: state.locLens,
           tier: state.tier,
+          structureGrid: state.structureGrid,
         }),
       );
     } catch {
@@ -137,6 +141,10 @@ export function createViewPrefs(app) {
     // The large-file lens needs a line count, which only file nodes carry.
     if (prefs.locLens) {
       state.locLens = true;
+    }
+    // The grid is a Structure sub-level; it only applies when Structure is the mode.
+    if (prefs.structureGrid && state.mode === 'structure') {
+      state.structureGrid = true;
     }
   }
 

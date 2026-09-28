@@ -10,25 +10,33 @@ import { topLevelDirectory } from './strabo-graph-ids.js';
 /** Counts for the tests / components strip, in file, block, or system mode. */
 export function mapCounts(model) {
   const isStructure = model.structure === true;
+  const isGrid = isStructure && model.structureLevel === 'grid';
   const isBlock = model.prefixLength !== undefined || model.system === true || isStructure;
   const byKey = new Map();
   let tests = 0;
   let modules = 0;
 
   for (const node of model.nodes ?? []) {
+    // A Structure grid's axis headers are labels, not components; the strip counts cells.
+    if (node.kind === 'axis') {
+      continue;
+    }
     if (node.kind === 'test') {
       tests += 1;
     } else {
       modules += 1;
     }
-    // A System drill-down lists the open unit's layers, not one chip per file.
+    // A System drill-down lists the open unit's layers, not one chip per file. A grid cell
+    // is keyed by its tier, so the strip reads as the rows rather than one chip per cell.
     const key = model.systemUnit
       ? node.collapsed
         ? 'outside units'
         : node.systemLayer ?? 'unit'
-      : isBlock
-        ? String(node.id)
-        : topLevelDirectory(node.id);
+      : isGrid
+        ? node.tier ?? 'cell'
+        : isBlock
+          ? String(node.id)
+          : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
 
@@ -67,6 +75,17 @@ export function readingLegend(model, locLens = false) {
       'size = files',
       'edge = import between units',
       'support = unit footer',
+    ];
+  }
+  if (model?.structure && model.structureLevel === 'grid') {
+    return [
+      'column = build unit',
+      'row = tier',
+      'cell = files',
+      'edge = recorded import',
+      'cross-unit = heavier',
+      'wrong-way = red or dashed',
+      'shelf = support tiers',
     ];
   }
   if (model?.structure) {
@@ -142,14 +161,19 @@ export function summarizeDiagnostics(model) {
  * Diagnostics panel; the header states what the map holds and stops there.
  */
 export function graphSummary(model) {
-  const nodes = (model?.nodes ?? []).length;
+  // A grid's axis headers are labels, not components, so they are not counted as nodes.
+  const nodes = (model?.nodes ?? []).filter((node) => node.kind !== 'axis').length;
   const edges = (model?.edges ?? []).length;
   // A System L0 map is units, not files; the drill-down and the file map are nodes. Naming
   // the unit is what stops "45 nodes" reading as if the shelves were still peers.
   const nodeWord = model?.structure
-    ? nodes === 1
-      ? 'tier'
-      : 'tiers'
+    ? model.structureLevel === 'grid'
+      ? nodes === 1
+        ? 'cell'
+        : 'cells'
+      : nodes === 1
+        ? 'tier'
+        : 'tiers'
     : model?.system && !model?.systemUnit
       ? nodes === 1
         ? 'unit'

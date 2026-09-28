@@ -60,6 +60,9 @@ export function stylesheet() {
     // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
     // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
     { selector: 'node.kind-tier', style: { 'border-width': 2, 'border-color': theme.nodeLine, 'background-opacity': 1 } },
+    // A Structure grid axis header is a bare label: no box, just its text, so the columns and
+    // rows read without competing with the cells.
+    { selector: 'node.kind-axis', style: { 'background-opacity': 0, 'border-opacity': 0, 'font-weight': 700, width: 10, height: 10 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
     // The large-file lens swaps the size encoding to lines of code and hides files under
@@ -148,6 +151,9 @@ export function stylesheet() {
     },
     { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
     { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-style': 'dashed', 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
+    // A Structure grid edge that crosses a unit boundary is a relationship between services,
+    // not only a wrong-way read: a thick accent line, distinct from the status hues.
+    { selector: 'edge.edge-structure-cross-unit', style: { width: 3, 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent, opacity: 1 } },
     { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {

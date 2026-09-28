@@ -4,8 +4,8 @@ Feature: Application logical structure from the tier lens
   I want the role tiers drawn as a structure joined by recorded imports
   So that I can see how the application is layered, not just where files sit on disk
 
-# Y3 draws the bands, the wrong-way edges, and the shelf. The grid (Y4) and the end-to-end
-# spine (Y6) are not built yet, so those two scenarios stay @wip to keep the run green.
+# Y3 draws the bands, the wrong-way edges, and the shelf; Y4 draws the unit × tier grid.
+# The end-to-end spine (Y6) is not built yet, so that scenario stays @wip to keep the run green.
 
   Background:
     Given the Strabo server is running against the fixture repository
@@ -35,12 +35,15 @@ Feature: Application logical structure from the tier lens
     Then the Structure view draws a support shelf
     And the "tests" tier is on the support shelf, not a band
 
-  @wip @grid
+  @grid
   Scenario: The unit by tier grid draws two build units
     Given I open the structure fixture repository
     When I switch to structure detail
+    And I turn on the structure grid
     Then the Structure view draws a column for "orders-api"
     And the Structure view draws a column for "web"
+    And the Structure grid draws a cell for "web" in "frontend"
+    And the cross-unit flow from "web" in "frontend" to "orders-api" in "api" is drawn
 
   @wip @spine
   Scenario: Opening a recorded call follows the end-to-end spine

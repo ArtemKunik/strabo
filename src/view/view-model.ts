@@ -715,6 +715,41 @@ export function buildStructureGridViewModel(
 
   const nodes: ViewNode[] = [];
   const positions: ViewPosition[] = [];
+  // Axis headers name the columns (units) and rows (tiers), so the grid is readable without
+  // reading each cell's label. They are roll-ups too: `kind: 'axis'`, never a file.
+  grid.units.forEach((unit, index) => {
+    const id = `unit:${unit.id}`;
+    nodes.push({
+      id,
+      kind: 'axis',
+      directory: '.',
+      label: unit.name,
+      workspacePath: id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      unit: unit.id,
+      unitName: unit.name,
+    });
+    positions.push({ id, x: index * CELL, y: -CELL });
+  });
+  grid.tiers.forEach((tier, index) => {
+    const id = `tier:${tier}`;
+    nodes.push({
+      id,
+      kind: 'axis',
+      directory: '.',
+      label: STRUCTURE_LABELS[tier] ?? tier,
+      workspacePath: id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      tier,
+    });
+    positions.push({ id, x: -CELL, y: index * CELL });
+  });
   for (const cell of grid.cells) {
     nodes.push({
       id: cell.id,
@@ -775,6 +810,7 @@ export function buildStructureGridViewModel(
     semanticTarget: edge.target,
     weight: edge.weight,
     crossUnit: edge.crossUnit ? edge.weight : 0,
+    crossUnitEdge: edge.crossUnit,
     tierKind: edge.kind,
   }));
 

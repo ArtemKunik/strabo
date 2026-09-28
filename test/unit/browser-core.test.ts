@@ -444,6 +444,79 @@ test('a structure map counts tiers, and its strip chips never filter (Y3)', () =
   );
 });
 
+test('buildGraphQuery sends level=grid only when the structure grid is on (Y4)', () => {
+  const bands = buildGraphQuery({ repository: '/demo', mode: 'structure', depth: 1, prefix: '' });
+  assert.ok(bands.includes('structure=1'));
+  assert.ok(!bands.includes('level='));
+
+  const grid = buildGraphQuery({
+    repository: '/demo',
+    mode: 'structure',
+    structureGrid: true,
+    depth: 1,
+    prefix: '',
+  });
+  assert.ok(grid.includes('structure=1'));
+  assert.ok(grid.includes('level=grid'));
+});
+
+test('the reading legend names the grid axes and cells (Y4)', () => {
+  assert.deepEqual(readingLegend({ structure: true, structureLevel: 'grid' }), [
+    'column = build unit',
+    'row = tier',
+    'cell = files',
+    'edge = recorded import',
+    'cross-unit = heavier',
+    'wrong-way = red or dashed',
+    'shelf = support tiers',
+  ]);
+});
+
+test('a structure grid counts cells and drops the axis headers (Y4)', () => {
+  const model = {
+    structure: true,
+    structureLevel: 'grid',
+    nodes: [
+      { id: 'unit:orders', kind: 'axis' },
+      { id: 'orders|api', kind: 'tier', tier: 'api' },
+      { id: 'orders|data', kind: 'tier', tier: 'data' },
+      { id: 'web|frontend', kind: 'tier', tier: 'frontend' },
+    ],
+    edges: [],
+  };
+  assert.match(graphSummary(model), /3 cells/);
+  assert.deepEqual(
+    mapCounts(model).entries.map((entry) => entry.label),
+    ['api', 'data', 'frontend'],
+  );
+});
+
+test('a grid cell edge carries the cross-unit class (Y4)', async () => {
+  const { buildElements } = await import('../../ui/strabo-graph.js');
+  const model = {
+    nodes: [
+      { id: 'web|frontend', kind: 'tier', label: 'web · Frontend' },
+      { id: 'orders|api', kind: 'tier', label: 'orders-api · API surface' },
+    ],
+    edges: [
+      {
+        source: 'web|frontend',
+        target: 'orders|api',
+        kind: 'import',
+        semanticSource: 'web|frontend',
+        semanticTarget: 'orders|api',
+        weight: 1,
+        tierKind: 'down',
+        crossUnitEdge: true,
+      },
+    ],
+    positions: [],
+    hubs: [],
+  };
+  const { edges } = buildElements(model);
+  assert.match(edges[0]?.classes ?? '', /edge-structure-cross-unit/);
+});
+
 test('buildGraphQuery sends the open unit and outside links in a system drill-down', () => {
   const query = buildGraphQuery({
     repository: '/demo',

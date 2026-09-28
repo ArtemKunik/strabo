@@ -41,6 +41,7 @@ export function queryElements(doc = document) {
     tbUnits: doc.getElementById('tb-units'),
     tbPath: doc.getElementById('tb-path'),
     tbBoundaries: doc.getElementById('tb-boundaries'),
+    tbGrid: doc.getElementById('tb-grid'),
     tbCalls: doc.getElementById('tb-calls'),
     tbCoChange: doc.getElementById('tb-cochange'),
     tbLabels: doc.getElementById('tb-labels'),

@@ -37,6 +37,9 @@ export function buildGraphQuery(state, options = {}) {
     }
   } else if (state.mode === 'structure') {
     params.set('structure', '1');
+    if (state.structureGrid) {
+      params.set('level', 'grid');
+    }
   } else if (state.mode === 'block') {
     params.set('blockDepth', String(state.depth ?? 1));
     if (state.prefix) {

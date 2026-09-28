@@ -20,8 +20,10 @@ export const SHAPES = {
   // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
   unit: 'round-rectangle',
   shelf: 'rectangle',
-  // Structure-view roll-ups: a role-tier band is a card, on par with a unit box.
+  // Structure-view roll-ups: a role-tier band/cell is a card, on par with a unit box; an
+  // axis header (a unit column or tier row) is a bare label.
   tier: 'round-rectangle',
+  axis: 'round-rectangle',
 };
 
 /**
@@ -90,13 +92,18 @@ export function buildElements(model) {
   const edges = (model.edges ?? []).map((edge, index) => ({
     group: 'edges',
     // A Structure-view edge states how it runs through the layer order; the stylesheet
-    // draws a wrong-way one apart (Phase 35 Y3).
-    classes:
+    // draws a wrong-way one apart (Phase 35 Y3), and a cell edge crossing a unit boundary
+    // (Y4) apart from a same-unit one.
+    classes: [
       edge.tierKind === 'upward'
         ? 'edge-tier-upward'
         : edge.tierKind === 'skip-layer'
           ? 'edge-tier-skip'
           : '',
+      edge.crossUnitEdge === true ? 'edge-structure-cross-unit' : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
     data: {
       id: `e${index}`,
       source: edge.source,

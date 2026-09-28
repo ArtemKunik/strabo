@@ -45,7 +45,7 @@ record is reported as `unavailable`, never invented.
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
 | 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
-| 35 | Application logical structure from the tier lens | In progress (Y0-Y3 done: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 Structure lens; Y4-Y9 planned: unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
+| 35 | Application logical structure from the tier lens | In progress (Y0-Y4 done: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 Structure lens, unit-by-tier grid with cross-unit edges; Y5-Y9 planned: unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2276,11 +2276,17 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   shape/size and the strip counts tiers. Served by `src/api/routes/graph.ts`; coverage in
   `test/unit/structure.test.ts`, `test/unit/browser-core.test.ts`, and the `@structure`
   acceptance scenarios (`test/acceptance/features/structure.feature`, `structure.steps.mjs`).
-- **Y4 - L1 unit × layer grid.** The polyglot picture: columns are build units, rows are tiers in
-  rank order, each cell sized by its files/LOC, and recorded edges drawn as arcs between cell
-  centres — cross-unit edges included, with their own styling, since Y1 keeps them (unlike
-  `directions`). Selecting a cell opens L2. This is the tier matrix with adjacency added, and is
-  the strongest reading for a monorepo with several services.
+- **Y4 - L1 unit × layer grid.** *Done (drawing).* `TierReport.grid` (`TierGrid`) carries columns
+  (build units), rows (ranked tiers in dependency order), one `TierGridCell` per unit×tier with its
+  files/lines/mixed/coverage, and one `TierGridEdge` per recorded import between two cells, with
+  the same `down`/`upward`/`skip-layer` kind rule as `tierFlow` and a `crossUnit` flag. Served by
+  `GET /graph?structure=1&level=grid` via `buildStructureGridViewModel`: cells are nodes positioned
+  by unit (x) and tier (y), unit/tier axis headers label the columns and rows, the support shelf
+  sits beside the grid, and a cross-unit edge takes the `edge-structure-cross-unit` accent stroke.
+  The **Grid** toolbar toggle (X) appears only in Structure mode, the level rides in view prefs and
+  the deep link (`level=grid`), and the legend names the axes, cells, and cross-unit styling. The
+  tier �-layer `@grid` acceptance scenario runs (a cell's own file list and the L2 drill-down are
+  Y5). Coverage in `test/unit/structure.test.ts` and `test/unit/browser-core.test.ts`.
 - **Y5 - L2 / L3 drill-down.** Open a cell to its files, then into today's file map filtered to
   the cell, reusing the System drill ladder (`buildSystemUnitViewModel`,
   `src/view/view-model.ts`) with a tier key function. Breadcrumb *Structure › unit › tier*. Escape

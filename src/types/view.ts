@@ -59,6 +59,8 @@ export interface ViewEdge extends GraphEdge {
   tierKind?: 'down' | 'upward' | 'skip-layer';
   /** In a Structure view, contributing edges whose two ends sit in different build units. */
   crossUnit?: number;
+  /** In a Structure grid, true when the edge's two endpoints sit in different build units. */
+  crossUnitEdge?: boolean;
 }
 
 export interface ViewPosition {

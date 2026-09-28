@@ -157,8 +157,10 @@ var SHAPES = {
   // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
   unit: "round-rectangle",
   shelf: "rectangle",
-  // Structure-view roll-ups: a role-tier band is a card, on par with a unit box.
-  tier: "round-rectangle"
+  // Structure-view roll-ups: a role-tier band/cell is a card, on par with a unit box; an
+  // axis header (a unit column or tier row) is a bare label.
+  tier: "round-rectangle",
+  axis: "round-rectangle"
 };
 function ambiguousFileIds(model) {
   const byName = /* @__PURE__ */ new Map();
@@ -210,8 +212,12 @@ function buildElements(model) {
   const edges = (model.edges ?? []).map((edge, index) => ({
     group: "edges",
     // A Structure-view edge states how it runs through the layer order; the stylesheet
-    // draws a wrong-way one apart (Phase 35 Y3).
-    classes: edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
+    // draws a wrong-way one apart (Phase 35 Y3), and a cell edge crossing a unit boundary
+    // (Y4) apart from a same-unit one.
+    classes: [
+      edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
+      edge.crossUnitEdge === true ? "edge-structure-cross-unit" : ""
+    ].filter(Boolean).join(" "),
     data: {
       id: `e${index}`,
       source: edge.source,
@@ -621,6 +627,9 @@ function buildGraphQuery(state2, options = {}) {
     }
   } else if (state2.mode === "structure") {
     params.set("structure", "1");
+    if (state2.structureGrid) {
+      params.set("level", "grid");
+    }
   } else if (state2.mode === "block") {
     params.set("blockDepth", String(state2.depth ?? 1));
     if (state2.prefix) {
@@ -655,17 +664,21 @@ function breadcrumb(state2) {
 // ui/strabo-graph-summary.js
 function mapCounts(model) {
   const isStructure = model.structure === true;
+  const isGrid = isStructure && model.structureLevel === "grid";
   const isBlock = model.prefixLength !== void 0 || model.system === true || isStructure;
   const byKey = /* @__PURE__ */ new Map();
   let tests = 0;
   let modules = 0;
   for (const node of model.nodes ?? []) {
+    if (node.kind === "axis") {
+      continue;
+    }
     if (node.kind === "test") {
       tests += 1;
     } else {
       modules += 1;
     }
-    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isBlock ? String(node.id) : topLevelDirectory(node.id);
+    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isGrid ? node.tier ?? "cell" : isBlock ? String(node.id) : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
   const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
@@ -693,6 +706,17 @@ function readingLegend(model, locLens = false) {
       "size = files",
       "edge = import between units",
       "support = unit footer"
+    ];
+  }
+  if (model?.structure && model.structureLevel === "grid") {
+    return [
+      "column = build unit",
+      "row = tier",
+      "cell = files",
+      "edge = recorded import",
+      "cross-unit = heavier",
+      "wrong-way = red or dashed",
+      "shelf = support tiers"
     ];
   }
   if (model?.structure) {
@@ -757,9 +781,9 @@ function summarizeDiagnostics(model) {
   };
 }
 function graphSummary(model) {
-  const nodes = (model?.nodes ?? []).length;
+  const nodes = (model?.nodes ?? []).filter((node) => node.kind !== "axis").length;
   const edges = (model?.edges ?? []).length;
-  const nodeWord = model?.structure ? nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
+  const nodeWord = model?.structure ? model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
   const edgeWord = edges === 1 ? "edge" : "edges";
   return `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
 }
@@ -2433,6 +2457,9 @@ function stylesheet() {
     // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
     // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
     { selector: "node.kind-tier", style: { "border-width": 2, "border-color": theme.nodeLine, "background-opacity": 1 } },
+    // A Structure grid axis header is a bare label: no box, just its text, so the columns and
+    // rows read without competing with the cells.
+    { selector: "node.kind-axis", style: { "background-opacity": 0, "border-opacity": 0, "font-weight": 700, width: 10, height: 10 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
     // The large-file lens swaps the size encoding to lines of code and hides files under
@@ -2521,6 +2548,9 @@ function stylesheet() {
     },
     { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
     { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-style": "dashed", "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
+    // A Structure grid edge that crosses a unit boundary is a relationship between services,
+    // not only a wrong-way read: a thick accent line, distinct from the status hues.
+    { selector: "edge.edge-structure-cross-unit", style: { width: 3, "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent, opacity: 1 } },
     { selector: "edge.edge-faded", style: { opacity: 0.1 } },
     { selector: "edge.dimmed", style: { opacity: 0.05 } },
     {
@@ -11316,6 +11346,7 @@ function queryElements(doc = document) {
     tbUnits: doc.getElementById("tb-units"),
     tbPath: doc.getElementById("tb-path"),
     tbBoundaries: doc.getElementById("tb-boundaries"),
+    tbGrid: doc.getElementById("tb-grid"),
     tbCalls: doc.getElementById("tb-calls"),
     tbCoChange: doc.getElementById("tb-cochange"),
     tbLabels: doc.getElementById("tb-labels"),
@@ -11415,6 +11446,9 @@ function createViewPrefs(app2) {
       if (parsed.locLens === true) {
         prefs.locLens = true;
       }
+      if (parsed.structureGrid === true) {
+        prefs.structureGrid = true;
+      }
       return prefs;
     } catch {
       return null;
@@ -11431,7 +11465,8 @@ function createViewPrefs(app2) {
           edgeKind: state2.edgeKind,
           coChange: state2.coChange,
           locLens: state2.locLens,
-          tier: state2.tier
+          tier: state2.tier,
+          structureGrid: state2.structureGrid
         })
       );
     } catch {
@@ -11484,6 +11519,9 @@ function createViewPrefs(app2) {
     }
     if (prefs.locLens) {
       state2.locLens = true;
+    }
+    if (prefs.structureGrid && state2.mode === "structure") {
+      state2.structureGrid = true;
     }
   }
   return {
@@ -11569,6 +11607,10 @@ function createUrlState(app2) {
       );
       set("unit", state2.mode === "system" ? state2.systemUnit ?? "" : "");
       set("outside", state2.mode === "system" && state2.showOutside ? "1" : "");
+      set(
+        "level",
+        state2.mode === "structure" && state2.structureGrid ? "grid" : ""
+      );
       set("node", store2.get().ui.node ?? "");
       set("panel", store2.get().ui.memberOpen ? "member-map" : "");
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -11592,6 +11634,7 @@ function createUrlState(app2) {
     state2.systemUnit = mode === "system" ? params.get("unit") : null;
     state2.systemUnitLabel = state2.systemUnit;
     state2.showOutside = mode === "system" && params.get("outside") === "1";
+    state2.structureGrid = mode === "structure" && params.get("level") === "grid";
     return params;
   }
   async function restoreUrlPanel() {
@@ -28097,6 +28140,7 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "u" && state2.mode === "system" && state2.systemUnit) app2.units.closeUnit();
     else if (key === "p") elements2.tbPath.click();
     else if (key === "b") elements2.tbBoundaries.click();
+    else if (key === "x" && state2.mode === "structure") elements2.tbGrid?.click();
     else if (key === "c" && state2.mode === "file") elements2.tbCalls?.click();
     else if (key === "h" && state2.mode === "file") elements2.tbCoChange?.click();
     else if (key === "l" && state2.mode === "file") elements2.tbLabels?.click();
@@ -28169,7 +28213,9 @@ var store = createStore({
     /** Target units whose count badge is expanded in place. */
     expandedUnits: [],
     /** Set once a single-unit repository has auto-opened, so L0 is not re-entered (L19). */
-    systemAutoOpened: false
+    systemAutoOpened: false,
+    /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
+    structureGrid: false
   },
   member: {
     order: "source",
@@ -28409,6 +28455,12 @@ function applyStripFilter(filter) {
 }
 function applyModeChrome() {
   document.body.dataset.mode = state.mode;
+  if (elements.tbGrid) {
+    const inStructure = state.mode === "structure";
+    elements.tbGrid.hidden = !inStructure;
+    elements.tbGrid.classList.toggle("active", inStructure && state.structureGrid);
+    elements.tbGrid.setAttribute("aria-pressed", String(inStructure && state.structureGrid));
+  }
 }
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
@@ -28420,6 +28472,9 @@ elements.detail.addEventListener("change", () => {
     state.unitFile = null;
     state.showOutside = false;
     state.expandedUnits = [];
+  }
+  if (state.mode !== "structure") {
+    state.structureGrid = false;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -28465,6 +28520,17 @@ elements.tbBoundaries.addEventListener("click", () => {
   state.prefix = "";
   scan();
 });
+if (elements.tbGrid) {
+  elements.tbGrid.addEventListener("click", () => {
+    if (state.mode !== "structure") {
+      return;
+    }
+    state.structureGrid = !state.structureGrid;
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
 function setScreen(screen) {
   store.set("ui", { screen });
   const showTerminalTab = screen === "terminal";

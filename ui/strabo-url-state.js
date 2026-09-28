@@ -45,6 +45,10 @@ export function createUrlState(app) {
       );
       set('unit', state.mode === 'system' ? state.systemUnit ?? '' : '');
       set('outside', state.mode === 'system' && state.showOutside ? '1' : '');
+      set(
+        'level',
+        state.mode === 'structure' && state.structureGrid ? 'grid' : '',
+      );
       set('node', store.get().ui.node ?? '');
       set('panel', store.get().ui.memberOpen ? 'member-map' : '');
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -72,6 +76,8 @@ export function createUrlState(app) {
     state.systemUnit = mode === 'system' ? params.get('unit') : null;
     state.systemUnitLabel = state.systemUnit;
     state.showOutside = mode === 'system' && params.get('outside') === '1';
+    // A Structure deep link may name the grid sub-level.
+    state.structureGrid = mode === 'structure' && params.get('level') === 'grid';
     return params;
   }
 
