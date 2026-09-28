@@ -37,10 +37,17 @@ export type {
   TierEndpointSite,
   TierTrace,
   TierReport,
+  TierSpine,
+  TierSpineHop,
+  TierIntentReport,
+  TierIntentGhostEdge,
+  TierIntentGhostBand,
+  TierIntentViolation,
 } from './tiers/types.ts';
 
 export { extractTables } from './tiers/table.ts';
 export { classifyTierContent, classifyTiers } from './tiers/classify.ts';
 export { readDeclaredTiers } from './tiers/declared.ts';
 export { propagateTiers, unitRole } from './tiers/propagate.ts';
+export { buildTierIntent } from './tiers/intent.ts';
 export { MAX_TIER_FILES, buildTierReport } from './tiers/report.ts';

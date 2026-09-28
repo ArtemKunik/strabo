@@ -188,7 +188,7 @@ function buildElements(model) {
   const ambiguous = ambiguousFileIds(model);
   const nodes = (model.nodes ?? []).map((node) => ({
     group: "nodes",
-    classes: `kind-${node.kind}`,
+    classes: [`kind-${node.kind}`, node.ghost === true ? "node-ghost" : ""].filter(Boolean).join(" "),
     data: {
       id: node.id,
       // A block node has no path tail to fall back on, so the server's compressed,
@@ -196,6 +196,7 @@ function buildElements(model) {
       label: node.label ?? model.directoryLabels?.[node.id] ?? (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split("/").pop()),
       path: node.id,
       kind: node.kind,
+      ghost: node.ghost === true,
       // Fill is one neutral surface for every node; directory is carried by position
       // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
       // its component count instead of blast radius; the hub ring is reserved for files,
@@ -216,7 +217,9 @@ function buildElements(model) {
     // (Y4) apart from a same-unit one.
     classes: [
       edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
-      edge.crossUnitEdge === true ? "edge-structure-cross-unit" : ""
+      edge.crossUnitEdge === true ? "edge-structure-cross-unit" : "",
+      edge.ghost === true ? "edge-ghost" : "",
+      edge.violation === true ? "edge-violation" : ""
     ].filter(Boolean).join(" "),
     data: {
       id: `e${index}`,
@@ -225,6 +228,10 @@ function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      ghost: edge.ghost === true,
+      intended: edge.intended === true,
+      violation: edge.violation === true,
+      ruleId: edge.ruleId,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),
@@ -2547,6 +2554,7 @@ function stylesheet() {
     // ring, so the product producers read apart from the plain data touch.
     { selector: "node.ov-data", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.edgeAccent, "background-opacity": 1 } },
     { selector: "node.ov-product", style: { "border-width": 4, "border-style": "double", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    { selector: "node.node-ghost", style: { "border-style": "dashed", opacity: 0.6 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -2592,6 +2600,8 @@ function stylesheet() {
     },
     { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
     { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-style": "dashed", "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
+    { selector: "edge.edge-ghost", style: { width: 1.75, "line-style": "dashed", opacity: 0.45, "line-color": theme.edge, "target-arrow-color": theme.edge } },
+    { selector: "edge.edge-violation", style: { width: 3, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: "edge.edge-structure-cross-unit", style: { width: 3, "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent, opacity: 1 } },

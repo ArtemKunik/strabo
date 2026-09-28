@@ -663,6 +663,21 @@ export function buildStructureViewModel(
     positions.push({ id: entry.tier, x: SHELF_X, y: index * SHELF_Y });
   });
 
+  // Ghost bands: intended tiers from rules that have no files in the repository yet (Y7)
+  const existingTiers = new Set(nodes.map((n) => n.id));
+  let ghostIndex = report.tierFlow.tiers.length;
+  for (const ghostBand of report.intent?.ghostBands ?? []) {
+    if (!existingTiers.has(ghostBand.tier)) {
+      const node = tierNode(ghostBand.tier, 'tier');
+      node.ghost = true;
+      node.why = `intended tier · ${ghostBand.ruleId}`;
+      nodes.push(node);
+      positions.push({ id: ghostBand.tier, x: 0, y: ghostIndex * BAND_Y });
+      ghostIndex += 1;
+      existingTiers.add(ghostBand.tier);
+    }
+  }
+
   const edges: ViewEdge[] = report.tierFlow.edges.map((edge) => ({
     source: edge.source,
     target: edge.target,
@@ -677,7 +692,32 @@ export function buildStructureViewModel(
     weight: edge.weight,
     crossUnit: edge.crossUnit,
     tierKind: edge.kind,
+    ghost: edge.ghost,
+    intended: edge.intended,
+    violation: edge.violation,
+    ruleId: edge.ruleId,
   }));
+
+  // Ghost edges: declared intended flows with 0 recorded imports (Y7)
+  for (const ghost of report.intent?.ghostEdges ?? []) {
+    edges.push({
+      source: ghost.source,
+      target: ghost.target,
+      kind: 'import',
+      evidence: {
+        line: 0,
+        specifier: `declared intent in ${ghost.ruleId} (0 recorded imports)`,
+        resolution: 'exact',
+      },
+      semanticSource: ghost.source,
+      semanticTarget: ghost.target,
+      weight: 0,
+      tierKind: ghost.kind,
+      ghost: true,
+      intended: true,
+      ruleId: ghost.ruleId,
+    });
+  }
 
   return {
     repository,
@@ -692,6 +732,7 @@ export function buildStructureViewModel(
     structure: true,
     structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
     structureSpines: report.spines,
+    structureIntent: report.intent,
   };
 }
 
@@ -813,6 +854,10 @@ export function buildStructureGridViewModel(
     crossUnit: edge.crossUnit ? edge.weight : 0,
     crossUnitEdge: edge.crossUnit,
     tierKind: edge.kind,
+    ghost: edge.ghost,
+    intended: edge.intended,
+    violation: edge.violation,
+    ruleId: edge.ruleId,
   }));
 
   return {
@@ -834,6 +879,7 @@ export function buildStructureGridViewModel(
       crossUnitEdges: grid.summary.crossUnitEdges,
     },
     structureSpines: report.spines,
+    structureIntent: report.intent,
   };
 }
 
@@ -975,5 +1021,6 @@ export function buildStructureCellViewModel(
     structureCell: cellId,
     structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
     structureSpines: report.spines,
+    structureIntent: report.intent,
   };
 }

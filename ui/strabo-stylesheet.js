@@ -106,6 +106,7 @@ export function stylesheet() {
     // ring, so the product producers read apart from the plain data touch.
     { selector: 'node.ov-data', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
     { selector: 'node.ov-product', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    { selector: 'node.node-ghost', style: { 'border-style': 'dashed', opacity: 0.6 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
@@ -151,6 +152,8 @@ export function stylesheet() {
     },
     { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
     { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-style': 'dashed', 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
+    { selector: 'edge.edge-ghost', style: { width: 1.75, 'line-style': 'dashed', opacity: 0.45, 'line-color': theme.edge, 'target-arrow-color': theme.edge } },
+    { selector: 'edge.edge-violation', style: { width: 3, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: 'edge.edge-structure-cross-unit', style: { width: 3, 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent, opacity: 1 } },

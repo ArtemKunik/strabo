@@ -61,10 +61,9 @@ export function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
   const ambiguous = ambiguousFileIds(model);
-
   const nodes = (model.nodes ?? []).map((node) => ({
     group: 'nodes',
-    classes: `kind-${node.kind}`,
+    classes: [`kind-${node.kind}`, node.ghost === true ? 'node-ghost' : ''].filter(Boolean).join(' '),
     data: {
       id: node.id,
       // A block node has no path tail to fall back on, so the server's compressed,
@@ -75,6 +74,7 @@ export function buildElements(model) {
         (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split('/').pop()),
       path: node.id,
       kind: node.kind,
+      ghost: node.ghost === true,
       // Fill is one neutral surface for every node; directory is carried by position
       // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
       // its component count instead of blast radius; the hub ring is reserved for files,
@@ -101,6 +101,8 @@ export function buildElements(model) {
           ? 'edge-tier-skip'
           : '',
       edge.crossUnitEdge === true ? 'edge-structure-cross-unit' : '',
+      edge.ghost === true ? 'edge-ghost' : '',
+      edge.violation === true ? 'edge-violation' : '',
     ]
       .filter(Boolean)
       .join(' '),
@@ -111,6 +113,10 @@ export function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      ghost: edge.ghost === true,
+      intended: edge.intended === true,
+      violation: edge.violation === true,
+      ruleId: edge.ruleId,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),

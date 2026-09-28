@@ -1,4 +1,17 @@
 import type { FileCoverageAggregate } from '../file-coverage.ts';
+import type {
+  TierIntentGhostBand,
+  TierIntentGhostEdge,
+  TierIntentReport,
+  TierIntentViolation,
+} from './intent.ts';
+
+export type {
+  TierIntentGhostBand,
+  TierIntentGhostEdge,
+  TierIntentReport,
+  TierIntentViolation,
+};
 
 /**
  * The role code plays, cutting across build units.
@@ -155,6 +168,14 @@ export interface TierFlowEdge {
   crossUnit: number;
   /** The build units the contributing edges start in, for scope. */
   units: string[];
+  /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */
+  ghost?: boolean;
+  /** True when this edge matches a declared allowed rule. */
+  intended?: boolean;
+  /** True when this edge breaks declared intent or tier order. */
+  violation?: boolean;
+  /** The declared rule id behind this intent or violation. */
+  ruleId?: string;
 }
 
 /**
@@ -206,6 +227,14 @@ export interface TierGridEdge {
   weight: number;
   /** True when the two ends sit in different build units, so the drawing styles it apart. */
   crossUnit: boolean;
+  /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */
+  ghost?: boolean;
+  /** True when this edge matches a declared allowed rule. */
+  intended?: boolean;
+  /** True when this edge breaks declared intent or tier order. */
+  violation?: boolean;
+  /** The declared rule id behind this intent or violation. */
+  ruleId?: string;
 }
 
 /**
@@ -337,6 +366,8 @@ export interface TierReport {
   traces: TierTrace[];
   /** The end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6). */
   spines: TierSpine[];
+  /** Intended vs observed architecture facts (Phase 35 Y7). */
+  intent?: TierIntentReport;
   summary: Record<Tier, number> & { total: number; mixed: number; unclassified: number };
   skipped: string[];
   /** Files beyond the scan ceiling; not read, so they are not claimed as unclassified. */

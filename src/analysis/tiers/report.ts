@@ -8,6 +8,7 @@ import { classifyTierContent, classifyTiers } from './classify.ts';
 import { readDeclaredTiers } from './declared.ts';
 import { propagateTiers, unitRole } from './propagate.ts';
 import { readText } from './read.ts';
+import { buildTierIntent } from './intent.ts';
 import {
   TIER_ORDER,
   TIER_RANK,
@@ -527,6 +528,7 @@ export function buildTierReport(
   }));
 
   const spines = buildSpines(traces, tableTrace, files, graph.edges ?? [], assignment);
+  const intent = buildTierIntent(root, files, tierFlow, graph.edges ?? [], assignment);
 
   return {
     files,
@@ -548,6 +550,7 @@ export function buildTierReport(
     endpoints,
     traces,
     spines,
+    intent,
     summary: { ...summary, total: files.length, mixed },
     skipped,
     truncated: all.length - selected.length,

@@ -1,4 +1,4 @@
-import type { TierSpine } from '../analysis/tiers/types.ts';
+import type { TierIntentReport, TierSpine } from '../analysis/tiers/types.ts';
 import type { Diagnostic, Exclusion, GraphEdge, GraphNode } from './graph.ts';
 import type { RepositoryDescriptor, ScanCacheMetadata } from './scan.ts';
 
@@ -40,6 +40,8 @@ export interface ViewNode extends GraphNode {
   unitName?: string;
   /** In a Structure grid (Y4), the cell's own id `<unit>|<tier>` for selection. */
   cell?: string;
+  /** In Structure mode (Y7), true when the band is declared in intent but has no files. */
+  ghost?: boolean;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -62,6 +64,14 @@ export interface ViewEdge extends GraphEdge {
   crossUnit?: number;
   /** In a Structure grid, true when the edge's two endpoints sit in different build units. */
   crossUnitEdge?: boolean;
+  /** In Structure mode (Y7), true when the edge is declared in intent but has 0 observed imports. */
+  ghost?: boolean;
+  /** In Structure mode (Y7), true when the edge reflects declared architecture intent. */
+  intended?: boolean;
+  /** In Structure mode (Y7), true when the edge breaks declared intent or layer order. */
+  violation?: boolean;
+  /** The declared rule id behind this intent or violation. */
+  ruleId?: string;
 }
 
 export interface ViewPosition {
@@ -195,6 +205,8 @@ export interface ViewModel {
   structureCell?: string;
   /** The end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6). */
   structureSpines?: TierSpine[];
+  /** Intended vs observed architecture facts (Phase 35 Y7). */
+  structureIntent?: TierIntentReport;
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */
