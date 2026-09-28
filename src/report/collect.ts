@@ -11,7 +11,8 @@ import { reviewWorkingTree } from '../analysis/review.ts';
 import { assertReadable } from '../boundary/repository-root.ts';
 import { computeRiskReport, type RiskOptions } from '../risk/report.ts';
 import { symbolExtractorFor } from '../scan/languages/registry.ts';
-import type { Graph } from '../types.ts';
+import type { DataReport, Graph } from '../types.ts';
+import { analyzeRepository } from '../workspace/analyze.ts';
 import {
   buildRepositoryReport,
   type RepositoryChangeSection,
@@ -41,6 +42,12 @@ export interface CollectRepositoryReportOptions {
   ownership?: boolean;
   /** Compute architecture drift over recent revisions (revision graphs). Defaults to true. */
   drift?: boolean;
+  /** Compute the data layer section. Defaults to true. */
+  data?: boolean;
+  /** A precomputed data layer; when given, it is used instead of reading one. */
+  dataReport?: DataReport;
+  /** Use qualified contract ids alongside bare names. */
+  qualifiedContracts?: boolean;
   /** Dependency-risk config; omitted means the risk section is not computed. */
   risk?: RiskOptions;
   /** Where to read the measured coverage report; omitted means the conventional locations. */
@@ -83,6 +90,16 @@ export async function collectRepositoryReport(
     ...(options.coverage?.ceiling ? { ceiling: options.coverage.ceiling } : {}),
   });
 
+  const data =
+    options.dataReport ??
+    (options.data === false
+      ? undefined
+      : await analyzeRepository(options.repository, root, {
+          ...(options.qualifiedContracts !== undefined
+            ? { qualifiedContracts: options.qualifiedContracts }
+            : {}),
+        }));
+
   return buildRepositoryReport({
     repository: options.repository,
     root,
@@ -95,6 +112,7 @@ export async function collectRepositoryReport(
     ...(risk ? { risk } : {}),
     ...(change ? { change } : {}),
     ...(drift ? { drift } : {}),
+    ...(data ? { data } : {}),
     coverage,
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.limits ? { limits: options.limits } : {}),

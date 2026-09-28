@@ -16,6 +16,8 @@ export interface CliEnv {
   deniedLicenses?: string[];
   /** Explicit coverage report paths, overriding the conventional auto-detected locations. */
   coverageReports?: string[];
+  /** Opt-in permission for `POST /analysis/coverage/refresh` to run the repository's script. */
+  allowCoverageRefresh: boolean;
   narratorEndpoint?: string;
   narratorModel?: string;
   narratorKeyEnv?: string;
@@ -63,6 +65,10 @@ export function readEnv(
     // An explicit report path (or a comma-separated list) overrides auto-detection; it is
     // still read only inside the scan ceiling.
     coverageReports: env.STRABO_COVERAGE_REPORT?.split(',').map((entry) => entry.trim()).filter(Boolean),
+    // Running the repository's own coverage script is the one analysis that executes code, so
+    // it is off unless the operator opts in; the detected command is still shown when it is off.
+    allowCoverageRefresh:
+      isEnabled(env.STRABO_ALLOW_COVERAGE_REFRESH) || hasFlag(argv, 'allow-coverage-refresh'),
     // The narrator is a second opt-in provider; without an endpoint and model it is inert.
     narratorEndpoint: env.STRABO_NARRATOR_ENDPOINT?.trim() || undefined,
     narratorModel: env.STRABO_NARRATOR_MODEL?.trim() || undefined,
@@ -130,6 +136,7 @@ export function configFromEnv(
     terminalDaemon,
     deniedLicenses,
     coverageReports,
+    allowCoverageRefresh,
     narratorEndpoint,
     narratorModel,
     narratorKeyEnv,
@@ -159,6 +166,7 @@ export function configFromEnv(
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),
     },
     ...(coverageReports && coverageReports.length > 0 ? { coverageReports } : {}),
+    allowCoverageRefresh,
     ...(narrator ? { narrator } : {}),
     serverLog: (message, error) => {
       if (error) {

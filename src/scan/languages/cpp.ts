@@ -77,23 +77,27 @@ export async function extractCppFacts(file: string, content: string): Promise<Cp
       return { facts, diagnostics };
     }
 
-    // Includes are collected from the whole tree, not just the top: a header guard or an
-    // `#ifdef` block puts them inside a preprocessor node.
-    collectIncludes(tree.rootNode, facts.includes);
-    facts.callables = collectCallables(tree.rootNode);
-    facts.calls = collectCalls(tree.rootNode);
+    try {
+      // Includes are collected from the whole tree, not just the top: a header guard or an
+      // `#ifdef` block puts them inside a preprocessor node.
+      collectIncludes(tree.rootNode, facts.includes);
+      facts.callables = collectCallables(tree.rootNode);
+      facts.calls = collectCalls(tree.rootNode);
 
-    if (tree.rootNode.hasError) {
-      diagnostics.push({
-        file,
-        line: 1,
-        severity: 'warning',
-        kind: 'parse-failure',
-        message: 'C++ source contains syntax errors; extracted facts may be incomplete.',
-      });
+      if (tree.rootNode.hasError) {
+        diagnostics.push({
+          file,
+          line: 1,
+          severity: 'warning',
+          kind: 'parse-failure',
+          message: 'C++ source contains syntax errors; extracted facts may be incomplete.',
+        });
+      }
+
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
     }
-
-    return { facts, diagnostics };
   });
 }
 
@@ -430,7 +434,8 @@ export async function extractCppSymbols(
       return { symbols, diagnostics };
     }
 
-    const recordField = (owner: string, name: string): void => {
+    try {
+      const recordField = (owner: string, name: string): void => {
       const owned = fieldsByOwner.get(owner) ?? new Set<string>();
       fieldsByOwner.set(owner, owned);
       owned.add(name);
@@ -649,6 +654,9 @@ export async function extractCppSymbols(
     markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

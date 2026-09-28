@@ -22,6 +22,7 @@ export {
   coverageEntryLabel,
   coverageTotalsLabel,
   coverageProvenanceText,
+  coverageRefreshText,
   coverageSubjectLabel,
 } from './strabo-panel-coverage.js';
 
@@ -41,6 +42,10 @@ export {
   renderMembers,
   renderMemberMap,
 } from './strabo-panel-members.js';
+
+export {
+  renderProducts,
+} from './strabo-panel-products.js';
 
 export {
   renderReview,

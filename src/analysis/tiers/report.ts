@@ -16,8 +16,11 @@ import {
   type TierCallSite,
   type TierDirection,
   type TierEndpointSite,
+  type TierFlow,
+  type TierFlowEdge,
   type TierMatrixCell,
   type TierReport,
+  type TierShelfEntry,
   type TierTrace,
   type TierUnitReport,
 } from './types.ts';
@@ -148,9 +151,23 @@ export function buildTierReport(
       files: matching.length,
       lines: matching.reduce((total, entry) => total + entry.lines, 0),
       fileShare: files.length > 0 ? Number((matching.length / files.length).toFixed(3)) : 0,
+      // A mixed file keeps the tier the classifier pinned it to, but is counted apart so a
+      // clean band is never inflated by a file that two tiers claim.
+      mixed: matching.filter((entry) => entry.mixed).length,
       coverage: summariseFileCoverage(matching.map((entry) => entry.file), coverage),
     };
   }).filter((entry) => entry.files > 0);
+
+  // The support shelf: tiers with no dependency rank cannot sit in the stack, so the drawing
+  // keeps them beside it. Read from perTier so the counts can never disagree with the matrix.
+  const shelf: TierShelfEntry[] = perTier
+    .filter((entry) => TIER_RANK[entry.tier] === undefined)
+    .map((entry) => ({
+      tier: entry.tier,
+      files: entry.files,
+      lines: entry.lines,
+      mixed: entry.mixed,
+    }));
 
   const tierOfFile = new Map(files.map((entry) => [entry.file, entry.tier]));
   const directions: TierDirection[] = [];
@@ -199,6 +216,103 @@ export function buildTierReport(
   directions.sort(
     (a, b) => a.unit.localeCompare(b.unit) || a.line - b.line || a.source.localeCompare(b.source),
   );
+
+  // The structure the tier classification becomes: every recorded import collapsed across the
+  // tiers, with the wrong-way reads kept as their own edges. Cross-unit edges are included —
+  // unlike `directions`, which is scoped to one unit — and counted so a multi-unit picture can
+  // style them apart. Shelf tiers and unclassified files are outside the layer order.
+  const rankedPresent = TIER_ORDER.filter(
+    (tier) => TIER_RANK[tier] !== undefined && files.some((entry) => entry.tier === tier),
+  );
+  const presentRanks = new Set(
+    rankedPresent.map((tier) => TIER_RANK[tier]).filter((rank): rank is number => rank !== undefined),
+  );
+  const intraByTier = new Map<Tier, number>();
+  const flowEdges = new Map<
+    string,
+    {
+      source: Tier;
+      target: Tier;
+      kind: TierFlowEdge['kind'];
+      weight: number;
+      crossUnit: number;
+      units: Set<string>;
+    }
+  >();
+  let flowTotal = 0;
+  let intraTotal = 0;
+  for (const edge of graph.edges ?? []) {
+    // A call edge parallels an import edge, so counting it would double the same tier pair.
+    if (edge.kind === 'call') {
+      continue;
+    }
+    const sourceTier = tierOfFile.get(edge.source);
+    const targetTier = tierOfFile.get(edge.target);
+    if (!sourceTier || !targetTier) {
+      continue;
+    }
+    const sourceRank = TIER_RANK[sourceTier];
+    const targetRank = TIER_RANK[targetTier];
+    if (sourceRank === undefined || targetRank === undefined) {
+      continue;
+    }
+    flowTotal += 1;
+    if (sourceRank === targetRank) {
+      intraTotal += 1;
+      intraByTier.set(sourceTier, (intraByTier.get(sourceTier) ?? 0) + 1);
+      continue;
+    }
+    const unit = assignment.get(edge.source) ?? '.';
+    const targetUnit = assignment.get(edge.target) ?? '.';
+    // A skip is only a skip when a ranked tier sits between the two; otherwise it reads as a
+    // direct downward edge. The intermediate tiers are read repository-wide, not per unit.
+    const kind: TierFlowEdge['kind'] =
+      sourceRank < targetRank
+        ? 'upward'
+        : sourceRank - targetRank > 1 &&
+            [...presentRanks].some((rank) => rank < sourceRank && rank > targetRank)
+          ? 'skip-layer'
+          : 'down';
+    const key = `${sourceTier}\u0000${targetTier}\u0000${kind}`;
+    const entry = flowEdges.get(key) ?? {
+      source: sourceTier,
+      target: targetTier,
+      kind,
+      weight: 0,
+      crossUnit: 0,
+      units: new Set<string>(),
+    };
+    entry.weight += 1;
+    entry.units.add(unit);
+    if (unit !== targetUnit) {
+      entry.crossUnit += 1;
+    }
+    flowEdges.set(key, entry);
+  }
+  const rankIndex = (tier: Tier): number => TIER_ORDER.indexOf(tier);
+  const tierFlow: TierFlow = {
+    tiers: rankedPresent,
+    edges: [...flowEdges.values()]
+      .map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        kind: entry.kind,
+        weight: entry.weight,
+        crossUnit: entry.crossUnit,
+        units: [...entry.units].sort(),
+      }))
+      .sort(
+        (a, b) =>
+          rankIndex(a.source) - rankIndex(b.source) ||
+          rankIndex(a.target) - rankIndex(b.target) ||
+          a.kind.localeCompare(b.kind),
+      ),
+    intraByTier: [...intraByTier.entries()]
+      .map(([tier, weight]) => ({ tier, weight }))
+      .sort((a, b) => rankIndex(a.tier) - rankIndex(b.tier)),
+    total: flowTotal,
+    intraRatio: flowTotal > 0 ? Number((intraTotal / flowTotal).toFixed(3)) : 0,
+  };
 
   const tables = files
     .flatMap((entry) => entry.tables)
@@ -297,6 +411,8 @@ export function buildTierReport(
       coverage: summariseFileCoverage(files.map((entry) => entry.file), coverage),
     },
     directions,
+    tierFlow,
+    shelf,
     tables,
     tableTrace,
     calls,

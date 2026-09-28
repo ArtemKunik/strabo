@@ -1,3 +1,4 @@
+import type { DataReport } from './data.ts';
 import type { DependencyEcosystem } from './enums.ts';
 import type { PublishedCoordinate } from './scan.ts';
 import type { SchemaSnapshot, SchemaUsageReport } from './schema.ts';
@@ -77,6 +78,8 @@ export interface ContractField {
   name: string;
   type: string;
   required: boolean;
+  /** Protobuf field number, when the format records one. */
+  number?: number;
 }
 
 /** A data contract definition found in one repository. */
@@ -137,6 +140,8 @@ export interface WorkspaceReport {
   schemas: SchemaSnapshot[];
   /** Code that names tables and columns, checked against every declared schema. */
   usage: SchemaUsageReport;
+  /** The data layer as a graph of datasets, contracts, products, and lineage (Phase 33). */
+  data: DataReport;
   /** Totals for the status line; never a verdict. */
   summary: {
     repositories: number;

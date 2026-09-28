@@ -80,6 +80,14 @@ export interface StraboConfig {
    */
   coverageReports?: string[];
   /**
+   * Permit `POST /analysis/coverage/refresh` to run the repository's own coverage script
+   * (a conventional `package.json` script such as `test:coverage`) so a measured report
+   * exists. Off by default, because it is the only analysis that executes repository code;
+   * when off, the route answers 403 and the detected command is still named for the operator
+   * to run by hand. `STRABO_ALLOW_COVERAGE_REFRESH=1` or `--allow-coverage-refresh` turns it on.
+   */
+  allowCoverageRefresh?: boolean;
+  /**
    * Dependency-risk lookup. Online advisory/license calls are opt-in and off by default;
    * inventory and file mapping work without them.
    */

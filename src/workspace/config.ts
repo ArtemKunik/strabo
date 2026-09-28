@@ -10,6 +10,10 @@ export interface WorkspaceConfig {
   repositories: string[];
   /** Databases the operator declared, by name and environment variable; never a URL. */
   databases: DatabaseConfig[];
+  /** `qualified` turns qualified contract ids on beside the bare-name default (J3). */
+  contractsIdentity: 'bare' | 'qualified';
+  /** Exported catalog snapshot paths named in config, relative to the config file (J13). */
+  catalogs: string[];
   /** Directory the config path was resolved against, for relative roots. */
   baseDir: string;
 }
@@ -55,8 +59,29 @@ export function readWorkspaceConfig(configPath: string | undefined): WorkspaceCo
     name,
     repositories,
     databases: readDatabases(parsed.databases, resolvedPath),
+    contractsIdentity: readContractsIdentity(parsed.contracts, resolvedPath),
+    catalogs: Array.isArray(parsed.catalogs)
+      ? parsed.catalogs.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
+      : [],
     baseDir: path.dirname(resolvedPath),
   };
+}
+
+/** `contracts: { identity: "qualified" }`; anything else keeps the bare-name default. */
+function readContractsIdentity(value: unknown, configPath: string): 'bare' | 'qualified' {
+  if (value === undefined) {
+    return 'bare';
+  }
+  if (!isRecord(value)) {
+    throw new StraboScopeError(`Workspace config "${configPath}" needs contracts to be an object.`);
+  }
+  if (value.identity === undefined || value.identity === 'bare') {
+    return 'bare';
+  }
+  if (value.identity === 'qualified') {
+    return 'qualified';
+  }
+  throw new StraboScopeError(`Workspace config "${configPath}" contracts.identity must be "bare" or "qualified".`);
 }
 
 /**

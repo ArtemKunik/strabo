@@ -47,6 +47,7 @@ export async function runCheckCommand(
   const options: CheckOptions = {
     workspaceRoot: env.root,
     scanCeiling: env.scanCeiling,
+    configPath: env.configPath,
     requested: flagValue(argv, 'repository'),
     rules,
     healthRegressionPct:

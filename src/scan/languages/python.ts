@@ -106,24 +106,28 @@ export async function extractPythonFacts(
       return { facts, diagnostics };
     }
 
-    // Imports are collected from the whole tree, not just the module body: Python allows a
-    // deferred import inside a function or an `if TYPE_CHECKING:` block, and those are real
-    // dependencies.
-    collectImports(tree.rootNode, facts.imports, facts.bindings);
-    collectCallables(tree.rootNode, facts.callables);
-    collectCalls(tree.rootNode, facts.calls);
+    try {
+      // Imports are collected from the whole tree, not just the module body: Python allows a
+      // deferred import inside a function or an `if TYPE_CHECKING:` block, and those are real
+      // dependencies.
+      collectImports(tree.rootNode, facts.imports, facts.bindings);
+      collectCallables(tree.rootNode, facts.callables);
+      collectCalls(tree.rootNode, facts.calls);
 
-    if (tree.rootNode.hasError) {
-      diagnostics.push({
-        file,
-        line: 1,
-        severity: 'warning',
-        kind: 'parse-failure',
-        message: 'Python source contains syntax errors; extracted facts may be incomplete.',
-      });
+      if (tree.rootNode.hasError) {
+        diagnostics.push({
+          file,
+          line: 1,
+          severity: 'warning',
+          kind: 'parse-failure',
+          message: 'Python source contains syntax errors; extracted facts may be incomplete.',
+        });
+      }
+
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
     }
-
-    return { facts, diagnostics };
   });
 }
 
@@ -707,7 +711,8 @@ export async function extractPythonSymbols(
       return { symbols, diagnostics };
     }
 
-    const module = moduleOwnerName(file);
+    try {
+      const module = moduleOwnerName(file);
 
     const addField = (owner: string, name: string, symbol: CodeSymbol | null): void => {
       const owned = fieldsByOwner.get(owner) ?? new Set<string>();
@@ -838,6 +843,9 @@ export async function extractPythonSymbols(
     markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

@@ -52,6 +52,7 @@ export function createAnalysisContext(config: StraboConfig): AnalysisContext {
     computeMeasuredCoverage(repository.root, graph, {
       reportPaths: config.coverageReports,
       ceiling: config.scanCeiling ?? config.workspaceRoot,
+      allowRefresh: config.allowCoverageRefresh === true,
       ...(files ? { files } : {}),
     });
 

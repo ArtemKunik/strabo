@@ -8,17 +8,19 @@
  * `units.ts` can change without altering what a scope fence means.
  */
 
-/** Compile a glob to an anchored regular expression, with `\` normalised to `/`. */
-export function globToRegExp(glob: string): RegExp {
+const MAX_CACHE_ENTRIES = 1000;
+const GLOB_CACHE = new Map<string, RegExp>();
+
+function compileGlobToRegExp(glob: string): RegExp {
   const pattern = glob.replace(/\\/g, '/');
   let source = '';
   for (let index = 0; index < pattern.length; index += 1) {
     const character = pattern[index] as string;
     if (character === '*') {
       if (pattern[index + 1] === '*') {
-        // `**/` also matches zero directories, so `src/**` matches `src/a.ts`.
+        // `**/` matches zero or more directory segments safely without catastrophic backtracking
         if (pattern[index + 2] === '/') {
-          source += '(?:.*/)?';
+          source += '(?:[^/]+/)*';
           index += 2;
         } else {
           source += '.*';
@@ -36,6 +38,23 @@ export function globToRegExp(glob: string): RegExp {
     }
   }
   return new RegExp(`^${source}$`);
+}
+
+/** Compile a glob to an anchored regular expression, with `\` normalised to `/`. */
+export function globToRegExp(glob: string): RegExp {
+  const cached = GLOB_CACHE.get(glob);
+  if (cached) {
+    return cached;
+  }
+  const compiled = compileGlobToRegExp(glob);
+  if (GLOB_CACHE.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = GLOB_CACHE.keys().next().value;
+    if (oldestKey !== undefined) {
+      GLOB_CACHE.delete(oldestKey);
+    }
+  }
+  GLOB_CACHE.set(glob, compiled);
+  return compiled;
 }
 
 /** True when a repository-relative file path matches a glob, treating both separators alike. */

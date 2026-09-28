@@ -6,6 +6,7 @@ import { createNarratorKeyStore, type NarratorKeyStore } from '../narrator/key-s
 import { createRepositoryStore, type RepositoryStore } from '../state/repository-store.ts';
 import { createSettingsStore, type SettingsStore } from '../state/settings-store.ts';
 import { createAnalysisRouter } from './routes/analysis.ts';
+import { createDataRouter } from './routes/data.ts';
 import { createDelegateRouter } from './routes/delegate.ts';
 import { createFilesRouter } from './routes/files.ts';
 import { createGraphRouter } from './routes/graph.ts';
@@ -76,6 +77,7 @@ export function createStraboRouter(
   router.use(createInteropRouter(config));
   router.use(createFilesRouter(config));
   router.use(createAnalysisRouter(config));
+  router.use(createDataRouter(config));
   router.use(createRiskRouter(config));
   router.use(createDelegateRouter(config));
   router.use(

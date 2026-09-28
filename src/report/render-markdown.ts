@@ -1,6 +1,7 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryDataSection,
   RepositoryReportDocument,
   Severity,
 } from './report-types.ts';
@@ -33,6 +34,7 @@ export function renderReportMarkdown(document: RepositoryReportDocument): string
   renderPainPoints(lines, document.painPoints);
   renderChange(lines, document.change);
   renderDrift(lines, document.drift);
+  renderData(lines, document.data);
   renderSuggestions(lines, document);
   renderEvidence(lines, document);
   return `${lines.join('\n')}\n`;
@@ -206,6 +208,54 @@ function renderDrift(lines: string[], drift: RepositoryReportDocument['drift']):
     const values = series.points.map((point) => (point.value === null ? '—' : String(point.value)));
     lines.push(`- ${series.label}: ${values.join(' → ')}`);
   }
+  lines.push('');
+}
+
+function renderData(lines: string[], data: RepositoryDataSection | null): void {
+  lines.push('## Data layer');
+  if (!data) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  lines.push(
+    `- ${data.datasets} datasets · ${data.edges} read/write edges · ${data.products.length} data products · ${data.contracts.length} contracts · ${data.events} topics/queues`,
+  );
+  lines.push(
+    `- Gaps: ${data.gaps.noSingleWriter} dataset(s) without a single writer · ${data.gaps.contractlessPort} shared dataset(s) without a contract · ${data.gaps.unconformant} conformance finding(s)`,
+  );
+  section(
+    lines,
+    `Data products (${data.products.length})`,
+    data.products.map((product) => {
+      const ports = `${product.inputPorts.length} in, ${product.outputPorts.length} out`;
+      return `\`${product.name}\` — ${product.format}, ${ports}${product.owner ? `, owned by ${product.owner}` : ''}`;
+    }),
+  );
+  section(
+    lines,
+    `Conformance findings (${data.conformance.length})`,
+    data.conformance.map(
+      (finding) =>
+        `\`${finding.contract}\` — ${finding.kind} field \`${finding.field}\`${finding.dataset ? ` on \`${finding.dataset}\`` : ''}: ${finding.detail}`,
+    ),
+  );
+  section(
+    lines,
+    `Product candidates (${data.candidates.length})`,
+    data.candidates.map(
+      (candidate) =>
+        `\`${candidate.dataset}\` — ${candidate.kind} (${candidate.writers.length} writer(s), ${candidate.readers.length} reader(s)): ${candidate.detail}`,
+    ),
+  );
+  section(
+    lines,
+    `Classifications (${data.classifications.length})`,
+    data.classifications.map(
+      (tag) =>
+        `\`${tag.dataset}\`${tag.field ? `.${tag.field}` : ''} — ${tag.tag} (${tag.source})`,
+    ),
+  );
   lines.push('');
 }
 

@@ -100,40 +100,44 @@ export async function extractKotlinFacts(file: string, content: string): Promise
       return { facts, diagnostics };
     }
 
-    for (const node of tree.rootNode.namedChildren) {
-      if (node.type === 'package_header') {
-        facts.package = PACKAGE_PATTERN.exec(node.text)?.[1] ?? '';
-      } else if (node.type === 'import_list') {
-        for (const header of node.namedChildren) {
-          if (header.type === 'import_header') {
-            const reference = parseImport(header);
-            if (reference) {
-              facts.imports.push(reference);
+    try {
+      for (const node of tree.rootNode.namedChildren) {
+        if (node.type === 'package_header') {
+          facts.package = PACKAGE_PATTERN.exec(node.text)?.[1] ?? '';
+        } else if (node.type === 'import_list') {
+          for (const header of node.namedChildren) {
+            if (header.type === 'import_header') {
+              const reference = parseImport(header);
+              if (reference) {
+                facts.imports.push(reference);
+              }
             }
           }
         }
       }
+
+      collectTypes(tree.rootNode, '', facts.types);
+      const references: KotlinTypeReference[] = [];
+      collectTypeReferences(tree.rootNode, references);
+      facts.typeReferences = dedupeReferences(references);
+      collectFunctions(tree.rootNode, facts.functions);
+      collectTopLevelMembers(tree.rootNode, facts.members);
+      collectCalls(tree.rootNode, facts.calls);
+
+      if (tree.rootNode.hasError) {
+        diagnostics.push({
+          file,
+          line: 1,
+          severity: 'warning',
+          kind: 'parse-failure',
+          message: 'Kotlin source contains syntax errors; extracted facts may be incomplete.',
+        });
+      }
+
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
     }
-
-    collectTypes(tree.rootNode, '', facts.types);
-    const references: KotlinTypeReference[] = [];
-    collectTypeReferences(tree.rootNode, references);
-    facts.typeReferences = dedupeReferences(references);
-    collectFunctions(tree.rootNode, facts.functions);
-    collectTopLevelMembers(tree.rootNode, facts.members);
-    collectCalls(tree.rootNode, facts.calls);
-
-    if (tree.rootNode.hasError) {
-      diagnostics.push({
-        file,
-        line: 1,
-        severity: 'warning',
-        kind: 'parse-failure',
-        message: 'Kotlin source contains syntax errors; extracted facts may be incomplete.',
-      });
-    }
-
-    return { facts, diagnostics };
   });
 }
 
@@ -562,7 +566,8 @@ export async function extractKotlinSymbols(
       return { symbols, diagnostics };
     }
 
-    const typeNames = new Set<string>();
+    try {
+      const typeNames = new Set<string>();
 
     const addField = (field: CodeSymbol): void => {
       symbols.push(field);
@@ -664,6 +669,9 @@ export async function extractKotlinSymbols(
 
     symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
     return { symbols, diagnostics, accesses, calls };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

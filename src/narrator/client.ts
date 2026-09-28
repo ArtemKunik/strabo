@@ -188,13 +188,46 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function extractNarrative(body: unknown): string {
-  const content = (body as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message
-    ?.content;
-  if (typeof content !== 'string' || content.trim().length === 0) {
+export function isAnthropicEndpoint(endpoint: string): boolean {
+  try {
+    const url = new URL(endpoint);
+    return url.hostname.toLowerCase() === 'api.anthropic.com';
+  } catch {
+    return false;
+  }
+}
+
+export function extractNarrative(body: unknown): string {
+  if (typeof body !== 'object' || body === null) {
     throw new Error('narrator response had no message content');
   }
-  return content.trim();
+  const payload = body as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+    content?: Array<{ type?: unknown; text?: unknown }> | unknown;
+  };
+  const openAiContent = payload.choices?.[0]?.message?.content;
+  if (typeof openAiContent === 'string' && openAiContent.trim().length > 0) {
+    return openAiContent.trim();
+  }
+  if (Array.isArray(payload.content)) {
+    const textBlocks = payload.content
+      .filter(
+        (block): block is { type?: unknown; text: string } =>
+          typeof block === 'object' &&
+          block !== null &&
+          (block.type === 'text' || !block.type) &&
+          typeof block.text === 'string',
+      )
+      .map((block) => block.text);
+    const combined = textBlocks.join('\n').trim();
+    if (combined.length > 0) {
+      return combined;
+    }
+  }
+  if (typeof payload.content === 'string' && payload.content.trim().length > 0) {
+    return payload.content.trim();
+  }
+  throw new Error('narrator response had no message content');
 }
 
 /**
@@ -306,19 +339,37 @@ export function createNarratorClient(options: NarratorClientOptions): NarratorCl
 
     let response: Awaited<ReturnType<FetchLike>>;
     try {
+      const isAnthropic = isAnthropicEndpoint(resolution.endpoint);
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+      };
+      if (apiKey) {
+        if (isAnthropic) {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['authorization'] = `Bearer ${apiKey}`;
+        }
+      }
+      const requestBody = isAnthropic
+        ? {
+            model: resolution.model,
+            max_tokens: 2048,
+            system: prompt.system,
+            messages: [{ role: 'user', content: prompt.user }],
+          }
+        : {
+            model: resolution.model,
+            messages: [
+              { role: 'system', content: prompt.system },
+              { role: 'user', content: prompt.user },
+            ],
+          };
+
       response = await fetchImpl(resolution.endpoint, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-        },
-        body: JSON.stringify({
-          model: resolution.model,
-          messages: [
-            { role: 'system', content: prompt.system },
-            { role: 'user', content: prompt.user },
-          ],
-        }),
+        headers,
+        body: JSON.stringify(requestBody),
       });
     } catch {
       log('narrator request failed');

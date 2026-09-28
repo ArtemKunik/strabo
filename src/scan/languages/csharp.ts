@@ -99,33 +99,37 @@ export async function extractCSharpFacts(file: string, content: string): Promise
       return { facts, diagnostics };
     }
 
-    facts.namespace = findNamespace(tree.rootNode);
-    for (const node of walk(tree.rootNode)) {
-      if (node.type === 'using_directive') {
-        const reference = parseUsing(node.text, node.startPosition.row + 1);
-        if (reference) {
-          facts.usings.push(reference);
+    try {
+      facts.namespace = findNamespace(tree.rootNode);
+      for (const node of walk(tree.rootNode)) {
+        if (node.type === 'using_directive') {
+          const reference = parseUsing(node.text, node.startPosition.row + 1);
+          if (reference) {
+            facts.usings.push(reference);
+          }
         }
       }
-    }
-    collectTypes(tree.rootNode, '', facts.types);
-    const references: CSharpTypeReference[] = [];
-    collectTypeReferences(tree.rootNode, references);
-    facts.typeReferences = dedupeReferences(references);
-    collectMethods(tree.rootNode, facts.methods);
-    collectCalls(tree.rootNode, facts.calls);
+      collectTypes(tree.rootNode, '', facts.types);
+      const references: CSharpTypeReference[] = [];
+      collectTypeReferences(tree.rootNode, references);
+      facts.typeReferences = dedupeReferences(references);
+      collectMethods(tree.rootNode, facts.methods);
+      collectCalls(tree.rootNode, facts.calls);
 
-    if (tree.rootNode.hasError) {
-      diagnostics.push({
-        file,
-        line: 1,
-        severity: 'warning',
-        kind: 'parse-failure',
-        message: 'C# source contains syntax errors; extracted facts may be incomplete.',
-      });
-    }
+      if (tree.rootNode.hasError) {
+        diagnostics.push({
+          file,
+          line: 1,
+          severity: 'warning',
+          kind: 'parse-failure',
+          message: 'C# source contains syntax errors; extracted facts may be incomplete.',
+        });
+      }
 
-    return { facts, diagnostics };
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
+    }
   });
 }
 
@@ -376,7 +380,8 @@ export async function extractCSharpSymbols(
       return { symbols, diagnostics };
     }
 
-    const visit = (node: import('web-tree-sitter').Node, owner: string): void => {
+    try {
+      const visit = (node: import('web-tree-sitter').Node, owner: string): void => {
       if (CSHARP_TYPE_DECLARATIONS.has(node.type)) {
         const name = node.childForFieldName('name')?.text;
         if (name) {
@@ -506,6 +511,9 @@ export async function extractCSharpSymbols(
     markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

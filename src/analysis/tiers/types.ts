@@ -120,6 +120,8 @@ export interface TierMatrix {
     files: number;
     lines: number;
     fileShare: number;
+    /** Of `files`, how many the classifier pinned while flagging them mixed. */
+    mixed: number;
     /** Coverage over the tier's files from one source: measured, or the reach fallback. */
     coverage: FileCoverageAggregate;
   }>;
@@ -137,6 +139,53 @@ export interface TierDirection {
   kind: 'upward' | 'skip-layer';
   line: number;
   specifier: string;
+}
+
+/** One aggregated flow between two role tiers, read from recorded imports (calls excluded). */
+export interface TierFlowEdge {
+  source: Tier;
+  target: Tier;
+  /** `down` follows the tier order; `upward` and `skip-layer` are the wrong-way reads. */
+  kind: 'down' | 'upward' | 'skip-layer';
+  /** Recorded edges rolled into this tier pair. */
+  weight: number;
+  /** Contributing edges whose two ends sit in different build units. */
+  crossUnit: number;
+  /** The build units the contributing edges start in, for scope. */
+  units: string[];
+}
+
+/**
+ * The whole-repository flow between role tiers: the structure the tier classification
+ * becomes once recorded imports are collapsed across it.
+ *
+ * Same-tier edges are kept apart because a self-edge is not a layer relationship, and a
+ * high `intraRatio` means the code is not really layered.
+ */
+export interface TierFlow {
+  /** The ranked tiers present, in dependency order (frontend first). */
+  tiers: Tier[];
+  edges: TierFlowEdge[];
+  /** Ranked edges whose two ends share a tier, per tier. */
+  intraByTier: Array<{ tier: Tier; weight: number }>;
+  /** Ranked edges read: the summed edge weights plus the same-tier edges. */
+  total: number;
+  /** Share of `total` that stays inside one tier, rounded to three places. */
+  intraRatio: number;
+}
+
+/**
+ * A support tier outside the layer order, folded onto a shelf rather than a band.
+ *
+ * `infra`, `build`, `tests`, and `unclassified` have no dependency rank, so they cannot sit in
+ * the stack; the drawing keeps them beside it, exactly as the System view shelves periphery.
+ */
+export interface TierShelfEntry {
+  tier: Tier;
+  files: number;
+  lines: number;
+  /** Of `files`, how many the classifier pinned while flagging them mixed. */
+  mixed: number;
 }
 
 /** One recorded reference to a table, joined to the file's tier and unit. */
@@ -181,6 +230,10 @@ export interface TierReport {
   units: TierUnitReport[];
   matrix: TierMatrix;
   directions: TierDirection[];
+  /** The edges between role tiers collapsed across the repository (Phase 35 Y1). */
+  tierFlow: TierFlow;
+  /** Support tiers outside the layer order (Phase 35 Y2): infra, build, tests, unclassified. */
+  shelf: TierShelfEntry[];
   tables: TableReference[];
   /** The bottom half of the end-to-end trace: a table joined to the files that name it. */
   tableTrace: TableTraceEntry[];

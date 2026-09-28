@@ -121,51 +121,55 @@ export async function extractRustFacts(file: string, content: string): Promise<R
       return { facts, diagnostics };
     }
 
-    for (const node of tree.rootNode.namedChildren) {
-      if (node.type === 'mod_item') {
-        const match = MOD_PATTERN.exec(node.text);
-        if (match) {
-          const path = pathAttribute(node);
-          facts.mods.push({
-            name: match[1] as string,
-            external: match[2] === ';',
-            line: node.startPosition.row + 1,
-            ...(path ? { path } : {}),
-          });
-        }
-      } else if (node.type === 'use_declaration') {
-        const reexport = node.namedChildren.some((child) => child.type === 'visibility_modifier');
-        for (const reference of expandUse(node.text)) {
-          facts.uses.push({
-            segments: reference.segments,
-            glob: reference.glob,
-            boundName: reference.alias ?? reference.segments.at(-1) ?? '',
-            reexport,
-            line: node.startPosition.row + 1,
-          });
-        }
-      } else if (ITEM_TYPES.has(node.type)) {
-        const name = node.childForFieldName('name');
-        if (name) {
-          facts.items.push({ name: name.text, line: node.startPosition.row + 1 });
+    try {
+      for (const node of tree.rootNode.namedChildren) {
+        if (node.type === 'mod_item') {
+          const match = MOD_PATTERN.exec(node.text);
+          if (match) {
+            const path = pathAttribute(node);
+            facts.mods.push({
+              name: match[1] as string,
+              external: match[2] === ';',
+              line: node.startPosition.row + 1,
+              ...(path ? { path } : {}),
+            });
+          }
+        } else if (node.type === 'use_declaration') {
+          const reexport = node.namedChildren.some((child) => child.type === 'visibility_modifier');
+          for (const reference of expandUse(node.text)) {
+            facts.uses.push({
+              segments: reference.segments,
+              glob: reference.glob,
+              boundName: reference.alias ?? reference.segments.at(-1) ?? '',
+              reexport,
+              line: node.startPosition.row + 1,
+            });
+          }
+        } else if (ITEM_TYPES.has(node.type)) {
+          const name = node.childForFieldName('name');
+          if (name) {
+            facts.items.push({ name: name.text, line: node.startPosition.row + 1 });
+          }
         }
       }
+
+      if (tree.rootNode.hasError) {
+        diagnostics.push({
+          file,
+          line: 1,
+          severity: 'warning',
+          kind: 'parse-failure',
+          message: 'Rust source contains syntax errors; extracted facts may be incomplete.',
+        });
+      }
+
+      facts.paths = collectInlinePaths(tree.rootNode);
+      facts.calls = collectCalls(tree.rootNode);
+
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
     }
-
-    if (tree.rootNode.hasError) {
-      diagnostics.push({
-        file,
-        line: 1,
-        severity: 'warning',
-        kind: 'parse-failure',
-        message: 'Rust source contains syntax errors; extracted facts may be incomplete.',
-      });
-    }
-
-    facts.paths = collectInlinePaths(tree.rootNode);
-    facts.calls = collectCalls(tree.rootNode);
-
-    return { facts, diagnostics };
   });
 }
 
@@ -832,7 +836,8 @@ export async function extractRustSymbols(
       return { symbols, diagnostics };
     }
 
-    const visit = (node: Node, owner: string): void => {
+    try {
+      const visit = (node: Node, owner: string): void => {
       if (node.type === 'struct_item' || node.type === 'enum_item') {
         const name = node.childForFieldName('name')?.text;
         if (name) {
@@ -944,6 +949,9 @@ export async function extractRustSymbols(
     markEntries(symbols, content);
 
     return { symbols: sortSymbols(symbols), diagnostics, accesses, calls };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

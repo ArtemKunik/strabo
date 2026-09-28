@@ -13,6 +13,7 @@ export * from './types/graph.ts';
 export * from './types/dependencies.ts';
 export * from './types/scan.ts';
 export * from './types/schema.ts';
+export * from './types/data.ts';
 export * from './types/database.ts';
 export * from './types/workspace.ts';
 export * from './types/view.ts';

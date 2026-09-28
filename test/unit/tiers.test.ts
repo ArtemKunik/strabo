@@ -274,6 +274,102 @@ test('buildTierReport builds the tier matrix and flags wrong-way edges', () => {
   assert.equal(report.directions.find((entry) => entry.kind === 'upward')?.target, 'src/handlers/orders.ts');
 });
 
+test('buildTierReport aggregates the tier flow, including cross-unit edges (Y1)', async () => {
+  const root = path.resolve('test/fixtures/structure-repo');
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+
+  assert.deepEqual(report.tierFlow.tiers, ['frontend', 'api', 'domain', 'integration', 'data']);
+  assert.equal(report.tierFlow.total, 6, 'the tests-tier edge is outside the layer order');
+  assert.equal(report.tierFlow.intraRatio, 0);
+  assert.deepEqual(report.tierFlow.intraByTier, []);
+  assert.deepEqual(
+    report.tierFlow.edges.map((entry) => [entry.source, entry.target, entry.kind, entry.weight]),
+    [
+      ['frontend', 'api', 'down', 1],
+      ['api', 'domain', 'down', 1],
+      ['api', 'data', 'skip-layer', 1],
+      ['domain', 'integration', 'down', 1],
+      ['integration', 'data', 'down', 1],
+      ['data', 'domain', 'upward', 1],
+    ],
+  );
+  const cross = report.tierFlow.edges.find(
+    (entry) => entry.source === 'frontend' && entry.target === 'api',
+  );
+  assert.equal(cross?.crossUnit, 1);
+  assert.deepEqual(cross?.units, ['web']);
+});
+
+test('buildTierReport keeps same-tier edges apart from the ranked flow (Y1)', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{ "name": "core" }\n');
+  write(root, 'src/components/App.tsx', 'export const App = 1;\n');
+  write(root, 'src/components/Widget.tsx', 'export const Widget = 2;\n');
+  write(root, 'src/data/store.ts', 'export const store = 3;\n');
+
+  const report = buildTierReport(root, 'core', {
+    nodes: [
+      { id: 'src/components/App.tsx' },
+      { id: 'src/components/Widget.tsx' },
+      { id: 'src/data/store.ts' },
+    ],
+    edges: [
+      {
+        source: 'src/components/App.tsx',
+        target: 'src/components/Widget.tsx',
+        evidence: { line: 1, specifier: './Widget' },
+      },
+      {
+        source: 'src/components/App.tsx',
+        target: 'src/data/store.ts',
+        evidence: { line: 1, specifier: '../data/store' },
+      },
+    ],
+  });
+
+  assert.equal(report.tierFlow.intraRatio, 0.5);
+  assert.deepEqual(report.tierFlow.intraByTier, [{ tier: 'frontend', weight: 1 }]);
+  // No ranked tier sits between frontend and data here, so it is a direct downward edge.
+  assert.deepEqual(
+    report.tierFlow.edges.map((entry) => [entry.source, entry.target, entry.kind, entry.crossUnit]),
+    [['frontend', 'data', 'down', 0]],
+  );
+});
+
+test('buildTierReport folds support tiers onto the shelf and counts mixed files apart (Y2)', () => {
+  const root = tempDir();
+  write(root, 'Cargo.toml', '[package]\nname = "core"\n');
+  write(root, 'deploy/Dockerfile', 'FROM node:22\n');
+  write(root, 'src/feature.test.ts', 'export const t = 1;\n');
+  write(root, 'src/thing.ts', 'export const thing = 1;\n');
+  write(
+    root,
+    'src/orders.ts',
+    "import express from 'express';\nimport React from 'react';\nexport const o = 1;\n",
+  );
+
+  const ids = ['Cargo.toml', 'deploy/Dockerfile', 'src/feature.test.ts', 'src/thing.ts', 'src/orders.ts'];
+  const report = buildTierReport(root, 'core', { nodes: ids.map((id) => ({ id })) });
+
+  // Only the tiers with no dependency rank sit on the shelf, in tier order.
+  assert.deepEqual(
+    report.shelf.map((entry) => [entry.tier, entry.files, entry.mixed]),
+    [
+      ['infra', 1, 0],
+      ['build', 1, 0],
+      ['tests', 1, 0],
+      ['unclassified', 1, 0],
+    ],
+  );
+
+  // The mixed file keeps its pinned tier but is counted apart from the clean band.
+  const frontend = report.matrix.perTier.find((entry) => entry.tier === 'frontend');
+  assert.equal(frontend?.files, 1);
+  assert.equal(frontend?.mixed, 1);
+  assert.equal(report.summary.mixed, 1);
+});
+
 test('buildTierReport reads measured coverage for matrix cells and per-tier stats (U2)', async () => {
   const root = tempDir();
   write(root, 'package.json', '{ "name": "web" }\n');

@@ -1,4 +1,5 @@
-import type { Graph } from '../types.ts';
+import type { DataReport, Graph } from '../types.ts';
+import { buildProductLevel, emptyProductLevel, type ProductUnit } from './data/product-level.ts';
 import { detectCommunities } from './system-communities.ts';
 import { aggregateEdges } from './system-edges.ts';
 import { assignLayers } from './system-layers.ts';
@@ -25,6 +26,7 @@ export type {
   SystemCommunity,
   SystemPeriphery,
 } from './system-types.ts';
+export type { ProductLevel, ProductLevelNode, ProductUnit } from './data/product-level.ts';
 
 /**
  * Roll a file graph up into build units and the layers inside them.
@@ -35,7 +37,12 @@ export type {
  * support (tests, scripts, generated, fixtures) fold into a shelf instead of becoming
  * components.
  */
-export function buildSystemReport(root: string, repositoryName: string, graph: Graph): SystemReport {
+export function buildSystemReport(
+  root: string,
+  repositoryName: string,
+  graph: Graph,
+  data?: DataReport,
+): SystemReport {
   const files = graph.nodes.map((node) => node.id);
   const derived = detectUnits(root, files, repositoryName);
   const { units, assignment } = applyDeclaredGroups(derived, files, readDeclaredGroups(root));
@@ -83,12 +90,21 @@ export function buildSystemReport(root: string, repositoryName: string, graph: G
     }
   }
 
+  const productUnits: ProductUnit[] = units.map((unit) => ({
+    id: unit.id,
+    name: unit.name,
+    repository: repositoryName,
+    files: componentFiles.get(unit.id) ?? [],
+  }));
+  const products = data ? buildProductLevel(data, productUnits) : emptyProductLevel();
+
   return {
     units: nodes,
     edges,
     layers: layers.sort((a, b) => a.unit.localeCompare(b.unit) || a.order - b.order || a.name.localeCompare(b.name)),
     communities,
     periphery: periphery.sort((a, b) => a.file.localeCompare(b.file)),
+    products,
     summary: {
       units: nodes.length,
       edges: edges.length,

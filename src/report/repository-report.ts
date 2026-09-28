@@ -2,7 +2,7 @@ import { computeGraphMetrics } from '../analysis/analysis.ts';
 import { computeCycles } from '../analysis/cycles.ts';
 import type { MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import { computeRepositoryPassport, computeUntested } from '../analysis/passport.ts';
-import type { DependencyAdvisory, Graph, RiskReport } from '../types.ts';
+import type { DataReport, DependencyAdvisory, Graph, RiskReport } from '../types.ts';
 import type { SmellRule, SmellsReport } from '../analysis/quality.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
@@ -10,6 +10,7 @@ import {
   DEFAULT_REPORT_LIMITS,
   SEVERITY_ORDER,
   type PainPoint,
+  type RepositoryDataSection,
   type RepositoryReportDocument,
   type RepositoryReportInputs,
   type ReportLimits,
@@ -101,6 +102,13 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
   const truncated = painPoints.length > limits.painPoints;
   const shown = truncated ? painPoints.slice(0, limits.painPoints) : painPoints;
 
+  let data: RepositoryDataSection | null = null;
+  if (inputs.data) {
+    data = dataSection(inputs.data);
+  } else {
+    unavailable.push('the data layer was not computed');
+  }
+
   return {
     schema: 'strabo-report-1',
     repository: inputs.repository,
@@ -111,6 +119,7 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     painPoints: shown,
     change: inputs.change ?? null,
     drift: inputs.drift ?? null,
+    data,
     suggestions: shown.map(suggestionFor),
     evidence: {
       files: graph.nodes.length,
@@ -121,6 +130,25 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
       truncated,
       unavailable,
       warnings,
+    },
+  };
+}
+
+/** Trim a computed data layer into the report's section, keeping counts and every finding. */
+function dataSection(data: DataReport): RepositoryDataSection {
+  return {
+    datasets: data.datasets.length,
+    edges: data.edges.length,
+    products: data.products,
+    contracts: data.contracts,
+    candidates: data.candidates,
+    conformance: data.conformance,
+    classifications: data.classifications,
+    events: data.events.length,
+    gaps: {
+      noSingleWriter: data.candidates.filter((entry) => entry.kind === 'no-single-writer').length,
+      contractlessPort: data.candidates.filter((entry) => entry.kind === 'output-port').length,
+      unconformant: data.conformance.length,
     },
   };
 }

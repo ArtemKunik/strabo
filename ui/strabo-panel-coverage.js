@@ -76,6 +76,23 @@ export function coverageProvenanceText(provenance) {
   return `reachable basis (static test-reach, not executed coverage): ${reason}${detail}`;
 }
 
+/**
+ * The one line naming the repository's own coverage command, or empty when none was detected.
+ * A measured report that is stale says so; no report says it was not found.
+ */
+export function coverageRefreshText(provenance) {
+  const hint = provenance?.refresh;
+  if (!hint || !hint.command) {
+    return '';
+  }
+  if (provenance.available) {
+    const stale = provenance.stale?.length ?? 0;
+    return `The report is stale for ${stale} file(s). Refresh it with ${hint.command}.`;
+  }
+  const off = hint.allowed ? '' : ' Server-side refresh is off (set STRABO_ALLOW_COVERAGE_REFRESH=1 to run it here).';
+  return `No coverage report was found. Generate one with ${hint.command}.${off}`;
+}
+
 /** The scope's name for a heading: the project, a folder path, or a file path. */
 export function coverageSubjectLabel(report) {
   if (!report) {
@@ -98,6 +115,33 @@ function note(text) {
 }
 
 /**
+ * The actionable line under the provenance: names the repository's coverage command, and when
+ * the server permits it, a button that runs it and reloads the panel. Nothing runs unbidden.
+ */
+function coverageRefreshBlock(provenance, handlers) {
+  const hint = provenance?.refresh;
+  const text = coverageRefreshText(provenance);
+  if (!hint || !text) {
+    return null;
+  }
+  const block = element('div', 'coverage-refresh');
+  block.dataset.role = 'coverage-refresh';
+  block.append(note(text));
+  if (hint.allowed && typeof handlers.onRefresh === 'function') {
+    const button = element(
+      'button',
+      'link',
+      provenance.available ? 'Refresh report' : 'Generate report',
+    );
+    button.type = 'button';
+    button.dataset.role = 'coverage-refresh-run';
+    button.addEventListener('click', () => handlers.onRefresh());
+    block.append(button);
+  }
+  return block;
+}
+
+/**
  * Render a project or folder coverage report: the provenance, the subtree totals, the child
  * folders table, and (folder scope) the direct files. Handlers are `onOpenProject`,
  * `onOpenFolder(folder)`, and `onSelect(file)`.
@@ -107,7 +151,7 @@ export function renderCoverageReport(container, report, handlers = {}) {
 
   if (report?.loading) {
     container.append(element('h3', null, 'Coverage'));
-    container.append(note('Loading coverage…'));
+    container.append(note(report.message ?? 'Loading coverage…'));
     return;
   }
 
@@ -131,6 +175,10 @@ export function renderCoverageReport(container, report, handlers = {}) {
 
   container.append(coverageBreadcrumb(report.subject, handlers));
   container.append(provenanceLine(report.provenance));
+  const refresh = coverageRefreshBlock(report.provenance, handlers);
+  if (refresh) {
+    container.append(refresh);
+  }
   container.append(coverageTotals(report.totals, report.threshold));
   container.append(coverageFolders(report.folders ?? [], handlers));
 
@@ -331,6 +379,10 @@ export function renderCoverageFile(container, report, handlers = {}) {
   }
 
   container.append(provenanceLine(report.provenance));
+  const refresh = coverageRefreshBlock(report.provenance, handlers);
+  if (refresh) {
+    container.append(refresh);
+  }
 
   const figure = element('p', 'coverage-file-figure');
   figure.dataset.role = 'coverage-file-figure';

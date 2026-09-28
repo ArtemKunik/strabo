@@ -719,6 +719,50 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/tiers', args),
     },
     {
+      name: 'get_data_products',
+      description:
+        'The recorded data layer: datasets, declared data products with their ports, owners, contracts, and conformance findings, undeclared product candidates with ownership, and event/message flows. Every fact names its evidence.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/data/products', args),
+    },
+    {
+      name: 'get_data_lineage',
+      description:
+        'Static data lineage for one dataset (or all of it): the recorded `derives` edges, their evidence lines, and the upstream and downstream datasets. Pass `dataset` for one dataset.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dataset: { type: 'string', description: 'A dataset id, table, topic, or path.' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/data/lineage', args, { dataset: stringArg(args, 'dataset') }),
+    },
+    {
+      name: 'get_dataset_consumers',
+      description:
+        'Who reads a dataset or column: the recorded readers, the downstream datasets, the contracts that govern it, and the data products it belongs to. Ask before renaming a column.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          dataset: { type: 'string', description: 'A dataset id, table, topic, or path.' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['dataset'],
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/data/lineage', args, { dataset: requiredArg(args, 'dataset') }),
+    },
+    {
       name: 'get_dead_code',
       description: 'Files nothing imports, and that are neither entry points nor tests.',
       inputSchema: {

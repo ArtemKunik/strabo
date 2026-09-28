@@ -42,6 +42,7 @@ Coverage options:
   --file=<path>                   coverage for one file, with the tests that reach it
   --folder=<path>                 coverage for a folder and its subtree
   --threshold=<pct>               under-covered cut-off percent (default 50)
+  --refresh                       run the repository's own coverage script first, then read it
   --format=json                   machine-readable result
   --out=<file>                    write to a file instead of stdout
 
@@ -56,7 +57,7 @@ Check rules (only the ones named can fail the build):
   --format=json                   machine-readable result
 
 Environment: STRABO_ROOT, STRABO_CONFIG, STRABO_SCAN_CEILING, STRABO_STATE_DIR,
-STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, PORT, STRABO_HOST
+STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, STRABO_ALLOW_COVERAGE_REFRESH, PORT, STRABO_HOST
 `;
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {

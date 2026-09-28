@@ -146,7 +146,7 @@ test('concurrent refreshes for one root are coalesced into a single scan', async
       started = true;
       // Hold the first scan open long enough for the second request to finish its async
       // fingerprint and reach the in-flight check, so the assertion is not timing-dependent.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
     return scanRepository(target);
   };

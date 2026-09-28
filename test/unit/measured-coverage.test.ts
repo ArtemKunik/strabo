@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +10,7 @@ import {
   computeArchitectureHealth,
   computeCoverage,
   computeMeasuredCoverage,
+  coverageProvenance,
   detectCoverageFormat,
   extractTypeScriptSymbols,
   mapReportPath,
@@ -195,6 +198,36 @@ test('an absent report is unavailable with a reason, not zeros', async () => {
   assert.equal(measured.reason, 'no-report-found');
   assert.deepEqual(measured.files, []);
   assert.equal(measured.summary.lineCoverage, null);
+});
+
+test('an absent report offers the repository coverage command when refresh is allowed', async () => {
+  const graph = await loadGraph(noReportFixture);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-refresh-prov-'));
+  fs.writeFileSync(
+    path.join(root, 'package.json'),
+    JSON.stringify({ scripts: { 'test:coverage': 'node --test --experimental-test-coverage' } }),
+  );
+
+  const measured = await computeMeasuredCoverage(root, graph, { allowRefresh: true });
+  assert.equal(measured.available, false);
+  assert.equal(measured.reason, 'no-report-found');
+  assert.equal(measured.refresh?.script, 'test:coverage');
+  assert.equal(measured.refresh?.command, 'npm run test:coverage');
+  assert.equal(measured.refresh?.allowed, true);
+
+  assert.equal(coverageProvenance(measured).refresh?.command, 'npm run test:coverage');
+});
+
+test('the refresh hint is refused by default and absent without a coverage script', async () => {
+  const graph = await loadGraph(noReportFixture);
+  const withScript = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-refresh-prov-'));
+  fs.writeFileSync(path.join(withScript, 'package.json'), JSON.stringify({ scripts: { 'test:coverage': 'x' } }));
+  const denied = await computeMeasuredCoverage(withScript, graph);
+  assert.equal(denied.refresh?.allowed, false);
+
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-refresh-prov-'));
+  fs.writeFileSync(path.join(bare, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+  assert.equal((await computeMeasuredCoverage(bare, graph)).refresh, undefined);
 });
 
 test('a malformed report is unavailable with a reason, not zeros', async () => {

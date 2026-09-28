@@ -106,5 +106,6 @@ export function bindKeyboardShortcuts(app) {
     else if (key === 'n') elements.tbBranches.click();
     else if (key === 'd') elements.tbCoverage?.click();
     else if (key === 'g' && app.groupSelection.length >= 2) elements.tbDelegateGroup.click();
+    else if (key === 'a') elements.tbProducts?.click();
   });
 }

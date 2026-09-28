@@ -62,6 +62,32 @@ test('computeCycles finds circular coupling', async () => {
   assert.ok(members.includes('src/cycle-b.ts'));
 });
 
+test('computeCycles handles deep graphs iteratively without call stack overflow', () => {
+  const count = 12000;
+  const nodes = Array.from({ length: count }, (_, i) => ({
+    id: `node-${i}`,
+    file: `node-${i}.ts`,
+    kind: 'module' as const,
+    lines: 10,
+  }));
+  const edges = Array.from({ length: count }, (_, i) => ({
+    source: `node-${i}`,
+    target: `node-${(i + 1) % count}`,
+  }));
+  const graph = {
+    repository: 'deep-test',
+    nodes,
+    edges,
+    diagnostics: [],
+    orphans: [],
+    cycles: [],
+  };
+
+  const groups = computeCycles(graph);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0]?.members.length, count);
+});
+
 test('computeCoverage reports reachability from test files, not execution coverage', async () => {
   const graph = await loadGraph();
   const result = computeCoverage(graph);

@@ -102,3 +102,17 @@ test('delegate rejects a prompt-less request and an unknown agent', async () => 
   });
   assert.equal(unknown.status, 400);
 });
+
+test('delegate rejects a cross-origin request', async () => {
+  const base = await listen(app());
+  const rejected = await fetch(`${base}/delegate`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      origin: 'https://evil.example.com',
+    },
+    body: JSON.stringify({ agent: 'opencode', prompt: 'Do something bad.', dryRun: true }),
+  });
+  assert.equal(rejected.status, 403);
+});
+

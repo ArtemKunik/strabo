@@ -21,6 +21,7 @@ import { renderReportHtml } from '../report/render-html.ts';
 import { renderReportMarkdown } from '../report/render-markdown.ts';
 import { renderReportPdf } from '../report/render-pdf.ts';
 import { computeFreshness, revisionFromFingerprint } from '../status.ts';
+import { readWorkspaceConfig } from '../workspace/config.ts';
 import { collectFailOnValues } from './check.ts';
 import { run } from '../process.ts';
 
@@ -118,6 +119,13 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
   const cached = await getCachedGraph(repository.root);
   const freshness = await computeFreshness(repository.root, cached.fingerprint, cached.report.scannedAt);
 
+  let qualified = false;
+  try {
+    qualified = readWorkspaceConfig(env.configPath)?.contractsIdentity === 'qualified';
+  } catch {
+    qualified = false;
+  }
+
   const document = await collectRepositoryReport({
     repository: repository.name,
     root: repository.root,
@@ -134,6 +142,8 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
     hotspots: !hasFlag(argv, 'hotspots'),
     ownership: !hasFlag(argv, 'ownership'),
     drift: !hasFlag(argv, 'drift'),
+    data: !hasFlag(argv, 'data'),
+    qualifiedContracts: qualified,
     coverage: {
       ...(env.coverageReports ? { reportPaths: env.coverageReports } : {}),
       ceiling: env.scanCeiling,

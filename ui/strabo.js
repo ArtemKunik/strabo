@@ -35,6 +35,7 @@ import { createGitController } from './strabo-git-controller.js';
 import { createSettingsController } from './strabo-settings-controller.js';
 import { createRepositoryPanels } from './strabo-repo-panels.js';
 import { createCoverage } from './strabo-coverage.js';
+import { createProducts } from './strabo-products.js';
 import { createLensController } from './strabo-lens-controller.js';
 import { createRepositoryPicker } from './strabo-repositories.js';
 import { createSystemUnits } from './strabo-system-units.js';
@@ -191,6 +192,7 @@ app.git = createGitController(app);
 app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
 app.coverage = createCoverage(app);
+app.products = createProducts(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
@@ -556,6 +558,7 @@ if (window.STRABO_TEST) {
     blocks: () => app.panels.showBlocks(),
     coverage: () => app.coverage.showCoverage(),
     coverageFolder: (folder) => app.coverage.loadFolder(folder),
+    products: () => app.products.showProducts(),
     brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,

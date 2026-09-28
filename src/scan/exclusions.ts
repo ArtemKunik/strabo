@@ -14,6 +14,16 @@ const GENERATED_DIRS = new Set([
   // source (and a .NET `bin/` holds no source extensions anyway), so excluding it
   // would hide the package's own entry point from the scan.
   'obj',
+  // Python virtualenvs and bytecode caches
+  '.venv',
+  'venv',
+  '__pycache__',
+  // Modern web and build tool caches
+  '.next',
+  '.nuxt',
+  '.turbo',
+  // JVM and Gradle caches
+  '.gradle',
 ]);
 
 /**

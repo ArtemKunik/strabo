@@ -60,7 +60,14 @@ async function extractAndResolve(
       }
       const parsed = await withParser(grammarFor(file), (parser) => {
         const tree = parser.parse(content);
-        return tree ? collectFacts(tree.rootNode) : null;
+        if (!tree) {
+          return null;
+        }
+        try {
+          return collectFacts(tree.rootNode);
+        } finally {
+          tree.delete();
+        }
       });
       if (parsed) {
         facts.set(file, parsed);

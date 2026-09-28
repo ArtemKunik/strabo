@@ -4,6 +4,7 @@ import path from 'node:path';
 import { isInside, toPosix } from '../boundary/repository-root.ts';
 import type { Graph } from '../types.ts';
 import { run } from '../process.ts';
+import { detectCoverageCommand, type CoverageRefreshHint } from './coverage-refresh.ts';
 
 /**
  * Read the coverage reports a repository already has. This module never runs a test or a
@@ -94,6 +95,11 @@ export interface MeasuredCoverageSummary {
   reportAgeMs: number | null;
   reason?: CoverageUnavailableReason;
   detail?: string;
+  /**
+   * The repository's own coverage command, offered when no report was read (or the report
+   * predates the files it names) so a caller can offer to produce one.
+   */
+  refresh?: CoverageRefreshHint;
   /** Candidates found inside the ceiling that could not be read or parsed. */
   skipped: Array<{ path: string; reason: string }>;
   /** Report-named files that are not graph nodes, sorted. Never silently dropped. */
@@ -115,6 +121,8 @@ export interface CoverageProvenance {
   reportAgeMs: number | null;
   reason?: CoverageUnavailableReason;
   detail?: string;
+  /** The repository's own coverage command, when one was detected. */
+  refresh?: CoverageRefreshHint;
   outOfGraph: string[];
   stale: string[];
   summary: MeasuredSummary;
@@ -123,6 +131,11 @@ export interface CoverageProvenance {
 export interface MeasuredCoverageOptions {
   /** Explicit report path(s) from env/config; relative to `root`, or absolute inside `ceiling`. */
   reportPaths?: readonly string[];
+  /**
+   * Whether the caller will run {@link CoverageRefreshHint.command} when asked. Reflection
+   * only: this function never runs it. Defaults to false.
+   */
+  allowRefresh?: boolean;
   /** The scan ceiling. A candidate outside it is never read; defaults to `root`. */
   ceiling?: string;
   /** Limit the `git log` staleness read to these graph files (e.g. one file for `/symbols`). */
@@ -598,6 +611,7 @@ export function coverageProvenance(report: MeasuredCoverageSummary): CoveragePro
     reportAgeMs: report.reportAgeMs,
     ...(report.reason ? { reason: report.reason } : {}),
     ...(report.detail ? { detail: report.detail } : {}),
+    ...(report.refresh ? { refresh: report.refresh } : {}),
     outOfGraph: report.outOfGraph,
     stale: report.stale,
     summary: report.summary,
@@ -639,10 +653,12 @@ export async function computeMeasuredCoverage(
   if (!chosen) {
     const found = candidates.some((candidate) => fs.existsSync(candidate));
     const malformed = skipped.some((entry) => entry.reason === 'malformed');
-    return emptySummary(
+    const summary = emptySummary(
       malformed ? 'report-malformed' : found ? 'report-unreadable' : 'no-report-found',
       skipped,
     );
+    attachRefreshHint(root, summary, options);
+    return summary;
   }
 
   const reportModified = options.modifiedAt
@@ -697,7 +713,7 @@ export async function computeMeasuredCoverage(
   const detail =
     reportModified === null ? 'the report has no readable timestamp' : undefined;
 
-  return {
+  const result: MeasuredCoverageSummary = {
     available: true,
     basis: 'measured',
     format: chosen.parsed.format,
@@ -715,6 +731,23 @@ export async function computeMeasuredCoverage(
     stale,
     summary,
   };
+  // A stale report is worth regenerating, so the same hint is offered as when none exists.
+  if (stale.length > 0) {
+    attachRefreshHint(root, result, options);
+  }
+  return result;
+}
+
+/** Name the repository's own coverage command, when it has one, without running it. */
+function attachRefreshHint(
+  root: string,
+  target: { refresh?: CoverageRefreshHint },
+  options: MeasuredCoverageOptions,
+): void {
+  const command = detectCoverageCommand(root);
+  if (command) {
+    target.refresh = { ...command, allowed: options.allowRefresh === true };
+  }
 }
 
 function emptySummary(

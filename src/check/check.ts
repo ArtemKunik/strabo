@@ -7,16 +7,28 @@ import { buildTierReport } from '../analysis/tiers.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { revisionFromFingerprint } from '../status.ts';
-import type { Graph } from '../types.ts';
+import type { Graph, StraboConfig } from '../types.ts';
+import { analyzeWorkspace } from '../workspace/analyze.ts';
+import { resolveWorkspaceRepositories } from '../workspace/config.ts';
 import { BASELINE_VERSION, type CheckBaseline } from './baseline.ts';
 
-export type CheckRule = 'cycles' | 'layer-violations' | 'new-smells' | 'health-regression';
+export type CheckRule =
+  | 'cycles'
+  | 'layer-violations'
+  | 'new-smells'
+  | 'health-regression'
+  | 'data-contract-breaking'
+  | 'data-no-single-writer'
+  | 'data-unconformant';
 
 export const CHECK_RULES: readonly CheckRule[] = [
   'cycles',
   'layer-violations',
   'new-smells',
   'health-regression',
+  'data-contract-breaking',
+  'data-no-single-writer',
+  'data-unconformant',
 ];
 
 /**
@@ -35,6 +47,15 @@ export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
   'new-smells': 'new-smells',
   health: 'health-regression',
   'health-regression': 'health-regression',
+  data: 'data-unconformant',
+  'data-contract': 'data-contract-breaking',
+  'data-breaking': 'data-contract-breaking',
+  'data-contract-breaking': 'data-contract-breaking',
+  'data-writer': 'data-no-single-writer',
+  'data-no-writer': 'data-no-single-writer',
+  'data-no-single-writer': 'data-no-single-writer',
+  'data-conformance': 'data-unconformant',
+  'data-unconformant': 'data-unconformant',
 };
 
 /**
@@ -91,6 +112,8 @@ export interface CheckWarning {
 export interface CheckOptions {
   workspaceRoot: string;
   scanCeiling?: string;
+  /** Workspace config path (`STRABO_CONFIG`), so the data rules see the declared repositories. */
+  configPath?: string;
   requested?: string;
   rules?: readonly string[];
   baseline?: CheckBaseline | null;
@@ -188,6 +211,62 @@ export async function collectFindings(
   return findings.sort((a, b) => a.key.localeCompare(b.key));
 }
 
+/** The check rules that read the workspace data layer (Phase 33 J10) rather than one graph. */
+const DATA_RULES: ReadonlySet<string> = new Set(['data-contract-breaking', 'data-no-single-writer', 'data-unconformant']);
+
+/**
+ * Findings from the recorded data layer: a dataset shared with no single writer, a dataset
+ * read across a repository boundary with no contract, and a declared contract that does not
+ * match its implementation. Each names only what the scan recorded.
+ */
+export async function collectDataFindings(options: CheckOptions): Promise<CheckFinding[]> {
+  const scanCeiling = options.scanCeiling ?? options.workspaceRoot;
+  const config: StraboConfig = {
+    workspaceRoot: options.workspaceRoot,
+    scanCeiling,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  };
+  const { name, repositories } = resolveWorkspaceRepositories(config);
+  const workspace = await analyzeWorkspace(name, repositories);
+  const governed = new Set(
+    workspace.data.edges.filter((edge) => edge.kind === 'governs').map((edge) => edge.target),
+  );
+  const findings: CheckFinding[] = [];
+
+  for (const candidate of workspace.data.candidates) {
+    if (candidate.kind === 'no-single-writer') {
+      findings.push({
+        rule: 'data-no-single-writer',
+        key: `data-writer:${candidate.dataset}`,
+        node: candidate.dataset,
+        detail: candidate.detail,
+        inputs: { writers: candidate.writers.length, readers: candidate.readers.length },
+      });
+    } else if (candidate.kind === 'shared-without-contract') {
+      findings.push({
+        rule: 'data-contract-breaking',
+        key: `data-breaking:${candidate.dataset}`,
+        node: candidate.dataset,
+        detail: candidate.detail,
+        inputs: { readers: candidate.readers.length },
+      });
+    }
+  }
+
+  for (const finding of workspace.data.conformance) {
+    const rule = finding.dataset && governed.has(finding.dataset) ? 'data-contract-breaking' : 'data-unconformant';
+    findings.push({
+      rule,
+      key: `data-conformance:${finding.contract}:${finding.dataset ?? ''}:${finding.field}:${finding.kind}`,
+      node: finding.dataset ?? finding.contract,
+      detail: finding.detail,
+      inputs: { kind: finding.kind, field: finding.field, contract: finding.contract },
+    });
+  }
+
+  return findings;
+}
+
 export async function runCheck(options: CheckOptions): Promise<CheckResult> {
   const now = options.now ?? (() => new Date());
   const repository = resolveRepositoryRoot({
@@ -205,6 +284,9 @@ export async function runCheck(options: CheckOptions): Promise<CheckResult> {
     graph,
     rules.includes('new-smells'),
   );
+  if (rules.some((rule) => DATA_RULES.has(rule))) {
+    collected.push(...(await collectDataFindings({ ...options, workspaceRoot: options.workspaceRoot })));
+  }
   const healthScore = computeArchitectureHealth(graph).score;
 
   const warnings: CheckWarning[] = [];

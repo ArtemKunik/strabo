@@ -8,6 +8,7 @@
  * in the panel, not thrown.
  */
 
+import { API_PATH } from './strabo-core.js';
 import { renderCoverageFile, renderCoverageReport } from './strabo-panels.js';
 
 export function createCoverage(app) {
@@ -46,10 +47,50 @@ export function createCoverage(app) {
         loadProject();
       }
     },
+    onRefresh: () => {
+      refresh();
+    },
   };
 
   function renderPanel() {
     renderCoverageReport(elements.coveragePanel, panelReport, handlers);
+  }
+
+  /**
+   * Ask the server to run the repository's own coverage script, then reload the scope on
+   * screen so the panel reads the fresh report. A failure is rendered, never thrown.
+   */
+  async function refresh() {
+    const token = (panelToken += 1);
+    panelReport = { loading: true, message: 'Running the repository coverage script…' };
+    renderPanel();
+    try {
+      const response = await fetch(`${API_PATH}/analysis/coverage/refresh${coverageQuery()}`, {
+        method: 'POST',
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      }
+      if (token !== panelToken) {
+        return;
+      }
+    } catch (error) {
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = { error: error.message };
+      renderPanel();
+      return;
+    }
+    if (subject.scope === 'folder' && subject.folder) {
+      await loadFolder(subject.folder);
+    } else {
+      await loadProject();
+    }
+    if (app.selected) {
+      await loadFileCoverage(app.selected);
+    }
   }
 
   /** Open the window and load the project-wide report. */

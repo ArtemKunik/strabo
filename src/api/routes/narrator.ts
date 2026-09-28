@@ -9,7 +9,12 @@ import { reviewWorkingTree } from '../../analysis/review.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
-import { createNarratorClient, type NarratorClient } from '../../narrator/client.ts';
+import {
+  createNarratorClient,
+  extractNarrative,
+  isAnthropicEndpoint,
+  type NarratorClient,
+} from '../../narrator/client.ts';
 import { resolveNarratorConfig } from '../../narrator/config.ts';
 import { buildCoveragePlanRequest } from '../../narrator/coverage-plan.ts';
 import { buildCoverageWeeklyRequest } from '../../narrator/coverage-weekly.ts';
@@ -329,16 +334,24 @@ export function createNarratorRouter(
         }
         modelsUrl = endpoint.includes('/chat/completions')
           ? endpoint.replace('/chat/completions', '/models')
-          : endpoint.replace(/\/$/, '') + '/models';
+          : endpoint.includes('/messages')
+            ? endpoint.replace('/messages', '/models')
+            : endpoint.replace(/\/$/, '') + '/models';
       } catch {
         response.status(400).json({ error: 'endpoint is not a URL.' });
         return;
       }
       const apiKeyEnv = effective?.apiKeyEnv?.trim() || 'STRABO_NARRATOR_API_KEY';
       const apiKey = readKey(apiKeyEnv);
+      const isAnthropic = isAnthropicEndpoint(endpoint);
       const headers: Record<string, string> = { accept: 'application/json' };
       if (apiKey) {
-        headers.authorization = `Bearer ${apiKey}`;
+        if (isAnthropic) {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers.authorization = `Bearer ${apiKey}`;
+        }
       }
 
       const fetchModels = async (url: string): Promise<Response | null> => {
@@ -468,21 +481,39 @@ export function createNarratorRouter(
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15_000);
         try {
+          const isAnthropic = isAnthropicEndpoint(resolution.endpoint);
+          const headers: Record<string, string> = {
+            'content-type': 'application/json',
+          };
+          if (apiKey) {
+            if (isAnthropic) {
+              headers['x-api-key'] = apiKey;
+              headers['anthropic-version'] = '2023-06-01';
+            } else {
+              headers.authorization = `Bearer ${apiKey}`;
+            }
+          }
+          const testBody = isAnthropic
+            ? {
+                model: resolution.model,
+                max_tokens: 16,
+                system: 'Reply with the word ok.',
+                messages: [{ role: 'user', content: '<evidence>\nconnection test\n</evidence>' }],
+              }
+            : {
+                model: resolution.model,
+                max_tokens: 8,
+                messages: [
+                  { role: 'system', content: 'Reply with the word ok.' },
+                  { role: 'user', content: '<evidence>\nconnection test\n</evidence>' },
+                ],
+              };
+
           res = await fetchImpl(resolution.endpoint, {
             method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
-            },
+            headers,
             signal: controller.signal,
-            body: JSON.stringify({
-              model: resolution.model,
-              max_tokens: 8,
-              messages: [
-                { role: 'system', content: 'Reply with the word ok.' },
-                { role: 'user', content: '<evidence>\nconnection test\n</evidence>' },
-              ],
-            }),
+            body: JSON.stringify(testBody),
           });
         } finally {
           clearTimeout(timer);
@@ -497,19 +528,25 @@ export function createNarratorRouter(
         response.json({ ok: false, reason: 'provider-error', detail: narratorTestHint(res.status, text) });
         return;
       }
-      const payload = (await res.json().catch(() => null)) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
-        model?: unknown;
-      } | null;
-      const content = payload?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || content.trim() === '') {
+      const payload = await res.json().catch(() => null);
+      let content: string | null = null;
+      try {
+        content = extractNarrative(payload);
+      } catch {
+        content = null;
+      }
+      if (!content) {
         response.json({ ok: false, reason: 'provider-error', detail: 'the narrator response could not be parsed.' });
         return;
       }
       response.json({
         ok: true,
         latencyMs,
-        model: typeof payload?.model === 'string' && payload.model !== '' ? payload.model : resolution.model,
+        model:
+          typeof (payload as { model?: unknown })?.model === 'string' &&
+          (payload as { model: string }).model !== ''
+            ? (payload as { model: string }).model
+            : resolution.model,
       });
     } catch (error) {
       sendError(response, error);

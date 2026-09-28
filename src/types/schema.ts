@@ -46,10 +46,14 @@ export interface SchemaIndex {
 export interface SchemaTable {
   /** Lower-case name; the default schema (`public`, `dbo`) is dropped. */
   name: string;
+  /** A base table (the default), a view, or a materialized view. */
+  kind?: 'table' | 'view' | 'materialized-view';
   columns: SchemaColumn[];
   constraints: SchemaConstraint[];
   indexes: SchemaIndex[];
   declared: SchemaLocation;
+  /** Tables a view's `FROM`/`JOIN` reads; present only for a view the reader resolved. */
+  viewDependencies?: string[];
 }
 
 /** A statement the parser saw but could not apply, so the snapshot may be incomplete there. */
@@ -94,6 +98,11 @@ export interface CodeDataUse {
   confidence: 'strong' | 'weak';
   /** What the code does with the table; `unknown` when the scan cannot tell read from write. */
   access: DataAccess;
+  /**
+   * The declared entity or model name whose mapping named this table, when the rule read one.
+   * An entity links to a table only through such a declaration, never through name similarity.
+   */
+  entity?: string;
 }
 
 /** Code that names a table or column no SQL file in the workspace declares. */

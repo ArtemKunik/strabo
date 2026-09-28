@@ -250,3 +250,20 @@ test('a built bundle and its source map are classified generated', () => {
   });
   assert.equal(classifyExclusion('src/index.ts'), null);
 });
+
+test('virtualenv and framework build directories are classified generated', () => {
+  for (const path of [
+    '.venv/lib/python3.11/site-packages/pkg/a.py',
+    'venv/bin/activate',
+    'src/__pycache__/app.cpython-311.pyc',
+    '.next/server/pages/index.js',
+    '.nuxt/dist/server.js',
+    '.turbo/cache/xyz.json',
+    '.gradle/caches/modules-2/files.jar',
+  ]) {
+    const result = classifyExclusion(path);
+    assert.ok(result, `${path} should be excluded`);
+    assert.equal(result.reason, 'generated');
+  }
+});
+

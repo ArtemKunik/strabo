@@ -148,6 +148,7 @@ function inputs(overrides: Partial<RepositoryReportInputs> = {}): RepositoryRepo
     hotspots: hotspots(),
     ownership: ownership(),
     risk: risk(),
+    data: dataReport(),
     generatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
   };
@@ -238,6 +239,86 @@ test('a stale graph is its own low-severity pain point', () => {
   const stale = document.painPoints.find((point) => point.kind === 'stale-graph');
   assert.equal(stale?.severity, 'low');
   assert.match(renderReportMarkdown(document), /stale: older than the working tree/);
+});
+
+function dataReport(): RepositoryReportInputs['data'] {
+  const dataset = (id: string, label: string) => ({
+    id,
+    repository: 'demo',
+    label,
+    kind: 'table' as const,
+    columns: [],
+  });
+  return {
+    datasets: [dataset('db:demo/orders', 'orders')],
+    edges: [],
+    model: { datasets: [], entities: [], relationships: [], findings: [], gaps: [] } as never,
+    contracts: [],
+    shapeTwins: [],
+    events: [],
+    eventContracts: [],
+    products: [
+      {
+        id: 'datacontract:demo:revenue',
+        name: 'revenue',
+        format: 'datacontract',
+        repository: 'demo',
+        source: 'datacontract.yaml',
+        owner: 'data-team',
+        outputPorts: [{ dataset: 'db:demo/orders', fields: [], contract: null }],
+        inputPorts: [],
+        contracts: [],
+        classification: [],
+      } as never,
+    ],
+    candidates: [],
+    conformance: [
+      {
+        contract: 'datacontract:demo:revenue',
+        dataset: 'db:demo/orders',
+        repository: 'demo',
+        kind: 'missing',
+        field: 'region',
+        detail: 'declared but not recorded',
+        contractEvidence: { file: 'datacontract.yaml' },
+      } as never,
+    ],
+    lineage: [],
+    classifications: [],
+    catalogs: [],
+    dbt: [],
+    summary: {
+      datasets: 1,
+      tables: 1,
+      topics: 0,
+      contracts: 0,
+      products: 1,
+      candidates: 0,
+      conformance: 1,
+      lineage: 0,
+      modeled: true,
+    },
+    unavailable: [],
+  };
+}
+
+test('the data layer is a report section, and absent means named not empty', () => {
+  const document = buildRepositoryReport(inputs({ data: dataReport() }));
+  const section = document.data;
+  assert.ok(section);
+  assert.equal(section.datasets, 1);
+  assert.equal(section.gaps.unconformant, 1);
+  assert.equal(section.products[0]?.name, 'revenue');
+
+  const markdown = renderReportMarkdown(document);
+  assert.match(markdown, /## Data layer/);
+  assert.match(markdown, /`revenue` — datacontract, 0 in, 1 out, owned by data-team/);
+  assert.match(markdown, /conformance finding\(s\)/);
+
+  const absent = buildRepositoryReport(inputs({ data: undefined }));
+  assert.equal(absent.data, null);
+  assert.ok(absent.evidence.unavailable.includes('the data layer was not computed'));
+  assert.match(renderReportMarkdown(absent), /## Data layer\n- not included in this report/);
 });
 
 test('suggestionFor maps a cycle to an evidence-bound action', () => {

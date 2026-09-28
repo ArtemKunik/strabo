@@ -240,17 +240,19 @@ function protoFields(body: string): ContractField[] {
     if (skipDepth > 0) {
       continue;
     }
-    const hit = /^(repeated\s+|optional\s+|required\s+)?([A-Za-z_][\w.]*)\s+([A-Za-z_]\w*)\s*=\s*\d+/.exec(
+    const hit = /^(repeated\s+|optional\s+|required\s+)?([A-Za-z_][\w.]*)\s+([A-Za-z_]\w*)\s*=\s*(\d+)/.exec(
       line,
     );
     if (!hit) {
       continue;
     }
     const qualifier = (hit[1] ?? '').trim();
+    const number = Number(hit[4]);
     fields.push({
       name: hit[3] ?? '',
       type: hit[2] ?? 'unknown',
       required: qualifier !== 'repeated' && qualifier !== 'optional',
+      ...(Number.isFinite(number) ? { number } : {}),
     });
   }
   return fields

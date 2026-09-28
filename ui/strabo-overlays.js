@@ -21,6 +21,7 @@ export const OVERLAY_TITLES = {
   smells: 'Smells',
   'hidden-coupling': 'Hidden coupling (co-change, no import path)',
   'declared-rules': 'Declared rules',
+  data: 'Data',
 };
 
 /** The analysis endpoint each overlay reads. */
@@ -35,10 +36,11 @@ export const OVERLAY_ENDPOINTS = {
   smells: '/analysis/smells',
   'hidden-coupling': '/analysis/co-change',
   'declared-rules': '/analysis/rules',
+  data: '/analysis/data/overlay',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules'];
+export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data'];
 
 /**
  * Map a review analysis result onto node classes and a panel summary.
@@ -174,9 +176,62 @@ export function overlayFor(kind, data) {
       return hiddenCouplingOverlay(data);
     case 'declared-rules':
       return declaredRulesOverlay(data);
+    case 'data':
+      return dataOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
+}
+
+/**
+ * The data-on-code overlay (J11): the datasets a file writes and reads, and the code that
+ * produces a declared product's ports.
+ *
+ * A file that produces a product's output port earns the product ring (`ov-product`); every
+ * other file that writes or reads a recorded dataset is marked `ov-data`. The two share one
+ * visual language with the Data lens, which draws the same datasets, topics, and products as
+ * nodes. Nothing is inferred: only files the server recorded touching a dataset appear.
+ */
+export function dataOverlay(data) {
+  const files = Array.isArray(data?.files) ? data.files : [];
+  const classes = new Map();
+  let writers = 0;
+  let readers = 0;
+  for (const entry of files) {
+    const productProducer = Array.isArray(entry.products) && entry.products.length > 0 && entry.writes.length > 0;
+    if (productProducer) {
+      classes.set(entry.file, 'ov-product');
+    } else {
+      classes.set(entry.file, 'ov-data');
+    }
+    if (entry.writes.length > 0) {
+      writers += 1;
+    }
+    if (entry.reads.length > 0) {
+      readers += 1;
+    }
+  }
+  const products = Array.isArray(data?.products) ? data.products : [];
+  return {
+    classes,
+    summary: `${files.length} file(s) touch data · ${writers} write · ${readers} read · ${products.length} product(s)`,
+    items: files
+      .slice(0, 200)
+      .map((entry) => {
+        const parts = [];
+        if (entry.writes.length > 0) {
+          parts.push(`writes ${entry.writes.join(', ')}`);
+        }
+        if (entry.reads.length > 0) {
+          parts.push(`reads ${entry.reads.join(', ')}`);
+        }
+        if (entry.products.length > 0) {
+          parts.push(`feeds ${entry.products.join(', ')}`);
+        }
+        return `${entry.file} · ${parts.join(' · ')}`;
+      }),
+    meta: { files: files.length, writers, readers, products: products.length },
+  };
 }
 
 /**

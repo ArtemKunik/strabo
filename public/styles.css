@@ -5798,6 +5798,18 @@ table.change-metrics td:first-child .link {
   font-weight: 600;
 }
 
+.coverage-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.coverage-refresh .unavailable {
+  margin: 0;
+}
+
 .coverage-totals {
   margin: 6px 0 10px;
 }
@@ -5874,4 +5886,84 @@ table.change-metrics td:first-child .link {
 .coverage-folders h4,
 .coverage-files-section h4 {
   margin: 10px 0 4px;
+}
+/* Data products panel: product cards, candidates, conformance, the ER view, and the data rows. */
+
+.products-panel {
+  padding: 10px 12px;
+}
+
+.products-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.products-panel h4 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.data-summary {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.data-note {
+  margin: 2px 0 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.product-cards,
+.product-candidates,
+.data-conformance,
+.er-view,
+.data-contracts,
+.data-classification,
+.data-events,
+.data-catalogs,
+.data-dbt {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.product-card,
+.data-row,
+.er-table {
+  padding: 6px 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.product-name,
+.data-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.product-ports,
+.product-consumers,
+.product-conformance,
+.data-detail,
+.er-finding,
+.er-entity {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--ink-2);
+  word-break: break-word;
+}
+
+.product-conformance,
+.er-finding {
+  color: var(--status-serious);
+}
+
+.product-port-open,
+.data-open {
+  margin-top: 4px;
+  margin-right: 6px;
+  font-size: 11px;
 }

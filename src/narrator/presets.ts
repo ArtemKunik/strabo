@@ -1,12 +1,10 @@
 /**
  * Provider presets for the in-app narrator setup.
  *
- * Every preset is OpenAI-compatible on the wire: the client sends an OpenAI-style
- * `messages` body to `<endpoint>`. The Anthropic preset uses Anthropic's
- * OpenAI-compatible endpoint (`https://api.anthropic.com/v1/chat/completions`,
- * via base URL `https://api.anthropic.com/v1/`), which the current Anthropic docs
- * confirm fits `chat.completions` calls — so no native Messages API adapter is
- * needed. The same holds for Ollama, LM Studio, OpenAI, and OpenRouter.
+ * Most presets are OpenAI-compatible on the wire (`/v1/chat/completions`). The Anthropic
+ * preset targets Anthropic's native Messages API (`https://api.anthropic.com/v1/messages`);
+ * the narrator client handles Anthropic authentication headers, system/user structure,
+ * and content extraction transparently.
  *
  * A preset only fills the endpoint and suggests models; every field stays editable.
  */
@@ -49,7 +47,7 @@ export const NARRATOR_PRESETS: NarratorPreset[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
-    endpoint: 'https://api.anthropic.com/v1/chat/completions',
+    endpoint: 'https://api.anthropic.com/v1/messages',
     models: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],
     needsKey: true,
   },

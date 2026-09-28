@@ -343,9 +343,9 @@ function adjacency(model) {
   const forward = /* @__PURE__ */ new Map();
   const backward = /* @__PURE__ */ new Map();
   const push = (map, key, value) => {
-    const list = map.get(key);
-    if (list) {
-      list.push(value);
+    const list2 = map.get(key);
+    if (list2) {
+      list2.push(value);
     } else {
       map.set(key, [value]);
     }
@@ -533,9 +533,9 @@ function shelfHoverText(shelf) {
   return `${tests}, ${scripts}: folded support`;
 }
 function withUnitHotspots(cards, report) {
-  const list = cards ?? [];
-  const byPrefix = list.map((card) => card.id).sort((a, b2) => b2.length - a.length);
-  const counts = new Map(list.map((card) => [card.id, 0]));
+  const list2 = cards ?? [];
+  const byPrefix = list2.map((card) => card.id).sort((a, b2) => b2.length - a.length);
+  const counts = new Map(list2.map((card) => [card.id, 0]));
   for (const spot of report?.hotspots ?? []) {
     const owner = byPrefix.find(
       (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
@@ -544,7 +544,7 @@ function withUnitHotspots(cards, report) {
       counts.set(owner, (counts.get(owner) ?? 0) + 1);
     }
   }
-  return list.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
+  return list2.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
 }
 function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
@@ -895,8 +895,8 @@ function labelsThatFit(boxes, texts) {
   };
   const add = (grid, rect, owner) => {
     for (const key of cellsOf(rect)) {
-      const list = grid.get(key);
-      if (list) list.push({ rect, owner });
+      const list2 = grid.get(key);
+      if (list2) list2.push({ rect, owner });
       else grid.set(key, [{ rect, owner }]);
     }
   };
@@ -1287,7 +1287,8 @@ var OVERLAY_TITLES = {
   ownership: "Ownership",
   smells: "Smells",
   "hidden-coupling": "Hidden coupling (co-change, no import path)",
-  "declared-rules": "Declared rules"
+  "declared-rules": "Declared rules",
+  data: "Data"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -1299,9 +1300,10 @@ var OVERLAY_ENDPOINTS = {
   ownership: "/analysis/ownership",
   smells: "/analysis/smells",
   "hidden-coupling": "/analysis/co-change",
-  "declared-rules": "/analysis/rules"
+  "declared-rules": "/analysis/rules",
+  data: "/analysis/data/overlay"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data"];
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -1334,10 +1336,10 @@ function reviewGroups(files) {
   const order = ["commit", "branch", "staged", "unstaged", "untracked"];
   const groups = new Map(order.map((name) => [name, []]));
   for (const file of files ?? []) {
-    const list = groups.get(file.group) ?? groups.get("unstaged");
-    list.push(file);
+    const list2 = groups.get(file.group) ?? groups.get("unstaged");
+    list2.push(file);
   }
-  return [...groups.entries()].filter(([, list]) => list.length > 0);
+  return [...groups.entries()].filter(([, list2]) => list2.length > 0);
 }
 function cohesionDelta(change) {
   const before = change?.before ?? null;
@@ -1394,9 +1396,50 @@ function overlayFor(kind, data) {
       return hiddenCouplingOverlay(data);
     case "declared-rules":
       return declaredRulesOverlay(data);
+    case "data":
+      return dataOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
+}
+function dataOverlay(data) {
+  const files = Array.isArray(data?.files) ? data.files : [];
+  const classes = /* @__PURE__ */ new Map();
+  let writers = 0;
+  let readers = 0;
+  for (const entry of files) {
+    const productProducer = Array.isArray(entry.products) && entry.products.length > 0 && entry.writes.length > 0;
+    if (productProducer) {
+      classes.set(entry.file, "ov-product");
+    } else {
+      classes.set(entry.file, "ov-data");
+    }
+    if (entry.writes.length > 0) {
+      writers += 1;
+    }
+    if (entry.reads.length > 0) {
+      readers += 1;
+    }
+  }
+  const products = Array.isArray(data?.products) ? data.products : [];
+  return {
+    classes,
+    summary: `${files.length} file(s) touch data \xB7 ${writers} write \xB7 ${readers} read \xB7 ${products.length} product(s)`,
+    items: files.slice(0, 200).map((entry) => {
+      const parts = [];
+      if (entry.writes.length > 0) {
+        parts.push(`writes ${entry.writes.join(", ")}`);
+      }
+      if (entry.reads.length > 0) {
+        parts.push(`reads ${entry.reads.join(", ")}`);
+      }
+      if (entry.products.length > 0) {
+        parts.push(`feeds ${entry.products.join(", ")}`);
+      }
+      return `${entry.file} \xB7 ${parts.join(" \xB7 ")}`;
+    }),
+    meta: { files: files.length, writers, readers, products: products.length }
+  };
 }
 function declaredRulesOverlay(report) {
   if (!report || report.available === false) {
@@ -1449,8 +1492,8 @@ function hiddenCouplingOverlay(report) {
   };
 }
 function moduleDepthOverlay(signals) {
-  const list = Array.isArray(signals) ? signals : [];
-  const flagged = list.filter((entry) => entry.signal && entry.signal !== "ok");
+  const list2 = Array.isArray(signals) ? signals : [];
+  const flagged = list2.filter((entry) => entry.signal && entry.signal !== "ok");
   const classes = /* @__PURE__ */ new Map();
   for (const entry of flagged) {
     classes.set(entry.file, entry.signal === "pass-through" ? "ov-pass-through" : "ov-wide-interface");
@@ -1458,17 +1501,17 @@ function moduleDepthOverlay(signals) {
   const passThrough = flagged.filter((entry) => entry.signal === "pass-through").length;
   return {
     classes,
-    summary: `${flagged.length} flagged \xB7 ${passThrough} pass-through \xB7 ${list.length} file(s)`,
+    summary: `${flagged.length} flagged \xB7 ${passThrough} pass-through \xB7 ${list2.length} file(s)`,
     items: flagged.map(
       (entry) => `${entry.file} \xB7 ${entry.signal} \xB7 ${entry.implementationLines} impl line(s) \xB7 interface width ${entry.interfaceWidth}`
     )
   };
 }
 function ownershipOverlay(contexts) {
-  const list = Array.isArray(contexts) ? contexts : [];
+  const list2 = Array.isArray(contexts) ? contexts : [];
   const classes = /* @__PURE__ */ new Map();
   let sole = 0;
-  for (const entry of list) {
+  for (const entry of list2) {
     if (entry.distinctAuthors === 1 && entry.transitiveDependents > 0) {
       classes.set(entry.file, "ov-sole-owner");
       sole += 1;
@@ -1476,8 +1519,8 @@ function ownershipOverlay(contexts) {
   }
   return {
     classes,
-    summary: `${sole} single-author module(s) with dependents \xB7 ${list.length} file(s) with history`,
-    items: list.slice(0, 200).map(
+    summary: `${sole} single-author module(s) with dependents \xB7 ${list2.length} file(s) with history`,
+    items: list2.slice(0, 200).map(
       (entry) => `${entry.file} \xB7 ${entry.distinctAuthors} author(s) \xB7 ${entry.commits} commit(s) \xB7 ${entry.transitiveDependents} dependent(s)`
     )
   };
@@ -1567,18 +1610,18 @@ function testReachOverlay(data) {
   const unreached = data?.unreachedWithDependents ?? [];
   const testFiles = data?.testFiles ?? [];
   const reached = data?.reached ?? [];
-  const classes = /* @__PURE__ */ new Map();
-  for (const id of unreached) {
-    classes.set(id, "ov-unreached");
-  }
   if (testFiles.length === 0) {
     return {
-      classes,
+      classes: /* @__PURE__ */ new Map(),
       summary: "no test files identified",
       items: [],
       meta: { testFiles: 0, reached: reached.length, unreached: unreached.length },
       emptyNote: "No test files matched the scan heuristics, so reachability cannot be derived."
     };
+  }
+  const classes = /* @__PURE__ */ new Map();
+  for (const id of unreached) {
+    classes.set(id, "ov-unreached");
   }
   if (unreached.length === 0) {
     return {
@@ -2311,8 +2354,8 @@ function chooseLabels(nodes, zoom) {
     }
     shown.add(candidate.id);
     for (const key of cells) {
-      const list = grid.get(key);
-      if (list) list.push(rect);
+      const list2 = grid.get(key);
+      if (list2) list2.push(rect);
       else grid.set(key, [rect]);
     }
   }
@@ -2404,6 +2447,11 @@ function stylesheet() {
     // A declared-rule violation is a serious signal, so it rides the reserved status scale:
     // a heavy solid ring in the serious hue, distinct from the changed and cycle rings.
     { selector: "node.ov-declared-rule", style: { "border-width": 3, "border-style": "solid", "border-color": theme.cycle, "background-opacity": 1 } },
+    // The data-on-code overlay (J11): a file that touches a recorded dataset takes a dashed
+    // accent ring, and one that produces a declared product's output port a heavier double
+    // ring, so the product producers read apart from the plain data touch.
+    { selector: "node.ov-data", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    { selector: "node.ov-product", style: { "border-width": 4, "border-style": "double", "border-color": theme.edgeAccent, "background-opacity": 1 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
@@ -2784,7 +2832,7 @@ function createUnitCardLayer(container, cy, onOpen) {
 }
 
 // ui/strabo-graph-classes.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling", "ov-declared-rule"];
+var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling", "ov-declared-rule", "ov-data", "ov-product"];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
   ...TIER_ORDER.map((tier) => `tier-${tier}`),
@@ -3184,9 +3232,9 @@ function buildNodeGrid(nodes, positions, options = {}) {
     }
     const key = `${Math.floor(position.x / cell)},${Math.floor(position.y / cell)}`;
     const entry = { x: position.x, y: position.y, radius };
-    const list = cells.get(key);
-    if (list) {
-      list.push(entry);
+    const list2 = cells.get(key);
+    if (list2) {
+      list2.push(entry);
     } else {
       cells.set(key, [entry]);
     }
@@ -3203,11 +3251,11 @@ function gridHit(grid, x, y) {
   const cy = Math.floor(y / cell);
   for (let gx = cx - span; gx <= cx + span; gx += 1) {
     for (let gy = cy - span; gy <= cy + span; gy += 1) {
-      const list = cells.get(`${gx},${gy}`);
-      if (!list) {
+      const list2 = cells.get(`${gx},${gy}`);
+      if (!list2) {
         continue;
       }
-      for (const entry of list) {
+      for (const entry of list2) {
         if (x >= entry.x - entry.radius && x <= entry.x + entry.radius && y >= entry.y - entry.radius && y <= entry.y + entry.radius) {
           return true;
         }
@@ -3312,9 +3360,9 @@ function createView(container) {
     }
     for (const node of model.nodes ?? []) {
       const directory = node.directory ?? ".";
-      const list = map.get(directory);
-      if (list) {
-        list.push(node.id);
+      const list2 = map.get(directory);
+      if (list2) {
+        list2.push(node.id);
       } else {
         map.set(directory, [node.id]);
       }
@@ -3793,12 +3841,12 @@ function backButton(handlers, fallbackTitle) {
   back.addEventListener("click", () => handlers.onBack?.());
   return back;
 }
-function appendFact(list, term, value) {
+function appendFact(list2, term, value) {
   const dt2 = document.createElement("dt");
   dt2.textContent = term;
   const dd = document.createElement("dd");
   dd.textContent = value;
-  list.append(dt2, dd);
+  list2.append(dt2, dd);
 }
 function wiring(text) {
   const span = document.createElement("span");
@@ -4119,7 +4167,7 @@ function narrativeBlocks(text) {
   };
   const blocks = [];
   let paragraph = [];
-  let list = null;
+  let list2 = null;
   const flushParagraph = () => {
     if (paragraph.length > 0) {
       blocks.push({ type: "p", runs: inline(paragraph.join(" ")) });
@@ -4127,9 +4175,9 @@ function narrativeBlocks(text) {
     }
   };
   const flushList = () => {
-    if (list) {
-      blocks.push(list);
-      list = null;
+    if (list2) {
+      blocks.push(list2);
+      list2 = null;
     }
   };
   for (const raw of String(text ?? "").split(/\r?\n/)) {
@@ -4141,11 +4189,11 @@ function narrativeBlocks(text) {
     } else if (item) {
       flushParagraph();
       const type = item[1] !== void 0 ? "ol" : "ul";
-      if (list && list.type !== type) {
+      if (list2 && list2.type !== type) {
         flushList();
       }
-      list = list ?? { type, items: [] };
-      list.items.push(inline(item[2]));
+      list2 = list2 ?? { type, items: [] };
+      list2.items.push(inline(item[2]));
     } else {
       flushList();
       paragraph.push(line.replace(/^#{1,6}\s+/, ""));
@@ -4181,13 +4229,13 @@ function renderNarrativeReply(target, reply) {
       paragraph.append(...inline(block.runs));
       nodes.push(paragraph);
     } else {
-      const list = document.createElement(block.type);
+      const list2 = document.createElement(block.type);
       for (const item of block.items) {
         const entry = document.createElement("li");
         entry.append(...inline(item));
-        list.append(entry);
+        list2.append(entry);
       }
-      nodes.push(list);
+      nodes.push(list2);
     }
   }
   const attribution = document.createElement("p");
@@ -4196,8 +4244,8 @@ function renderNarrativeReply(target, reply) {
   target.replaceChildren(...nodes, attribution);
 }
 function renderNarrationPanel(container, state2, handlers = {}) {
-  const heading2 = document.createElement("h3");
-  heading2.textContent = `Narrator \xB7 ${state2.label}`;
+  const heading3 = document.createElement("h3");
+  heading3.textContent = `Narrator \xB7 ${state2.label}`;
   const reply = document.createElement("div");
   reply.className = "narrator-reply";
   reply.dataset.role = "narrative";
@@ -4208,7 +4256,7 @@ function renderNarrationPanel(container, state2, handlers = {}) {
   } else {
     renderNarrativeReply(reply, state2.reply);
   }
-  const nodes = [heading2, reply];
+  const nodes = [heading3, reply];
   if (state2.phase === "done" && state2.reply?.available !== true && handlers.onOpenNarratorSettings) {
     const setup = document.createElement("button");
     setup.type = "button";
@@ -4498,12 +4546,12 @@ function renderInspector(container, model, id, handlers = {}) {
   trace.textContent = "Use a row button to trace a directed path.";
   container.append(trace);
 }
-function listSection(heading2, from, entries, handlers) {
+function listSection(heading3, from, entries, handlers) {
   const section2 = document.createElement("section");
   const title = document.createElement("h3");
-  title.textContent = `${heading2} (${entries.length} file(s))`;
+  title.textContent = `${heading3} (${entries.length} file(s))`;
   section2.append(title);
-  const list = document.createElement("ul");
+  const list2 = document.createElement("ul");
   for (const entry of entries.slice(0, 100)) {
     const item = document.createElement("li");
     item.dataset.delegateNode = entry.id;
@@ -4527,9 +4575,9 @@ function listSection(heading2, from, entries, handlers) {
       evidence.textContent = `L${entry.line} ${entry.specifier ?? ""}`.trim();
       item.append(evidence);
     }
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 function renderChangesWith(container, result, handlers = {}) {
@@ -4552,9 +4600,9 @@ function renderChangesWith(container, result, handlers = {}) {
     container.append(note4);
     return;
   }
-  const list = document.createElement("ul");
-  list.className = "passport-list";
-  list.dataset.role = "changes-with-list";
+  const list2 = document.createElement("ul");
+  list2.className = "passport-list";
+  list2.dataset.role = "changes-with-list";
   for (const partner of partners) {
     const item = document.createElement("li");
     item.dataset.delegateNode = partner.file;
@@ -4587,9 +4635,9 @@ function renderChangesWith(container, result, handlers = {}) {
       commits.append(more);
     }
     item.append(commits);
-    list.append(item);
+    list2.append(item);
   }
-  container.append(list);
+  container.append(list2);
 }
 function appendOutsideLinks(container, model, id, node, handlers) {
   const isFile = Boolean(node?.systemUnit) && !id.endsWith("#support");
@@ -4991,7 +5039,7 @@ function renderFunctionTableVirtual(report) {
   const header = document.createElement("div");
   header.className = "function-virtual-head";
   wrapper.append(header);
-  const list = createVirtualList({
+  const list2 = createVirtualList({
     rowHeight: 30,
     overscan: 8,
     className: "function-virtual-list",
@@ -5016,7 +5064,7 @@ function renderFunctionTableVirtual(report) {
       return row;
     }
   });
-  wrapper.append(list.element);
+  wrapper.append(list2.element);
   const detail = document.createElement("div");
   detail.className = "function-virtual-detail";
   detail.textContent = "Select a function for its signature, metrics, and call sites.";
@@ -5029,7 +5077,7 @@ function renderFunctionTableVirtual(report) {
         select(target);
       }
     }));
-    for (const row of list.element.querySelectorAll(".function-row")) {
+    for (const row of list2.element.querySelectorAll(".function-row")) {
       row.classList.toggle("selected", row.dataset.function === entry?.name);
     }
   };
@@ -5045,18 +5093,18 @@ function renderFunctionTableVirtual(report) {
         draw();
       })
     );
-    list.setItems(orderedEntries());
-    list.refresh();
+    list2.setItems(orderedEntries());
+    list2.refresh();
   };
-  list.element.addEventListener("click", (event) => {
+  list2.element.addEventListener("click", (event) => {
     const row = event.target.closest?.(".function-row");
     const entry = orderedEntries().find((candidate) => candidate?.name === row?.dataset.function);
     if (entry) {
       select(entry);
     }
   });
-  list.element.addEventListener("keydown", (event) => {
-    const rows = [...list.element.querySelectorAll(".function-row")];
+  list2.element.addEventListener("keydown", (event) => {
+    const rows = [...list2.element.querySelectorAll(".function-row")];
     const current = rows.indexOf(document.activeElement?.closest?.(".function-row") ?? null);
     const next = rovingIndex(Math.max(0, current), rows.length, event.key);
     if (next === null) {
@@ -5136,6 +5184,18 @@ function coverageProvenanceText(provenance) {
   const detail = provenance.detail ? ` \u2014 ${provenance.detail}` : "";
   return `reachable basis (static test-reach, not executed coverage): ${reason}${detail}`;
 }
+function coverageRefreshText(provenance) {
+  const hint = provenance?.refresh;
+  if (!hint || !hint.command) {
+    return "";
+  }
+  if (provenance.available) {
+    const stale = provenance.stale?.length ?? 0;
+    return `The report is stale for ${stale} file(s). Refresh it with ${hint.command}.`;
+  }
+  const off = hint.allowed ? "" : " Server-side refresh is off (set STRABO_ALLOW_COVERAGE_REFRESH=1 to run it here).";
+  return `No coverage report was found. Generate one with ${hint.command}.${off}`;
+}
 function coverageSubjectLabel(report) {
   if (!report) {
     return "coverage";
@@ -5153,11 +5213,33 @@ function figureCell(label, basis) {
 function note(text) {
   return element2("p", "unavailable", text);
 }
+function coverageRefreshBlock(provenance, handlers) {
+  const hint = provenance?.refresh;
+  const text = coverageRefreshText(provenance);
+  if (!hint || !text) {
+    return null;
+  }
+  const block = element2("div", "coverage-refresh");
+  block.dataset.role = "coverage-refresh";
+  block.append(note(text));
+  if (hint.allowed && typeof handlers.onRefresh === "function") {
+    const button3 = element2(
+      "button",
+      "link",
+      provenance.available ? "Refresh report" : "Generate report"
+    );
+    button3.type = "button";
+    button3.dataset.role = "coverage-refresh-run";
+    button3.addEventListener("click", () => handlers.onRefresh());
+    block.append(button3);
+  }
+  return block;
+}
 function renderCoverageReport(container, report, handlers = {}) {
   container.replaceChildren();
   if (report?.loading) {
     container.append(element2("h3", null, "Coverage"));
-    container.append(note("Loading coverage\u2026"));
+    container.append(note(report.message ?? "Loading coverage\u2026"));
     return;
   }
   container.append(element2("h3", null, `Coverage \u2014 ${coverageSubjectLabel(report)}`));
@@ -5178,6 +5260,10 @@ function renderCoverageReport(container, report, handlers = {}) {
   }
   container.append(coverageBreadcrumb(report.subject, handlers));
   container.append(provenanceLine(report.provenance));
+  const refresh = coverageRefreshBlock(report.provenance, handlers);
+  if (refresh) {
+    container.append(refresh);
+  }
   container.append(coverageTotals(report.totals, report.threshold));
   container.append(coverageFolders(report.folders ?? [], handlers));
   if (Array.isArray(report.files)) {
@@ -5298,7 +5384,7 @@ function coverageFiles(files, handlers) {
     section2.append(note("No files sit directly in this folder."));
     return section2;
   }
-  const list = element2("ul", "passport-list coverage-files");
+  const list2 = element2("ul", "passport-list coverage-files");
   for (const file of files) {
     const item = element2("li", "coverage-file-row");
     item.dataset.file = file.file;
@@ -5324,9 +5410,9 @@ function coverageFiles(files, handlers) {
     if (facts.length > 0) {
       item.append(element2("span", "evidence", facts.join(" \xB7 ")));
     }
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 function renderCoverageFile(container, report, handlers = {}) {
@@ -5353,6 +5439,10 @@ function renderCoverageFile(container, report, handlers = {}) {
     return;
   }
   container.append(provenanceLine(report.provenance));
+  const refresh = coverageRefreshBlock(report.provenance, handlers);
+  if (refresh) {
+    container.append(refresh);
+  }
   const figure = element2("p", "coverage-file-figure");
   figure.dataset.role = "coverage-file-figure";
   figure.dataset.basis = entry.basis ?? "unavailable";
@@ -5400,7 +5490,7 @@ function fileLinkList(title, files, handlers, emptyText) {
     section2.append(note(emptyText));
     return section2;
   }
-  const list = element2("ul", "passport-list");
+  const list2 = element2("ul", "passport-list");
   for (const file of files) {
     const item = element2("li");
     item.dataset.delegateNode = file;
@@ -5408,9 +5498,9 @@ function fileLinkList(title, files, handlers, emptyText) {
     open.type = "button";
     open.addEventListener("click", () => handlers.onSelect?.(file));
     item.append(open);
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 
@@ -5668,9 +5758,9 @@ function probeConsent(database, checkCount) {
 
 // ui/strabo-panel-workspace.js
 function workspaceHeading(text, count) {
-  const heading2 = document.createElement("h4");
-  heading2.textContent = `${text} (${count})`;
-  return heading2;
+  const heading3 = document.createElement("h4");
+  heading3.textContent = `${text} (${count})`;
+  return heading3;
 }
 function workspaceNote(text) {
   const note4 = document.createElement("p");
@@ -5679,15 +5769,15 @@ function workspaceNote(text) {
   return note4;
 }
 function workspaceList(className, rows, fill) {
-  const list = document.createElement("ul");
-  list.className = className;
+  const list2 = document.createElement("ul");
+  list2.className = className;
   for (const row of rows) {
     const item = document.createElement("li");
     item.className = "workspace-row";
     fill(item, row);
-    list.append(item);
+    list2.append(item);
   }
-  return list;
+  return list2;
 }
 function renderWorkspace(container, report, handlers = {}) {
   container.replaceChildren();
@@ -5857,9 +5947,9 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   const section2 = document.createElement("section");
   section2.className = "workspace-tools";
   container.append(section2);
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Compatibility and migrations";
-  section2.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Compatibility and migrations";
+  section2.append(heading3);
   const form = document.createElement("div");
   form.className = "workspace-tools-form";
   const label = document.createElement("label");
@@ -6025,10 +6115,10 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   }
 }
 function passportSection(title, count) {
-  const heading2 = document.createElement("h4");
-  heading2.className = "passport-section-heading";
-  heading2.textContent = `${title} (${count})`;
-  return heading2;
+  const heading3 = document.createElement("h4");
+  heading3.className = "passport-section-heading";
+  heading3.textContent = `${title} (${count})`;
+  return heading3;
 }
 function passportNote(text) {
   const note4 = document.createElement("p");
@@ -6037,8 +6127,8 @@ function passportNote(text) {
   return note4;
 }
 function passportFileList(entries, handlers, label) {
-  const list = document.createElement("ul");
-  list.className = "passport-list";
+  const list2 = document.createElement("ul");
+  list2.className = "passport-list";
   for (const entry of entries) {
     const item = document.createElement("li");
     const id = entry.file ?? entry.id;
@@ -6056,9 +6146,9 @@ function passportFileList(entries, handlers, label) {
       span.textContent = detail;
       item.append(span);
     }
-    list.append(item);
+    list2.append(item);
   }
-  return list;
+  return list2;
 }
 function passportProvenanceText(provenance) {
   if (!provenance || !provenance.fingerprint) {
@@ -6071,14 +6161,14 @@ function passportProvenanceText(provenance) {
   return `graph ${short}${scanned}${behind}${stale}`;
 }
 function passportPlainList(entries, label) {
-  const list = document.createElement("ul");
-  list.className = "passport-list";
+  const list2 = document.createElement("ul");
+  list2.className = "passport-list";
   for (const entry of entries) {
     const item = document.createElement("li");
     item.textContent = label(entry);
-    list.append(item);
+    list2.append(item);
   }
-  return list;
+  return list2;
 }
 function passportStartHere(handlers) {
   const jobs = [
@@ -6092,9 +6182,9 @@ function passportStartHere(handlers) {
   const block = document.createElement("div");
   block.className = "passport-start";
   block.dataset.role = "passport-start";
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Start here";
-  block.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Start here";
+  block.append(heading3);
   for (const [key, id, label, hint] of jobs) {
     const button3 = document.createElement("button");
     button3.type = "button";
@@ -6171,14 +6261,14 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   if ((cycles.largest ?? []).length === 0) {
     container.append(passportNote("No dependency cycles recorded."));
   } else {
-    const list = document.createElement("ul");
-    list.className = "passport-list";
+    const list2 = document.createElement("ul");
+    list2.className = "passport-list";
     for (const group of cycles.largest) {
       const item = document.createElement("li");
       item.textContent = `${group.size} file(s): ${group.members.join(" \u2194 ")}`;
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   const untested = report.untested ?? { total: 0, files: [] };
   const measured = untested.basis === "measured";
@@ -6511,15 +6601,15 @@ function renderMembers(container, result) {
       container.append(renderMemberType(type));
     }
   } else if (symbols.length > 0) {
-    const list = document.createElement("ul");
+    const list2 = document.createElement("ul");
     for (const symbol of symbols.slice(0, 200)) {
       const item = document.createElement("li");
       const owner = symbol.owner ? `${symbol.owner}.` : "";
       const type = symbol.type ? `: ${symbol.type}` : "";
       item.textContent = `${symbol.kind} \xB7 ${symbol.visibility} \xB7 ${owner}${symbol.name}${type}`;
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   if (reExports.length > 0) {
     container.append(buildReExportSection(reExports));
@@ -6534,27 +6624,27 @@ function renderMemberType(type) {
   title.textContent = type.name;
   section2.append(title);
   if (type.fields.length > 0) {
-    const heading2 = document.createElement("h5");
-    heading2.textContent = `Fields (${type.fields.length})`;
-    section2.append(heading2);
-    const list = document.createElement("ul");
-    list.className = "member-fields";
+    const heading3 = document.createElement("h5");
+    heading3.textContent = `Fields (${type.fields.length})`;
+    section2.append(heading3);
+    const list2 = document.createElement("ul");
+    list2.className = "member-fields";
     for (const field2 of type.fields) {
       const item = document.createElement("li");
       item.className = "member-field";
       const kind = field2.mutable === false ? "val" : "var";
       item.textContent = `${field2.visibility} ${kind} ${field2.name}: ${field2.type ?? "unrecorded type"}`;
       item.append(wiring(`reads ${field2.reads} \xB7 writes ${field2.writes}`));
-      list.append(item);
+      list2.append(item);
     }
-    section2.append(list);
+    section2.append(list2);
   }
   if (type.methods.length > 0) {
-    const heading2 = document.createElement("h5");
-    heading2.textContent = `Methods (${type.methods.length})`;
-    section2.append(heading2);
-    const list = document.createElement("ul");
-    list.className = "member-methods";
+    const heading3 = document.createElement("h5");
+    heading3.textContent = `Methods (${type.methods.length})`;
+    section2.append(heading3);
+    const list2 = document.createElement("ul");
+    list2.className = "member-methods";
     for (const method of type.methods) {
       const item = document.createElement("li");
       item.className = "member-method";
@@ -6565,9 +6655,9 @@ function renderMemberType(type) {
           wiring(`reads ${method.reads.join(", ") || "none"} \xB7 writes ${method.writes.join(", ") || "none"}`)
         );
       }
-      list.append(item);
+      list2.append(item);
     }
-    section2.append(list);
+    section2.append(list2);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
     const note4 = document.createElement("p");
@@ -6601,24 +6691,24 @@ function renderDataFlow(dataFlow) {
     const panel = document.createElement("div");
     panel.className = "flow-panel";
     panel.dataset.flow = key;
-    const heading2 = document.createElement("h5");
-    heading2.textContent = label;
-    panel.append(heading2);
-    const list = document.createElement("ul");
+    const heading3 = document.createElement("h5");
+    heading3.textContent = label;
+    panel.append(heading3);
+    const list2 = document.createElement("ul");
     const items = dataFlow[key] ?? [];
     if (items.length === 0) {
       const empty = document.createElement("li");
       empty.className = "unavailable";
       empty.textContent = "none recorded";
-      list.append(empty);
+      list2.append(empty);
     } else {
       for (const item of items) {
         const entry = document.createElement("li");
         entry.textContent = item;
-        list.append(entry);
+        list2.append(entry);
       }
     }
-    panel.append(list);
+    panel.append(list2);
     section2.append(panel);
   }
   const caveat = document.createElement("p");
@@ -6739,25 +6829,25 @@ function buildReExportSection(reExports) {
   const section2 = document.createElement("section");
   section2.className = "member-type member-reexports";
   section2.dataset.role = "re-exports";
-  const heading2 = document.createElement("h3");
-  heading2.className = "member-type-name";
-  heading2.textContent = "Public surface";
+  const heading3 = document.createElement("h3");
+  heading3.className = "member-type-name";
+  heading3.textContent = "Public surface";
   const count = document.createElement("span");
   count.className = "member-count";
   count.textContent = `${reExports.length} re-export(s)`;
-  heading2.append(count);
-  section2.append(heading2);
-  const list = document.createElement("ul");
-  list.className = "member-reexports-list";
+  heading3.append(count);
+  section2.append(heading3);
+  const list2 = document.createElement("ul");
+  list2.className = "member-reexports-list";
   for (const entry of reExports) {
     const item = document.createElement("li");
     item.className = "member-reexport";
     const kind = entry.typeOnly ? "type " : "";
     const name = entry.name === "*" ? `*` : `{ ${entry.name} }`;
     item.textContent = `export ${kind}${name} from '${entry.from}'`;
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 function buildMemberInsights(data, memberMap) {
@@ -6900,14 +6990,14 @@ function memberButton(id, text, handler, className = "") {
 function buildTypeSection(type, view2, clusters, handlers) {
   const section2 = document.createElement("section");
   section2.className = "member-type";
-  const heading2 = document.createElement("h3");
-  heading2.className = "member-type-name";
-  heading2.textContent = type.name;
+  const heading3 = document.createElement("h3");
+  heading3.className = "member-type-name";
+  heading3.textContent = type.name;
   const count = document.createElement("span");
   count.className = "member-count";
   count.textContent = `${type.fields.length + type.methods.length} members`;
-  heading2.append(count);
-  section2.append(heading2);
+  heading3.append(count);
+  section2.append(heading3);
   const legend = document.createElement("div");
   legend.className = "member-clusters";
   legend.dataset.role = "clusters";
@@ -7058,13 +7148,13 @@ function flowPanel(label, key, items) {
     panel.append(unavailableNote(emptyFlowText(key)));
     return panel;
   }
-  const list = document.createElement("ul");
+  const list2 = document.createElement("ul");
   for (const item of items) {
     const entry = document.createElement("li");
     entry.textContent = item;
-    list.append(entry);
+    list2.append(entry);
   }
-  panel.append(list);
+  panel.append(list2);
   return panel;
 }
 function emptyFlowText(key) {
@@ -7299,13 +7389,13 @@ function buildDataFlow(memberMap, consumerIds) {
   } else if (consumerIds.length === 0) {
     external.append(unavailableNote("No repository consumers recorded"));
   } else {
-    const list = document.createElement("ul");
+    const list2 = document.createElement("ul");
     for (const id of consumerIds.slice(0, 30)) {
       const entry = document.createElement("li");
       entry.textContent = id;
-      list.append(entry);
+      list2.append(entry);
     }
-    external.append(list);
+    external.append(list2);
   }
   right.append(external);
   row.append(right);
@@ -7363,14 +7453,14 @@ function buildHealth(report, metrics) {
     svg.append(svgElement("circle", { cx: point.x, cy: point.y, r: "2.5", class: "radar-dot" }));
   }
   section2.append(svg);
-  const list = document.createElement("ul");
-  list.className = "health-axes";
+  const list2 = document.createElement("ul");
+  list2.className = "health-axes";
   for (const axis of report.axes) {
     const item = document.createElement("li");
     item.textContent = axis.value === null ? `${axis.label} unavailable` : `${axis.label} ${axis.value}%`;
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 function buildConstellation(memberMap, consumerIds) {
@@ -7400,6 +7490,446 @@ function buildConstellation(memberMap, consumerIds) {
   caption.textContent = "Fields, methods, and repository consumers are shown when current scan data provides them.";
   section2.append(caption);
   return section2;
+}
+
+// ui/strabo-data.js
+function dataProductsSummary(report) {
+  const products = report?.products ?? [];
+  const candidates = report?.candidates ?? [];
+  const conformance = report?.conformance ?? [];
+  const catalogs = report?.catalogs ?? [];
+  const dbt = report?.dbt ?? [];
+  return `${products.length} product(s) \xB7 ${candidates.length} candidate(s) \xB7 ${conformance.length} conformance finding(s) \xB7 ${catalogs.length} catalog declaration(s) \xB7 ${dbt.length} dbt project(s)`;
+}
+function productPortRows(product) {
+  const rows = [];
+  for (const port of product?.outputPorts ?? []) {
+    rows.push({ direction: "output", dataset: port.dataset, fields: (port.schema ?? []).length, contract: port.contract ?? null });
+  }
+  for (const port of product?.inputPorts ?? []) {
+    rows.push({ direction: "input", dataset: port.dataset, fields: (port.schema ?? []).length, contract: port.contract ?? null });
+  }
+  return rows;
+}
+function productCardLabel(product) {
+  const owner = product.owner ? ` \xB7 owned by ${product.owner}` : " \xB7 no declared owner";
+  return `${product.name} \xB7 ${product.format}${owner} \xB7 ${product.outputPorts.length} output port(s), ${product.inputPorts.length} input port(s)`;
+}
+function candidateRows(report) {
+  return (report?.candidates ?? []).map((candidate) => ({
+    dataset: candidate.dataset,
+    kind: candidate.kind,
+    writers: candidate.writers?.length ?? 0,
+    readers: candidate.readers?.length ?? 0,
+    owner: candidate.ownership?.owner ?? null,
+    ownerSource: candidate.ownership?.source ?? null,
+    detail: candidate.detail
+  }));
+}
+function conformanceRows(report) {
+  return (report?.conformance ?? []).map((finding) => ({
+    contract: finding.contract,
+    dataset: finding.dataset,
+    field: finding.field,
+    kind: finding.kind,
+    detail: finding.detail,
+    file: finding.contractEvidence?.file ?? null,
+    line: finding.contractEvidence?.line ?? null
+  }));
+}
+function erRows(report) {
+  const findings = report?.model?.findings ?? [];
+  const byDataset = /* @__PURE__ */ new Map();
+  for (const finding of findings) {
+    const list2 = byDataset.get(finding.dataset) ?? [];
+    list2.push(finding);
+    byDataset.set(finding.dataset, list2);
+  }
+  return (report?.datasets ?? []).filter((dataset) => dataset.kind === "table" || dataset.kind === "view" || dataset.kind === "materialized-view").map((dataset) => ({
+    dataset: dataset.id,
+    label: dataset.label ?? dataset.id,
+    kind: dataset.kind,
+    columns: (dataset.columns ?? []).map((column) => column.name),
+    findings: (byDataset.get(dataset.id) ?? []).map((finding) => ({ kind: finding.kind, detail: finding.detail }))
+  })).sort((a, b2) => a.label.localeCompare(b2.label));
+}
+function entityRows(report) {
+  return (report?.model?.entities ?? []).map((entity) => ({
+    entity: entity.entity,
+    table: entity.table,
+    file: entity.file,
+    line: entity.line,
+    evidence: entity.evidence
+  }));
+}
+function classificationRows(report) {
+  return (report?.classifications ?? []).map((tag) => ({
+    dataset: tag.dataset,
+    field: tag.field,
+    tag: tag.tag,
+    source: tag.source,
+    pathLength: (tag.path ?? []).length
+  }));
+}
+function catalogRows(report) {
+  const rows = (report?.catalogs ?? []).map((entry) => ({
+    catalog: entry.catalog,
+    dataset: entry.dataset,
+    owner: entry.owner,
+    domain: entry.domain,
+    observed: entry.observed === true,
+    exportedAt: entry.exportedAt,
+    detail: entry.detail
+  }));
+  return {
+    rows,
+    observed: rows.filter((row) => row.observed).length,
+    unobserved: rows.filter((row) => !row.observed).length
+  };
+}
+function dbtRows(report) {
+  return (report?.dbt ?? []).map((project) => ({
+    name: project.name,
+    root: project.root,
+    models: project.modelCount,
+    seeds: project.seedCount,
+    snapshots: project.snapshotCount,
+    unresolved: (project.unresolved ?? []).length
+  }));
+}
+function eventRows(report) {
+  return (report?.events ?? []).map((flow) => ({
+    topic: flow.topic,
+    kind: flow.kind,
+    producers: (flow.producers ?? []).length,
+    consumers: (flow.consumers ?? []).length,
+    contract: flow.contract
+  }));
+}
+function contractRows2(report) {
+  const twins = /* @__PURE__ */ new Map();
+  for (const twin of report?.shapeTwins ?? []) {
+    for (const id of twin.contracts ?? []) {
+      twins.set(id, twin.contracts.filter((other) => other !== id));
+    }
+  }
+  return (report?.contracts ?? []).map((contract) => ({
+    id: contract.id,
+    bareId: contract.bareId,
+    qualifiedId: contract.qualifiedId,
+    format: contract.format,
+    fields: (contract.fields ?? []).length,
+    twins: twins.get(contract.id) ?? []
+  }));
+}
+
+// ui/strabo-panel-products.js
+function heading(text, count) {
+  const element3 = document.createElement("h4");
+  element3.textContent = `${text} (${count})`;
+  return element3;
+}
+function unavailable(text) {
+  const note4 = document.createElement("p");
+  note4.className = "unavailable";
+  note4.textContent = text;
+  return note4;
+}
+function list(className, rows, fill) {
+  const element3 = document.createElement("ul");
+  element3.className = className;
+  for (const row of rows) {
+    const item = document.createElement("li");
+    item.className = "data-row";
+    fill(item, row);
+    element3.append(item);
+  }
+  return element3;
+}
+function renderProducts(container, report, handlers = {}) {
+  container.replaceChildren();
+  const title = document.createElement("h3");
+  title.textContent = "Data products";
+  container.append(title);
+  const summary = document.createElement("p");
+  summary.className = "data-summary";
+  summary.dataset.role = "data-summary";
+  summary.textContent = dataProductsSummary(report);
+  container.append(summary);
+  if (report?.error) {
+    container.append(unavailable(report.error));
+    return;
+  }
+  renderProductCards(container, report, handlers);
+  renderCandidates(container, report, handlers);
+  renderConformance(container, report);
+  renderEr(container, report, handlers);
+  renderContracts(container, report);
+  renderClassifications(container, report);
+  renderEvents(container, report);
+  renderCatalogs(container, report);
+  renderDbt(container, report);
+}
+function renderProductCards(container, report, handlers) {
+  const products = report?.products ?? [];
+  container.append(heading("Products", products.length));
+  if (products.length === 0) {
+    container.append(unavailable("No data product declared. A candidate below is evidence, not a product."));
+    return;
+  }
+  const element3 = document.createElement("ul");
+  element3.className = "product-cards";
+  for (const product of products) {
+    const item = document.createElement("li");
+    item.className = "product-card";
+    item.dataset.role = "product-card";
+    item.dataset.product = product.id;
+    const name = document.createElement("div");
+    name.className = "product-name";
+    name.textContent = productCardLabel(product);
+    item.append(name);
+    const ports = productPortRows(product);
+    const portList = document.createElement("div");
+    portList.className = "product-ports";
+    portList.dataset.role = "product-ports";
+    portList.textContent = ports.length === 0 ? "no port declared" : ports.map(
+      (port) => `${port.direction} \xB7 ${port.dataset}${port.fields > 0 ? ` (${port.fields} field(s))` : ""}` + (port.contract ? ` \xB7 ${port.contract}` : "")
+    ).join(" \xB7 ");
+    item.append(portList);
+    const consumers = Array.isArray(product.consumers) ? product.consumers : [];
+    if (consumers.length > 0) {
+      const reader = document.createElement("div");
+      reader.className = "product-consumers";
+      reader.dataset.role = "product-consumers";
+      reader.textContent = `${consumers.length} consumer file(s): ${consumers.slice(0, 8).join(", ")}`;
+      item.append(reader);
+    }
+    const findings = product.conformance ?? [];
+    if (findings.length > 0) {
+      const gap = document.createElement("div");
+      gap.className = "product-conformance";
+      gap.dataset.role = "product-conformance";
+      gap.textContent = `${findings.length} conformance finding(s): ${findings.map((finding) => `${finding.field} (${finding.kind})`).join(", ")}`;
+      item.append(gap);
+    }
+    if (handlers.onSelect) {
+      for (const port of product.outputPorts ?? []) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "product-port-open";
+        open.dataset.role = "product-port-open";
+        open.dataset.dataset = port.dataset;
+        open.textContent = `Open ${port.dataset}`;
+        open.addEventListener("click", () => handlers.onSelect(port.dataset));
+        item.append(open);
+      }
+    }
+    element3.append(item);
+  }
+  container.append(element3);
+}
+function renderCandidates(container, report, handlers) {
+  const rows = candidateRows(report);
+  container.append(heading("Candidates", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No dataset is shared enough to be a product candidate."));
+    return;
+  }
+  container.append(
+    list("product-candidates", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.dataset} \u2014 ${row.kind}`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = `${row.writers} writer(s) \xB7 ${row.readers} reader(s)` + (row.owner ? ` \xB7 owner ${row.owner} (${row.ownerSource})` : " \xB7 no owner recorded") + ` \xB7 ${row.detail}`;
+      item.append(detail);
+      if (handlers.onSelect) {
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "data-open";
+        open.textContent = `Open ${row.dataset}`;
+        open.addEventListener("click", () => handlers.onSelect(row.dataset));
+        item.append(open);
+      }
+    })
+  );
+}
+function renderConformance(container, report) {
+  const rows = conformanceRows(report);
+  container.append(heading("Conformance", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No declared port disagrees with the recorded implementation."));
+    return;
+  }
+  container.append(
+    list("data-conformance", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.kind}: ${row.field}${row.dataset ? ` on ${row.dataset}` : ""}`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = `${row.contract}` + (row.file ? ` \xB7 declared at ${row.file}${row.line ? `:${row.line}` : ""}` : "") + ` \xB7 ${row.detail}`;
+      item.append(detail);
+    })
+  );
+}
+function renderEr(container, report, handlers) {
+  const datasets = erRows(report);
+  container.append(heading("ER view", datasets.length));
+  if (datasets.length === 0) {
+    container.append(unavailable("No table or view was recorded in a schema."));
+    return;
+  }
+  const entities = entityRows(report);
+  const element3 = document.createElement("ul");
+  element3.className = "er-view";
+  for (const dataset of datasets) {
+    const item = document.createElement("li");
+    item.className = "er-table";
+    item.dataset.role = "er-table";
+    item.dataset.dataset = dataset.dataset;
+    const label = document.createElement("div");
+    label.className = "data-label";
+    label.textContent = `${dataset.label} (${dataset.kind})`;
+    item.append(label);
+    const columns = document.createElement("div");
+    columns.className = "data-detail";
+    columns.textContent = dataset.columns.length > 0 ? `${dataset.columns.length} column(s): ${dataset.columns.join(", ")}` : "no column recorded";
+    item.append(columns);
+    for (const finding of dataset.findings) {
+      const findingRow = document.createElement("div");
+      findingRow.className = "er-finding";
+      findingRow.dataset.role = "er-finding";
+      findingRow.textContent = `${finding.kind}: ${finding.detail}`;
+      item.append(findingRow);
+    }
+    const producers = entities.filter((entity) => entity.table === dataset.label || entity.table === dataset.dataset);
+    for (const entity of producers) {
+      const entityRow = document.createElement("div");
+      entityRow.className = "er-entity";
+      entityRow.dataset.role = "er-entity";
+      entityRow.textContent = `entity ${entity.entity} \xB7 ${entity.file}:${entity.line} (${entity.evidence})`;
+      item.append(entityRow);
+    }
+    if (handlers.onSelect) {
+      const open = document.createElement("button");
+      open.type = "button";
+      open.className = "data-open";
+      open.textContent = `Open ${dataset.dataset}`;
+      open.addEventListener("click", () => handlers.onSelect(dataset.dataset));
+      item.append(open);
+    }
+    element3.append(item);
+  }
+  container.append(element3);
+}
+function renderContracts(container, report) {
+  const rows = contractRows2(report);
+  container.append(heading("Contracts", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No contract was recorded."));
+    return;
+  }
+  container.append(
+    list("data-contracts", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.id} (${row.format})`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = `${row.fields} field(s)` + (row.twins.length > 0 ? ` \xB7 same shape as ${row.twins.join(", ")}` : "");
+      item.append(detail);
+    })
+  );
+}
+function renderClassifications(container, report) {
+  const rows = classificationRows(report);
+  container.append(heading("Classification", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No classification was declared or derived."));
+    return;
+  }
+  container.append(
+    list("data-classification", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.dataset}${row.field ? `.${row.field}` : ""} \u2014 ${row.tag}`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = row.source === "derived" ? `derived along lineage (${row.pathLength} evidence step(s))` : "declared";
+      item.append(detail);
+    })
+  );
+}
+function renderEvents(container, report) {
+  const rows = eventRows(report);
+  container.append(heading("Events", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No topic or queue flow was recorded."));
+    return;
+  }
+  container.append(
+    list("data-events", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.topic} (${row.kind})`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = `${row.producers} producer(s) \xB7 ${row.consumers} consumer(s)` + (row.contract ? ` \xB7 ${row.contract}` : " \xB7 no payload contract resolved");
+      item.append(detail);
+    })
+  );
+}
+function renderCatalogs(container, report) {
+  const { rows, observed, unobserved } = catalogRows(report);
+  container.append(heading("Catalog declarations", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No exported catalog snapshot was read."));
+    return;
+  }
+  const note4 = document.createElement("p");
+  note4.className = "data-note";
+  note4.dataset.role = "catalog-disagreements";
+  note4.textContent = `${observed} observed by the scan \xB7 ${unobserved} the scan did not observe`;
+  container.append(note4);
+  container.append(
+    list("data-catalogs", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.dataset} \u2014 ${row.catalog}${row.observed ? "" : " (not observed)"}`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = (row.owner ? `owner ${row.owner}` : "no owner") + (row.domain ? ` \xB7 domain ${row.domain}` : "") + (row.exportedAt ? ` \xB7 exported ${row.exportedAt}` : "") + ` \xB7 ${row.detail}`;
+      item.append(detail);
+    })
+  );
+}
+function renderDbt(container, report) {
+  const rows = dbtRows(report);
+  container.append(heading("dbt projects", rows.length));
+  if (rows.length === 0) {
+    container.append(unavailable("No dbt project was detected."));
+    return;
+  }
+  container.append(
+    list("data-dbt", rows, (item, row) => {
+      const label = document.createElement("div");
+      label.className = "data-label";
+      label.textContent = `${row.name} \u2014 ${row.root === "." ? "repository root" : row.root}`;
+      item.append(label);
+      const detail = document.createElement("div");
+      detail.className = "data-detail";
+      detail.textContent = `${row.models} model(s) \xB7 ${row.seeds} seed(s) \xB7 ${row.snapshots} snapshot(s)` + (row.unresolved > 0 ? ` \xB7 ${row.unresolved} unresolved ref(s)` : "");
+      item.append(detail);
+    })
+  );
 }
 
 // ui/strabo-impact.js
@@ -7734,9 +8264,9 @@ function renderBranches(container, result, handlers = {}) {
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
   );
-  const list = document.createElement("ul");
-  list.className = "branch-list";
-  list.dataset.role = "branches-list";
+  const list2 = document.createElement("ul");
+  list2.className = "branch-list";
+  list2.dataset.role = "branches-list";
   for (const branch of result.branches) {
     const item = document.createElement("li");
     item.className = "branch-row";
@@ -7803,9 +8333,9 @@ function renderBranches(container, result, handlers = {}) {
       push.addEventListener("click", () => handlers.onPush(branch));
       item.append(push);
     }
-    list.append(item);
+    list2.append(item);
   }
-  container.append(list);
+  container.append(list2);
 }
 function divergenceBar(counts, maxCount) {
   const bar = document.createElement("span");
@@ -7849,13 +8379,13 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
   }
   container.append(merge);
-  const fileList = (role, heading2, entries, describe) => {
+  const fileList = (role, heading3, entries, describe) => {
     if (entries.length === 0) return;
     const title = document.createElement("h4");
-    title.textContent = `${heading2} (${entries.length})`;
+    title.textContent = `${heading3} (${entries.length})`;
     container.append(title);
-    const list = document.createElement("ul");
-    list.dataset.role = role;
+    const list2 = document.createElement("ul");
+    list2.dataset.role = role;
     for (const entry of entries.slice(0, 100)) {
       const id = typeof entry === "string" ? entry : entry.id;
       const item = document.createElement("li");
@@ -7873,9 +8403,9 @@ function renderBranchDivergence(container, branch, handlers = {}) {
         span.textContent = detail;
         item.append(span);
       }
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   };
   const conflicted = new Set(branch.conflicts.available ? branch.conflicts.paths : []);
   fileList("review-conflicts", "Conflicting files", [...conflicted]);
@@ -7917,9 +8447,9 @@ function renderImpactPassport(container, set, handlers = {}) {
     container.append(unavailableNote("No impact passport was recorded."));
     return;
   }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = passportHeading(set.scope);
-  container.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = passportHeading(set.scope);
+  container.append(heading3);
   const caption = document.createElement("p");
   caption.className = "unavailable";
   caption.dataset.role = "impact-caption";
@@ -7950,13 +8480,13 @@ function renderImpactPassport(container, set, handlers = {}) {
     return;
   }
   container.append(impactCard({ ...set.totals ?? {}, provenance }, true, approximate));
-  const list = document.createElement("ul");
-  list.className = "impact-files";
-  list.dataset.role = "impact-files";
+  const list2 = document.createElement("ul");
+  list2.className = "impact-files";
+  list2.dataset.role = "impact-files";
   for (const file of set.files) {
-    list.append(impactFileRow(file, handlers));
+    list2.append(impactFileRow(file, handlers));
   }
-  container.append(list);
+  container.append(list2);
   if (set.capped) {
     container.append(unavailableNote("Only the first files in the change set were measured."));
   }
@@ -8036,16 +8566,16 @@ function impactCard(card, totals, approximate = false) {
 function impactList(title, entries, role) {
   const section2 = document.createElement("div");
   section2.className = "impact-list";
-  const heading2 = document.createElement("h5");
-  heading2.textContent = title;
-  section2.append(heading2);
+  const heading3 = document.createElement("h5");
+  heading3.textContent = title;
+  section2.append(heading3);
   if (entries.length === 0) {
     section2.append(unavailableNote("None recorded."));
     section2.dataset.role = role;
     return section2;
   }
-  const list = document.createElement("ul");
-  list.dataset.role = role;
+  const list2 = document.createElement("ul");
+  list2.dataset.role = role;
   for (const entry of entries) {
     const item = document.createElement("li");
     const text = document.createElement("span");
@@ -8057,9 +8587,9 @@ function impactList(title, entries, role) {
       detail.textContent = entry.detail;
       item.append(detail);
     }
-    list.append(item);
+    list2.append(item);
   }
-  section2.append(list);
+  section2.append(list2);
   return section2;
 }
 function impactFileRow(file, handlers) {
@@ -8125,9 +8655,9 @@ function renderRisk(container, report, handlers = {}) {
     container.append(undeclared);
   }
   const advisories = orderAdvisories(report.advisories);
-  const heading2 = document.createElement("h4");
-  heading2.textContent = `Advisories (${advisories.length})`;
-  container.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = `Advisories (${advisories.length})`;
+  container.append(heading3);
   if (advisories.length === 0) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
@@ -8135,8 +8665,8 @@ function renderRisk(container, report, handlers = {}) {
     note4.textContent = report.online ? "No known advisories for the resolved dependencies." : "Advisories were not looked up.";
     container.append(note4);
   } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "risk-advisories";
+    const list2 = document.createElement("ul");
+    list2.dataset.role = "risk-advisories";
     for (const advisory of advisories) {
       const item = document.createElement("li");
       item.className = `risk-advisory severity-${advisory.severity}`;
@@ -8183,8 +8713,8 @@ function renderRisk(container, report, handlers = {}) {
       }
       const impacted = advisory.impactedFiles.filter((entry) => entry.distance > 0);
       if (impacted.length > 0) {
-        const list2 = document.createElement("ul");
-        list2.dataset.role = "risk-impact";
+        const list3 = document.createElement("ul");
+        list3.dataset.role = "risk-impact";
         for (const entry of impacted.slice(0, 20)) {
           const entryItem = document.createElement("li");
           const button3 = document.createElement("button");
@@ -8199,13 +8729,13 @@ function renderRisk(container, report, handlers = {}) {
           distance.className = "evidence";
           distance.textContent = `\xB7 distance ${entry.distance}`;
           entryItem.append(distance);
-          list2.append(entryItem);
+          list3.append(entryItem);
         }
-        item.append(list2);
+        item.append(list3);
       }
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   const flagged = report.licenses.filter((entry) => entry.denied || entry.risk !== "permissive");
   const licenseHeading = document.createElement("h4");
@@ -8218,8 +8748,8 @@ function renderRisk(container, report, handlers = {}) {
     note4.textContent = report.online ? "No denied or copyleft licenses were found." : "Licenses were not looked up.";
     container.append(note4);
   } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "risk-licenses";
+    const list2 = document.createElement("ul");
+    list2.dataset.role = "risk-licenses";
     for (const entry of flagged.slice(0, 50)) {
       const item = document.createElement("li");
       const label = `${entry.dependency.name}@${entry.dependency.version ?? "unresolved"} \xB7 ${entry.licenses.join(" OR ") || "no license recorded"}`;
@@ -8230,9 +8760,9 @@ function renderRisk(container, report, handlers = {}) {
       risk.className = entry.denied ? "risk-severity severity-critical" : "evidence";
       risk.textContent = entry.denied ? "denied" : entry.risk;
       item.append(risk);
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   if (report.caveats.length > 0) {
     const caveats = document.createElement("p");
@@ -8314,25 +8844,25 @@ function renderScopeFence(container, scopeFence) {
   }
   const section2 = document.createElement("section");
   section2.dataset.role = "review-scope-fence";
-  const heading2 = document.createElement("h3");
-  heading2.textContent = "Scope fence";
-  section2.append(heading2);
+  const heading3 = document.createElement("h3");
+  heading3.textContent = "Scope fence";
+  section2.append(heading3);
   for (const group of scopeFenceGroups(scopeFence)) {
-    const list = document.createElement("ul");
-    list.dataset.role = `review-scope-fence-${group.key}`;
+    const list2 = document.createElement("ul");
+    list2.dataset.role = `review-scope-fence-${group.key}`;
     for (const item of group.items) {
       const entry = document.createElement("li");
       entry.textContent = item;
-      list.append(entry);
+      list2.append(entry);
     }
-    section2.append(list);
+    section2.append(list2);
   }
   container.append(section2);
 }
 function renderStructuralDiff(container, structural) {
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Structure";
-  container.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Structure";
+  container.append(heading3);
   if (!structural || structural.available === false) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
@@ -8354,14 +8884,14 @@ function renderStructuralDiff(container, structural) {
     const title = document.createElement("h5");
     title.textContent = `${group.label} (${group.items.length})`;
     container.append(title);
-    const list = document.createElement("ul");
-    list.dataset.role = `review-structure-${group.key}`;
+    const list2 = document.createElement("ul");
+    list2.dataset.role = `review-structure-${group.key}`;
     for (const item of group.items) {
       const entry = document.createElement("li");
       entry.textContent = item;
-      list.append(entry);
+      list2.append(entry);
     }
-    container.append(list);
+    container.append(list2);
   }
 }
 function renderReview(container, result, handlers = {}) {
@@ -8433,11 +8963,11 @@ function renderReview(container, result, handlers = {}) {
     container.append(note4);
   }
   for (const [group, files] of reviewGroups(result.files)) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
-    container.append(heading2);
-    const list = document.createElement("ul");
-    list.dataset.role = `review-group-${group}`;
+    const heading3 = document.createElement("h4");
+    heading3.textContent = `${REVIEW_GROUP_LABELS[group] ?? group} (${files.length})`;
+    container.append(heading3);
+    const list2 = document.createElement("ul");
+    list2.dataset.role = `review-group-${group}`;
     for (const file of files) {
       const item = document.createElement("li");
       const button3 = document.createElement("button");
@@ -8470,9 +9000,9 @@ function renderReview(container, result, handlers = {}) {
         diff.addEventListener("click", () => handlers.onOpenDiff(file.path, file));
         item.append(diff);
       }
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   if (result.structural !== void 0) {
     renderStructuralDiff(container, result.structural);
@@ -8497,8 +9027,8 @@ function renderReview(container, result, handlers = {}) {
     note4.textContent = "Nothing depends on the changed files.";
     container.append(note4);
   } else {
-    const list = document.createElement("ul");
-    list.dataset.role = "review-impact";
+    const list2 = document.createElement("ul");
+    list2.dataset.role = "review-impact";
     for (const entry of affected.slice(0, 100)) {
       const item = document.createElement("li");
       const button3 = document.createElement("button");
@@ -8513,9 +9043,9 @@ function renderReview(container, result, handlers = {}) {
       distance.className = "evidence";
       distance.textContent = `\xB7 distance ${entry.distance}`;
       item.append(distance);
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   if ((result.impact?.outsideGraph ?? []).length > 0) {
     const outside = document.createElement("p");
@@ -8529,9 +9059,9 @@ function renderChangeMetrics(container, metrics, handlers = {}) {
   if (!metrics || metrics.available === false) {
     return;
   }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Change metrics";
-  container.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Change metrics";
+  container.append(heading3);
   const summary = document.createElement("p");
   summary.className = "overlay-summary";
   summary.dataset.role = "change-metrics-summary";
@@ -8627,9 +9157,9 @@ function renderChangePassport(container, passport) {
   if (!passport || !Array.isArray(passport.files) || passport.files.length === 0) {
     return;
   }
-  const heading2 = document.createElement("h4");
-  heading2.textContent = "Change passport";
-  container.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Change passport";
+  container.append(heading3);
   const caption = document.createElement("p");
   caption.className = "unavailable";
   caption.textContent = passport.baseline ? `Cohesion from recorded member wiring, compared with ${passport.baseline}.` : "Cohesion from recorded member wiring; no baseline revision was available.";
@@ -8642,9 +9172,9 @@ function renderChangePassport(container, passport) {
     line.textContent = provenance;
     container.append(line);
   }
-  const list = document.createElement("ul");
-  list.className = "change-passport";
-  list.dataset.role = "change-passport";
+  const list2 = document.createElement("ul");
+  list2.className = "change-passport";
+  list2.dataset.role = "change-passport";
   for (const change of passport.files) {
     const item = document.createElement("li");
     const path = document.createElement("span");
@@ -8659,9 +9189,9 @@ function renderChangePassport(container, passport) {
     value.title = change.note ?? "";
     item.append(value);
     item.append(changeRiskBlock(change));
-    list.append(item);
+    list2.append(item);
   }
-  container.append(list);
+  container.append(list2);
   if (passport.capped) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
@@ -8677,15 +9207,15 @@ function changeRiskBlock(change) {
     ...(change.edgesRemoved ?? []).map((edge) => `\u2212 ${edge.source} \u2192 ${edge.target} (${edge.kind})`)
   ];
   if (edges.length > 0) {
-    const list = document.createElement("ul");
-    list.className = "change-edges";
-    list.dataset.role = "change-edges";
+    const list2 = document.createElement("ul");
+    list2.className = "change-edges";
+    list2.dataset.role = "change-edges";
     for (const edge of edges) {
       const item = document.createElement("li");
       item.textContent = edge;
-      list.append(item);
+      list2.append(item);
     }
-    block.append(list);
+    block.append(list2);
   }
   const risk = change.risk;
   if (!risk || !Array.isArray(risk.signals) || risk.signals.length === 0) {
@@ -8727,14 +9257,14 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
   container.replaceChildren();
   const kind = options.kind ?? "impact";
   container.className = `overlay-panel overlay-kind-${kind}`;
-  const heading2 = document.createElement("h3");
+  const heading3 = document.createElement("h3");
   const dot = document.createElement("span");
   dot.className = "overlay-dot";
   dot.setAttribute("aria-hidden", "true");
-  heading2.append(dot);
-  heading2.append(document.createTextNode(`${title} \xB7 ${overlay2.summary}`));
-  heading2.className = "overlay-summary";
-  container.append(heading2);
+  heading3.append(dot);
+  heading3.append(document.createTextNode(`${title} \xB7 ${overlay2.summary}`));
+  heading3.className = "overlay-summary";
+  container.append(heading3);
   if (options.onClose) {
     const dismiss = document.createElement("button");
     dismiss.type = "button";
@@ -8742,7 +9272,7 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     dismiss.setAttribute("aria-label", "Dismiss overlay panel");
     dismiss.textContent = "\xD7";
     dismiss.addEventListener("click", () => options.onClose());
-    heading2.append(dismiss);
+    heading3.append(dismiss);
   }
   if (overlay2.meta && (overlay2.meta.testFiles !== void 0 || overlay2.meta.unreached !== void 0)) {
     const counts = document.createElement("p");
@@ -8811,7 +9341,7 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
       }
       return entry;
     };
-    const list = createVirtualList({
+    const list2 = createVirtualList({
       rowHeight: 20,
       overscan: 6,
       className: "overlay-list",
@@ -8834,7 +9364,7 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
       const matching = matchingItems();
       empty.textContent = changedOnly && !filter ? "No changed modules." : "No modules match this filter.";
       empty.hidden = matching.length > 0;
-      list.setItems(matching);
+      list2.setItems(matching);
     };
     const controls = document.createElement("div");
     controls.className = "overlay-controls";
@@ -8867,10 +9397,10 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     if (controls.childElementCount > 0) {
       container.append(controls);
     }
-    container.append(list.element);
+    container.append(list2.element);
     container.append(empty);
     renderList();
-    list.refresh();
+    list2.refresh();
   }
   if (Array.isArray(options.actions) && options.actions.length > 0) {
     const actions = document.createElement("div");
@@ -8902,10 +9432,10 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.hidden = false;
   container.replaceChildren();
   container.dataset.delegateEdge = evidence.id;
-  const heading2 = document.createElement("h3");
-  heading2.className = "overlay-summary";
-  heading2.textContent = `Edge \xB7 ${evidence.kind}`;
-  container.append(heading2);
+  const heading3 = document.createElement("h3");
+  heading3.className = "overlay-summary";
+  heading3.textContent = `Edge \xB7 ${evidence.kind}`;
+  container.append(heading3);
   const route = document.createElement("p");
   route.className = "edge-route";
   route.append(edgeEndpoint(evidence.source, handlers.onSelect));
@@ -9083,7 +9613,7 @@ function renderTimeline(container, result, onSelect, options = {}) {
     container.append(note4);
     return;
   }
-  const list = document.createElement("ul");
+  const list2 = document.createElement("ul");
   for (const commit of result.commits.slice(0, 50)) {
     const item = document.createElement("li");
     if (options.selectedHash && commit.hash === options.selectedHash) {
@@ -9109,9 +9639,9 @@ function renderTimeline(container, result, onSelect, options = {}) {
       metric.title = badge.title;
       item.append(metric);
     }
-    list.append(item);
+    list2.append(item);
   }
-  container.append(list);
+  container.append(list2);
 }
 
 // ui/strabo-panel-chrome.js
@@ -9142,25 +9672,25 @@ function renderDiagnostics(container, model, runtime = {}) {
       const summaryEl = document.createElement("summary");
       summaryEl.textContent = `${kind} (${items.length})`;
       details.append(summaryEl);
-      const list = document.createElement("ul");
+      const list2 = document.createElement("ul");
       for (const diagnostic of items.slice(0, 20)) {
         const item = document.createElement("li");
         item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
         item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-        list.append(item);
+        list2.append(item);
       }
-      details.append(list);
+      details.append(list2);
       container.append(details);
     }
   } else if (summary.samples.length > 0) {
-    const list = document.createElement("ul");
+    const list2 = document.createElement("ul");
     for (const diagnostic of summary.samples) {
       const item = document.createElement("li");
       item.dataset.delegateDiagnostic = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
       item.textContent = `${diagnostic.file}:${diagnostic.line} ${diagnostic.message}`;
-      list.append(item);
+      list2.append(item);
     }
-    container.append(list);
+    container.append(list2);
   }
   return summary;
 }
@@ -9211,8 +9741,8 @@ function renderShortcuts(container) {
   const title = document.createElement("h3");
   title.textContent = "Keyboard shortcuts";
   container.append(title);
-  const list = document.createElement("dl");
-  list.className = "shortcut-list";
+  const list2 = document.createElement("dl");
+  list2.className = "shortcut-list";
   for (const entry of shortcutSheet()) {
     const term = document.createElement("dt");
     const kbd = document.createElement("kbd");
@@ -9220,9 +9750,9 @@ function renderShortcuts(container) {
     term.append(kbd);
     const description = document.createElement("dd");
     description.textContent = entry.action;
-    list.append(term, description);
+    list2.append(term, description);
   }
-  container.append(list);
+  container.append(list2);
 }
 function renderTestsStrip(container, counts, onFilter, activeFilter = "") {
   const chip = (label, filter, className = "strip-chip") => h(
@@ -9285,7 +9815,7 @@ function renderFolderList(container, result, onNavigate) {
 }
 
 // ui/strabo-highlight.js
-var words = (list) => new Set(list.split(/\s+/).filter(Boolean));
+var words = (list2) => new Set(list2.split(/\s+/).filter(Boolean));
 var C_LIKE_LITERALS = "true false null";
 var LANGUAGES = {
   javascript: {
@@ -10242,9 +10772,9 @@ function numberInput(value, fallback, onChange) {
 function section(title) {
   const group = document.createElement("section");
   group.className = "setting-section";
-  const heading2 = document.createElement("h4");
-  heading2.textContent = title;
-  group.append(heading2);
+  const heading3 = document.createElement("h4");
+  heading3.textContent = title;
+  group.append(heading3);
   return group;
 }
 function note2(text) {
@@ -10509,9 +11039,9 @@ function commitSection(prefs, handlers) {
 function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
   container.replaceChildren();
-  const heading2 = document.createElement("h3");
-  heading2.textContent = "Settings";
-  container.append(heading2);
+  const heading3 = document.createElement("h3");
+  heading3.textContent = "Settings";
+  container.append(heading3);
   const local = section("Appearance");
   local.append(
     field(
@@ -10767,6 +11297,7 @@ function queryElements(doc = document) {
     tbRisk: doc.getElementById("tb-risk"),
     tbBranches: doc.getElementById("tb-branches"),
     tbCoverage: doc.getElementById("tb-coverage"),
+    tbProducts: doc.getElementById("tb-products"),
     tbClear: doc.getElementById("tb-clear"),
     tbOverflow: doc.getElementById("tb-overflow"),
     tbOverflowMenu: doc.getElementById("tb-overflow-menu"),
@@ -10794,6 +11325,7 @@ function queryElements(doc = document) {
     routePanel: doc.getElementById("route-panel"),
     blocksPanel: doc.getElementById("blocks-panel"),
     coveragePanel: doc.getElementById("coverage-panel"),
+    productsPanel: doc.getElementById("products-panel"),
     sourcePanel: doc.getElementById("source-panel"),
     screenTabGraph: doc.getElementById("screen-tab-graph"),
     screenTabTerminal: doc.getElementById("screen-tab-terminal"),
@@ -11806,16 +12338,16 @@ function createGitController(app2) {
     });
   });
   async function loadTimelineScreen() {
-    const list = elements2.historyList;
-    if (!list) {
+    const list2 = elements2.historyList;
+    if (!list2) {
       return;
     }
     closeHistoryReview();
-    list.replaceChildren();
+    list2.replaceChildren();
     const note4 = document.createElement("p");
     note4.className = "evidence";
     note4.textContent = "Loading recorded history\u2026";
-    list.append(note4);
+    list2.append(note4);
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
     const [result, history, drift] = await Promise.all([
@@ -11823,7 +12355,7 @@ function createGitController(app2) {
       request2(`/analysis/change-metrics/history${query}`).catch(() => null),
       request2(`/analysis/drift${driftQuery}`).catch(() => null)
     ]);
-    renderTimeline(list, result, (commit) => {
+    renderTimeline(list2, result, (commit) => {
       selectHistoryCommit(commit).catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
@@ -12147,15 +12679,15 @@ function ensurePromptDialog() {
   dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
   const header = document.createElement("header");
   header.className = "dialog-header";
-  const heading2 = document.createElement("strong");
-  heading2.className = "prompt-dialog-title";
+  const heading3 = document.createElement("strong");
+  heading3.className = "prompt-dialog-title";
   const close = document.createElement("button");
   close.type = "button";
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
   close.addEventListener("click", () => dialog2.close());
-  header.append(heading2, close);
+  header.append(heading3, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
   const text = document.createElement("textarea");
@@ -12547,7 +13079,7 @@ function renderBlocks(container, assembly, options = {}) {
     clear.textContent = "Every brick connects to the stack, and no cycle was recorded.";
     notes.append(clear);
   } else {
-    const list = document.createElement("ul");
+    const list2 = document.createElement("ul");
     for (const suggestion of assembly.suggestions) {
       const item = document.createElement("li");
       item.className = `blocks-note ${suggestion.kind}`;
@@ -12557,9 +13089,9 @@ function renderBlocks(container, assembly, options = {}) {
       const detail = document.createElement("p");
       detail.textContent = suggestion.detail;
       item.append(strong, detail);
-      list.append(item);
+      list2.append(item);
     }
-    notes.append(list);
+    notes.append(list2);
   }
   container.append(notes);
 }
@@ -12615,7 +13147,7 @@ function writeRouteProgress(storage, repository, index) {
   } catch {
   }
 }
-function heading(level, text) {
+function heading2(level, text) {
   const node = document.createElement(level);
   node.textContent = text;
   return node;
@@ -12628,7 +13160,7 @@ function note3(text, className = "overlay-note") {
 }
 function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
   container.replaceChildren();
-  container.append(heading("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
+  container.append(heading2("h3", `Reading route \u2014 ${route?.repository ?? "repository"}`));
   if (!route) {
     if (state2.error) {
       container.append(note3("The reading route could not be loaded.", "unavailable"));
@@ -12745,7 +13277,7 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
     section2.dataset.unit = unit.summary?.id ?? "";
     const unitName = unit.summary?.name ?? unit.summary?.id ?? "unit";
     section2.append(
-      heading("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
+      heading2("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
     );
     if (unit.summary?.roleEvidence) {
       section2.append(note3(unit.summary.roleEvidence, "route-unit-why"));
@@ -13091,10 +13623,45 @@ function createCoverage(app2) {
       } else {
         loadProject();
       }
+    },
+    onRefresh: () => {
+      refresh();
     }
   };
   function renderPanel() {
     renderCoverageReport(elements2.coveragePanel, panelReport, handlers);
+  }
+  async function refresh() {
+    const token = panelToken += 1;
+    panelReport = { loading: true, message: "Running the repository coverage script\u2026" };
+    renderPanel();
+    try {
+      const response = await fetch(`${API_PATH}/analysis/coverage/refresh${coverageQuery()}`, {
+        method: "POST"
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      }
+      if (token !== panelToken) {
+        return;
+      }
+    } catch (error) {
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = { error: error.message };
+      renderPanel();
+      return;
+    }
+    if (subject.scope === "folder" && subject.folder) {
+      await loadFolder(subject.folder);
+    } else {
+      await loadProject();
+    }
+    if (app2.selected) {
+      await loadFileCoverage(app2.selected);
+    }
   }
   async function showCoverage() {
     elements2.coveragePanel.hidden = false;
@@ -13186,6 +13753,60 @@ function createCoverage(app2) {
   };
 }
 
+// ui/strabo-products.js
+function createProducts(app2) {
+  const { state: state2, elements: elements2 } = app2;
+  let panelToken = 0;
+  let panelReport = null;
+  function productsQuery() {
+    return state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+  }
+  const handlers = {
+    onSelect: (id) => app2.selection?.selectNode(id),
+    onRetry: () => {
+      loadProducts();
+    }
+  };
+  function renderPanel() {
+    renderProducts(elements2.productsPanel, panelReport, handlers);
+  }
+  async function showProducts() {
+    elements2.productsPanel.hidden = false;
+    await loadProducts();
+    app2.windows?.refreshDock();
+  }
+  async function loadProducts() {
+    const token = panelToken += 1;
+    panelReport = { loading: true };
+    renderPanel();
+    try {
+      const report = await app2.request(`/analysis/data/products${productsQuery()}`);
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = report;
+    } catch (error) {
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = { error: error.message };
+    }
+    renderPanel();
+  }
+  function closeProducts() {
+    elements2.productsPanel.hidden = true;
+    app2.windows?.refreshDock();
+  }
+  elements2.tbProducts?.addEventListener("click", () => {
+    app2.floatingWindows?.find?.((controller) => controller.key === "products")?.toggle();
+  });
+  return {
+    closeProducts,
+    loadProducts,
+    showProducts
+  };
+}
+
 // ui/strabo-tier-panel.js
 function headerCell(text) {
   const cell = document.createElement("th");
@@ -13265,9 +13886,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const calls = tierCallSites(report);
   if (calls.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Calls";
-    container.append(heading2);
+    const heading3 = document.createElement("h4");
+    heading3.textContent = "Calls";
+    container.append(heading3);
     for (const call of calls.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-call";
@@ -13278,9 +13899,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const endpoints = tierEndpointSites(report);
   if (endpoints.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Endpoints";
-    container.append(heading2);
+    const heading3 = document.createElement("h4");
+    heading3.textContent = "Endpoints";
+    container.append(heading3);
     for (const endpoint of endpoints.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-endpoint";
@@ -13291,9 +13912,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const joined = tierTraces(report).filter((entry) => entry.endpoint !== null);
   if (joined.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Trace";
-    container.append(heading2);
+    const heading3 = document.createElement("h4");
+    heading3.textContent = "Trace";
+    container.append(heading3);
     for (const entry of joined.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-trace";
@@ -13304,9 +13925,9 @@ function renderTierPanel(container, report, filter = "all") {
   }
   const tables = tierTables(report);
   if (tables.length > 0) {
-    const heading2 = document.createElement("h4");
-    heading2.textContent = "Tables";
-    container.append(heading2);
+    const heading3 = document.createElement("h4");
+    heading3.textContent = "Tables";
+    container.append(heading3);
     for (const entry of tables.slice(0, 20)) {
       const item = document.createElement("div");
       item.className = "tier-table";
@@ -13362,16 +13983,16 @@ function ensureDialog() {
   element3.setAttribute("aria-label", "Review the commit message before committing");
   const header = document.createElement("header");
   header.className = "dialog-header";
-  const heading2 = document.createElement("strong");
-  heading2.className = "commit-dialog-title";
-  heading2.textContent = "Commit changes";
+  const heading3 = document.createElement("strong");
+  heading3.className = "commit-dialog-title";
+  heading3.textContent = "Commit changes";
   const close = document.createElement("button");
   close.type = "button";
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
   close.addEventListener("click", () => element3.close());
-  header.append(heading2, close);
+  header.append(heading3, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
   const status = document.createElement("p");
@@ -23777,15 +24398,15 @@ function sessionTabLabel(meta) {
   return KIND_LABELS[meta?.kind] ?? "Session";
 }
 function tabLabels(sessions) {
-  const list = sessions ?? [];
+  const list2 = sessions ?? [];
   const totals = /* @__PURE__ */ new Map();
-  for (const session of list) {
+  for (const session of list2) {
     const base = sessionTabLabel(session);
     totals.set(base, (totals.get(base) ?? 0) + 1);
   }
   const seen = /* @__PURE__ */ new Map();
   const labels = /* @__PURE__ */ new Map();
-  for (const session of list) {
+  for (const session of list2) {
     const base = sessionTabLabel(session);
     if ((totals.get(base) ?? 0) > 1) {
       const index = (seen.get(base) ?? 0) + 1;
@@ -23833,26 +24454,26 @@ function orderSessions(sessions, order) {
   return out;
 }
 function moveInOrder(order, fromId, toId) {
-  const list = [...order ?? []];
-  const from = list.indexOf(fromId);
-  const to = list.indexOf(toId);
+  const list2 = [...order ?? []];
+  const from = list2.indexOf(fromId);
+  const to = list2.indexOf(toId);
   if (from === -1 || to === -1 || from === to) {
-    return list;
+    return list2;
   }
-  list.splice(from, 1);
-  const target = list.indexOf(toId);
-  list.splice(target, 0, fromId);
-  return list;
+  list2.splice(from, 1);
+  const target = list2.indexOf(toId);
+  list2.splice(target, 0, fromId);
+  return list2;
 }
 function cycleSessionId(order, activeId, delta) {
-  const list = order ?? [];
-  if (list.length === 0) {
+  const list2 = order ?? [];
+  if (list2.length === 0) {
     return null;
   }
-  const index = list.indexOf(activeId);
+  const index = list2.indexOf(activeId);
   const base = index === -1 ? 0 : index;
-  const next = ((base + delta) % list.length + list.length) % list.length;
-  return list[next] ?? null;
+  const next = ((base + delta) % list2.length + list2.length) % list2.length;
+  return list2[next] ?? null;
 }
 function digitSessionId(order, key) {
   const index = Number(key);
@@ -23991,11 +24612,11 @@ function fuzzyScore(text, query) {
 }
 function filterSessions(sessions, query) {
   const needle = String(query ?? "").trim();
-  const list = sessions ?? [];
+  const list2 = sessions ?? [];
   if (needle === "") {
-    return [...list];
+    return [...list2];
   }
-  return list.map((session) => ({ session, score: fuzzyScore(sessionSearchText(session), needle) })).filter((entry) => entry.score >= 0).sort((a, b2) => b2.score - a.score).map((entry) => entry.session);
+  return list2.map((session) => ({ session, score: fuzzyScore(sessionSearchText(session), needle) })).filter((entry) => entry.score >= 0).sort((a, b2) => b2.score - a.score).map((entry) => entry.session);
 }
 var overlay = null;
 var overlayApi = null;
@@ -24017,18 +24638,18 @@ function ensureOverlay() {
   input.placeholder = "Switch session\u2026";
   input.setAttribute("aria-label", "Filter sessions");
   input.autocomplete = "off";
-  const list = document.createElement("div");
-  list.className = "terminal-switcher-list";
-  list.setAttribute("role", "listbox");
-  panel.append(input, list);
+  const list2 = document.createElement("div");
+  list2.className = "terminal-switcher-list";
+  list2.setAttribute("role", "listbox");
+  panel.append(input, list2);
   overlay.append(panel);
   document.body.append(overlay);
-  overlayApi = { overlay, panel, input, list };
+  overlayApi = { overlay, panel, input, list: list2 };
   return overlay;
 }
 function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
   ensureOverlay();
-  const { overlay: root, input, list } = overlayApi;
+  const { overlay: root, input, list: list2 } = overlayApi;
   let matches2 = filterSessions(sessions, "");
   let selected = 0;
   const renderList = () => {
@@ -24055,7 +24676,7 @@ function openSessionSwitcher({ sessions = [], activeId = null, onPick } = {}) {
       });
       return row;
     });
-    list.replaceChildren(...rows);
+    list2.replaceChildren(...rows);
     if (rows[selected]) {
       rows[selected].scrollIntoView({ block: "nearest" });
     }
@@ -24192,8 +24813,8 @@ function registerCitationLinks(term, { openSourceAt } = {}) {
 
 // ui/strabo-terminal-presets.js
 function normalizePresets(payload) {
-  const list = Array.isArray(payload) ? payload : Array.isArray(payload?.presets) ? payload.presets : [];
-  return list.map((entry) => {
+  const list2 = Array.isArray(payload) ? payload : Array.isArray(payload?.presets) ? payload.presets : [];
+  return list2.map((entry) => {
     if (typeof entry === "string") {
       return { id: entry, label: entry, detail: "" };
     }
@@ -25364,9 +25985,9 @@ function createTerminalBridge(app2) {
   terminalBadge.hidden = true;
   elements2.screenTabTerminal.append(terminalBadge);
   function updateTerminalBadge(sessions) {
-    const list = Array.isArray(sessions) ? sessions : [];
-    const running = list.filter((session) => session?.status === "running").length;
-    const failed = list.filter(
+    const list2 = Array.isArray(sessions) ? sessions : [];
+    const running = list2.filter((session) => session?.status === "running").length;
+    const failed = list2.filter(
       (session) => session?.status === "exited" && (session.exitCode ?? 0) !== 0
     ).length;
     const count = running + failed;
@@ -25678,7 +26299,7 @@ function createChromeMenus(app2) {
       });
       items[next].focus();
     });
-    for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk", "tb-coverage"]) {
+    for (const id of ["tb-timeline", "tb-branches", "tb-review", "tb-risk", "tb-coverage", "tb-products"]) {
       document.getElementById(id)?.addEventListener("click", () => closeOverflowMenu({ restoreFocus: true }));
     }
     document.addEventListener("click", (event) => {
@@ -25899,12 +26520,12 @@ function createDelegation(app2) {
     };
   }
   function overlayDelegateTarget(item) {
-    const heading2 = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
+    const heading3 = document.querySelector("#overlay-panel h3")?.textContent ?? "Review overlay";
     return {
       kind: "view",
-      label: heading2.trim().slice(0, 120),
+      label: heading3.trim().slice(0, 120),
       detail: item.dataset.delegateOverlayItem ?? item.textContent.trim(),
-      evidence: [`overlay: ${heading2.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
+      evidence: [`overlay: ${heading3.trim()}`, `item: ${(item.dataset.delegateOverlayItem ?? item.textContent).trim()}`]
     };
   }
   function viewDelegateTarget(detail) {
@@ -26809,9 +27430,9 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     const hidden = element3.hidden === true;
     win.hidden = hidden;
     if (!hidden && config.titleFrom) {
-      const heading2 = config.titleFrom(element3);
-      if (heading2) {
-        title.textContent = heading2;
+      const heading3 = config.titleFrom(element3);
+      if (heading3) {
+        title.textContent = heading3;
       }
     }
     win.setAttribute("aria-label", title.textContent);
@@ -27331,6 +27952,21 @@ function createFloatingPanels(app2) {
           });
         },
         onClose: () => app2.coverage.closeCoverage()
+      },
+      {
+        key: "products",
+        element: elements2.productsPanel,
+        title: "Data products",
+        dockLabel: "Data",
+        glyph: "\u25C8",
+        width: 620,
+        height: 640,
+        onOpen: () => {
+          app2.products.showProducts().catch((error) => {
+            elements2.status.textContent = `Error: ${error.message}`;
+          });
+        },
+        onClose: () => app2.products.closeProducts()
       }
     ]
   });
@@ -27441,6 +28077,7 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "n") elements2.tbBranches.click();
     else if (key === "d") elements2.tbCoverage?.click();
     else if (key === "g" && app2.groupSelection.length >= 2) elements2.tbDelegateGroup.click();
+    else if (key === "a") elements2.tbProducts?.click();
   });
 }
 
@@ -27557,6 +28194,7 @@ app.git = createGitController(app);
 app.settings = createSettingsController(app);
 app.panels = createRepositoryPanels(app);
 app.coverage = createCoverage(app);
+app.products = createProducts(app);
 app.lenses = createLensController(app);
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
@@ -27862,6 +28500,7 @@ if (window.STRABO_TEST) {
     blocks: () => app.panels.showBlocks(),
     coverage: () => app.coverage.showCoverage(),
     coverageFolder: (folder) => app.coverage.loadFolder(folder),
+    products: () => app.products.showProducts(),
     brickAssembly: () => buildBrickAssembly(app.current?.nodes ?? [], app.current?.edges ?? []),
     setScreen,
     screen: () => store.get().ui.screen,

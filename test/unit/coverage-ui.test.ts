@@ -242,6 +242,52 @@ test('a reachable report never renders a reachable figure as a percent', () => {
   }
 });
 
+test('a reachable report offers the detected command and a run button when allowed', () => {
+  const target = document.createElement('div');
+  const calls: string[] = [];
+  renderCoverageReport(
+    target,
+    {
+      ...PROJECT_REACHABLE,
+      provenance: {
+        ...PROVENANCE_REACHABLE,
+        refresh: { runner: 'npm', script: 'test:coverage', command: 'npm run test:coverage', allowed: true },
+      },
+    },
+    { onRefresh: () => calls.push('refresh') },
+  );
+
+  const block = target.querySelector('[data-role="coverage-refresh"]');
+  assert.ok(block, 'the refresh block is offered');
+  assert.match(block.textContent, /npm run test:coverage/);
+
+  const button = target.querySelector('[data-role="coverage-refresh-run"]');
+  assert.ok(button, 'the run button is offered when allowed');
+  (button as HTMLElement).click();
+  assert.deepEqual(calls, ['refresh']);
+});
+
+test('a reachable report without permission names the command but offers no button', () => {
+  const target = document.createElement('div');
+  renderCoverageReport(
+    target,
+    {
+      ...PROJECT_REACHABLE,
+      provenance: {
+        ...PROVENANCE_REACHABLE,
+        refresh: { runner: 'npm', script: 'test:coverage', command: 'npm run test:coverage', allowed: false },
+      },
+    },
+    { onRefresh: () => assert.fail('must not run without permission') },
+  );
+
+  const block = target.querySelector('[data-role="coverage-refresh"]');
+  assert.ok(block);
+  assert.match(block.textContent, /npm run test:coverage/);
+  assert.match(block.textContent, /STRABO_ALLOW_COVERAGE_REFRESH/);
+  assert.equal(target.querySelector('[data-role="coverage-refresh-run"]'), null);
+});
+
 test('the file section names the basis, the lines, and the tests and importers as links', () => {
   const target = document.createElement('div');
   const selected: string[] = [];

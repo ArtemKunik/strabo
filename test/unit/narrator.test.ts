@@ -21,7 +21,9 @@ import {
   buildNarratorPrompt,
   createMemoryNarratorCache,
   createNarratorClient,
+  extractNarrative,
   frameUntrusted,
+  isAnthropicEndpoint,
   type FetchLike,
 } from '../../src/narrator/client.ts';
 
@@ -280,4 +282,68 @@ test('the narrator route reports status and refuses evidence-free requests', asy
     assert.deepEqual(await inert.json(), { available: false, reason: 'not-configured' });
   });
 });
+
+test('isAnthropicEndpoint correctly detects api.anthropic.com', () => {
+  assert.equal(isAnthropicEndpoint('https://api.anthropic.com/v1/messages'), true);
+  assert.equal(isAnthropicEndpoint('https://api.anthropic.com/v1/chat/completions'), true);
+  assert.equal(isAnthropicEndpoint('https://api.openai.com/v1/chat/completions'), false);
+  assert.equal(isAnthropicEndpoint('http://127.0.0.1:11434/v1/chat/completions'), false);
+  assert.equal(isAnthropicEndpoint('not-a-url'), false);
+});
+
+test('extractNarrative parses both OpenAI choices and Anthropic content blocks', () => {
+  // OpenAI format
+  assert.equal(extractNarrative({ choices: [{ message: { content: 'OpenAI prose.' } }] }), 'OpenAI prose.');
+  // Anthropic format
+  assert.equal(
+    extractNarrative({ content: [{ type: 'text', text: 'Anthropic prose line 1.' }, { type: 'text', text: 'Line 2.' }] }),
+    'Anthropic prose line 1.\nLine 2.',
+  );
+  // Rejections on empty / missing
+  assert.throws(() => extractNarrative({}), /narrator response had no message content/);
+  assert.throws(() => extractNarrative({ content: [] }), /narrator response had no message content/);
+});
+
+test('narratorClient formats Anthropic messages API request with x-api-key and system prompt', async () => {
+  let capturedUrl = '';
+  let capturedHeaders: Record<string, string> = {};
+  let capturedBody: Record<string, unknown> = {};
+
+  const client = createNarratorClient({
+    root: process.cwd(),
+    config: {
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      model: 'claude-sonnet-4-6',
+      apiKeyEnv: 'TEST_ANTHROPIC_KEY',
+    },
+    env: { TEST_ANTHROPIC_KEY: 'sk-ant-test-key' },
+    fetchImpl: async (url, init) => {
+      capturedUrl = url;
+      capturedHeaders = init.headers;
+      capturedBody = JSON.parse(init.body) as Record<string, unknown>;
+      return jsonResponse({
+        content: [{ type: 'text', text: 'Claude narrative response.' }],
+      });
+    },
+  });
+
+  const reply = await client.narrate({ instruction: 'Explain diff', evidence: '3 files changed' });
+  assert.equal(reply.available, true);
+  if (reply.available) {
+    assert.equal(reply.text, 'Claude narrative response.');
+  }
+
+  assert.equal(capturedUrl, 'https://api.anthropic.com/v1/messages');
+  assert.equal(capturedHeaders['x-api-key'], 'sk-ant-test-key');
+  assert.equal(capturedHeaders['anthropic-version'], '2023-06-01');
+  assert.equal(capturedHeaders['authorization'], undefined);
+  assert.equal(capturedBody['model'], 'claude-sonnet-4-6');
+  assert.equal(capturedBody['max_tokens'], 2048);
+  assert.ok(typeof capturedBody['system'] === 'string');
+  assert.ok(Array.isArray(capturedBody['messages']));
+  const messages = capturedBody['messages'] as Array<{ role: string; content: string }>;
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.role, 'user');
+});
+
 

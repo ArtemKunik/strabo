@@ -43,8 +43,9 @@ record is reported as `unavailable`, never invented.
 | 30 | String-typed edges and declared architecture | Landed (H1-H5: module, route, CLI, MCP, overlay; declared-rules acceptance scenario) |
 | 31 | Architecture drift over time | Landed (O1-O4: module, route, report, Timeline chart, published static drift artifact) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
-| 33 | Data layer, data products, and contracts | In progress (J1 done: data-use access direction; J2-J14 planned: data model view, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact, surfaces, product level and data-on-code overlay, dbt repository kind, catalog snapshots, classification along lineage) |
+| 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
 | 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
+| 35 | Application logical structure from the tier lens | In progress (Y0-Y2 done: structure fixture + @wip scenario, tierFlow aggregate, shelf and mixed counts; Y3-Y9 planned: L0 tier bands, unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2201,6 +2202,111 @@ Known limits, named rather than hidden: line coverage says a line ran, not that 
 anything about it; a report covers only the tests that produced it, so a monorepo with one report
 per package is merged by path and a package with no report is `not in report`; and per-test
 attribution exists only where the tool recorded it.
+
+## Phase 35 - Application logical structure from the tier lens
+
+Phase 16 classifies every file by role (`frontend`, `api`, `domain`, `integration`, `data`, plus
+`infra`/`build`/`tests`/`unclassified`) and orders the first five into a dependency rank
+(`TIER_RANK`, `src/analysis/tiers/types.ts:47`). It even computes the edges that run the wrong
+way through that order (`directions`, `src/analysis/tiers/report.ts:155`). But the classification
+is only ever shown as a matrix table, a per-node colour, and a violations overlay; there is no
+picture of the application's *structure*. As of 2026-09-27:
+
+- **No aggregated edge between tiers.** `TierReport` carries `matrix.cells` and the *bad*
+  `directions`, but not the healthy edges. `frontend → api` at weight 40, `api → domain` at
+  weight 12, and the intra-tier share are all absent, so nothing can be drawn between role bands.
+- **The matrix is a table, not a graph.** `tierMatrixRows` / `tierPerTierRows`
+  (`ui/strabo-tiers.js`) render counts per unit×tier; no view joins the cells with the recorded
+  imports.
+- **The System view draws a different "layer".** Phase 16's swim lanes are depth-derived layers
+  inside one unit (`SystemLayer`, `src/analysis/system-types.ts:33`), not role tiers; the docs
+  already warn against conflating the two (`docs/FEATURES.md:174`, `src/analysis/passport.ts:32`).
+- **Wrong-way edges are per-unit only.** `directions` skips any edge whose target sits in another
+  unit (`report.ts:168`), so a cross-unit upward dependency is currently invisible.
+- **Mixed files have no display rule.** `TierClassification.mixed` is true when two tiers tie; no
+  view says what to do with it.
+- **Three tiers cannot be a layer.** `infra`, `build`, `tests`, and `unclassified` are outside
+  `TIER_RANK` (`tierRank` returns null), so they have no place in a dependency-ordered stack.
+
+The principles stay the same: the structure is drawn only from recorded edges; a cell or band
+with no recorded cross-tier edge says so rather than being filled in; and the role language stays
+"tier", never "layer", to keep it apart from the System view.
+
+### Slices
+
+- **Y0 - Acceptance scenario first.** *Done.* A fixture whose files span tiers and two
+  build units, with one `upward` edge and one `skip-layer` edge inside a unit, one cross-unit
+  edge, and a `call → endpoint → table` trace. The scenario asserts the `tierFlow` aggregate and
+  the rendered bands, and fails before the slices below. Run against it at every step.
+  `test/fixtures/structure-repo` carries exactly those recorded facts, and
+  `test/acceptance/features/structure.feature` holds the scenarios (`@wip` until Y3 renders a
+  lens to drive them).
+- **Y1 - `tierFlow` in the tier report.** *Done.* `TierReport` gained a `tierFlow` aggregate
+  over the same recording `directions` walks: `tiers` (ranked tiers present, in dependency
+  order), one `TierFlowEdge` per `source → target` with its `kind` (`down`/`upward`/`skip-layer`),
+  `weight`, `crossUnit`, and starting `units`, plus `intraByTier` and the `intraRatio` so "is
+  this codebase even layered?" is answerable in one number. Unlike `directions`, cross-unit edges
+  are included; shelf tiers and unclassified files stay out of the ranked flow. Served on the
+  existing `GET /analysis/tiers`. Types in `src/analysis/tiers/types.ts`, assembly in
+  `src/analysis/tiers/report.ts`; coverage in `test/unit/tiers.test.ts`.
+- **Y2 - Shelves and the mixed rule.** *Done (data side).* `infra`, `build`, `tests`, and
+  `unclassified` have no dependency rank, so they become `TierReport.shelf` (`TierShelfEntry`: tier,
+  files, lines, mixed) instead of bands, read from the same `perTier` roll-up so the counts can
+  never disagree with the matrix. `TierMatrix.perTier` gained `mixed`, and the classifier already
+  pins a mixed file to the `TIER_ORDER` winner; a clean band reads `files - mixed`. The legend
+  naming of both rules lands with the Y3 lens. Coverage in `test/unit/tiers.test.ts`.
+- **Y3 - L0 tier bands.** A new **Structure** lens beside `Files` / `Directories` / `System`
+  draws the tiers as bands in rank order (frontend on top, data at the bottom), each band sized by
+  its file or LOC count, with the Y1 edges between bands styled by kind — a downward edge solid, an
+  `upward` edge red, a `skip-layer` edge dashed — reusing the Blocks styling and the Phase 13
+  colour budget. A band or pair with no recorded edge says so. Legend: *band = tier · size = files
+  · edge = recorded import, wrong-way highlighted*.
+- **Y4 - L1 unit × layer grid.** The polyglot picture: columns are build units, rows are tiers in
+  rank order, each cell sized by its files/LOC, and recorded edges drawn as arcs between cell
+  centres — cross-unit edges included, with their own styling, since Y1 keeps them (unlike
+  `directions`). Selecting a cell opens L2. This is the tier matrix with adjacency added, and is
+  the strongest reading for a monorepo with several services.
+- **Y5 - L2 / L3 drill-down.** Open a cell to its files, then into today's file map filtered to
+  the cell, reusing the System drill ladder (`buildSystemUnitViewModel`,
+  `src/view/view-model.ts`) with a tier key function. Breadcrumb *Structure › unit › tier*. Escape
+  or the breadcrumb returns.
+- **Y6 - End-to-end spine.** The most behavioral reading, from data already recorded: one spine
+  per declared route, `call site (frontend) → endpoint (api) → handler (domain) → table (data)`,
+  built from `traces`, `tableTrace`, and `tables`. A call with no matching endpoint or a handler
+  with no table shows a dangling stub, never a fabricated hop. Opened from a cell or an edge to
+  answer "why do these two cells connect".
+- **Y7 - Intended vs observed.** `strabo.rules.yml` (`src/analysis/rules.ts`) already states the
+  architecture an operator intends. Draw intent as a ghost band/edge and the observed `tierFlow`
+  solid, so a mismatch reads as a violation on the same picture; the findings stay the same
+  `layer-violations` rule `strabo check` already reports (`src/check/check.ts:134`).
+- **Y8 - Agent and report surface.** MCP `get_tier_flow` (nodes, edges, kinds, intra ratio, with
+  the basis and the scan ceiling named), a **Structure** section in the repository report, and the
+  `tierFlow` counts in the existing `layer-violations` finding text. The `strabo check` rule is
+  unchanged; only its explanation gains the aggregate.
+- **Y9 - Honesty and limits.** Bound the drawing by the Phase 16 file ceiling (`MAX_TIER_FILES`,
+  `report.ts:26`): a band the scan did not classify is drawn as `unclassified`, not as empty, and
+  the truncated count is shown. Keep the colour count inside the Phase 13 budget (the eight tier
+  hues already conflict; resolve in the rules, not by exception — see *Removed or frozen*). State
+  the two known limits in the panel: an upward edge can be a shared type imported by an upper
+  tier and misread as a violation, and a mostly-intra-tier ratio means the repository simply is not
+  layered, which the panel reports rather than decorating.
+
+Slice order: **Y0** first (the working agreement), then **Y1** and **Y2**, which every drawing
+reads. **Y3** is the smallest honest picture; **Y4** reuses it for the monorepo case. **Y5**
+depends on Y3/Y4. **Y6** is independent of the drawings and can land any time after Y1. **Y7**
+needs the rules reader only. **Y8** grows with each slice.
+
+Acceptance: on the Y0 fixture the Structure lens draws one band per ranked tier with the correct
+edge weights, colours the `upward` edge red and the `skip-layer` edge on a pattern, folds
+`tests`/`infra` onto the shelf, badges the mixed file, and — opening the recorded call — follows
+`call → endpoint → table` with no invented hop. `get_tier_flow` returns the same counts, and the
+repository report's Structure section matches.
+
+Known limits, named rather than hidden: role tiers are a partition and only become a structure
+through recorded edges, so a repository with few cross-tier imports legitimately draws as
+disconnected bands; `unclassified` files weaken every picture and their share is shown, not hidden;
+and a `skip-layer` edge is only a violation when the unit actually has an intermediate tier to use
+(`report.ts:188`), which the panel repeats rather than over-claiming.
 
 ## Reading route (landed)
 

@@ -2,17 +2,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type {
+  CatalogDeclaration,
   CodeDataUse,
   ContractDefinition,
   DataAccess,
+  DataProduct,
+  EventContract,
+  EventEndpoint,
   PublishedCoordinate,
   SchemaSnapshot,
   ServiceCall,
   ServiceEndpoint,
 } from '../types.ts';
+import type { DbtExtraction } from '../workspace/dbt.ts';
+import type { RawLineage, RawPathIo } from '../workspace/lineage.ts';
 import { cacheRoot } from './graph-cache.ts';
 
-export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-5';
+export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-6';
 
 /** The per-repository facts that are expensive to recompute and cheap to store. */
 export interface CachedRepoFacts {
@@ -24,6 +30,38 @@ export interface CachedRepoFacts {
   schema: SchemaSnapshot | null;
   /** Tables and columns the repository's source code names. */
   dataUses: CodeDataUse[];
+  /** Literal topics and queues the source produces to and consumes from (J4). */
+  eventEndpoints: EventEndpoint[];
+  /** Payload contracts declared for topics (J4). */
+  eventContracts: EventContract[];
+  /** Data products the repository's descriptors declare (J5). */
+  products: DataProduct[];
+  /** Table-level lineage read from SQL (J8). */
+  lineage: RawLineage[];
+  /** Literal file and object paths the batch code reads and writes (J8). */
+  pathIo: RawPathIo[];
+  /** Exported catalog snapshots read as declarations (J13). */
+  catalogs: CatalogDeclaration[];
+  /** dbt projects detected in the repository (J12). */
+  dbt: DbtExtraction;
+}
+
+function emptyFacts(publishes: PublishedCoordinate | null): CachedRepoFacts {
+  return {
+    publishes,
+    contracts: [],
+    endpoints: [],
+    calls: [],
+    schema: null,
+    dataUses: [],
+    eventEndpoints: [],
+    eventContracts: [],
+    products: [],
+    lineage: [],
+    pathIo: [],
+    catalogs: [],
+    dbt: { projects: [], references: [], columns: [] },
+  };
 }
 
 interface StoreEntry extends CachedRepoFacts {
@@ -75,6 +113,13 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
         calls: entry.calls,
         schema: entry.schema,
         dataUses: entry.dataUses,
+        eventEndpoints: entry.eventEndpoints ?? [],
+        eventContracts: entry.eventContracts ?? [],
+        products: entry.products ?? [],
+        lineage: entry.lineage ?? [],
+        pathIo: entry.pathIo ?? [],
+        catalogs: entry.catalogs ?? [],
+        dbt: entry.dbt ?? { projects: [], references: [], columns: [] },
       };
     },
 
@@ -90,6 +135,13 @@ export function openWorkspaceCache(options: { file?: string } = {}): WorkspaceCa
         calls: facts.calls,
         schema: facts.schema,
         dataUses: facts.dataUses,
+        eventEndpoints: facts.eventEndpoints,
+        eventContracts: facts.eventContracts,
+        products: facts.products,
+        lineage: facts.lineage,
+        pathIo: facts.pathIo,
+        catalogs: facts.catalogs,
+        dbt: facts.dbt,
       };
       dirty = true;
     },
@@ -137,6 +189,13 @@ function readStore(file: string): StoreFile {
         calls: entry.calls,
         schema: isSchema(entry.schema) ? entry.schema : null,
         dataUses: Array.isArray(entry.dataUses) ? entry.dataUses.map(normalizeDataUseAccess) : [],
+        eventEndpoints: Array.isArray(entry.eventEndpoints) ? entry.eventEndpoints : [],
+        eventContracts: Array.isArray(entry.eventContracts) ? entry.eventContracts : [],
+        products: Array.isArray(entry.products) ? entry.products : [],
+        lineage: Array.isArray(entry.lineage) ? entry.lineage : [],
+        pathIo: Array.isArray(entry.pathIo) ? entry.pathIo : [],
+        catalogs: Array.isArray(entry.catalogs) ? entry.catalogs : [],
+        dbt: isDbt(entry.dbt) ? entry.dbt : { projects: [], references: [], columns: [] },
       };
     }
     return { version: WORKSPACE_CACHE_VERSION, entries };
@@ -175,6 +234,16 @@ function isCoordinate(value: unknown): value is PublishedCoordinate {
     typeof (value as PublishedCoordinate).ecosystem === 'string' &&
     typeof (value as PublishedCoordinate).name === 'string' &&
     typeof (value as PublishedCoordinate).source === 'string'
+  );
+}
+
+function isDbt(value: unknown): value is CachedRepoFacts['dbt'] {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as CachedRepoFacts['dbt']).projects) &&
+    Array.isArray((value as CachedRepoFacts['dbt']).references) &&
+    Array.isArray((value as CachedRepoFacts['dbt']).columns)
   );
 }
 

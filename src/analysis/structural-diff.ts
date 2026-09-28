@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -425,30 +426,106 @@ function revisionExclusion(file: string): Exclusion | null {
   return classifyExclusion(file);
 }
 
-/** Read a revision's files through `git show`, bounded and skipping minified blobs. */
+async function readRevisionContentsBatch(
+  root: string,
+  commit: string,
+  files: readonly string[],
+): Promise<Map<string, string>> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['cat-file', '--batch'], {
+      cwd: root,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
+    child.on('error', reject);
+    child.stderr.on('data', () => {});
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`git cat-file --batch exited with code ${code}`));
+        return;
+      }
+      try {
+        const fullBuffer = Buffer.concat(chunks);
+        const result = new Map<string, string>();
+        let offset = 0;
+        let fileIndex = 0;
+
+        while (offset < fullBuffer.length && fileIndex < files.length) {
+          const newlineIndex = fullBuffer.indexOf(10, offset);
+          if (newlineIndex === -1) {
+            break;
+          }
+          const header = fullBuffer.subarray(offset, newlineIndex).toString('utf8');
+          offset = newlineIndex + 1;
+
+          if (header.endsWith(' missing')) {
+            fileIndex += 1;
+            continue;
+          }
+
+          const parts = header.split(' ');
+          const type = parts[1];
+          const size = Number.parseInt(parts[2] ?? '0', 10);
+          const currentFile = files[fileIndex];
+          fileIndex += 1;
+
+          if (type === 'blob' && Number.isFinite(size)) {
+            const blobBytes = fullBuffer.subarray(offset, offset + size);
+            const content = blobBytes.toString('utf8');
+            if (currentFile && !looksMinified(content)) {
+              result.set(currentFile, content);
+            }
+            offset += size + 1;
+          } else {
+            offset += size + 1;
+          }
+        }
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    const stdinContent = files.map((file) => `${commit}:${file}\n`).join('');
+    child.stdin.end(stdinContent, 'utf8');
+  });
+}
+
+/** Read a revision's files using batch git cat-file, falling back to git show. */
 async function readRevisionContents(
   root: string,
   commit: string,
   files: readonly string[],
 ): Promise<Map<string, string>> {
-  const contentByFile = new Map<string, string>();
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < files.length) {
-      const file = files[cursor];
-      cursor += 1;
-      if (file === undefined) return;
-      const content = await contentAtRevision(root, commit, file);
-      if (content === null || looksMinified(content)) continue;
-      contentByFile.set(file, content);
-    }
-  };
-  const workers = Array.from(
-    { length: Math.min(REVISION_READ_CONCURRENCY, files.length) },
-    () => worker(),
-  );
-  await Promise.all(workers);
-  return contentByFile;
+  if (files.length === 0) {
+    return new Map();
+  }
+  try {
+    return await readRevisionContentsBatch(root, commit, files);
+  } catch {
+    const contentByFile = new Map<string, string>();
+    let cursor = 0;
+    const worker = async (): Promise<void> => {
+      while (cursor < files.length) {
+        const file = files[cursor];
+        cursor += 1;
+        if (file === undefined) return;
+        const content = await contentAtRevision(root, commit, file);
+        if (content === null || looksMinified(content)) continue;
+        contentByFile.set(file, content);
+      }
+    };
+    const workers = Array.from(
+      { length: Math.min(REVISION_READ_CONCURRENCY, files.length) },
+      () => worker(),
+    );
+    await Promise.all(workers);
+    return contentByFile;
+  }
 }
 
 /**

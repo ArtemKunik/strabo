@@ -1,3 +1,4 @@
+import type { ProductLevel } from './data/product-level.ts';
 import type { Periphery, SystemUnitEcosystem } from './units.ts';
 
 /** A unit as the System view draws it, with the evidence for its grouping. */
@@ -60,6 +61,8 @@ export interface SystemReport {
   layers: SystemLayer[];
   communities: SystemCommunity[];
   periphery: SystemPeriphery[];
+  /** Declared data products as a level above the units (J11); empty when none was computed. */
+  products: ProductLevel;
   summary: {
     units: number;
     edges: number;

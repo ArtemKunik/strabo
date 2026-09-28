@@ -13,19 +13,20 @@ import { UNDER_COVERED_THRESHOLD } from '../../analysis/file-coverage.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
 import { coverageProvenance } from '../../analysis/measured-coverage.ts';
+import { refreshCoverage } from '../../analysis/coverage-refresh.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { assertReadable } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
-import { parsePositiveInt, sendError } from '../http.ts';
+import { isSameOriginRequest, parsePositiveInt, sendError } from '../http.ts';
 import type { AnalysisContext } from './analysis-context.ts';
 
 /** Coverage, file-health, function, and quality endpoints. */
 export function createQualityRouter(context: AnalysisContext): Router {
   const router = Router();
-  const { resolve, measuredCoverage } = context;
+  const { config, resolve, measuredCoverage } = context;
 
   router.get('/analysis/test-reach', async (request, response) => {
     try {
@@ -130,6 +131,62 @@ export function createQualityRouter(context: AnalysisContext): Router {
         return;
       }
       response.json(report);
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Produce a coverage report by running the repository's own conventional coverage script
+   * (`test:coverage`, `coverage`, …) and read it back, returning the project report. This is
+   * the one analysis that executes repository code, so it is opt-in and same-origin only: with
+   * `allowCoverageRefresh` off the route refuses, and the GET routes still name the detected
+   * command for the operator to run by hand.
+   */
+  router.post('/analysis/coverage/refresh', async (request, response) => {
+    try {
+      if (!config.allowCoverageRefresh) {
+        response.status(403).json({
+          error:
+            'coverage refresh is off; set STRABO_ALLOW_COVERAGE_REFRESH=1 to let the server run the repository script',
+        });
+        return;
+      }
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: "coverage refresh is only accepted from this server's own origin" });
+        return;
+      }
+      const repository = resolve(request);
+      const result = await refreshCoverage(repository.root);
+      const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      // A suite that exits non-zero still usually writes the report. Read it back regardless;
+      // only refuse when the command produced nothing to read.
+      if (!result.ok && !measured.available) {
+        const notFound = result.reason === 'no-script' || result.reason === 'no-manifest';
+        response.status(notFound ? 409 : 500).json({
+          error: result.detail ?? 'the coverage command did not succeed',
+          command: result.command,
+          exitCode: result.exitCode,
+          output: result.output,
+        });
+        return;
+      }
+      response.json({
+        ...projectCoverageReport(
+          cached.report.graph,
+          measured,
+          coverageThreshold(request.query.threshold),
+        ),
+        refresh: {
+          ok: result.ok,
+          command: result.command,
+          output: result.output,
+          ...(result.ok
+            ? {}
+            : { reason: result.reason, detail: result.detail ?? 'the coverage command did not succeed' }),
+        },
+      });
     } catch (error) {
       sendError(response, error);
     }

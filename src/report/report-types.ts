@@ -6,7 +6,7 @@ import type { ReviewStatus } from '../analysis/review-types.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
 import type { SmellsReport } from '../analysis/quality.ts';
-import type { Graph, RiskReport } from '../types.ts';
+import type { DataReport, Graph, RiskReport } from '../types.ts';
 
 /**
  * The report contract, kept apart from the builder so `suggestions.ts` can name a pain point
@@ -33,8 +33,32 @@ export interface RepositoryReportDocument {
   change: RepositoryChangeSection | null;
   /** Architecture drift over recent revisions (Phase 31 O3); null when not computed. */
   drift: DriftReport | null;
+  /** The data layer, contract, and product facts (Phase 33 J10); null when not computed. */
+  data: RepositoryDataSection | null;
   suggestions: Suggestion[];
   evidence: ReportEvidence;
+}
+
+/**
+ * The data-layer part of the repository report: the recorded datasets, contracts, and
+ * products with the conformance gaps between a declared port and what the code records.
+ * Present only when the caller computed the data layer.
+ */
+export interface RepositoryDataSection {
+  datasets: number;
+  edges: number;
+  products: DataReport['products'];
+  contracts: DataReport['contracts'];
+  candidates: DataReport['candidates'];
+  conformance: DataReport['conformance'];
+  classifications: DataReport['classifications'];
+  events: number;
+  /** Coverage of the data layer, stated so an empty section is never read as "no data". */
+  gaps: {
+    noSingleWriter: number;
+    contractlessPort: number;
+    unconformant: number;
+  };
 }
 
 export interface ReportRevision {
@@ -156,6 +180,8 @@ export interface RepositoryReportInputs {
   drift?: DriftReport;
   /** The repository's measured coverage report; absent or unavailable means reachability. */
   coverage?: MeasuredCoverageSummary | null;
+  /** The computed data layer (Phase 33 J10); absent means the section was not computed. */
+  data?: DataReport;
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }

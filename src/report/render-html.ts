@@ -1,6 +1,7 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryDataSection,
   RepositoryReportDocument,
   Severity,
 } from './report-types.ts';
@@ -23,6 +24,7 @@ export function renderReportHtml(document: RepositoryReportDocument): string {
   body.push(painPointSection(document.painPoints));
   body.push(changeSection(document.change));
   body.push(driftSection(document.drift));
+  body.push(dataSection(document.data));
   body.push(suggestionSection(document));
   body.push(evidenceSection(document));
 
@@ -188,6 +190,59 @@ function driftSection(drift: RepositoryReportDocument['drift']): string {
     parts.push(`<li>${escapeHtml(series.label)}: ${escapeHtml(values)}</li>`);
   }
   parts.push('</ul>');
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+function dataSection(data: RepositoryDataSection | null): string {
+  const parts: string[] = ['<section>', '<h2>Data layer</h2>'];
+  if (!data) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  parts.push(
+    `<p>${data.datasets} datasets · ${data.edges} read/write edges · ${data.products.length} data products · ${data.contracts.length} contracts · ${data.events} topics/queues</p>`,
+  );
+  parts.push(
+    `<p>Gaps: ${data.gaps.noSingleWriter} dataset(s) without a single writer · ${data.gaps.contractlessPort} shared dataset(s) without a contract · ${data.gaps.unconformant} conformance finding(s)</p>`,
+  );
+  parts.push(
+    sublist(
+      `Data products (${data.products.length})`,
+      data.products.map((product) => {
+        const ports = `${product.inputPorts.length} in, ${product.outputPorts.length} out`;
+        return `<code>${escapeHtml(product.name)}</code> - ${escapeHtml(product.format)}, ${ports}${product.owner ? `, owned by ${escapeHtml(product.owner)}` : ''}`;
+      }),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Conformance findings (${data.conformance.length})`,
+      data.conformance.map(
+        (finding) =>
+          `<code>${escapeHtml(finding.contract)}</code> - ${escapeHtml(finding.kind)} field <code>${escapeHtml(finding.field)}</code>${finding.dataset ? ` on <code>${escapeHtml(finding.dataset)}</code>` : ''}: ${escapeHtml(finding.detail)}`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Product candidates (${data.candidates.length})`,
+      data.candidates.map(
+        (candidate) =>
+          `<code>${escapeHtml(candidate.dataset)}</code> - ${escapeHtml(candidate.kind)} (${candidate.writers.length} writer(s), ${candidate.readers.length} reader(s)): ${escapeHtml(candidate.detail)}`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Classifications (${data.classifications.length})`,
+      data.classifications.map(
+        (tag) =>
+          `<code>${escapeHtml(tag.dataset)}</code>${tag.field ? `.${escapeHtml(tag.field)}` : ''} - ${escapeHtml(tag.tag)} (${escapeHtml(tag.source)})`,
+      ),
+    ),
+  );
   parts.push('</section>');
   return parts.join('\n');
 }

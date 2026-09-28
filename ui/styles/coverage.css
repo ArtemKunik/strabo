@@ -26,6 +26,18 @@
   font-weight: 600;
 }
 
+.coverage-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin: 4px 0 8px;
+}
+
+.coverage-refresh .unavailable {
+  margin: 0;
+}
+
 .coverage-totals {
   margin: 6px 0 10px;
 }

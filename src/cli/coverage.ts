@@ -9,6 +9,7 @@ import {
   formatAge,
   type MeasuredCoverageSummary,
 } from '../analysis/measured-coverage.ts';
+import { refreshCoverage } from '../analysis/coverage-refresh.ts';
 import {
   fileCoverageReport,
   folderCoverageReport,
@@ -62,11 +63,29 @@ export async function runCoverageCommand(
   });
   const cached = await getCachedGraph(repository.root);
   const graph = cached.report.graph;
-  const measured = await computeMeasuredCoverage(repository.root, graph, {
+  const coverageOptions = {
     ceiling: env.scanCeiling,
     ...(env.coverageReports ? { reportPaths: env.coverageReports } : {}),
     ...(file ? { files: [file] } : {}),
-  });
+  };
+  let measured = await computeMeasuredCoverage(repository.root, graph, coverageOptions);
+
+  // An explicit `--refresh` runs the repository's own coverage script first, then re-reads.
+  // The CLI is the operator's own terminal, so this is not gated the way the server route is.
+  if (hasFlag(argv, 'refresh')) {
+    const result = await refreshCoverage(repository.root);
+    if (result.ok) {
+      writeError(`strabo coverage: ran ${result.command}\n`);
+    } else {
+      writeError(`strabo coverage: ${result.detail ?? 'the coverage command did not succeed'}\n`);
+    }
+    // A suite that fails still usually writes the report, so read it back regardless and only
+    // fail when the command produced nothing to read.
+    measured = await computeMeasuredCoverage(repository.root, graph, coverageOptions);
+    if (!result.ok && !measured.available) {
+      return result.reason === 'no-script' || result.reason === 'no-manifest' ? 2 : 1;
+    }
+  }
 
   let report: CoverageReport | null;
   if (file) {
@@ -196,4 +215,9 @@ function flagValue(argv: readonly string[], name: string): string | undefined {
 function numberFlag(argv: readonly string[], name: string): number | undefined {
   const parsed = Number.parseFloat(flagValue(argv, name) ?? '');
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+/** A bare `--name` switch, or an `--name=value` form. */
+function hasFlag(argv: readonly string[], name: string): boolean {
+  return argv.some((arg) => arg === `--${name}` || arg.startsWith(`--${name}=`));
 }

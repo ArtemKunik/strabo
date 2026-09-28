@@ -15,6 +15,8 @@ import { renderReportHtml } from '../../report/render-html.ts';
 import { renderReportMarkdown } from '../../report/render-markdown.ts';
 import { parseDeniedLicenses } from '../../risk/licenses.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { analyzeRepository } from '../../workspace/analyze.ts';
+import { readWorkspaceConfig } from '../../workspace/config.ts';
 import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 import { graphProvenance, type AnalysisContext } from './analysis-context.ts';
 
@@ -133,6 +135,7 @@ export function createStructureRouter(context: AnalysisContext): Router {
           stale: provenance.stale,
         },
         change: includeChange,
+        qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
         risk: { online: config.risk?.online === true, deniedLicenses: denied },
         coverage: {
           ...(config.coverageReports ? { reportPaths: config.coverageReports } : {}),
@@ -162,7 +165,10 @@ export function createStructureRouter(context: AnalysisContext): Router {
     try {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
-      response.json(buildSystemReport(repository.root, repository.name, cached.report.graph));
+      const data = await analyzeRepository(repository.name, repository.root, {
+        qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
+      });
+      response.json(buildSystemReport(repository.root, repository.name, cached.report.graph, data));
     } catch (error) {
       sendError(response, error);
     }

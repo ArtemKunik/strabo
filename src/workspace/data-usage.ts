@@ -344,6 +344,20 @@ function ormEvidence(label: string, access: DataAccess): string {
   return access === 'write' ? `${label}; write method in scope` : label;
 }
 
+/**
+ * The name declared by the class/record/struct header that opens the body at `open`.
+ * Only a declaration in the text between the annotation and its body is taken, so an
+ * unrelated earlier type is never borrowed.
+ */
+function declaredNameBefore(content: string, from: number, to: number): string | undefined {
+  const between = content.slice(from, to);
+  let name: string | undefined;
+  for (const match of between.matchAll(/\b(?:class|record|struct|object|interface)\s+([A-Za-z_]\w*)/g)) {
+    name = match[1];
+  }
+  return name;
+}
+
 function jpaUses(file: string, content: string): RawDataUse[] {
   const uses: RawDataUse[] = [];
   for (const match of content.matchAll(/@Table\s*\(\s*(?:name\s*=\s*)?"([^"]+)"/g)) {
@@ -351,7 +365,9 @@ function jpaUses(file: string, content: string): RawDataUse[] {
     if (!table) {
       continue;
     }
-    const body = braceBody(content, (match.index ?? 0) + match[0].length);
+    const annotationEnd = (match.index ?? 0) + match[0].length;
+    const body = braceBody(content, annotationEnd);
+    const entity = body ? declaredNameBefore(content, annotationEnd, body.start - 1) : undefined;
     const columns = body
       ? [...body.text.matchAll(/@Column\s*\([^)]*?\bname\s*=\s*"([^"]+)"/g)].map((column) => (column[1] ?? '').toLowerCase())
       : [];
@@ -365,6 +381,7 @@ function jpaUses(file: string, content: string): RawDataUse[] {
       evidence: ormEvidence('ORM annotation (@Table)', access),
       confidence: 'strong',
       access,
+      ...(entity ? { entity } : {}),
     });
   }
   return uses;
@@ -378,7 +395,9 @@ function typeOrmUses(file: string, content: string): RawDataUse[] {
     if (!table) {
       continue;
     }
-    const body = braceBody(content, (match.index ?? 0) + match[0].length);
+    const annotationEnd = (match.index ?? 0) + match[0].length;
+    const body = braceBody(content, annotationEnd);
+    const entity = body ? declaredNameBefore(content, annotationEnd, body.start - 1) : undefined;
     const columns: string[] = [];
     if (body) {
       const column = /@(?:Primary(?:Generated)?Column|Column)\s*\(([^)]*)\)\s*(?:(?:public|private|protected|readonly)\s+)*([A-Za-z_$][\w$]*)/g;
@@ -396,6 +415,7 @@ function typeOrmUses(file: string, content: string): RawDataUse[] {
       evidence: ormEvidence('ORM annotation (@Entity)', access),
       confidence: 'strong',
       access,
+      ...(entity ? { entity } : {}),
     });
   }
   return uses;
@@ -425,6 +445,7 @@ function prismaUses(file: string, content: string): RawDataUse[] {
       evidence: `ORM method (Prisma ${method})`,
       confidence: 'strong',
       access: ormMethodAccess('javascript', method),
+      entity: match[1] ?? undefined,
     });
   }
   return uses;
@@ -457,6 +478,7 @@ function sqlAlchemyUses(file: string, content: string): RawDataUse[] {
       }
     }
     const access = ormScopeAccess('python', lines.slice(start, end).join('\n'));
+    const entity = declaredNameBefore(content, 0, (content.split(/\r?\n/).slice(0, index).join('\n')).length);
     uses.push({
       file,
       line: index + 1,
@@ -465,6 +487,7 @@ function sqlAlchemyUses(file: string, content: string): RawDataUse[] {
       evidence: ormEvidence('ORM declaration (__tablename__)', access),
       confidence: 'strong',
       access,
+      ...(entity ? { entity } : {}),
     });
   }
   return uses;
@@ -498,7 +521,9 @@ function rustUses(file: string, content: string): RawDataUse[] {
     if (!table) {
       continue;
     }
-    const body = braceBody(content, (match.index ?? 0) + match[0].length);
+    const annotationEnd = (match.index ?? 0) + match[0].length;
+    const body = braceBody(content, annotationEnd);
+    const entity = body ? declaredNameBefore(content, annotationEnd, body.start - 1) : undefined;
     const columns = body
       ? [...body.text.matchAll(/\bpub\s+([a-z_]\w*)\s*:/g)].map((column) => (column[1] ?? '').toLowerCase())
       : [];
@@ -511,6 +536,7 @@ function rustUses(file: string, content: string): RawDataUse[] {
       evidence: ormEvidence('ORM macro (sea_orm)', access),
       confidence: 'strong',
       access,
+      ...(entity ? { entity } : {}),
     });
   }
   return uses;

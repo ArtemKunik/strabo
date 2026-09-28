@@ -308,6 +308,21 @@ export function createFloatingPanels(app) {
         },
         onClose: () => app.coverage.closeCoverage(),
       },
+      {
+        key: 'products',
+        element: elements.productsPanel,
+        title: 'Data products',
+        dockLabel: 'Data',
+        glyph: '◈',
+        width: 620,
+        height: 640,
+        onOpen: () => {
+          app.products.showProducts().catch((error) => {
+            elements.status.textContent = `Error: ${error.message}`;
+          });
+        },
+        onClose: () => app.products.closeProducts(),
+      },
     ],
   });
 

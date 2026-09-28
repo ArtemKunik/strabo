@@ -431,6 +431,43 @@ function readName(cursor: Cursor): string | null {
   return schemaAndName.join('.');
 }
 
+/** Words that can follow FROM/JOIN but never name a table in that position. */
+const NOT_TABLE_WORDS = new Set(['select', 'where', 'values', 'set', 'lateral', 'only', 'unnest', 'generate_series', 'dual']);
+
+/**
+ * The tables a view query reads, from its `FROM` and `JOIN` clauses. CTE names are excluded
+ * (they are query-local), and a subquery or a function call names nothing rather than a guess.
+ * Pure over the statement's tokens, so it is exercised without a database.
+ */
+export function viewDependenciesFrom(tokens: Token[]): string[] {
+  const cursor = new Cursor(tokens, '');
+  const ctes = new Set<string>();
+  for (let index = 0; index + 2 < tokens.length; index += 1) {
+    const head = tokens[index];
+    const name = tokens[index + 1];
+    const as = tokens[index + 2];
+    if (head && name && as && (head.upper === 'WITH' || head.text === ',') && name.kind !== 'punct' && as.upper === 'AS') {
+      ctes.add(name.text.toLowerCase());
+    }
+  }
+  const dependencies = new Set<string>();
+  while (!cursor.done) {
+    const token = cursor.peek();
+    if (token && (token.upper === 'FROM' || token.upper === 'JOIN')) {
+      cursor.next();
+      cursor.eatWords('ONLY');
+      cursor.eatWords('LATERAL');
+      const name = readName(cursor);
+      if (name && !ctes.has(name) && !NOT_TABLE_WORDS.has(name)) {
+        dependencies.add(name);
+      }
+      continue;
+    }
+    cursor.next();
+  }
+  return [...dependencies].sort();
+}
+
 // ---------------------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------------------
@@ -650,11 +687,51 @@ class SchemaBuilder {
     if (cursor.isWords('TEMP') || cursor.isWords('TEMPORARY')) {
       return; // Session-local tables are not part of the schema.
     }
-    if (cursor.eatWords('TABLE')) {
+    const materialized = cursor.eatWords('MATERIALIZED');
+    if (cursor.eatWords('VIEW')) {
+      this.createView(cursor, statement, materialized ? 'materialized-view' : 'view');
+    } else if (cursor.eatWords('TABLE')) {
       this.createTable(cursor, statement);
     } else if (cursor.eatWords('INDEX')) {
       this.createIndex(cursor, statement, unique);
     }
+  }
+
+  /**
+   * A view or materialized view is a dataset in its own right. Its columns are recorded from
+   * an explicit column list; its `FROM`/`JOIN` tables become `viewDependencies`, so a view
+   * `derives` from them. A view with no readable query is a gap, never a guessed shape.
+   */
+  private createView(cursor: Cursor, statement: Statement, kind: 'view' | 'materialized-view'): void {
+    cursor.eatWords('IF', 'NOT', 'EXISTS');
+    const name = readName(cursor);
+    if (!name) {
+      return;
+    }
+    const table: SchemaTable = {
+      name,
+      kind,
+      columns: [],
+      constraints: [],
+      indexes: [],
+      declared: this.location(statement.line),
+    };
+    const explicit = readGroup(cursor);
+    if (explicit) {
+      for (const item of splitTopLevel(explicit)) {
+        const only = item[0];
+        if (item.length === 1 && only && (only.kind === 'word' || only.kind === 'id')) {
+          table.columns.push({ name: only.text.toLowerCase(), type: 'unknown', nullable: true, declared: this.location(statement.line) });
+        }
+      }
+    }
+    if (!cursor.eatWords('AS')) {
+      this.byName.set(name, table);
+      this.gap(statement, 'the view query could not be read');
+      return;
+    }
+    table.viewDependencies = viewDependenciesFrom(cursor.tokens.slice(cursor.pos));
+    this.byName.set(name, table);
   }
 
   private createTable(cursor: Cursor, statement: Statement): void {

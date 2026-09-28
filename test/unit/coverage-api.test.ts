@@ -82,3 +82,47 @@ test('the file coverage route returns the figure, its tests, and its importers',
   const unknown = await dispatch('GET', '/analysis/coverage/file?file=src%2Fmissing.ts');
   assert.equal(unknown.status, 404);
 });
+
+test('the project coverage report names the detected command when no report was found', async () => {
+  const dispatch = createApiDispatch(config);
+  const result = await dispatch('GET', '/analysis/coverage/project');
+  const body = result.body as {
+    provenance: { available: boolean; refresh?: { script: string; command: string; allowed: boolean } };
+  };
+  // The fixture has no package.json, so there is no command to offer; the shape stays absent.
+  assert.equal(body.provenance.available, true);
+  assert.equal(body.provenance.refresh, undefined);
+});
+
+test('the coverage refresh route is refused unless the operator opts in', async () => {
+  const dispatch = createApiDispatch(config);
+  const result = await dispatch('POST', '/analysis/coverage/refresh');
+  assert.equal(result.status, 403);
+  assert.match((result.body as { error: string }).error, /refresh is off/);
+});
+
+test('the coverage refresh route reports a repository with no coverage script or report', async () => {
+  const bareRoot = path.join(fixtures, 'sample-repo');
+  const dispatch = createApiDispatch({
+    workspaceRoot: bareRoot,
+    scanCeiling: fixtures,
+    allowCoverageRefresh: true,
+  });
+  const result = await dispatch('POST', '/analysis/coverage/refresh');
+  assert.equal(result.status, 409);
+  assert.match((result.body as { error: string }).error, /package\.json/);
+});
+
+test('the refresh route keeps an existing report when the repository has no script', async () => {
+  const dispatch = createApiDispatch({ ...config, allowCoverageRefresh: true });
+  const result = await dispatch('POST', '/analysis/coverage/refresh');
+  assert.equal(result.status, 200);
+  const body = result.body as {
+    provenance: { available: boolean; basis: string };
+    refresh: { ok: boolean; reason?: string };
+  };
+  assert.equal(body.provenance.available, true);
+  assert.equal(body.provenance.basis, 'measured');
+  assert.equal(body.refresh.ok, false);
+  assert.equal(body.refresh.reason, 'no-manifest');
+});

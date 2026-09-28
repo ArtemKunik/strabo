@@ -84,14 +84,18 @@ export async function extractSqlFacts(file: string, content: string): Promise<Sq
       return { facts, diagnostics };
     }
 
-    collect(tree.rootNode, new Set(), facts);
-    facts.references = dedupeByName(facts.references);
+    try {
+      collect(tree.rootNode, new Set(), facts);
+      facts.references = dedupeByName(facts.references);
 
-    if (tree.rootNode.hasError) {
-      diagnostics.push(syntaxWarning(file));
+      if (tree.rootNode.hasError) {
+        diagnostics.push(syntaxWarning(file));
+      }
+
+      return { facts, diagnostics };
+    } finally {
+      tree.delete();
     }
-
-    return { facts, diagnostics };
   });
 }
 
@@ -312,7 +316,8 @@ export async function extractSqlSymbols(file: string, content: string): Promise<
       return { symbols, diagnostics };
     }
 
-    const declared = new Set<string>();
+    try {
+      const declared = new Set<string>();
     const columns = new Set<string>();
 
     const addColumn = (owner: string, definition: Node): void => {
@@ -382,6 +387,9 @@ export async function extractSqlSymbols(file: string, content: string): Promise<
     }
 
     return { symbols: sortSymbols(symbols), diagnostics };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

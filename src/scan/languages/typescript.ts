@@ -85,7 +85,8 @@ export async function extractTypeScriptSymbols(
       return { symbols, diagnostics };
     }
 
-    const moduleOwner = moduleName(file);
+    try {
+      const moduleOwner = moduleName(file);
     const ownerFor = (owner: string): string => owner || moduleOwner;
 
     const pushSymbol = (symbol: CodeSymbol): boolean => {
@@ -374,7 +375,10 @@ export async function extractTypeScriptSymbols(
     markRecursive(symbols, calls);
     markEntries(symbols, content);
 
-    return { symbols: sortSymbols(symbols), diagnostics, accesses, calls, reExports };
+      return { symbols: sortSymbols(symbols), diagnostics, accesses, calls, reExports };
+    } finally {
+      tree.delete();
+    }
   });
 }
 

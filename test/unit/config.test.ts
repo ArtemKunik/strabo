@@ -45,6 +45,12 @@ test('readEnv enables widening only from the environment or a CLI flag, never a 
   assert.equal(readEnv({}, ['--allow-ceiling-widening']).allowCeilingWidening, true);
 });
 
+test('readEnv permits coverage refresh only from the environment or a CLI flag', () => {
+  assert.equal(readEnv({}).allowCoverageRefresh, false);
+  assert.equal(readEnv({ STRABO_ALLOW_COVERAGE_REFRESH: '1' }).allowCoverageRefresh, true);
+  assert.equal(readEnv({}, ['--allow-coverage-refresh']).allowCoverageRefresh, true);
+});
+
 test('readEnv ignores the host arguments unless they are passed in', () => {
   const env = readEnv({ STRABO_ROOT: 'from-env' });
 

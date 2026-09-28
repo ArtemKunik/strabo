@@ -247,6 +247,21 @@ export type {
   ParsedFileCoverage,
 } from './analysis/measured-coverage.ts';
 export {
+  detectCoverageCommand,
+  refreshCoverage,
+  runCoverageScript,
+  clearCoverageCommandCache,
+  COVERAGE_SCRIPT_NAMES,
+} from './analysis/coverage-refresh.ts';
+export type {
+  CoverageRunner,
+  CoverageCommand,
+  CoverageRefreshHint,
+  CoverageRefreshResult,
+  CoverageRefreshReason,
+  CoverageRefreshOptions,
+} from './analysis/coverage-refresh.ts';
+export {
   diffGraphs,
   structuralContext,
   computeStructuralDiff,
@@ -402,6 +417,50 @@ export type { SqlSource } from './workspace/schema.ts';
 export { extractDataUses, extractDataUsesFromSource } from './workspace/data-usage.ts';
 export type { RawDataUse } from './workspace/data-usage.ts';
 export { computeSchemaUsage, computeSchemaDrift } from './workspace/schema-usage.ts';
+export { buildDataReport } from './analysis/data/report.ts';
+export { buildProductLevel, buildDataOverlay, emptyProductLevel } from './analysis/data/product-level.ts';
+export type {
+  DataOverlay,
+  DataOverlayFile,
+  ProductLevel,
+  ProductLevelNode,
+  ProductLevelPort,
+  ProductLevelEdge,
+  ProductUnit,
+} from './analysis/data/product-level.ts';
+export type { DataReportInput, DataRepository } from './analysis/data/report.ts';
+export { buildModel, buildEntities, buildTableDatasets, tableDatasetId, tableColumns } from './analysis/data/model.ts';
+export {
+  identifyContract,
+  identifyContracts,
+  qualifiedIdOf,
+  shapeFingerprint,
+  shapeTwins,
+  bareNameOf,
+} from './analysis/data/identity.ts';
+export { buildEvents, eventContractId, topicDatasetId } from './analysis/data/events.ts';
+export { buildCandidates } from './analysis/data/candidates.ts';
+export type { CandidateInput } from './analysis/data/candidates.ts';
+export { buildConformance, portSchema } from './analysis/data/conformance.ts';
+export type { ConformanceInput } from './analysis/data/conformance.ts';
+export { computeDataImpact } from './analysis/data/impact.ts';
+export type { DataImpactFinding, DataImpactInput } from './analysis/data/impact.ts';
+export { propagateClassification } from './analysis/data/classification.ts';
+export type { ClassificationInput } from './analysis/data/classification.ts';
+export { readCodeowners } from './analysis/data/codeowners.ts';
+export type { Codeowners } from './analysis/data/codeowners.ts';
+export { extractEventEndpoints, extractEventContracts } from './workspace/events.ts';
+export type { RegistrySubject } from './workspace/events.ts';
+export { extractDeclaredProducts } from './workspace/products.ts';
+export { extractSqlLineage, extractPathIo } from './workspace/lineage.ts';
+export type { RawLineage, RawPathIo, LineageColumn } from './workspace/lineage.ts';
+export { extractDbt } from './workspace/dbt.ts';
+export type { DbtExtraction, DbtModelColumn, DbtModelReference } from './workspace/dbt.ts';
+export { extractCatalogDeclarations } from './workspace/catalog.ts';
+export { buildOpenLineage } from './export/openlineage.ts';
+export type { OpenLineageExport, OpenLineageOptions } from './export/openlineage.ts';
+export { createDataRouter } from './api/routes/data.ts';
+export type { DataRouterOptions } from './api/routes/data.ts';
 export {
   analyzeCompat,
   analyzeWorkspaceCompat,
