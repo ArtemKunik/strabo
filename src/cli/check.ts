@@ -4,6 +4,7 @@ import {
   buildBaseline,
   parseDeclaredRuleIds,
   parseFailOnRules,
+  parseUncoveredChangeThreshold,
   runCheck,
   type CheckOptions,
 } from '../check/check.ts';
@@ -33,6 +34,12 @@ export async function runCheckCommand(
   if (hasFlag(argv, 'fail-on-health-regression')) {
     rules.push('health-regression');
   }
+  if (hasFlag(argv, 'fail-on-coverage-stale')) {
+    rules.push('coverage-stale');
+  }
+  if (hasFlag(argv, 'fail-on-uncovered-change')) {
+    rules.push('uncovered-change');
+  }
   for (const rule of parseFailOnRules(collectFailOnValues(argv))) {
     if (!rules.includes(rule)) {
       rules.push(rule);
@@ -54,6 +61,9 @@ export async function runCheckCommand(
       numberFlag(argv, 'fail-on-health-regression') ??
       numberFlag(argv, 'health-regression-pct') ??
       0,
+    uncoveredChangeThreshold:
+      numberFlag(argv, 'fail-on-uncovered-change') ??
+      parseUncoveredChangeThreshold(collectFailOnValues(argv)),
   };
 
   const baselineFile = flagValue(argv, 'baseline');

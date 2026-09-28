@@ -45,7 +45,7 @@ record is reported as `unavailable`, never invented.
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
 | 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
-| 35 | Application logical structure from the tier lens | In progress (Y0-Y2 done: structure fixture + @wip scenario, tierFlow aggregate, shelf and mixed counts; Y3-Y9 planned: L0 tier bands, unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
+| 35 | Application logical structure from the tier lens | In progress (Y0-Y3 done: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 Structure lens; Y4-Y9 planned: unit×layer grid, drill-down, end-to-end spine, intended-vs-observed, agent and report surface, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2164,16 +2164,22 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   coverage aggregate and `notInReport`, and keep labelled reachability as the fallback when no
   report exists. Coverage is
   `test/unit/{file-coverage,tiers,impact-passport,change-passport}.test.ts`.
-- **U3 - Honest reachability.** Test reach records its depth: `direct` (a test imports the file)
-  or `transitive, n hops`, with the shortest path. The overlay and the passport split the two, and
-  "reached only through n or more hops" is its own bucket. "Tests to run" is ordered direct
-  first.
-- **U4 - Changed-line coverage in review.** The changed lines of a pending change or a branch
+- **U3 - Honest reachability (done).** Test reach records its depth: `direct` (a test imports
+  the file) or `transitive, n hops`, with the shortest path via `computeDetailedTestReachByFile`
+  (`src/analysis/coverage.ts`). `computeTestReachByFile` orders direct tests first, then shortest
+  path length, then alphabetical. `FileCoverage` (`src/analysis/file-coverage.ts`), `CoverageFileEntry`
+  (`src/analysis/coverage-report.ts`), and `PassportUntested` (`src/analysis/passport.ts`) carry
+  `reachDepth`, `reachDirect`, and `reachPath`, splitting direct from transitive test reach.
+  Coverage in `test/unit/analysis.test.ts`.
+- **U4 - Changed-line coverage in review (done).** The changed lines of a pending change or a branch
   (Phase 17 Q3, Phase 23) are intersected with the report's covered lines, giving for example
-  *28 of 40 changed lines covered; `parseRow` changed and uncovered*. A changed public-surface
-  function (Phase 17 Q4) that is uncovered is listed first. When the report is older than the
-  change, it answers "report predates the change" instead of a figure. The result goes into the
-  Change impact passport card, agent-change review (Phase 29), and the report.
+  *28 of 40 changed lines covered; `parseRow` changed and uncovered*. Exact line hit numbers are
+  preserved across LCOV, Cobertura, and JaCoCo parsers (`coveredLines: number[]` in
+  `src/analysis/measured-coverage.ts`). `computeChangedLineCoverage` and `summariseChangedCoverage`
+  (`src/analysis/changed-coverage.ts`) rank uncovered public-surface functions first, and answer
+  "report predates the change" when the report mtime is older than the change base commit. Integrated
+  into `FileImpactPassport` (`src/analysis/impact-passport.ts`) and `ChangePassport`
+  (`src/analysis/change-passport.ts`). Coverage in `test/unit/changed-coverage.test.ts`.
 - **U5 - Risk from coverage.** A **risky and untested** list ranks functions by complexity
   (Phase 14) × churn (Phase 17 Q5) × uncovered share, and shows each input beside the rank, never
   a composite score alone. It feeds the hotspots overlay and the passport.
@@ -2181,13 +2187,15 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   per-test `TN:` blocks in LCOV record which test executed which lines. When a report carries
   them, the Functions tab and the impact passport name the covering tests. Without them, the
   answer is the U3 reachability list, labelled as such.
-- **U7 - Agent and gate surface.**
+- **U7 - Agent and gate surface (done).**
   - MCP `get_coverage` (per file or function, with basis and age) and `get_uncovered_changes`.
   - `strabo check --fail-on=uncovered-change[:<percent>]` and `--fail-on=coverage-stale`.
-  - A **Coverage** section in the repository report.
-  - When no report is found, the panel names the locations it checked and the command that
-    produces a report for each detected ecosystem (Node test runner, c8 or nyc, pytest-cov,
-    JaCoCo, `cargo llvm-cov`, coverlet), so "unavailable" comes with a next step.
+  - A **Coverage** section in the repository report (`RepositoryCoverageSection`, JSON, Markdown, HTML).
+  - When no report is found, the panel and report name the locations checked and conventional commands
+    that produce a report for each detected ecosystem (`detectCoverageEcosystems` in
+    `src/analysis/coverage-refresh.ts` for Node test runner, c8 or nyc, pytest-cov, JaCoCo,
+    `cargo llvm-cov`, coverlet), so "unavailable" comes with a next step.
+  - Coverage in `test/unit/{coverage-mcp,interop-check,repository-report}.test.ts`.
 
 Slice order: **U0** first, so every later slice can be seen on Strabo itself. **U2** comes before
 **U1**, so the overlay and the summaries share one source. **U3** is independent. **U4** and
@@ -2255,12 +2263,19 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   never disagree with the matrix. `TierMatrix.perTier` gained `mixed`, and the classifier already
   pins a mixed file to the `TIER_ORDER` winner; a clean band reads `files - mixed`. The legend
   naming of both rules lands with the Y3 lens. Coverage in `test/unit/tiers.test.ts`.
-- **Y3 - L0 tier bands.** A new **Structure** lens beside `Files` / `Directories` / `System`
-  draws the tiers as bands in rank order (frontend on top, data at the bottom), each band sized by
-  its file or LOC count, with the Y1 edges between bands styled by kind — a downward edge solid, an
-  `upward` edge red, a `skip-layer` edge dashed — reusing the Blocks styling and the Phase 13
-  colour budget. A band or pair with no recorded edge says so. Legend: *band = tier · size = files
-  · edge = recorded import, wrong-way highlighted*.
+- **Y3 - L0 tier bands.** *Done.* A **Structure** option beside `Directories` / `Files` /
+  `System` in the View popover. `GET /graph?structure=1` returns a `ViewModel` with
+  `structure: true` from `buildStructureViewModel` (`src/view/view-model.ts`): one `tier` node
+  per ranked tier, stacked in dependency order (frontend at the top, data at the bottom) and
+  sized by file count, one `shelf` node per support tier beside the stack, and the `tierFlow`
+  edges with `tierKind`/`crossUnit`/`weight`. A wrong-way edge is a red solid line (`upward`)
+  or a dashed one (`skip-layer`), reusing the tier-direction classes and the Phase 13 budget; a
+  band's `mixed` count rides on the node for its badge. The legend reads *band = tier · size =
+  files · edge = recorded import · wrong-way = red or dashed · shelf = support tiers*. Query,
+  deep-link (`mode=structure`), and per-repository prefs carry the mode; nodes get the `tier`
+  shape/size and the strip counts tiers. Served by `src/api/routes/graph.ts`; coverage in
+  `test/unit/structure.test.ts`, `test/unit/browser-core.test.ts`, and the `@structure`
+  acceptance scenarios (`test/acceptance/features/structure.feature`, `structure.steps.mjs`).
 - **Y4 - L1 unit × layer grid.** The polyglot picture: columns are build units, rows are tiers in
   rank order, each cell sized by its files/LOC, and recorded edges drawn as arcs between cell
   centres — cross-unit edges included, with their own styling, since Y1 keeps them (unlike
@@ -2279,10 +2294,12 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   architecture an operator intends. Draw intent as a ghost band/edge and the observed `tierFlow`
   solid, so a mismatch reads as a violation on the same picture; the findings stay the same
   `layer-violations` rule `strabo check` already reports (`src/check/check.ts:134`).
-- **Y8 - Agent and report surface.** MCP `get_tier_flow` (nodes, edges, kinds, intra ratio, with
-  the basis and the scan ceiling named), a **Structure** section in the repository report, and the
-  `tierFlow` counts in the existing `layer-violations` finding text. The `strabo check` rule is
-  unchanged; only its explanation gains the aggregate.
+- **Y8 - Agent and report surface (done).** MCP `get_tier_flow` (`GET /analysis/tiers/flow`,
+  returning nodes, edges, kinds, shelf, and intra-tier ratio with basis and scan ceiling), a
+  **Structure** section in the repository report (`RepositoryStructureSection`, JSON, Markdown, HTML),
+  and the `tierFlow` counts in the existing `layer-violations` finding text (`[tierFlow: N cross-tier edges, intra-ratio N%]`).
+  The `strabo check` rule is unchanged; only its explanation gains the aggregate. Coverage in
+  `test/unit/{coverage-mcp,interop-check,repository-report}.test.ts`.
 - **Y9 - Honesty and limits.** Bound the drawing by the Phase 16 file ceiling (`MAX_TIER_FILES`,
   `report.ts:26`): a band the scan did not classify is drawn as `unclassified`, not as empty, and
   the truncated count is shown. Keep the colour count inside the Phase 13 budget (the eight tier

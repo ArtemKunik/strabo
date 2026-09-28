@@ -17,6 +17,9 @@ import {
   type Graph,
   type HotspotReport,
   type OwnershipContext,
+  type MeasuredCoverageSummary,
+  type RepositoryCoverageSection,
+  type RepositoryStructureSection,
   type RepositoryReportInputs,
   type RepositoryReportDocument,
   type RiskReport,
@@ -137,6 +140,69 @@ function risk(): RiskReport {
   };
 }
 
+function coverageSummary(): MeasuredCoverageSummary {
+  return {
+    available: true,
+    basis: 'measured',
+    format: 'lcov',
+    reportPath: 'coverage/lcov.info',
+    reportModified: '2026-01-01T00:00:00.000Z',
+    reportAgeMs: 60000,
+    skipped: [],
+    outOfGraph: [],
+    files: [
+      {
+        rawPath: 'a.ts',
+        file: 'a.ts',
+        inGraph: true,
+        linesFound: 20,
+        linesHit: 17,
+        lineCoverage: 85,
+        functions: [],
+        functionsFound: 2,
+        functionsHit: 2,
+        lastCommit: '2026-01-01T00:00:00.000Z',
+        stale: false,
+      },
+    ],
+    stale: [],
+    summary: {
+      filesMeasured: 1,
+      linesFound: 20,
+      linesHit: 17,
+      lineCoverage: 85,
+    },
+  };
+}
+
+function structureReport(): RepositoryStructureSection {
+  return {
+    tierFlow: {
+      tiers: ['frontend', 'api', 'domain'],
+      edges: [
+        {
+          source: 'frontend',
+          target: 'api',
+          kind: 'down',
+          weight: 5,
+          crossUnit: 0,
+          units: ['root'],
+        },
+      ],
+      intraByTier: [{ tier: 'frontend', weight: 2 }],
+      total: 7,
+      intraRatio: 0.286,
+    },
+    shelf: [{ tier: 'tests', files: 1, lines: 10, mixed: 0 }],
+    summary: {
+      classified: 4,
+      unclassified: 1,
+      mixed: 0,
+    },
+    directions: [],
+  };
+}
+
 function inputs(overrides: Partial<RepositoryReportInputs> = {}): RepositoryReportInputs {
   return {
     repository: 'demo',
@@ -149,6 +215,7 @@ function inputs(overrides: Partial<RepositoryReportInputs> = {}): RepositoryRepo
     ownership: ownership(),
     risk: risk(),
     data: dataReport(),
+    structure: structureReport(),
     generatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
   };
@@ -396,4 +463,62 @@ test('with a measured report, the untested pain points use measured coverage (U2
   // Without a report the same graph has no untested dependency: both files are reached.
   const reachOnly = buildRepositoryReport({ repository: 'coverage', graph });
   assert.equal(reachOnly.painPoints.some((entry) => entry.kind === 'untested-reach'), false);
+});
+
+test('the coverage and structure sections are part of the report, and absent means named not empty', () => {
+  const document = buildRepositoryReport(inputs({ coverage: coverageSummary() }));
+  const cov = document.coverage;
+  assert.ok(cov);
+  assert.equal(cov.available, true);
+  assert.equal(cov.basis, 'measured');
+  assert.equal(cov.lineCoverage, 85);
+
+  const struct = document.structure;
+  assert.ok(struct);
+  assert.equal(struct.summary.classified, 4);
+  assert.equal(struct.tierFlow.tiers.length, 3);
+  assert.equal(struct.tierFlow.edges.length, 1);
+
+  const markdown = renderReportMarkdown(document);
+  assert.match(markdown, /## Code coverage/);
+  assert.match(markdown, /Line coverage: 85%/);
+  assert.match(markdown, /## Logical structure/);
+  assert.match(markdown, /`frontend` → `api`/);
+
+  const absent = buildRepositoryReport(inputs({ structure: undefined }));
+  assert.equal(absent.coverage, null);
+  assert.equal(absent.structure, null);
+  assert.ok(absent.evidence.unavailable.includes('logical structure was not computed'));
+
+  const absentMd = renderReportMarkdown(absent);
+  assert.match(absentMd, /## Code coverage\n- not included in this report/);
+  assert.match(absentMd, /## Logical structure\n- not included in this report/);
+});
+
+test('coverage section when unavailable reports checked locations and commands', () => {
+  const document = buildRepositoryReport(
+    inputs({
+      coverage: {
+        available: false,
+        basis: 'reachable',
+        format: null,
+        reportPath: null,
+        reportModified: null,
+        reportAgeMs: null,
+        reason: 'no-report-found',
+        detail: 'no coverage report was found inside the scan ceiling',
+        skipped: [],
+        outOfGraph: [],
+        files: [],
+        stale: [],
+        summary: { filesMeasured: 0, linesFound: 0, linesHit: 0, lineCoverage: null },
+      },
+    }),
+  );
+  assert.ok(document.coverage);
+  assert.equal(document.coverage.available, false);
+  assert.ok(document.coverage.checkedLocations && document.coverage.checkedLocations.length > 0);
+  const markdown = renderReportMarkdown(document);
+  assert.match(markdown, /unavailable: no-report-found/);
+  assert.match(markdown, /checked: `coverage\/lcov\.info`/);
 });

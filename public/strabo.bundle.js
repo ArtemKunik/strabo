@@ -138,7 +138,7 @@ function shelfDiameter(files) {
   return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
 }
 function nodeDiameter(node) {
-  if (node?.kind === "unit") return unitDiameter(node.files ?? node.size);
+  if (node?.kind === "unit" || node?.kind === "tier") return unitDiameter(node.files ?? node.size);
   if (node?.kind === "shelf") return shelfDiameter(node.files);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
@@ -156,7 +156,9 @@ var SHAPES = {
   schema: "round-diamond",
   // System-view roll-ups: a build unit is a card, its folded support shelf a footer strip.
   unit: "round-rectangle",
-  shelf: "rectangle"
+  shelf: "rectangle",
+  // Structure-view roll-ups: a role-tier band is a card, on par with a unit box.
+  tier: "round-rectangle"
 };
 function ambiguousFileIds(model) {
   const byName = /* @__PURE__ */ new Map();
@@ -207,6 +209,9 @@ function buildElements(model) {
   }));
   const edges = (model.edges ?? []).map((edge, index) => ({
     group: "edges",
+    // A Structure-view edge states how it runs through the layer order; the stylesheet
+    // draws a wrong-way one apart (Phase 35 Y3).
+    classes: edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
     data: {
       id: `e${index}`,
       source: edge.source,
@@ -614,6 +619,8 @@ function buildGraphQuery(state2, options = {}) {
         }
       }
     }
+  } else if (state2.mode === "structure") {
+    params.set("structure", "1");
   } else if (state2.mode === "block") {
     params.set("blockDepth", String(state2.depth ?? 1));
     if (state2.prefix) {
@@ -631,6 +638,9 @@ function breadcrumb(state2) {
     }
     return crumbs2;
   }
+  if (state2.mode === "structure") {
+    return [{ label: "Structure", prefix: "" }];
+  }
   if (state2.mode !== "block") {
     return [];
   }
@@ -644,7 +654,8 @@ function breadcrumb(state2) {
 
 // ui/strabo-graph-summary.js
 function mapCounts(model) {
-  const isBlock = model.prefixLength !== void 0 || model.system === true;
+  const isStructure = model.structure === true;
+  const isBlock = model.prefixLength !== void 0 || model.system === true || isStructure;
   const byKey = /* @__PURE__ */ new Map();
   let tests = 0;
   let modules = 0;
@@ -660,8 +671,9 @@ function mapCounts(model) {
   const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
     label: key,
     count,
-    // Block ids are whole directories; file ids filter by their directory prefix.
-    filter: key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
+    // Block ids are whole directories; file ids filter by their directory prefix. A
+    // Structure band is a roll-up, so its chip never filters the map.
+    filter: isStructure ? "" : key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
   }));
   return { tests, modules, entries };
 }
@@ -681,6 +693,15 @@ function readingLegend(model, locLens = false) {
       "size = files",
       "edge = import between units",
       "support = unit footer"
+    ];
+  }
+  if (model?.structure) {
+    return [
+      "band = tier",
+      "size = files",
+      "edge = recorded import",
+      "wrong-way = red or dashed",
+      "shelf = support tiers"
     ];
   }
   return [
@@ -738,7 +759,7 @@ function summarizeDiagnostics(model) {
 function graphSummary(model) {
   const nodes = (model?.nodes ?? []).length;
   const edges = (model?.edges ?? []).length;
-  const nodeWord = model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
+  const nodeWord = model?.structure ? nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
   const edgeWord = edges === 1 ? "edge" : "edges";
   return `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
 }
@@ -2409,6 +2430,9 @@ function stylesheet() {
     // support shelf is drawn as a muted dashed strip, never a peer box.
     { selector: "node.kind-unit", style: { "border-width": 2, "border-color": theme.nodeLine, "background-opacity": 1 } },
     { selector: "node.kind-shelf", style: { "border-width": 1.5, "border-style": "dashed", "border-color": theme.nodeLine, opacity: 0.85 } },
+    // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
+    // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
+    { selector: "node.kind-tier", style: { "border-width": 2, "border-color": theme.nodeLine, "background-opacity": 1 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
     // The large-file lens swaps the size encoding to lines of code and hides files under
@@ -2496,7 +2520,7 @@ function stylesheet() {
       }
     },
     { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
-    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
+    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-style": "dashed", "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
     { selector: "edge.edge-faded", style: { opacity: 0.1 } },
     { selector: "edge.dimmed", style: { opacity: 0.05 } },
     {
@@ -9703,7 +9727,11 @@ var LEGEND_SWATCHES = {
   "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))"
+  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))",
+  "band = tier": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "edge = recorded import": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
+  "wrong-way = red or dashed": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
+  "shelf = support tiers": "linear-gradient(135deg,var(--wash),var(--node-fill))"
 };
 function renderLegend(container, model, options = {}) {
   container.replaceChildren();
@@ -11366,7 +11394,7 @@ function createViewPrefs(app2) {
         return null;
       }
       const prefs = {};
-      if (parsed.mode === "block" || parsed.mode === "file" || parsed.mode === "system") {
+      if (parsed.mode === "block" || parsed.mode === "file" || parsed.mode === "system" || parsed.mode === "structure") {
         prefs.mode = parsed.mode;
       }
       if (typeof parsed.overlay === "string" && parsed.overlay !== "") {
@@ -11535,7 +11563,10 @@ function createUrlState(app2) {
         }
       };
       set("repository", state2.repository ?? "");
-      set("mode", state2.mode === "file" ? "file" : state2.mode === "system" ? "system" : "");
+      set(
+        "mode",
+        state2.mode === "file" ? "file" : state2.mode === "system" ? "system" : state2.mode === "structure" ? "structure" : ""
+      );
       set("unit", state2.mode === "system" ? state2.systemUnit ?? "" : "");
       set("outside", state2.mode === "system" && state2.showOutside ? "1" : "");
       set("node", store2.get().ui.node ?? "");
@@ -11554,7 +11585,7 @@ function createUrlState(app2) {
       state2.repository = repository;
     }
     const mode = params.get("mode");
-    if (mode === "file" || mode === "block" || mode === "system") {
+    if (mode === "file" || mode === "block" || mode === "system" || mode === "structure") {
       state2.mode = mode;
       elements2.detail.value = mode;
     }

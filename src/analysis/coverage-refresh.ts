@@ -142,6 +142,84 @@ export function detectCoverageCommand(root: string, options: CoverageRefreshOpti
   return command;
 }
 
+export interface CoverageCommandSuggestion {
+  ecosystem: string;
+  command: string;
+}
+
+/**
+ * Suggest conventional commands that produce a coverage report for each detected ecosystem
+ * in `root`. Offered when no report was found so "unavailable" comes with a next step.
+ */
+export function detectCoverageEcosystems(root: string): CoverageCommandSuggestion[] {
+  const suggestions: CoverageCommandSuggestion[] = [];
+
+  // Node / npm
+  const packageJson = path.join(root, 'package.json');
+  if (fs.existsSync(packageJson)) {
+    const cmd = detectCoverageCommand(root);
+    if (cmd) {
+      suggestions.push({ ecosystem: cmd.runner, command: cmd.command });
+    } else {
+      suggestions.push({
+        ecosystem: 'Node test runner',
+        command: 'node --test --experimental-test-coverage',
+      });
+      suggestions.push({
+        ecosystem: 'c8 or nyc',
+        command: 'npx c8 npm test',
+      });
+    }
+  }
+
+  // Rust / Cargo
+  if (fs.existsSync(path.join(root, 'Cargo.toml'))) {
+    suggestions.push({
+      ecosystem: 'cargo llvm-cov',
+      command: 'cargo llvm-cov --lcov --output-path coverage/lcov.info',
+    });
+  }
+
+  // Java / Kotlin (Maven / Gradle)
+  if (fs.existsSync(path.join(root, 'pom.xml'))) {
+    suggestions.push({ ecosystem: 'JaCoCo (Maven)', command: 'mvn test' });
+  } else if (
+    fs.existsSync(path.join(root, 'build.gradle')) ||
+    fs.existsSync(path.join(root, 'build.gradle.kts'))
+  ) {
+    suggestions.push({ ecosystem: 'JaCoCo (Gradle)', command: 'gradle test jacocoTestReport' });
+  }
+
+  // Python
+  if (
+    fs.existsSync(path.join(root, 'pyproject.toml')) ||
+    fs.existsSync(path.join(root, 'setup.py')) ||
+    fs.existsSync(path.join(root, 'setup.cfg')) ||
+    fs.existsSync(path.join(root, 'requirements.txt')) ||
+    fs.existsSync(path.join(root, '.pytest.ini'))
+  ) {
+    suggestions.push({
+      ecosystem: 'pytest-cov',
+      command: 'pytest --cov=. --cov-report=lcov:coverage/lcov.info',
+    });
+  }
+
+  // .NET
+  try {
+    const entries = fs.readdirSync(root);
+    if (entries.some((file) => file.endsWith('.csproj') || file.endsWith('.sln') || file.endsWith('.fsproj'))) {
+      suggestions.push({
+        ecosystem: 'coverlet',
+        command: 'dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=lcov /p:CoverletOutput=./coverage/',
+      });
+    }
+  } catch {
+    // root may not be accessible
+  }
+
+  return suggestions;
+}
+
 /** Detect the command and run it; `no-script` when the manifest declares no coverage script. */
 export async function refreshCoverage(
   root: string,

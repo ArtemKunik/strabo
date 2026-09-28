@@ -1,8 +1,10 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryCoverageSection,
   RepositoryDataSection,
   RepositoryReportDocument,
+  RepositoryStructureSection,
   Severity,
 } from './report-types.ts';
 
@@ -23,6 +25,8 @@ export function renderReportHtml(document: RepositoryReportDocument): string {
   body.push(overviewSection(document));
   body.push(painPointSection(document.painPoints));
   body.push(changeSection(document.change));
+  body.push(coverageHtmlSection(document.coverage));
+  body.push(structureHtmlSection(document.structure));
   body.push(driftSection(document.drift));
   body.push(dataSection(document.data));
   body.push(suggestionSection(document));
@@ -158,6 +162,98 @@ function changeSection(change: RepositoryChangeSection | null): string {
   for (const warning of change.warnings) {
     parts.push(`<p class="warning">warning: ${escapeHtml(warning)}</p>`);
   }
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+function coverageHtmlSection(coverage: RepositoryCoverageSection | null): string {
+  const parts: string[] = ['<section>', '<h2>Code coverage</h2>'];
+  if (!coverage) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  if (!coverage.available) {
+    parts.push(
+      `<p class="muted">Unavailable: ${escapeHtml(coverage.reason ?? 'no report')}${coverage.detail ? ` — ${escapeHtml(coverage.detail)}` : ''}</p>`,
+    );
+    if (coverage.checkedLocations && coverage.checkedLocations.length > 0) {
+      parts.push(
+        `<p>Checked locations: ${coverage.checkedLocations.map((loc) => `<code>${escapeHtml(loc)}</code>`).join(', ')}</p>`,
+      );
+    }
+    if (coverage.suggestedCommands && coverage.suggestedCommands.length > 0) {
+      parts.push(
+        sublist(
+          'Produce a report',
+          coverage.suggestedCommands.map(
+            (c) => `<code>${escapeHtml(c.command)}</code> (${escapeHtml(c.ecosystem)})`,
+          ),
+        ),
+      );
+    } else if (coverage.refreshCommand) {
+      parts.push(`<p>Produce a report: <code>${escapeHtml(coverage.refreshCommand)}</code></p>`);
+    }
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  parts.push(
+    `<p>Line coverage: ${coverage.lineCoverage !== null ? `${coverage.lineCoverage}%` : 'unavailable'} (${coverage.linesHit}/${coverage.linesFound} lines across ${coverage.filesMeasured} file(s)) · Basis: ${escapeHtml(coverage.basis)} (${escapeHtml(coverage.format ?? 'unknown format')})</p>`,
+  );
+  if (coverage.reportPath) {
+    parts.push(
+      `<p>Report path: <code>${escapeHtml(coverage.reportPath)}</code>${coverage.reportModified ? ` · modified ${escapeHtml(coverage.reportModified)}` : ''}</p>`,
+    );
+  }
+  if (coverage.stale.length > 0) {
+    parts.push(
+      `<p class="warning">Stale for ${coverage.stale.length} file(s): ${coverage.stale.slice(0, 5).map((f) => `<code>${escapeHtml(f)}</code>`).join(', ')}</p>`,
+    );
+  }
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+function structureHtmlSection(structure: RepositoryStructureSection | null): string {
+  const parts: string[] = ['<section>', '<h2>Logical structure</h2>'];
+  if (!structure) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  parts.push(
+    `<p>${structure.summary.classified} classified file(s) across ${structure.tierFlow.tiers.length} ranked tier(s) · ${structure.summary.unclassified} unclassified · ${structure.summary.mixed} mixed</p>`,
+  );
+  parts.push(
+    `<p>Flow: ${structure.tierFlow.edges.length} cross-tier edge(s) · ${structure.tierFlow.total} total recorded import(s) · intra-tier ratio ${Math.round(structure.tierFlow.intraRatio * 100)}%</p>`,
+  );
+  parts.push(
+    sublist(
+      `Tier flow (${structure.tierFlow.edges.length})`,
+      structure.tierFlow.edges.map(
+        (edge) =>
+          `<code>${escapeHtml(edge.source)}</code> → <code>${escapeHtml(edge.target)}</code> (${escapeHtml(edge.kind)}, weight ${edge.weight}${edge.crossUnit > 0 ? `, ${edge.crossUnit} cross-unit` : ''})`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Support tiers (${structure.shelf.length})`,
+      structure.shelf.map(
+        (entry) =>
+          `<code>${escapeHtml(entry.tier)}</code> — ${entry.files} file(s), ${entry.lines} line(s)${entry.mixed > 0 ? ` (${entry.mixed} mixed)` : ''}`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Wrong-way dependencies (${structure.directions.length})`,
+      structure.directions.map(
+        (dir) =>
+          `<code>${escapeHtml(dir.source)}</code> (${escapeHtml(dir.sourceTier)}) → <code>${escapeHtml(dir.target)}</code> (${escapeHtml(dir.targetTier)}) [${escapeHtml(dir.kind)}] at line ${dir.line}`,
+      ),
+    ),
+  );
   parts.push('</section>');
   return parts.join('\n');
 }

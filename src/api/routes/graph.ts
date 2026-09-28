@@ -3,12 +3,19 @@ import { Router } from 'express';
 import { buildBlockViewModel } from '../../analysis/blocks.ts';
 import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
+import { buildTierReport } from '../../analysis/tiers.ts';
 import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
-import { buildSystemUnitViewModel, buildSystemViewModel, buildViewModel } from '../../view/view-model.ts';
+import {
+  buildStructureGridViewModel,
+  buildStructureViewModel,
+  buildSystemUnitViewModel,
+  buildSystemViewModel,
+  buildViewModel,
+} from '../../view/view-model.ts';
 import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 
 /**
@@ -43,6 +50,20 @@ export function createGraphRouter(config: StraboConfig): Router {
         generatedAt: cached.report.scannedAt,
         stale: cached.stale,
       };
+
+      // The Structure view rolls the file graph up into role tiers (Phase 35 Y3); `level=grid`
+      // draws the unit × tier grid instead (Y4). It is an explicit request and takes precedence
+      // over a stale URL's unit/block parameters.
+      if (parseBoolean(request.query.structure)) {
+        const report = buildTierReport(repository.root, repository.name, cached.report.graph);
+        const level = asString(request.query.level);
+        response.json(
+          level === 'grid'
+            ? buildStructureGridViewModel(report, descriptor, cache)
+            : buildStructureViewModel(report, descriptor, cache),
+        );
+        return;
+      }
 
       // The System view rolls the file graph up into build units; it takes precedence over
       // any block-depth parameters a stale URL still carries.

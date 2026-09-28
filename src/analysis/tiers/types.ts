@@ -174,6 +174,62 @@ export interface TierFlow {
   intraRatio: number;
 }
 
+/** One cell of the unit × tier grid: a build unit's files in one role tier (Phase 35 Y4). */
+export interface TierGridCell {
+  /** Stable id, `<unit>|<tier>`, so a surface can name a cell without inventing one. */
+  id: string;
+  unit: string;
+  unitName: string;
+  tier: Tier;
+  files: number;
+  lines: number;
+  /** Of `files`, how many the classifier pinned while flagging them mixed. */
+  mixed: number;
+  /** Coverage over the cell's files from one source: measured, or the reach fallback. */
+  coverage: FileCoverageAggregate;
+}
+
+/** One aggregated recorded edge between two grid cells. */
+export interface TierGridEdge {
+  source: string;
+  target: string;
+  sourceUnit: string;
+  targetUnit: string;
+  sourceTier: Tier;
+  targetTier: Tier;
+  /** `down` follows the tier order; `upward`/`skip-layer` are the wrong-way reads. */
+  kind: TierFlowEdge['kind'];
+  weight: number;
+  /** True when the two ends sit in different build units, so the drawing styles it apart. */
+  crossUnit: boolean;
+}
+
+/**
+ * The unit × tier grid (Phase 35 Y4): the tier matrix with adjacency added.
+ *
+ * Columns are build units, rows are ranked tiers in dependency order, and each cell is a
+ * build unit's files in that tier. Every recorded edge between two cells is kept, including
+ * cross-unit ones, so a monorepo with several services can be read as one picture.
+ */
+export interface TierGrid {
+  /** Column order: build units, sorted by id. */
+  units: Array<{ id: string; name: string; files: number }>;
+  /** Row order: ranked tiers present, in dependency order (frontend first). */
+  tiers: Tier[];
+  cells: TierGridCell[];
+  edges: TierGridEdge[];
+  /** Support tiers outside the layer order, as a shelf beside the grid. */
+  shelf: TierShelfEntry[];
+  /** Cells per unit and tier for a fast lookup; always `<units> × <tiers>`. */
+  summary: {
+    units: number;
+    tiers: number;
+    cells: number;
+    edges: number;
+    crossUnitEdges: number;
+  };
+}
+
 /**
  * A support tier outside the layer order, folded onto a shelf rather than a band.
  *
@@ -232,6 +288,8 @@ export interface TierReport {
   directions: TierDirection[];
   /** The edges between role tiers collapsed across the repository (Phase 35 Y1). */
   tierFlow: TierFlow;
+  /** The unit × tier grid with adjacency (Phase 35 Y4). */
+  grid: TierGrid;
   /** Support tiers outside the layer order (Phase 35 Y2): infra, build, tests, unclassified. */
   shelf: TierShelfEntry[];
   tables: TableReference[];

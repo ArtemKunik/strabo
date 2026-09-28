@@ -1,10 +1,27 @@
 import type { Graph } from '../types.ts';
 import { buildAdjacency } from './analysis.ts';
 
+export interface TestReachDetail {
+  test: string;
+  depth: number;
+  path: string[];
+  direct: boolean;
+}
+
 export interface TestReachResult {
   testFiles: string[];
   reached: string[];
   unreachedWithDependents: string[];
+  /** Non-test files directly imported by at least one test. */
+  direct: string[];
+  /** Non-test files reached only transitively (depth >= 2, no test directly imports). */
+  transitive: string[];
+  /** Non-test files reached only through 3 or more hops. */
+  deepTransitive: string[];
+  /** Minimum hop distance from any test (0 for test itself, 1 for direct, 2+ for transitive). */
+  minDepthByFile: Record<string, number>;
+  /** Shortest path from a test to each reached file. */
+  shortestPaths: Record<string, string[]>;
 }
 
 interface TestClosure {
@@ -21,6 +38,8 @@ interface TestClosure {
 // revision graph or a test-local graph gets its own entry and is collected with the graph.
 const closureCache = new WeakMap<Graph, TestClosure>();
 const byFileCache = new WeakMap<Graph, Map<string, string[]>>();
+const byFileDetailedCache = new WeakMap<Graph, Map<string, TestReachDetail[]>>();
+const coverageResultCache = new WeakMap<Graph, TestReachResult>();
 
 /**
  * The forward closure from every test file: the adjacency, the test set, and every file a
@@ -56,20 +75,113 @@ function closureFromTests(graph: Graph): TestClosure {
 }
 
 /**
+ * Map each file to detailed reach information from tests: hop depth, shortest path, and
+ * directness.
+ *
+ * Direct tests (depth 1) come first, followed by ascending hop depth, with test name as
+ * the deterministic tie-breaker.
+ */
+export function computeDetailedTestReachByFile(graph: Graph): Map<string, TestReachDetail[]> {
+  const cached = byFileDetailedCache.get(graph);
+  if (cached) {
+    return cached;
+  }
+  const { testFiles, forward } = closureFromTests(graph);
+  const byFileDetailed = new Map<string, TestReachDetail[]>();
+
+  for (const testFile of testFiles) {
+    const seen = new Set<string>([testFile]);
+    const queue: Array<{ node: string; path: string[] }> = [{ node: testFile, path: [testFile] }];
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++]!;
+      const depth = current.path.length - 1;
+      const isDirect = depth === 1 || (depth === 0 && current.node === testFile);
+      const detail: TestReachDetail = {
+        test: testFile,
+        depth,
+        path: current.path,
+        direct: isDirect,
+      };
+      const list = byFileDetailed.get(current.node);
+      if (list) {
+        list.push(detail);
+      } else {
+        byFileDetailed.set(current.node, [detail]);
+      }
+      for (const dep of forward.get(current.node) ?? []) {
+        if (!seen.has(dep)) {
+          seen.add(dep);
+          queue.push({ node: dep, path: [...current.path, dep] });
+        }
+      }
+    }
+  }
+
+  for (const list of byFileDetailed.values()) {
+    list.sort((a, b) => {
+      if (a.direct !== b.direct) {
+        return a.direct ? -1 : 1;
+      }
+      if (a.depth !== b.depth) {
+        return a.depth - b.depth;
+      }
+      return a.test.localeCompare(b.test);
+    });
+  }
+
+  byFileDetailedCache.set(graph, byFileDetailed);
+  return byFileDetailed;
+}
+
+/**
  * Follow forward edges from files identified as tests and highlight modules with no
  * known path from a test.
  *
- * This measures graph reachability, not executed line or branch coverage.
+ * This measures graph reachability, recording depth (direct vs transitive) and shortest
+ * paths.
  */
 export function computeCoverage(graph: Graph): TestReachResult {
+  const cached = coverageResultCache.get(graph);
+  if (cached) {
+    return cached;
+  }
   const { testFiles, reached, backward } = closureFromTests(graph);
   const testSet = new Set(testFiles);
+  const detailed = computeDetailedTestReachByFile(graph);
+
+  const direct: string[] = [];
+  const transitive: string[] = [];
+  const deepTransitive: string[] = [];
+  const minDepthByFile: Record<string, number> = {};
+  const shortestPaths: Record<string, string[]> = {};
+
+  for (const file of reached) {
+    if (testSet.has(file)) {
+      continue;
+    }
+    const details = detailed.get(file) ?? [];
+    const minDepth = details.length > 0 ? details[0]!.depth : 0;
+    minDepthByFile[file] = minDepth;
+    shortestPaths[file] = details.length > 0 ? details[0]!.path : [file];
+
+    const hasDirect = details.some((d) => d.depth === 1);
+    if (hasDirect) {
+      direct.push(file);
+    } else {
+      transitive.push(file);
+    }
+    if (minDepth >= 3) {
+      deepTransitive.push(file);
+    }
+  }
+
+  direct.sort();
+  transitive.sort();
+  deepTransitive.sort();
+
   // Modules that something depends on but that no test reaches: used-but-untested code.
   // An unreached module with no dependents is an orphan, not an untested dependency.
-  //
-  // With no test file at all, "unreached" cannot be derived: every used file would qualify,
-  // which would dash the whole map as if it were the finding. Callers report the missing
-  // tests separately, so the list is empty rather than a blanket verdict.
   const unreachedWithDependents =
     testFiles.length === 0
       ? []
@@ -79,26 +191,34 @@ export function computeCoverage(graph: Graph): TestReachResult {
           .map((node) => node.id)
           .sort();
 
-  return {
+  const result: TestReachResult = {
     testFiles: [...testFiles].sort(),
     reached: [...reached].filter((id) => !testSet.has(id)).sort(),
     unreachedWithDependents,
+    direct,
+    transitive,
+    deepTransitive,
+    minDepthByFile,
+    shortestPaths,
   };
+
+  coverageResultCache.set(graph, result);
+  return result;
 }
 
 /**
  * Every file a test reaches, test files included: the membership set the map and the
  * summaries check. Defined once so the union cannot drift between call sites.
  */
-export function reachedFiles(result: TestReachResult): Set<string> {
+export function reachedFiles(result: Pick<TestReachResult, 'testFiles' | 'reached'>): Set<string> {
   return new Set([...result.reached, ...result.testFiles]);
 }
 
 /**
  * Map each file to the test files whose forward closure reaches it: the tests to run.
  *
- * The same reachability as `computeCoverage`, kept per test so a change can name the tests
- * that cover it rather than a boolean. A test file maps to itself, so changing a test lists it.
+ * Ordered direct tests first, then by ascending hop distance, with alphabetical tie-breaker.
+ * A test file maps to itself, so changing a test lists it.
  */
 export function computeTestReachByFile(graph: Graph): Map<string, string[]> {
   const cached = byFileCache.get(graph);
@@ -107,34 +227,10 @@ export function computeTestReachByFile(graph: Graph): Map<string, string[]> {
     // reads `get`/`has`, so one copy suffices for the whole graph's lifetime.
     return cached;
   }
-  const { testFiles, forward } = closureFromTests(graph);
+  const detailed = computeDetailedTestReachByFile(graph);
   const byFile = new Map<string, string[]>();
-
-  for (const testFile of testFiles) {
-    const seen = new Set<string>([testFile]);
-    const stack = [testFile];
-    while (stack.length > 0) {
-      const next = stack.pop() as string;
-      // `next` is popped at most once per test (the `seen` guard admits each dependency
-      // once), so this test is never already listed against this file: a membership scan
-      // would be dead work, and the old `list.includes` made this O(tests x files).
-      const list = byFile.get(next);
-      if (list) {
-        list.push(testFile);
-      } else {
-        byFile.set(next, [testFile]);
-      }
-      for (const dependency of forward.get(next) ?? []) {
-        if (!seen.has(dependency)) {
-          seen.add(dependency);
-          stack.push(dependency);
-        }
-      }
-    }
-  }
-
-  for (const list of byFile.values()) {
-    list.sort();
+  for (const [file, details] of detailed) {
+    byFile.set(file, details.map((d) => d.test));
   }
   byFileCache.set(graph, byFile);
   return byFile;

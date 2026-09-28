@@ -22,6 +22,10 @@ import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import { isSameOriginRequest, parsePositiveInt, sendError } from '../http.ts';
 import type { AnalysisContext } from './analysis-context.ts';
+import { diffFile } from '../../analysis/diff.ts';
+import { computeChangedLineCoverage, summariseChangedCoverage, type ChangedLineCoverage } from '../../analysis/changed-coverage.ts';
+import { reviewWorkingTree, reviewCommit } from '../../analysis/review.ts';
+import { readWorkingFile } from '../../analysis/git-content.ts';
 
 /** Coverage, file-health, function, and quality endpoints. */
 export function createQualityRouter(context: AnalysisContext): Router {
@@ -131,6 +135,81 @@ export function createQualityRouter(context: AnalysisContext): Router {
         return;
       }
       response.json(report);
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Changed-line coverage for the working tree or against a baseline revision.
+   */
+  router.get('/analysis/coverage/uncovered-changes', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const baseline = typeof request.query.baseline === 'string' && request.query.baseline.trim()
+        ? request.query.baseline.trim()
+        : null;
+
+      const review = baseline
+        ? await reviewCommit(repository.root, cached.report.graph, baseline)
+        : await reviewWorkingTree(repository.root, cached.report.graph);
+
+      const reviewFiles = review.available ? review.files : [];
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      const threshold = coverageThreshold(request.query.threshold) ?? 100;
+
+      const fileResults: ChangedLineCoverage[] = [];
+      for (const file of reviewFiles) {
+        if (file.status === 'deleted') {
+          continue;
+        }
+        const diffResult = await diffFile(repository.root, {
+          file: file.path,
+          base: baseline ?? undefined,
+          untracked: file.status === 'untracked',
+        });
+        if (diffResult.available) {
+          const extractor = symbolExtractorFor(file.path);
+          let functions;
+          if (extractor) {
+            const content = readWorkingFile(repository.root, file.path);
+            if (content !== null) {
+              try {
+                const extraction = await extractor.extract(file.path, content);
+                functions = buildFunctions(file.path, extraction.symbols, extraction.calls ?? []).functions;
+              } catch {
+                // extractor error; continue without functions
+              }
+            }
+          }
+          const item = computeChangedLineCoverage(diffResult.diff, measured, {
+            functions,
+          });
+          fileResults.push(item);
+        }
+      }
+
+      const totals = summariseChangedCoverage(fileResults);
+      const belowThreshold = fileResults.filter(
+        (item) => item.coveragePercent !== null && item.coveragePercent < threshold,
+      );
+
+      const isStale = measured?.files.some((f) => f.stale) ?? false;
+      const basis = measured?.available ? (isStale ? 'stale' : 'measured') : 'unavailable';
+
+      response.json({
+        repository: repository.name,
+        basis,
+        reportPath: measured?.reportPath ?? null,
+        reportModified: measured?.reportModified ?? null,
+        reportAgeMs: measured?.reportAgeMs ?? null,
+        stale: isStale,
+        threshold,
+        files: fileResults,
+        belowThreshold,
+        totals,
+      });
     } catch (error) {
       sendError(response, error);
     }

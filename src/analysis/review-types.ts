@@ -1,4 +1,5 @@
 import type { FileCoverage, FileCoverageAggregate } from './file-coverage.ts';
+import type { ChangedLineCoverage, ChangedCoverageTotals } from './changed-coverage.ts';
 
 /**
  * Review data shapes shared by the review and change-passport analyses.
@@ -306,6 +307,8 @@ export interface FileImpactPassport {
   untestedBasis?: 'measured' | 'reachable';
   /** This file's own coverage, measured when the report names it, else the reach fallback. */
   coverage?: FileCoverage | null;
+  /** U4: Changed-line coverage for this file. */
+  changedLineCoverage?: ChangedLineCoverage | null;
   note?: string;
   /** The graph this card was computed from, when the serializer attached it. */
   provenance?: GraphProvenance;
@@ -391,6 +394,8 @@ export interface CohesionChange {
   coverage: FileCoverage | null;
   /** The pending-change risk, or null when nothing measurable was touched. */
   risk: ChangeRisk | null;
+  /** U4: Changed-line coverage for this file. */
+  changedLineCoverage?: ChangedLineCoverage | null;
   /**
    * The Change impact passport for this file: the current-state snapshot plus the deltas
    * this change produced. Always present, even when no baseline could be read.
@@ -405,6 +410,8 @@ export interface ChangePassport {
   baseline: string | null;
   /** True when there were more changed files than were measured. */
   capped: boolean;
+  /** U4: Changed-line coverage totals across all changed files. */
+  changedLineCoverage?: ChangedCoverageTotals | null;
   /** The graph this passport was computed from, when the serializer attached it. */
   provenance?: GraphProvenance;
 }

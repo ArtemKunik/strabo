@@ -14,6 +14,8 @@ import { buildFunctions, type FunctionEntry } from './functions.ts';
 import type { MeasuredCoverageSummary } from './measured-coverage.ts';
 import { contentAtRevision, readWorkingFile } from './git-content.ts';
 import { FUNCTION_SIGNAL_LABELS, type FunctionSignal } from './signals.ts';
+import { computeChangedLineCoverage, type ChangedLineCoverage } from './changed-coverage.ts';
+import { diffFile } from './diff.ts';
 import type {
   ComplexitySummary,
   CoherenceSummary,
@@ -199,6 +201,8 @@ export interface BuildPassportInput {
   untestedBasis?: 'measured' | 'reachable';
   /** This file's own coverage from one source; omitted for a hand-built card. */
   coverage?: FileCoverage | null;
+  /** U4: Changed-line coverage for this file. */
+  changedLineCoverage?: ChangedLineCoverage | null;
   note?: string;
 }
 
@@ -235,6 +239,7 @@ export function buildFileImpactPassport(input: BuildPassportInput): FileImpactPa
     untestedDependents: [...input.untestedDependents],
     untestedBasis: input.untestedBasis ?? 'reachable',
     coverage: input.coverage ?? null,
+    changedLineCoverage: input.changedLineCoverage ?? null,
     ...(input.note ? { note: input.note } : {}),
   };
 }
@@ -440,6 +445,13 @@ export async function computeFileImpactPassport(
       ? 'not present in HEAD'
       : undefined;
 
+  const diffResult = await diffFile(root, { file });
+  const changedLineCoverage = diffResult.available
+    ? computeChangedLineCoverage(diffResult.diff, measured, {
+        functions: after?.functions,
+      })
+    : null;
+
   return buildFileImpactPassport({
     path: file,
     status: before === null ? 'added' : 'modified',
@@ -453,6 +465,7 @@ export async function computeFileImpactPassport(
     untestedDependents,
     untestedBasis: basis,
     coverage: fileCoverageFigure,
+    changedLineCoverage,
     ...(note ? { note } : {}),
   });
 }

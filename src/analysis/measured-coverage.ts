@@ -52,6 +52,8 @@ export interface ParsedFileCoverage {
   functions: MeasuredFunctionCoverage[];
   functionsFound: number;
   functionsHit: number;
+  /** Covered line numbers (1-based) recorded in the report, sorted ascending. */
+  coveredLines?: number[];
 }
 
 export interface ParsedCoverageReport {
@@ -270,6 +272,7 @@ export function parseLcov(content: string): ParsedCoverageReport {
       functions,
       functionsFound: current.fnf > 0 ? current.fnf : functions.length,
       functionsHit: current.fnh > 0 ? current.fnh : functions.filter((fn) => (fn.hits ?? 0) > 0).length,
+      coveredLines: [...current.hitLines].sort((a, b) => a - b),
     });
     current = null;
   };
@@ -436,6 +439,10 @@ export function parseCobertura(content: string): ParsedCoverageReport {
       functions,
       functionsFound: functions.length,
       functionsHit: functions.filter((fn) => (fn.lineCoverage ?? 0) > 0 || (fn.linesHit > 0)).length,
+      coveredLines: [...entry.lineHits.entries()]
+        .filter(([, hits]) => hits > 0)
+        .map(([line]) => line)
+        .sort((a, b) => a - b),
     };
   });
 
@@ -546,6 +553,10 @@ export function parseJacoco(content: string): ParsedCoverageReport {
       functions,
       functionsFound: functions.length,
       functionsHit: functions.filter((fn) => (fn.lineCoverage ?? 0) > 0 || fn.linesHit > 0).length,
+      coveredLines: [...entry.lineHits.entries()]
+        .filter(([, hits]) => hits > 0)
+        .map(([line]) => line)
+        .sort((a, b) => a - b),
     };
   });
 

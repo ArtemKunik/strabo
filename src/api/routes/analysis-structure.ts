@@ -210,6 +210,31 @@ export function createStructureRouter(context: AnalysisContext): Router {
     }
   });
 
+  /**
+   * The application logical structure from the tier lens: ranked tiers, cross-tier edges,
+   * support shelf, and intra-tier share (Phase 35 Y1, Y8).
+   */
+  router.get('/analysis/tiers/flow', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const measured = await measuredCoverage(repository, cached.report.graph);
+      const report = buildTierReport(repository.root, repository.name, cached.report.graph, measured);
+      response.json({
+        repository: repository.name,
+        basis: report.matrix.coverage.basis,
+        scanCeiling: context.config.scanCeiling,
+        nodes: report.tierFlow.tiers,
+        shelf: report.shelf,
+        edges: report.tierFlow.edges,
+        intraByTier: report.tierFlow.intraByTier,
+        intraRatio: report.tierFlow.intraRatio,
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
   router.get('/analysis/architecture-health', async (request, response) => {
     try {
       const repository = resolve(request);

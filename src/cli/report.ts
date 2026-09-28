@@ -143,6 +143,7 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
     ownership: !hasFlag(argv, 'ownership'),
     drift: !hasFlag(argv, 'drift'),
     data: !hasFlag(argv, 'data'),
+    structure: !hasFlag(argv, 'structure'),
     qualifiedContracts: qualified,
     coverage: {
       ...(env.coverageReports ? { reportPaths: env.coverageReports } : {}),

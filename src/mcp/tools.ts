@@ -581,6 +581,38 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       },
     },
     {
+      name: 'get_uncovered_changes',
+      description:
+        'Changed-line coverage for the working tree or against a baseline revision. Intersects git diff additions with the repository\'s measured coverage report, returning covered/uncovered line counts, coverage percent, and uncovered modified functions (public-surface functions listed first).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          baseline: {
+            type: 'string',
+            description: 'Optional git revision or branch to compare against; defaults to uncommitted working-tree changes.',
+          },
+          threshold: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            description: 'Coverage percent threshold (0-100); changes below it are highlighted in belowThreshold (default 100).',
+          },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        additionalProperties: false,
+      },
+      call: (args) => {
+        const query: Record<string, string> = { ...thresholdExtra(args) };
+        const baseline = stringArg(args, 'baseline');
+        if (baseline) {
+          query.baseline = baseline;
+        }
+        return get(dispatch, '/analysis/coverage/uncovered-changes', args, query);
+      },
+    },
+    {
       name: 'get_context',
       description:
         'The change-impact passport for one file: current-graph snapshot, complexity, signals, and pending-change deltas, with the recorded import edges and their evidence, plus the file tier and build unit.',
@@ -717,6 +749,17 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         additionalProperties: false,
       },
       call: (args) => get(dispatch, '/analysis/tiers', args),
+    },
+    {
+      name: 'get_tier_flow',
+      description:
+        'The application logical structure from the tier lens: ranked tiers, cross-tier dependency edges (downward, upward, skip-layer) with weights and cross-unit flags, support tiers on the shelf, and intra-tier dependency ratio.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/tiers/flow', args),
     },
     {
       name: 'get_data_products',

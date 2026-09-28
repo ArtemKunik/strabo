@@ -10,7 +10,7 @@ import {
   neighbourhood,
   rankHubs,
 } from '../../src/analysis/analysis.ts';
-import { computeTestReachByFile, reachedFiles } from '../../src/analysis/coverage.ts';
+import { computeDetailedTestReachByFile, computeTestReachByFile, reachedFiles } from '../../src/analysis/coverage.ts';
 import { computeCoverage } from '../../src/index.ts';
 import { computeCycles } from '../../src/index.ts';
 import { buildPositions } from '../../src/index.ts';
@@ -153,6 +153,67 @@ test('computeTestReachByFile lists a test once against a file reachable through 
   const byFile = computeTestReachByFile(graph);
   assert.deepEqual(byFile.get('a.ts'), ['t.test.ts']);
   assert.deepEqual(byFile.get('b.ts'), ['t.test.ts']);
+});
+
+test('computeCoverage and computeDetailedTestReachByFile record honest depth and shortest paths (U3)', () => {
+  const nodes = [
+    { id: 'dir.test.ts', kind: 'test' as const, directory: '.' },
+    { id: 'ind.test.ts', kind: 'test' as const, directory: '.' },
+    { id: 'hop1.ts', kind: 'module' as const, directory: '.' },
+    { id: 'hop2.ts', kind: 'module' as const, directory: '.' },
+    { id: 'target.ts', kind: 'module' as const, directory: '.' },
+    { id: 'deep.ts', kind: 'module' as const, directory: '.' },
+  ];
+  const edge = (source: string, target: string) => ({
+    source,
+    target,
+    kind: 'import' as const,
+    evidence: { line: 1, specifier: `./${target}`, resolution: 'exact' as const },
+    role: 'use' as const,
+  });
+  const graph = {
+    nodes,
+    edges: [
+      edge('dir.test.ts', 'target.ts'),
+      edge('ind.test.ts', 'hop1.ts'),
+      edge('hop1.ts', 'target.ts'),
+      edge('target.ts', 'deep.ts'),
+    ],
+    diagnostics: [],
+    excluded: [],
+  };
+
+  const detailed = computeDetailedTestReachByFile(graph);
+  const targetReach = detailed.get('target.ts') ?? [];
+  // Direct test comes first even though 'ind.test.ts' would be alphabetical before 'dir.test.ts' if equal!
+  // Wait: 'dir.test.ts' vs 'ind.test.ts': 'dir' is before 'ind' anyway, but let's check:
+  assert.equal(targetReach.length, 2);
+  assert.equal(targetReach[0]?.test, 'dir.test.ts');
+  assert.equal(targetReach[0]?.depth, 1);
+  assert.equal(targetReach[0]?.direct, true);
+  assert.deepEqual(targetReach[0]?.path, ['dir.test.ts', 'target.ts']);
+
+  assert.equal(targetReach[1]?.test, 'ind.test.ts');
+  assert.equal(targetReach[1]?.depth, 2);
+  assert.equal(targetReach[1]?.direct, false);
+  assert.deepEqual(targetReach[1]?.path, ['ind.test.ts', 'hop1.ts', 'target.ts']);
+
+  // deep.ts is at depth 2 from dir.test.ts and depth 3 from ind.test.ts
+  const deepReach = detailed.get('deep.ts') ?? [];
+  assert.equal(deepReach.length, 2);
+  assert.equal(deepReach[0]?.test, 'dir.test.ts');
+  assert.equal(deepReach[0]?.depth, 2);
+  assert.deepEqual(deepReach[0]?.path, ['dir.test.ts', 'target.ts', 'deep.ts']);
+
+  // computeCoverage buckets direct vs transitive
+  const coverage = computeCoverage(graph);
+  assert.deepEqual(coverage.direct, ['hop1.ts', 'target.ts']);
+  assert.deepEqual(coverage.transitive, ['deep.ts']);
+  assert.deepEqual(coverage.deepTransitive, []); // deep.ts has minDepth 2 (from dir.test.ts)
+
+  // Direct test comes first in computeTestReachByFile
+  const byFile = computeTestReachByFile(graph);
+  assert.deepEqual(byFile.get('target.ts'), ['dir.test.ts', 'ind.test.ts']);
 });
 
 test('buildPositions shelf-packs directories into a roughly rectangular map', () => {

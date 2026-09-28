@@ -30,6 +30,15 @@ export interface ViewNode extends GraphNode {
   collapsed?: boolean;
   /** The shelf a drill-down shelf node folds, for its hover card. */
   shelf?: UnitShelfFact;
+  /** The role tier a Structure-view band/shelf node stands for (Phase 35 Y3). */
+  tier?: string;
+  /** Of a band's files, how many the classifier flagged mixed, drawn as a badge. */
+  mixed?: number;
+  /** In a Structure grid (Y4), the build unit a cell node stands for, and its display name. */
+  unit?: string;
+  unitName?: string;
+  /** In a Structure grid (Y4), the cell's own id `<unit>|<tier>` for selection. */
+  cell?: string;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -43,6 +52,13 @@ export interface ViewEdge extends GraphEdge {
    * import. Absent or 1 on a file edge.
    */
   weight?: number;
+  /**
+   * In a Structure view, how a tier-to-tier edge runs through the layer order: `down`
+   * follows it, `upward` and `skip-layer` are the wrong-way reads (Phase 35 Y3).
+   */
+  tierKind?: 'down' | 'upward' | 'skip-layer';
+  /** In a Structure view, contributing edges whose two ends sit in different build units. */
+  crossUnit?: number;
 }
 
 export interface ViewPosition {
@@ -152,6 +168,21 @@ export interface ViewModel {
   unitCards?: UnitCard[];
   /** The only build unit, so the browser can auto-open it at L1 (L19). */
   systemSingleUnit?: string;
+  /** True when the model is a role-tier structure (Phase 35 Y3), not files or units. */
+  structure?: boolean;
+  /** The structure's own reading numbers: ranked edges read and the same-tier share. */
+  structureSummary?: { total: number; intraRatio: number };
+  /**
+   * The structure drawing on screen: `bands` is the tier stack (Y3), `grid` the unit × tier
+   * grid (Y4). Absent means `bands`, so an older client still reads.
+   */
+  structureLevel?: 'bands' | 'grid';
+  /** In a grid, the rows (ranked tiers) and columns (build units), for axis labels. */
+  structureGrid?: {
+    tiers: string[];
+    units: Array<{ id: string; name: string; files: number }>;
+    crossUnitEdges: number;
+  };
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */

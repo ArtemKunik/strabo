@@ -4,6 +4,7 @@ import { fileCoverage, type FileCoverage } from '../analysis/file-coverage.ts';
 import { percent, type MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import { buildPositions, buildSystemPositions } from '../analysis/layout.ts';
 import type { SystemReport } from '../analysis/system.ts';
+import type { Tier, TierReport } from '../analysis/tiers.ts';
 import type { OutsideLink, UnitCard, UnitCoverageFact, UnitShelfFact } from '../types.ts';
 
 import { toPosix } from '../boundary/repository-root.ts';
@@ -16,6 +17,7 @@ import type {
   ViewEdge,
   ViewModel,
   ViewNode,
+  ViewPosition,
 } from '../types.ts';
 import path from 'node:path';
 
@@ -591,4 +593,208 @@ function layoutUnitLanes(
   return [...positions.entries()]
     .map(([id, position]) => ({ id, ...position }))
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** The display name of each role tier, matching the tier panel's own labels. */
+const STRUCTURE_LABELS: Record<string, string> = {
+  frontend: 'Frontend',
+  api: 'API surface',
+  domain: 'Domain/service',
+  data: 'Data',
+  integration: 'Integration',
+  infra: 'Infra/config',
+  build: 'Build/tooling',
+  tests: 'Tests',
+  unclassified: 'Unclassified',
+};
+
+/**
+ * Turn the tier report into the Structure view (Phase 35 Y3).
+ *
+ * One band per ranked tier, stacked in dependency order (frontend at the top, data at the
+ * bottom) and joined by the `tierFlow` edges; the support tiers sit on a shelf beside the
+ * stack rather than in it. Every node is a roll-up, so its size is its file count and its
+ * `mixed` count rides along for a badge. Only recorded edges are drawn; a tier or pair with
+ * no edge simply has none, never a fabricated one.
+ */
+export function buildStructureViewModel(
+  report: TierReport,
+  repository: RepositoryDescriptor,
+  cache: ScanCacheMetadata,
+): ViewModel {
+  const perTier = new Map(report.matrix.perTier.map((entry) => [entry.tier, entry]));
+  const BAND_Y = 170;
+  const SHELF_X = 460;
+  const SHELF_Y = 150;
+
+  const nodes: ViewNode[] = [];
+  const positions: ViewPosition[] = [];
+  const tierNode = (
+    tier: Tier,
+    kind: 'tier' | 'shelf',
+  ): ViewNode => {
+    const fact = perTier.get(tier);
+    const files = fact?.files ?? 0;
+    return {
+      id: tier,
+      kind,
+      directory: '.',
+      label: STRUCTURE_LABELS[tier] ?? tier,
+      workspacePath: tier,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: files,
+      files,
+      tier,
+      mixed: fact?.mixed ?? 0,
+    };
+  };
+
+  // The stack: ranked tiers in dependency order, frontend highest on the canvas.
+  report.tierFlow.tiers.forEach((tier, index) => {
+    nodes.push(tierNode(tier, 'tier'));
+    positions.push({ id: tier, x: 0, y: index * BAND_Y });
+  });
+  // The shelf: support tiers beside the stack, never a band.
+  report.shelf.forEach((entry, index) => {
+    nodes.push(tierNode(entry.tier, 'shelf'));
+    positions.push({ id: entry.tier, x: SHELF_X, y: index * SHELF_Y });
+  });
+
+  const edges: ViewEdge[] = report.tierFlow.edges.map((edge) => ({
+    source: edge.source,
+    target: edge.target,
+    kind: 'import',
+    evidence: {
+      line: 1,
+      specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
+      resolution: 'exact',
+    },
+    semanticSource: edge.source,
+    semanticTarget: edge.target,
+    weight: edge.weight,
+    crossUnit: edge.crossUnit,
+    tierKind: edge.kind,
+  }));
+
+  return {
+    repository,
+    nodes,
+    edges,
+    positions,
+    // A band is a roll-up, not a file: the hub ring stays reserved for files.
+    hubs: [],
+    diagnostics: [],
+    excluded: [],
+    cache,
+    structure: true,
+    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+  };
+}
+
+/**
+ * Turn the tier report into the Structure grid (Phase 35 Y4): the polyglot picture.
+ *
+ * Columns are build units, rows are ranked tiers in dependency order, and each cell is a
+ * build unit's files in that tier, sized by file count and labelled with its unit and tier.
+ * Every recorded edge between two cells is drawn, including cross-unit ones, so a monorepo
+ * with several services reads as one picture. Support tiers sit on a shelf beside the grid,
+ * never as a row. Only recorded edges are drawn; an empty pair simply has no edge.
+ */
+export function buildStructureGridViewModel(
+  report: TierReport,
+  repository: RepositoryDescriptor,
+  cache: ScanCacheMetadata,
+): ViewModel {
+  const CELL = 170;
+  const grid = report.grid;
+  const unitIndex = new Map(grid.units.map((unit, index) => [unit.id, index]));
+  const tierIndex = new Map(grid.tiers.map((tier, index) => [tier, index]));
+
+  const nodes: ViewNode[] = [];
+  const positions: ViewPosition[] = [];
+  for (const cell of grid.cells) {
+    nodes.push({
+      id: cell.id,
+      kind: 'tier',
+      directory: '.',
+      label: `${cell.unitName} · ${STRUCTURE_LABELS[cell.tier] ?? cell.tier}`,
+      workspacePath: cell.id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: cell.files,
+      files: cell.files,
+      tier: cell.tier,
+      mixed: cell.mixed,
+      unit: cell.unit,
+      unitName: cell.unitName,
+      cell: cell.id,
+    });
+    positions.push({
+      id: cell.id,
+      x: (unitIndex.get(cell.unit) ?? 0) * CELL,
+      y: (tierIndex.get(cell.tier) ?? 0) * CELL,
+    });
+  }
+  // The shelf sits to the right of the grid, in its own column, never a tier row.
+  const shelfX = (grid.units.length + 0.5) * CELL;
+  report.shelf.forEach((entry, index) => {
+    const id = `shelf:${entry.tier}`;
+    nodes.push({
+      id,
+      kind: 'shelf',
+      directory: '.',
+      label: STRUCTURE_LABELS[entry.tier] ?? entry.tier,
+      workspacePath: id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: entry.files,
+      files: entry.files,
+      tier: entry.tier,
+      mixed: entry.mixed,
+    });
+    positions.push({ id, x: shelfX, y: index * CELL });
+  });
+
+  const edges: ViewEdge[] = grid.edges.map((edge) => ({
+    source: edge.source,
+    target: edge.target,
+    kind: 'import',
+    evidence: {
+      line: 1,
+      specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
+      resolution: 'exact',
+    },
+    semanticSource: edge.source,
+    semanticTarget: edge.target,
+    weight: edge.weight,
+    crossUnit: edge.crossUnit ? edge.weight : 0,
+    tierKind: edge.kind,
+  }));
+
+  return {
+    repository,
+    nodes,
+    edges,
+    positions,
+    // A cell is a roll-up, not a file: the hub ring stays reserved for files.
+    hubs: [],
+    diagnostics: [],
+    excluded: [],
+    cache,
+    structure: true,
+    structureLevel: 'grid',
+    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureGrid: {
+      tiers: grid.tiers,
+      units: grid.units,
+      crossUnitEdges: grid.summary.crossUnitEdges,
+    },
+  };
 }

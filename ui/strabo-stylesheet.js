@@ -57,6 +57,9 @@ export function stylesheet() {
     // support shelf is drawn as a muted dashed strip, never a peer box.
     { selector: 'node.kind-unit', style: { 'border-width': 2, 'border-color': theme.nodeLine, 'background-opacity': 1 } },
     { selector: 'node.kind-shelf', style: { 'border-width': 1.5, 'border-style': 'dashed', 'border-color': theme.nodeLine, opacity: 0.85 } },
+    // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
+    // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
+    { selector: 'node.kind-tier', style: { 'border-width': 2, 'border-color': theme.nodeLine, 'background-opacity': 1 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
     // The large-file lens swaps the size encoding to lines of code and hides files under
@@ -144,7 +147,7 @@ export function stylesheet() {
       },
     },
     { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
-    { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
+    { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-style': 'dashed', 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
     { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {

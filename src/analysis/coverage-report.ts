@@ -43,6 +43,12 @@ export interface CoverageFileEntry {
   stale: boolean | null;
   /** Whether the file is untested for a consumer at the chosen threshold. */
   untested: boolean;
+  /** U3: Reachability depth from the closest test (0 for test, 1 for direct, 2+ for transitive, null if unreached). */
+  reachDepth?: number | null;
+  /** U3: True when directly imported by at least one test. */
+  reachDirect?: boolean;
+  /** U3: Shortest path from a test to this file. */
+  reachPath?: string[] | null;
   /** Tests whose forward closure reaches this file: the tests to run. File scope only. */
   tests?: string[];
   /** Files that import this file. File scope only. */
@@ -133,6 +139,9 @@ function entryOf(file: string, figure: FileCoverage, basis: 'measured' | 'reacha
     notInReport: figure.notInReport,
     stale: figure.stale,
     untested: isUntested(figure, basis, threshold),
+    reachDepth: figure.reachDepth,
+    reachDirect: figure.reachDirect,
+    reachPath: figure.reachPath,
   };
 }
 

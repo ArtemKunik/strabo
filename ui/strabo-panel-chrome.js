@@ -90,6 +90,10 @@ const LEGEND_SWATCHES = {
   'size = files': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
   'edge = import between units': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
   'support = unit footer': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
+  'band = tier': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'edge = recorded import': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
+  'wrong-way = red or dashed': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
+  'shelf = support tiers': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
 };
 
 

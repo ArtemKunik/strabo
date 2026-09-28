@@ -6,6 +6,8 @@ import {
   buildBaseline,
   computeFreshness,
   defaultBaselinePath,
+  parseFailOnRules,
+  parseUncoveredChangeThreshold,
   readBaseline,
   runCheck,
   writeBaseline,
@@ -67,4 +69,29 @@ test('runCheck warns rather than failing when no rules are enabled', async () =>
   const result = await runCheck({ workspaceRoot: config.workspaceRoot, scanCeiling: fixtures });
   assert.equal(result.passed, true);
   assert.ok(result.warnings.some((warning) => warning.rule === 'check'));
+});
+
+test('parseFailOnRules and parseUncoveredChangeThreshold parse coverage gate flags (U7)', () => {
+  const rules = parseFailOnRules(['uncovered-change:85', 'coverage-stale', 'cycles']);
+  assert.deepEqual(rules, ['cycles', 'uncovered-change', 'coverage-stale']);
+
+  const threshold = parseUncoveredChangeThreshold(['uncovered-change:85']);
+  assert.equal(threshold, 85);
+
+  const defaultThreshold = parseUncoveredChangeThreshold(['uncovered-change', 'coverage-stale']);
+  assert.equal(defaultThreshold, undefined);
+});
+
+test('layer-violations finding detail includes tierFlow aggregate (Y8)', async () => {
+  const findings = await runCheck({
+    workspaceRoot: config.workspaceRoot,
+    scanCeiling: fixtures,
+    rules: ['layer-violations'],
+  });
+  for (const finding of findings.findings) {
+    if (finding.rule === 'layer-violations') {
+      assert.ok(finding.detail.includes('tierFlow:'), 'finding detail contains tierFlow summary');
+      assert.ok(typeof finding.inputs?.crossTierEdges === 'number');
+    }
+  }
 });

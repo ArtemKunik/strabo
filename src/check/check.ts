@@ -11,6 +11,13 @@ import type { Graph, StraboConfig } from '../types.ts';
 import { analyzeWorkspace } from '../workspace/analyze.ts';
 import { resolveWorkspaceRepositories } from '../workspace/config.ts';
 import { BASELINE_VERSION, type CheckBaseline } from './baseline.ts';
+import { computeMeasuredCoverage } from '../analysis/measured-coverage.ts';
+import { diffFile } from '../analysis/diff.ts';
+import { computeChangedLineCoverage } from '../analysis/changed-coverage.ts';
+import { reviewWorkingTree } from '../analysis/review.ts';
+import { readWorkingFile } from '../analysis/git-content.ts';
+import { symbolExtractorFor } from '../scan/languages/registry.ts';
+import { buildFunctions } from '../analysis/functions.ts';
 
 export type CheckRule =
   | 'cycles'
@@ -19,7 +26,9 @@ export type CheckRule =
   | 'health-regression'
   | 'data-contract-breaking'
   | 'data-no-single-writer'
-  | 'data-unconformant';
+  | 'data-unconformant'
+  | 'uncovered-change'
+  | 'coverage-stale';
 
 export const CHECK_RULES: readonly CheckRule[] = [
   'cycles',
@@ -29,6 +38,8 @@ export const CHECK_RULES: readonly CheckRule[] = [
   'data-contract-breaking',
   'data-no-single-writer',
   'data-unconformant',
+  'uncovered-change',
+  'coverage-stale',
 ];
 
 /**
@@ -56,6 +67,10 @@ export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
   'data-no-single-writer': 'data-no-single-writer',
   'data-conformance': 'data-unconformant',
   'data-unconformant': 'data-unconformant',
+  'uncovered-change': 'uncovered-change',
+  'uncovered-changes': 'uncovered-change',
+  'coverage-stale': 'coverage-stale',
+  'stale-coverage': 'coverage-stale',
 };
 
 /**
@@ -67,13 +82,31 @@ export function parseFailOnRules(values: readonly string[]): CheckRule[] {
   const named = new Set<CheckRule>();
   for (const value of values) {
     for (const token of value.split(',')) {
-      const rule = FAIL_ON_ALIASES[token.trim().toLowerCase()];
+      const trimmed = token.trim().toLowerCase();
+      const baseToken = trimmed.includes(':') ? trimmed.slice(0, trimmed.indexOf(':')) : trimmed;
+      const rule = FAIL_ON_ALIASES[baseToken];
       if (rule) {
         named.add(rule);
       }
     }
   }
   return CHECK_RULES.filter((rule) => named.has(rule));
+}
+
+export function parseUncoveredChangeThreshold(values: readonly string[]): number | undefined {
+  for (const value of values) {
+    for (const token of value.split(',')) {
+      const trimmed = token.trim().toLowerCase();
+      if (trimmed.startsWith('uncovered-change:') || trimmed.startsWith('uncovered-changes:')) {
+        const colon = trimmed.indexOf(':');
+        const parsed = Number.parseInt(trimmed.slice(colon + 1), 10);
+        if (Number.isFinite(parsed)) {
+          return Math.max(0, Math.min(100, parsed));
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -118,6 +151,7 @@ export interface CheckOptions {
   rules?: readonly string[];
   baseline?: CheckBaseline | null;
   healthRegressionPct?: number;
+  uncoveredChangeThreshold?: number;
   now?: () => Date;
 }
 
@@ -156,17 +190,20 @@ export async function collectFindings(
 
   const tiers = buildTierReport(root, repository, graph);
   for (const direction of tiers.directions) {
+    const flowNote = `[tierFlow: ${tiers.tierFlow.edges.length} cross-tier edges, intra-ratio ${Math.round(tiers.tierFlow.intraRatio * 100)}%]`;
     findings.push({
       rule: 'layer-violations',
       key: `layer:${direction.unit}:${direction.source}->${direction.target}:${direction.kind}`,
       node: `${direction.source} -> ${direction.target}`,
-      detail: `${direction.sourceTier} depends on ${direction.targetTier} (${direction.kind}) in unit ${direction.unit}`,
+      detail: `${direction.sourceTier} depends on ${direction.targetTier} (${direction.kind}) in unit ${direction.unit} ${flowNote}`,
       inputs: {
         unit: direction.unit,
         source: direction.source,
         target: direction.target,
         kind: direction.kind,
         line: direction.line,
+        crossTierEdges: tiers.tierFlow.edges.length,
+        intraRatio: tiers.tierFlow.intraRatio,
       },
     });
   }
@@ -287,9 +324,99 @@ export async function runCheck(options: CheckOptions): Promise<CheckResult> {
   if (rules.some((rule) => DATA_RULES.has(rule))) {
     collected.push(...(await collectDataFindings({ ...options, workspaceRoot: options.workspaceRoot })));
   }
-  const healthScore = computeArchitectureHealth(graph).score;
 
   const warnings: CheckWarning[] = [];
+  if (rules.includes('coverage-stale') || rules.includes('uncovered-change')) {
+    const measured = await computeMeasuredCoverage(repository.root, graph);
+
+    if (rules.includes('coverage-stale')) {
+      if (!measured.available) {
+        warnings.push({
+          rule: 'coverage-stale',
+          detail: `no coverage report available (${measured.reason ?? 'missing'}) to assess staleness`,
+        });
+      } else {
+        for (const file of measured.files) {
+          if (file.stale === true) {
+            collected.push({
+              rule: 'coverage-stale',
+              key: `coverage-stale:${file.file}`,
+              node: file.file,
+              detail: `coverage report predates last commit on ${file.file}`,
+              inputs: { file: file.file, reportModified: measured.reportModified ?? '' },
+            });
+          }
+        }
+      }
+    }
+
+    if (rules.includes('uncovered-change')) {
+      const review = await reviewWorkingTree(repository.root, graph);
+      const reviewFiles = review.available ? review.files : [];
+      const threshold = options.uncoveredChangeThreshold ?? 100;
+
+      for (const file of reviewFiles) {
+        if (file.status === 'deleted') continue;
+        const diffResult = await diffFile(repository.root, {
+          file: file.path,
+          untracked: file.status === 'untracked',
+        });
+        if (diffResult.available) {
+          const extractor = symbolExtractorFor(file.path);
+          let functions;
+          if (extractor) {
+            const content = readWorkingFile(repository.root, file.path);
+            if (content !== null) {
+              try {
+                const extraction = await extractor.extract(file.path, content);
+                functions = buildFunctions(file.path, extraction.symbols, extraction.calls ?? []).functions;
+              } catch {
+                // ignore
+              }
+            }
+          }
+          const item = computeChangedLineCoverage(diffResult.diff, measured, { functions });
+          if (item.linesChanged > 0) {
+            if (item.basis === 'stale') {
+              collected.push({
+                rule: 'uncovered-change',
+                key: `uncovered-change:${file.path}:stale`,
+                node: file.path,
+                detail: `cannot verify changed-line coverage: coverage report predates the change`,
+                inputs: { file: file.path, linesChanged: item.linesChanged, basis: 'stale' },
+              });
+            } else if (item.basis === 'unavailable') {
+              collected.push({
+                rule: 'uncovered-change',
+                key: `uncovered-change:${file.path}:uncovered`,
+                node: file.path,
+                detail: `${item.linesChanged} changed lines with no coverage report (${item.note ?? 'unavailable'})`,
+                inputs: { file: file.path, linesChanged: item.linesChanged, percent: 0, threshold },
+              });
+            } else if (item.coveragePercent !== null && item.coveragePercent < threshold) {
+              const fnNames = item.uncoveredFunctions.map((fn) => `\`${fn.name}\``).join(', ');
+              const fnDetail = fnNames ? `; changed and uncovered: ${fnNames}` : '';
+              collected.push({
+                rule: 'uncovered-change',
+                key: `uncovered-change:${file.path}:${item.coveragePercent}`,
+                node: file.path,
+                detail: `${item.linesCovered} of ${item.linesChanged} changed lines covered (${item.coveragePercent}% < ${threshold}% threshold)${fnDetail}`,
+                inputs: {
+                  file: file.path,
+                  linesCovered: item.linesCovered,
+                  linesChanged: item.linesChanged,
+                  percent: item.coveragePercent,
+                  threshold,
+                },
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const healthScore = computeArchitectureHealth(graph).score;
   if (rules.length === 0) {
     warnings.push({ rule: 'check', detail: 'no rules enabled; nothing can fail this build' });
   }

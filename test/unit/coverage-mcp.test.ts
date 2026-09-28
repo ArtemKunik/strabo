@@ -60,3 +60,37 @@ test('the coverage tool answers file and folder scopes, and honours the threshol
   assert.equal(strict.threshold, 80);
   assert.equal(strict.totals.untested, 2);
 });
+
+test('get_uncovered_changes is registered and returns change coverage (U7)', async () => {
+  const tools = createTools(createApiDispatch(config));
+  const tool = tools.find((t) => t.name === 'get_uncovered_changes');
+  assert.ok(tool, 'get_uncovered_changes tool is registered');
+
+  const handler = createMcpHandler(config);
+  const result = JSON.parse(await toolText(handler, 'get_uncovered_changes', {})) as {
+    basis: string;
+    files: unknown[];
+    totals: { linesChanged: number; linesCovered: number };
+  };
+  assert.ok(['measured', 'stale', 'unavailable'].includes(result.basis));
+  assert.ok(Array.isArray(result.files));
+  assert.ok(typeof result.totals.linesChanged === 'number');
+});
+
+test('get_tier_flow is registered and returns logical structure flow (Y8)', async () => {
+  const tools = createTools(createApiDispatch(config));
+  const tool = tools.find((t) => t.name === 'get_tier_flow');
+  assert.ok(tool, 'get_tier_flow tool is registered');
+
+  const handler = createMcpHandler(config);
+  const result = JSON.parse(await toolText(handler, 'get_tier_flow', {})) as {
+    nodes: unknown[];
+    shelf: unknown[];
+    edges: unknown[];
+    intraRatio: number;
+  };
+  assert.ok(Array.isArray(result.nodes));
+  assert.ok(Array.isArray(result.shelf));
+  assert.ok(Array.isArray(result.edges));
+  assert.ok(typeof result.intraRatio === 'number');
+});

@@ -83,6 +83,10 @@ export interface PassportCoverageFigure {
   file: string;
   value: number | null;
   stale: boolean | null;
+  /** U3: Reachability depth from the closest test (0 for test, 1 for direct, 2+ for transitive, null if unreached). */
+  depth?: number | null;
+  /** U3: Shortest path from reaching test, or null if unreached. */
+  path?: string[] | null;
 }
 
 /**
@@ -100,6 +104,12 @@ export interface PassportUntested {
   figures: PassportCoverageFigure[];
   /** Used files the measured report does not name: `not in report`, never counted as 0%. */
   notInReport: number;
+  /** U3: On reachable basis, non-test used files reached directly by tests. */
+  directReached?: string[];
+  /** U3: On reachable basis, non-test used files reached only transitively. */
+  transitiveOnly?: string[];
+  /** U3: On reachable basis, non-test used files reached only through 3 or more hops. */
+  deepTransitive?: string[];
 }
 
 /** A used file under this measured line coverage is listed as untested. */
@@ -240,13 +250,27 @@ export function computeUntested(
 
   if (!measured?.available) {
     const files = used.filter((file) => !coverage.get(file)?.reached).sort();
+    const reachedUsed = used.filter((file) => coverage.get(file)?.reached);
+    const directReached = reachedUsed.filter((file) => coverage.get(file)?.reachDirect).sort();
+    const transitiveOnly = reachedUsed.filter((file) => !coverage.get(file)?.reachDirect).sort();
+    const deepTransitive = reachedUsed.filter((file) => (coverage.get(file)?.reachDepth ?? 0) >= 3).sort();
+
     return {
       basis: 'reachable',
       threshold: null,
       total: files.length,
       files: files.slice(0, limit),
-      figures: files.slice(0, limit).map((file) => ({ file, value: null, stale: null })),
+      figures: files.slice(0, limit).map((file) => ({
+        file,
+        value: null,
+        stale: null,
+        depth: coverage.get(file)?.reachDepth ?? null,
+        path: coverage.get(file)?.reachPath ?? null,
+      })),
       notInReport: 0,
+      directReached,
+      transitiveOnly,
+      deepTransitive,
     };
   }
 

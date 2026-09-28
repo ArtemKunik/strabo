@@ -59,9 +59,9 @@ export function shelfDiameter(files) {
   return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
 }
 
-/** The diameter a node draws at: a unit/shelf by file count, a file by blast radius. */
+/** The diameter a node draws at: a unit/tier by file count, a shelf tag smaller, a file by blast radius. */
 export function nodeDiameter(node) {
-  if (node?.kind === 'unit') return unitDiameter(node.files ?? node.size);
+  if (node?.kind === 'unit' || node?.kind === 'tier') return unitDiameter(node.files ?? node.size);
   if (node?.kind === 'shelf') return shelfDiameter(node.files);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }

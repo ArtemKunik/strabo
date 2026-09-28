@@ -1,5 +1,5 @@
 import type { Graph } from '../types.ts';
-import { computeCoverage, reachedFiles } from './coverage.ts';
+import { computeCoverage, computeDetailedTestReachByFile, reachedFiles } from './coverage.ts';
 import { percent, type MeasuredCoverageSummary } from './measured-coverage.ts';
 
 /**
@@ -21,6 +21,8 @@ export interface FileCoverage {
   /** Lines the report recorded as hit and found; null unless `basis` is `measured`. */
   linesHit: number | null;
   linesFound: number | null;
+  /** Covered line numbers (1-based) from the measured report; null on reachability basis. */
+  coveredLines: number[] | null;
   /** True when the report predates the file's last commit; null when not assessed. */
   stale: boolean | null;
   /** Whether a test reaches this file over recorded edges: the labelled fallback. */
@@ -31,6 +33,12 @@ export interface FileCoverage {
   reportModified: string | null;
   /** `now - reportModified` in milliseconds; null when no report was read. */
   reportAgeMs: number | null;
+  /** U3: Reachability depth from the closest test (0 for test itself, 1 for direct, 2+ for transitive, null if unreached). */
+  reachDepth: number | null;
+  /** U3: True when directly imported by at least one test. */
+  reachDirect: boolean;
+  /** U3: Shortest path from a test to this file, or null if unreached. */
+  reachPath: string[] | null;
 }
 
 /**
@@ -143,6 +151,7 @@ export function fileCoverage(
   measured?: MeasuredCoverageSummary | null,
 ): Map<string, FileCoverage> {
   const reached = reachedFiles(computeCoverage(graph));
+  const detailedReach = computeDetailedTestReachByFile(graph);
   const report = measured?.available ? measured : null;
   const reportModified = report?.reportModified ?? null;
   const reportAgeMs = report?.reportAgeMs ?? null;
@@ -153,6 +162,11 @@ export function fileCoverage(
   const result = new Map<string, FileCoverage>();
   for (const node of graph.nodes) {
     const entry = byPath.get(node.id);
+    const details = detailedReach.get(node.id) ?? [];
+    const reachDepth = details.length > 0 ? details[0]!.depth : null;
+    const reachDirect = details.length > 0 ? details[0]!.direct : false;
+    const reachPath = details.length > 0 ? details[0]!.path : null;
+
     result.set(
       node.id,
       entry
@@ -161,22 +175,30 @@ export function fileCoverage(
             value: entry.lineCoverage,
             linesHit: entry.linesHit,
             linesFound: entry.linesFound,
+            coveredLines: entry.coveredLines ?? null,
             stale: entry.stale,
             reached: reached.has(node.id),
             notInReport: false,
             reportModified,
             reportAgeMs,
+            reachDepth,
+            reachDirect,
+            reachPath,
           }
         : {
             basis: 'reachable',
             value: null,
             linesHit: null,
             linesFound: null,
+            coveredLines: null,
             stale: null,
             reached: reached.has(node.id),
             notInReport: report !== null,
             reportModified,
             reportAgeMs,
+            reachDepth,
+            reachDirect,
+            reachPath,
           },
     );
   }

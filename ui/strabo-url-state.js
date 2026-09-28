@@ -33,7 +33,16 @@ export function createUrlState(app) {
         }
       };
       set('repository', state.repository ?? '');
-      set('mode', state.mode === 'file' ? 'file' : state.mode === 'system' ? 'system' : '');
+      set(
+        'mode',
+        state.mode === 'file'
+          ? 'file'
+          : state.mode === 'system'
+            ? 'system'
+            : state.mode === 'structure'
+              ? 'structure'
+              : '',
+      );
       set('unit', state.mode === 'system' ? state.systemUnit ?? '' : '');
       set('outside', state.mode === 'system' && state.showOutside ? '1' : '');
       set('node', store.get().ui.node ?? '');
@@ -55,7 +64,7 @@ export function createUrlState(app) {
       state.repository = repository;
     }
     const mode = params.get('mode');
-    if (mode === 'file' || mode === 'block' || mode === 'system') {
+    if (mode === 'file' || mode === 'block' || mode === 'system' || mode === 'structure') {
       state.mode = mode;
       elements.detail.value = mode;
     }

@@ -1,8 +1,10 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryCoverageSection,
   RepositoryDataSection,
   RepositoryReportDocument,
+  RepositoryStructureSection,
   Severity,
 } from './report-types.ts';
 
@@ -33,6 +35,8 @@ export function renderReportMarkdown(document: RepositoryReportDocument): string
   renderOverview(lines, document);
   renderPainPoints(lines, document.painPoints);
   renderChange(lines, document.change);
+  renderCoverage(lines, document.coverage);
+  renderTierStructure(lines, document.structure);
   renderDrift(lines, document.drift);
   renderData(lines, document.data);
   renderSuggestions(lines, document);
@@ -181,6 +185,88 @@ function renderStructure(lines: string[], change: RepositoryChangeSection): void
   );
   section(lines, `Entry points added (${diff.entryPointsAdded.length})`, diff.entryPointsAdded.map((file) => `\`${file}\``));
   section(lines, `Newly unreached (${diff.newlyUnreached.length})`, diff.newlyUnreached.map((file) => `\`${file}\``));
+}
+
+function renderCoverage(lines: string[], coverage: RepositoryCoverageSection | null): void {
+  lines.push('## Code coverage');
+  if (!coverage) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  if (!coverage.available) {
+    lines.push(`- unavailable: ${coverage.reason ?? 'no report'}${coverage.detail ? ` — ${coverage.detail}` : ''}`);
+    if (coverage.checkedLocations && coverage.checkedLocations.length > 0) {
+      lines.push(`- checked: ${coverage.checkedLocations.map((loc) => `\`${loc}\``).join(', ')}`);
+    }
+    if (coverage.suggestedCommands && coverage.suggestedCommands.length > 0) {
+      lines.push(
+        `- produce a report: ${coverage.suggestedCommands.map((c) => `\`${c.command}\` (${c.ecosystem})`).join(' · ')}`,
+      );
+    } else if (coverage.refreshCommand) {
+      lines.push(`- produce a report: \`${coverage.refreshCommand}\``);
+    }
+    lines.push('');
+    return;
+  }
+  lines.push(
+    `- Line coverage: ${coverage.lineCoverage !== null ? `${coverage.lineCoverage}%` : 'unavailable'} (${coverage.linesHit}/${coverage.linesFound} lines across ${coverage.filesMeasured} file(s))`,
+  );
+  lines.push(
+    `- Basis: ${coverage.basis} (${coverage.format ?? 'unknown format'})${coverage.reportPath ? ` · \`${coverage.reportPath}\`` : ''}${coverage.reportModified ? ` · modified ${coverage.reportModified}` : ''}`,
+  );
+  if (coverage.stale.length > 0) {
+    lines.push(
+      `- Stale for ${coverage.stale.length} file(s) (predates last commit): ${coverage.stale.slice(0, 5).map((f) => `\`${f}\``).join(', ')}${coverage.stale.length > 5 ? ` and ${coverage.stale.length - 5} more` : ''}`,
+    );
+  }
+  if (coverage.outOfGraph.length > 0) {
+    lines.push(`- ${coverage.outOfGraph.length} file(s) in report but outside scanned graph`);
+  }
+  if (coverage.refreshCommand) {
+    lines.push(`- Refresh command: \`${coverage.refreshCommand}\``);
+  }
+  lines.push('');
+}
+
+function renderTierStructure(lines: string[], structure: RepositoryStructureSection | null): void {
+  lines.push('## Logical structure');
+  if (!structure) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  lines.push(
+    `- ${structure.summary.classified} classified file(s) across ${structure.tierFlow.tiers.length} ranked tier(s) · ${structure.summary.unclassified} unclassified · ${structure.summary.mixed} mixed`,
+  );
+  lines.push(
+    `- Flow: ${structure.tierFlow.edges.length} cross-tier edge(s) · ${structure.tierFlow.total} total recorded import(s) · intra-tier ratio ${Math.round(structure.tierFlow.intraRatio * 100)}%`,
+  );
+  section(
+    lines,
+    `Tier flow (${structure.tierFlow.edges.length})`,
+    structure.tierFlow.edges.map(
+      (edge) =>
+        `\`${edge.source}\` → \`${edge.target}\` (${edge.kind}, weight ${edge.weight}${edge.crossUnit > 0 ? `, ${edge.crossUnit} cross-unit` : ''})`,
+    ),
+  );
+  section(
+    lines,
+    `Support tiers (${structure.shelf.length})`,
+    structure.shelf.map(
+      (entry) =>
+        `\`${entry.tier}\` — ${entry.files} file(s), ${entry.lines} line(s)${entry.mixed > 0 ? ` (${entry.mixed} mixed)` : ''}`,
+    ),
+  );
+  section(
+    lines,
+    `Wrong-way dependencies (${structure.directions.length})`,
+    structure.directions.map(
+      (dir) =>
+        `\`${dir.source}\` (${dir.sourceTier}) → \`${dir.target}\` (${dir.targetTier}) [${dir.kind}] at line ${dir.line}`,
+    ),
+  );
+  lines.push('');
 }
 
 function renderDrift(lines: string[], drift: RepositoryReportDocument['drift']): void {

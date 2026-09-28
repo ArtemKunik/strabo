@@ -177,7 +177,13 @@ export type {
   MetricTotals,
   MetricsHistoryEntry,
 } from './analysis/change-metrics.ts';
-export { computeCoverage } from './analysis/coverage.ts';
+export {
+  computeCoverage,
+  computeDetailedTestReachByFile,
+  computeTestReachByFile,
+  reachedFiles,
+} from './analysis/coverage.ts';
+export type { TestReachDetail, TestReachResult } from './analysis/coverage.ts';
 export {
   fileCoverage,
   summariseFileCoverage,
@@ -199,6 +205,15 @@ export type {
   CoverageFileEntry,
   CoverageFolderEntry,
 } from './analysis/coverage-report.ts';
+export {
+  computeChangedLineCoverage,
+  summariseChangedCoverage,
+} from './analysis/changed-coverage.ts';
+export type {
+  ChangedLineCoverage,
+  UncoveredFunctionChange,
+  ChangedCoverageTotals,
+} from './analysis/changed-coverage.ts';
 export { computeCoverageGaps } from './analysis/coverage-gaps.ts';
 export type {
   CoverageGap,
@@ -248,6 +263,7 @@ export type {
 } from './analysis/measured-coverage.ts';
 export {
   detectCoverageCommand,
+  detectCoverageEcosystems,
   refreshCoverage,
   runCoverageScript,
   clearCoverageCommandCache,
@@ -256,6 +272,7 @@ export {
 export type {
   CoverageRunner,
   CoverageCommand,
+  CoverageCommandSuggestion,
   CoverageRefreshHint,
   CoverageRefreshResult,
   CoverageRefreshReason,
@@ -385,8 +402,11 @@ export type {
   PainPoint,
   PainPointKind,
   RepositoryChangeSection,
+  RepositoryCoverageSection,
+  RepositoryDataSection,
   RepositoryReportDocument,
   RepositoryReportInputs,
+  RepositoryStructureSection,
   ReportEvidence,
   ReportLimits,
   ReportRevision,
@@ -566,7 +586,13 @@ export {
 } from './narrator/coverage-weekly.ts';
 export type { CoverageWeeklyRequest, CoverageWeeklyInput } from './narrator/coverage-weekly.ts';
 
-export { buildViewModel, buildSystemViewModel, buildSystemUnitViewModel } from './view/view-model.ts';
+export {
+  buildViewModel,
+  buildSystemViewModel,
+  buildSystemUnitViewModel,
+  buildStructureViewModel,
+  buildStructureGridViewModel,
+} from './view/view-model.ts';
 
 export {
   getCachedGraph,
@@ -608,7 +634,7 @@ export type {
 export { computeFreshness, revisionFromFingerprint } from './status.ts';
 export type { Freshness } from './status.ts';
 
-export { runCheck, buildBaseline, collectFindings, CHECK_RULES, FAIL_ON_ALIASES, parseFailOnRules } from './check/check.ts';
+export { runCheck, buildBaseline, collectFindings, CHECK_RULES, FAIL_ON_ALIASES, parseFailOnRules, parseUncoveredChangeThreshold } from './check/check.ts';
 export type { CheckFinding, CheckOptions, CheckResult, CheckRule, CheckWarning } from './check/check.ts';
 export {
   readBaseline,

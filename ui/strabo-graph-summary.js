@@ -9,7 +9,8 @@ import { topLevelDirectory } from './strabo-graph-ids.js';
 
 /** Counts for the tests / components strip, in file, block, or system mode. */
 export function mapCounts(model) {
-  const isBlock = model.prefixLength !== undefined || model.system === true;
+  const isStructure = model.structure === true;
+  const isBlock = model.prefixLength !== undefined || model.system === true || isStructure;
   const byKey = new Map();
   let tests = 0;
   let modules = 0;
@@ -36,8 +37,9 @@ export function mapCounts(model) {
     .map(([key, count]) => ({
       label: key,
       count,
-      // Block ids are whole directories; file ids filter by their directory prefix.
-      filter: key === '.' ? '' : isBlock && !model.systemUnit ? key : `${key}/`,
+      // Block ids are whole directories; file ids filter by their directory prefix. A
+      // Structure band is a roll-up, so its chip never filters the map.
+      filter: isStructure ? '' : key === '.' ? '' : isBlock && !model.systemUnit ? key : `${key}/`,
     }));
 
   return { tests, modules, entries };
@@ -65,6 +67,15 @@ export function readingLegend(model, locLens = false) {
       'size = files',
       'edge = import between units',
       'support = unit footer',
+    ];
+  }
+  if (model?.structure) {
+    return [
+      'band = tier',
+      'size = files',
+      'edge = recorded import',
+      'wrong-way = red or dashed',
+      'shelf = support tiers',
     ];
   }
   return [
@@ -135,8 +146,11 @@ export function graphSummary(model) {
   const edges = (model?.edges ?? []).length;
   // A System L0 map is units, not files; the drill-down and the file map are nodes. Naming
   // the unit is what stops "45 nodes" reading as if the shelves were still peers.
-  const nodeWord =
-    model?.system && !model?.systemUnit
+  const nodeWord = model?.structure
+    ? nodes === 1
+      ? 'tier'
+      : 'tiers'
+    : model?.system && !model?.systemUnit
       ? nodes === 1
         ? 'unit'
         : 'units'

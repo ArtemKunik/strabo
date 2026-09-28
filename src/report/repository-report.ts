@@ -1,18 +1,22 @@
 import { computeGraphMetrics } from '../analysis/analysis.ts';
 import { computeCycles } from '../analysis/cycles.ts';
-import type { MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
+import { detectCoverageEcosystems } from '../analysis/coverage-refresh.ts';
+import { DEFAULT_COVERAGE_REPORT_PATHS, type MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import { computeRepositoryPassport, computeUntested } from '../analysis/passport.ts';
 import type { DataReport, DependencyAdvisory, Graph, RiskReport } from '../types.ts';
 import type { SmellRule, SmellsReport } from '../analysis/quality.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
+import type { TierReport } from '../analysis/tiers/types.ts';
 import {
   DEFAULT_REPORT_LIMITS,
   SEVERITY_ORDER,
   type PainPoint,
+  type RepositoryCoverageSection,
   type RepositoryDataSection,
   type RepositoryReportDocument,
   type RepositoryReportInputs,
+  type RepositoryStructureSection,
   type ReportLimits,
   type Severity,
 } from './report-types.ts';
@@ -51,17 +55,18 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
   const unavailable: string[] = [];
   const warnings: string[] = [];
 
+  const measured = inputs.coverage && 'summary' in inputs.coverage ? inputs.coverage : null;
   const passport = computeRepositoryPassport(
     inputs.repository,
     graph,
     inputs.extensionCounts ?? {},
     10,
-    inputs.coverage ?? null,
+    measured,
   );
 
   const painPoints: PainPoint[] = [];
   painPoints.push(...cyclePoints(graph));
-  painPoints.push(...untestedPoints(graph, limits.untested, inputs.coverage ?? null));
+  painPoints.push(...untestedPoints(graph, limits.untested, measured));
 
   if (inputs.smells) {
     painPoints.push(...smellPoints(inputs.smells));
@@ -109,6 +114,18 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     unavailable.push('the data layer was not computed');
   }
 
+  let coverage: RepositoryCoverageSection | null = null;
+  if (inputs.coverage) {
+    coverage = coverageSection(inputs.coverage, inputs.root);
+  }
+
+  let structure: RepositoryStructureSection | null = null;
+  if (inputs.structure) {
+    structure = structureSection(inputs.structure);
+  } else {
+    unavailable.push('logical structure was not computed');
+  }
+
   return {
     schema: 'strabo-report-1',
     repository: inputs.repository,
@@ -120,6 +137,8 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     change: inputs.change ?? null,
     drift: inputs.drift ?? null,
     data,
+    coverage,
+    structure,
     suggestions: shown.map(suggestionFor),
     evidence: {
       files: graph.nodes.length,
@@ -131,6 +150,71 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
       unavailable,
       warnings,
     },
+  };
+}
+
+/** Map measured coverage (or reachability fallback) into the report's coverage section. */
+function coverageSection(
+  coverage: MeasuredCoverageSummary | RepositoryCoverageSection,
+  root?: string,
+): RepositoryCoverageSection {
+  if ('filesMeasured' in coverage && !('summary' in coverage)) {
+    return coverage as RepositoryCoverageSection;
+  }
+  const measured = coverage as MeasuredCoverageSummary;
+  const suggestions =
+    !measured.available && root
+      ? detectCoverageEcosystems(root)
+      : measured.refresh?.command
+        ? [{ ecosystem: measured.refresh.runner ?? 'package', command: measured.refresh.command }]
+        : [];
+
+  return {
+    available: measured.available,
+    basis: measured.basis,
+    format: measured.format,
+    reportPath: measured.reportPath,
+    reportModified: measured.reportModified,
+    reportAgeMs: measured.reportAgeMs,
+    lineCoverage: measured.summary.lineCoverage,
+    linesFound: measured.summary.linesFound,
+    linesHit: measured.summary.linesHit,
+    filesMeasured: measured.summary.filesMeasured,
+    stale: measured.stale,
+    outOfGraph: measured.outOfGraph,
+    ...(measured.reason ? { reason: measured.reason } : {}),
+    ...(measured.detail ? { detail: measured.detail } : {}),
+    refreshCommand: measured.refresh?.command ?? null,
+    checkedLocations: measured.available ? undefined : [...DEFAULT_COVERAGE_REPORT_PATHS],
+    suggestedCommands: suggestions.length > 0 ? suggestions : undefined,
+  };
+}
+
+/** Trim a computed tier report into the report's structure section. */
+function structureSection(
+  report: TierReport | RepositoryStructureSection,
+): RepositoryStructureSection {
+  if ('summary' in report && 'classified' in report.summary) {
+    return report as RepositoryStructureSection;
+  }
+  const tierReport = report as TierReport;
+  return {
+    tierFlow: tierReport.tierFlow,
+    shelf: tierReport.shelf,
+    summary: {
+      classified: tierReport.summary.total - tierReport.summary.unclassified,
+      unclassified: tierReport.summary.unclassified,
+      mixed: tierReport.summary.mixed,
+    },
+    directions: tierReport.directions.map((d) => ({
+      source: d.source,
+      target: d.target,
+      sourceTier: d.sourceTier,
+      targetTier: d.targetTier,
+      kind: d.kind,
+      unit: d.unit,
+      line: d.line,
+    })),
   };
 }
 

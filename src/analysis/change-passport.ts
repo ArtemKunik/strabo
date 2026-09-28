@@ -25,6 +25,8 @@ import type { StructuralDiff } from './structural-diff.ts';
 import { IMPACT_TIER_LABELS } from './review-types.ts';
 import type { ChangeEdge, ChangePassport, ChangeRisk, ChangeRiskSignal, CohesionChange, FunctionChange, PublicSurfaceChange, SymbolChange, TieredImpact, ReviewFile, ReviewStatus } from './review-types.ts';
 import { run } from '../process.ts';
+import { diffFile } from './diff.ts';
+import { computeChangedLineCoverage, summariseChangedCoverage, type ChangedLineCoverage } from './changed-coverage.ts';
 
 const MAX_FILES = 40;
 
@@ -49,9 +51,13 @@ export async function computeChangePassport(
   const basis: 'measured' | 'reachable' = measuredCoverage?.available ? 'measured' : 'reachable';
   const testsByFile = computeTestReachByFile(graph);
   for (const file of measured) {
-    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, coverage, basis, structural));
+    changes.push(await cohesionChange(root, file, safeBaseline, graph, forward, backward, graphMetrics.transitiveDependents, testsByFile, coverage, basis, structural, measuredCoverage));
   }
-  return { files: changes, baseline: safeBaseline, capped: files.length > measured.length };
+  const changedCoverages = changes
+    .map((c) => c.changedLineCoverage)
+    .filter((c): c is ChangedLineCoverage => Boolean(c));
+  const changedLineCoverage = changedCoverages.length > 0 ? summariseChangedCoverage(changedCoverages) : null;
+  return { files: changes, baseline: safeBaseline, capped: files.length > measured.length, changedLineCoverage };
 }
 
 async function cohesionChange(
@@ -66,6 +72,7 @@ async function cohesionChange(
   coverage: ReadonlyMap<string, FileCoverage>,
   basis: 'measured' | 'reachable',
   structural?: Pick<StructuralDiff, 'edgesAdded' | 'edgesRemoved'>,
+  measuredCoverage?: MeasuredCoverageSummary | null,
 ): Promise<CohesionChange> {
   const base: Pick<CohesionChange, 'path' | 'status' | 'previousPath'> = {
     path: file.path,
@@ -77,6 +84,12 @@ async function cohesionChange(
   const edgesRemoved = edgesTouching(structural?.edgesRemoved, file);
   const fileCoverageFigure = coverage.get(file.path) ?? null;
 
+  const diffResult = await diffFile(root, {
+    file: file.path,
+    base: baseline ?? undefined,
+    untracked: file.status === 'untracked',
+  });
+
   // Which tests to run, and which dependents are under-covered or unreached, are answered for
   // every file, even one whose language has no extractor. `isUntested` reads the measured
   // figure when the report names the dependent and the labelled reach fallback otherwise.
@@ -84,6 +97,10 @@ async function cohesionChange(
   const isUntestedDependent = (dependent: string): boolean =>
     isUntested(coverage.get(dependent), basis, UNDER_COVERED_THRESHOLD);
   const untestedDependents = (backward.get(file.path) ?? []).filter(isUntestedDependent).sort();
+
+  const changedLineCoverageFallback = diffResult.available
+    ? computeChangedLineCoverage(diffResult.diff, measuredCoverage)
+    : null;
 
   const emptyPassport = (note: string) =>
     buildFileImpactPassport({
@@ -98,15 +115,16 @@ async function cohesionChange(
       untestedDependents,
       untestedBasis: basis,
       coverage: fileCoverageFigure,
+      changedLineCoverage: changedLineCoverageFallback,
       note,
     });
 
   const extractor = symbolExtractorFor(file.path);
   if (!extractor) {
-    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, impactPassport: emptyPassport('no symbol extractor for this language') };
+    return { ...base, before: null, after: null, note: 'no symbol extractor for this language', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, changedLineCoverage: changedLineCoverageFallback, impactPassport: emptyPassport('no symbol extractor for this language') };
   }
   if (extractor.tracksAccess === false) {
-    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, impactPassport: emptyPassport('this language records no member access') };
+    return { ...base, before: null, after: null, note: 'this language records no member access', functions: [], publicSurface: [], edgesAdded, edgesRemoved, impact: null, testsToRun, untestedDependents, untestedBasis: basis, coverage: fileCoverageFigure, risk: null, changedLineCoverage: changedLineCoverageFallback, impactPassport: emptyPassport('this language records no member access') };
   }
 
   const sourcePath = file.previousPath ?? file.path;
@@ -122,6 +140,13 @@ async function cohesionChange(
   const impact = computeTieredImpact(file.path, file, graph, backward, functions);
   const risk = computeChangeRisk(file.path, functions, impact, isUntestedDependent);
   const note = noteFor({ file, baseline, beforeContent, before, after });
+
+  const changedLineCoverage = diffResult.available
+    ? computeChangedLineCoverage(diffResult.diff, measuredCoverage, {
+        functions: afterExtraction ? functionsOf(file.path, afterExtraction) : undefined,
+        publicSymbols: publicSurface.flatMap((surface) => surface.symbols),
+      })
+    : null;
 
   const factsBefore = beforeExtraction === null ? null : functionFacts(sourcePath, beforeExtraction.symbols, beforeExtraction.calls ?? []);
   const factsAfter = afterExtraction === null ? null : functionFacts(file.path, afterExtraction.symbols, afterExtraction.calls ?? []);
@@ -140,6 +165,7 @@ async function cohesionChange(
     untestedDependents,
     untestedBasis: basis,
     coverage: fileCoverageFigure,
+    changedLineCoverage,
     note,
   });
 
@@ -158,6 +184,7 @@ async function cohesionChange(
     untestedBasis: basis,
     coverage: fileCoverageFigure,
     risk,
+    changedLineCoverage,
     impactPassport,
   };
 }

@@ -31,7 +31,12 @@ export function createViewPrefs(app) {
         return null;
       }
       const prefs = {};
-      if (parsed.mode === 'block' || parsed.mode === 'file' || parsed.mode === 'system') {
+      if (
+        parsed.mode === 'block' ||
+        parsed.mode === 'file' ||
+        parsed.mode === 'system' ||
+        parsed.mode === 'structure'
+      ) {
         prefs.mode = parsed.mode;
       }
       if (typeof parsed.overlay === 'string' && parsed.overlay !== '') {

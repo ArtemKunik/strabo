@@ -13,6 +13,8 @@ import { computeRiskReport, type RiskOptions } from '../risk/report.ts';
 import { symbolExtractorFor } from '../scan/languages/registry.ts';
 import type { DataReport, Graph } from '../types.ts';
 import { analyzeRepository } from '../workspace/analyze.ts';
+import { buildTierReport } from '../analysis/tiers/report.ts';
+import type { TierReport } from '../analysis/tiers/types.ts';
 import {
   buildRepositoryReport,
   type RepositoryChangeSection,
@@ -46,6 +48,10 @@ export interface CollectRepositoryReportOptions {
   data?: boolean;
   /** A precomputed data layer; when given, it is used instead of reading one. */
   dataReport?: DataReport;
+  /** Compute the logical structure section (Phase 35 Y8). Defaults to true. */
+  structure?: boolean;
+  /** A precomputed tier report; when given, it is used instead of computing one. */
+  tierReport?: TierReport;
   /** Use qualified contract ids alongside bare names. */
   qualifiedContracts?: boolean;
   /** Dependency-risk config; omitted means the risk section is not computed. */
@@ -90,6 +96,12 @@ export async function collectRepositoryReport(
     ...(options.coverage?.ceiling ? { ceiling: options.coverage.ceiling } : {}),
   });
 
+  const structure =
+    options.tierReport ??
+    (options.structure === false
+      ? undefined
+      : buildTierReport(root, options.repository, graph, coverage));
+
   const data =
     options.dataReport ??
     (options.data === false
@@ -114,6 +126,7 @@ export async function collectRepositoryReport(
     ...(drift ? { drift } : {}),
     ...(data ? { data } : {}),
     coverage,
+    ...(structure ? { structure } : {}),
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.limits ? { limits: options.limits } : {}),
   });

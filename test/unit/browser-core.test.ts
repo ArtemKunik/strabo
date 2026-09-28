@@ -408,6 +408,42 @@ test('buildGraphQuery sends system=1 in system mode', () => {
   assert.ok(!query.includes('blockDepth'));
 });
 
+test('buildGraphQuery sends structure=1 in structure mode (Y3)', () => {
+  const query = buildGraphQuery({ repository: '/demo', mode: 'structure', depth: 1, prefix: '' });
+  assert.ok(query.includes('structure=1'));
+  assert.ok(!query.includes('system=1'));
+  assert.ok(!query.includes('blockDepth'));
+});
+
+test('the reading legend names bands and shelves in structure mode (Y3)', () => {
+  assert.deepEqual(readingLegend({ structure: true }), [
+    'band = tier',
+    'size = files',
+    'edge = recorded import',
+    'wrong-way = red or dashed',
+    'shelf = support tiers',
+  ]);
+});
+
+test('a structure map counts tiers, and its strip chips never filter (Y3)', () => {
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'frontend', kind: 'tier' },
+      { id: 'tests', kind: 'shelf' },
+    ],
+    edges: [],
+  };
+  assert.match(graphSummary(model), /2 tiers/);
+  assert.deepEqual(
+    mapCounts(model).entries.map((entry) => [entry.label, entry.filter]),
+    [
+      ['frontend', ''],
+      ['tests', ''],
+    ],
+  );
+});
+
 test('buildGraphQuery sends the open unit and outside links in a system drill-down', () => {
   const query = buildGraphQuery({
     repository: '/demo',

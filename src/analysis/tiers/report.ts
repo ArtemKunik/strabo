@@ -18,6 +18,9 @@ import {
   type TierEndpointSite,
   type TierFlow,
   type TierFlowEdge,
+  type TierGrid,
+  type TierGridCell,
+  type TierGridEdge,
   type TierMatrixCell,
   type TierReport,
   type TierShelfEntry,
@@ -314,6 +317,124 @@ export function buildTierReport(
     intraRatio: flowTotal > 0 ? Number((intraTotal / flowTotal).toFixed(3)) : 0,
   };
 
+  // The unit × tier grid (Y4): the tier matrix with adjacency. Columns are build units, rows
+  // are ranked tiers, and every recorded edge between two cells is kept — cross-unit included,
+  // since a monorepo's services frequently depend on each other. Cells without an edge simply
+  // have none; a tier or unit with no files is not a cell.
+  const unitName = new Map(units.map((unit) => [unit.id, unit.name]));
+  const gridCell = (unit: string, tier: Tier): string => `${unit}|${tier}`;
+  const rankedTiers = TIER_ORDER.filter(
+    (tier) => TIER_RANK[tier] !== undefined && files.some((entry) => entry.tier === tier),
+  );
+  const rankedTierSet = new Set<Tier>(rankedTiers);
+  const gridCells: TierGridCell[] = [];
+  for (const unit of unitIds) {
+    for (const tier of rankedTiers) {
+      const cell = cellMap.get(`${unit}\u0000${tier}`);
+      if (!cell) {
+        continue;
+      }
+      gridCells.push({
+        id: gridCell(unit, tier),
+        unit,
+        unitName: unitName.get(unit) ?? unit,
+        tier,
+        files: cell.files,
+        lines: cell.lines,
+        mixed: files.filter((entry) => cell.members.includes(entry.file) && entry.mixed).length,
+        coverage: summariseFileCoverage(cell.members, coverage),
+      });
+    }
+  }
+
+  const gridEdges = new Map<
+    string,
+    {
+      sourceUnit: string;
+      targetUnit: string;
+      sourceTier: Tier;
+      targetTier: Tier;
+      kind: TierFlowEdge['kind'];
+      weight: number;
+    }
+  >();
+  for (const edge of graph.edges ?? []) {
+    if (edge.kind === 'call') {
+      continue;
+    }
+    const sourceTier = tierOfFile.get(edge.source);
+    const targetTier = tierOfFile.get(edge.target);
+    if (!sourceTier || !targetTier || !rankedTierSet.has(sourceTier) || !rankedTierSet.has(targetTier)) {
+      continue;
+    }
+    const sourceUnit = assignment.get(edge.source) ?? '.';
+    const targetUnit = assignment.get(edge.target) ?? '.';
+    const sourceRank = TIER_RANK[sourceTier];
+    const targetRank = TIER_RANK[targetTier];
+    if (sourceRank === undefined || targetRank === undefined) {
+      continue;
+    }
+    // The same kind rule as `tierFlow`, so the grid and the bands cannot disagree.
+    const kind: TierFlowEdge['kind'] =
+      sourceRank === targetRank
+        ? 'down'
+        : sourceRank < targetRank
+          ? 'upward'
+          : sourceRank - targetRank > 1 &&
+              [...presentRanks].some((rank) => rank < sourceRank && rank > targetRank)
+            ? 'skip-layer'
+            : 'down';
+    const key = `${gridCell(sourceUnit, sourceTier)}\u0000${gridCell(targetUnit, targetTier)}`;
+    const entry = gridEdges.get(key) ?? {
+      sourceUnit,
+      targetUnit,
+      sourceTier,
+      targetTier,
+      kind,
+      weight: 0,
+    };
+    entry.weight += 1;
+    gridEdges.set(key, entry);
+  }
+  const gridEdgeList: TierGridEdge[] = [...gridEdges.values()]
+    .map((entry) => ({
+      source: gridCell(entry.sourceUnit, entry.sourceTier),
+      target: gridCell(entry.targetUnit, entry.targetTier),
+      sourceUnit: entry.sourceUnit,
+      targetUnit: entry.targetUnit,
+      sourceTier: entry.sourceTier,
+      targetTier: entry.targetTier,
+      kind: entry.kind,
+      weight: entry.weight,
+      crossUnit: entry.sourceUnit !== entry.targetUnit,
+    }))
+    .sort(
+      (a, b) =>
+        rankIndex(a.sourceTier) - rankIndex(b.sourceTier) ||
+        a.sourceUnit.localeCompare(b.sourceUnit) ||
+        rankIndex(a.targetTier) - rankIndex(b.targetTier) ||
+        a.targetUnit.localeCompare(b.targetUnit),
+    );
+  const gridCrossUnit = gridEdgeList.filter((edge) => edge.crossUnit).length;
+  const grid: TierGrid = {
+    units: unitIds.map((unit) => ({
+      id: unit,
+      name: unitName.get(unit) ?? unit,
+      files: (byUnit.get(unit) ?? []).length,
+    })),
+    tiers: rankedTiers,
+    cells: gridCells,
+    edges: gridEdgeList,
+    shelf,
+    summary: {
+      units: unitIds.length,
+      tiers: rankedTiers.length,
+      cells: gridCells.length,
+      edges: gridEdgeList.length,
+      crossUnitEdges: gridCrossUnit,
+    },
+  };
+
   const tables = files
     .flatMap((entry) => entry.tables)
     .sort(
@@ -412,6 +533,7 @@ export function buildTierReport(
     },
     directions,
     tierFlow,
+    grid,
     shelf,
     tables,
     tableTrace,

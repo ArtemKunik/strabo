@@ -35,6 +35,8 @@ export function buildGraphQuery(state, options = {}) {
         }
       }
     }
+  } else if (state.mode === 'structure') {
+    params.set('structure', '1');
   } else if (state.mode === 'block') {
     params.set('blockDepth', String(state.depth ?? 1));
     if (state.prefix) {
@@ -58,6 +60,9 @@ export function breadcrumb(state) {
       crumbs.push({ label: state.systemUnitLabel ?? state.systemUnit, prefix: state.systemUnit });
     }
     return crumbs;
+  }
+  if (state.mode === 'structure') {
+    return [{ label: 'Structure', prefix: '' }];
   }
   if (state.mode !== 'block') {
     return [];

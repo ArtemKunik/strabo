@@ -6,6 +6,8 @@ import type { ReviewStatus } from '../analysis/review-types.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
 import type { SmellsReport } from '../analysis/quality.ts';
+import type { Tier, TierFlow, TierShelfEntry, TierReport } from '../analysis/tiers/types.ts';
+import type { CoverageCommandSuggestion } from '../analysis/coverage-refresh.ts';
 import type { DataReport, Graph, RiskReport } from '../types.ts';
 
 /**
@@ -35,6 +37,10 @@ export interface RepositoryReportDocument {
   drift: DriftReport | null;
   /** The data layer, contract, and product facts (Phase 33 J10); null when not computed. */
   data: RepositoryDataSection | null;
+  /** Code coverage from measured report or reachability fallback (Phase 34 U7); null when not computed. */
+  coverage: RepositoryCoverageSection | null;
+  /** Logical structure across role tiers (Phase 35 Y8); null when not computed. */
+  structure: RepositoryStructureSection | null;
   suggestions: Suggestion[];
   evidence: ReportEvidence;
 }
@@ -59,6 +65,53 @@ export interface RepositoryDataSection {
     contractlessPort: number;
     unconformant: number;
   };
+}
+
+/**
+ * The code coverage part of the repository report: measured line coverage when available,
+ * or the reachability fallback with next steps when unavailable.
+ */
+export interface RepositoryCoverageSection {
+  available: boolean;
+  basis: 'measured' | 'reachable';
+  format: string | null;
+  reportPath: string | null;
+  reportModified: string | null;
+  reportAgeMs: number | null;
+  lineCoverage: number | null;
+  linesFound: number;
+  linesHit: number;
+  filesMeasured: number;
+  stale: string[];
+  outOfGraph: string[];
+  reason?: string;
+  detail?: string;
+  refreshCommand?: string | null;
+  checkedLocations?: string[];
+  suggestedCommands?: CoverageCommandSuggestion[];
+}
+
+/**
+ * The logical structure across role tiers (Phase 35 Y8): tier flow between ranked tiers,
+ * support tiers on the shelf, and recorded wrong-way dependencies.
+ */
+export interface RepositoryStructureSection {
+  tierFlow: TierFlow;
+  shelf: TierShelfEntry[];
+  summary: {
+    classified: number;
+    unclassified: number;
+    mixed: number;
+  };
+  directions: Array<{
+    source: string;
+    target: string;
+    sourceTier: Tier;
+    targetTier: Tier;
+    kind: 'upward' | 'skip-layer';
+    unit: string;
+    line: number;
+  }>;
 }
 
 export interface ReportRevision {
@@ -179,9 +232,11 @@ export interface RepositoryReportInputs {
   /** Precomputed by the caller (revision graphs); absent means the drift section was not computed. */
   drift?: DriftReport;
   /** The repository's measured coverage report; absent or unavailable means reachability. */
-  coverage?: MeasuredCoverageSummary | null;
+  coverage?: MeasuredCoverageSummary | RepositoryCoverageSection | null;
   /** The computed data layer (Phase 33 J10); absent means the section was not computed. */
   data?: DataReport;
+  /** Precomputed logical structure / tier report (Phase 35 Y8); absent means not computed. */
+  structure?: TierReport | RepositoryStructureSection;
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }
