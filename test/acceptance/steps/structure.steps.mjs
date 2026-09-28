@@ -195,3 +195,66 @@ Then('the flow from {string} to {string} is drawn as an upward edge', async func
     { timeout: 15_000 },
   );
 });
+
+When(
+  'I drill into the cell for {string} in {string}',
+  async function (unitName, tier) {
+    const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+    await this.page.evaluate(
+      ({ name, role }) => {
+        const model = window.straboTest?.model();
+        const cell = model?.nodes?.find((node) => node.unitName === name && node.tier === role);
+        if (cell) {
+          window.straboTest.drill(cell.id);
+        }
+      },
+      { name: unitName, role: tier },
+    );
+    await this.page.waitForFunction(
+      (generation) =>
+        window.straboTest?.model()?.structureLevel === 'cell' &&
+        window.straboTest.renderedGeneration() > generation,
+      before,
+      { timeout: 20_000 },
+    );
+  },
+);
+
+Then(
+  'the view shows the files of {string} in {string}',
+  async function (unitName, tier) {
+    await this.page.waitForFunction(
+      ({ name, role }) => {
+        const model = window.straboTest?.model();
+        return Boolean(
+          model?.structureLevel === 'cell' &&
+            model.structureUnitName === name &&
+            model.structureTier === role &&
+            model.nodes.some((n) => !n.collapsed),
+        );
+      },
+      { name: unitName, role: tier },
+      { timeout: 15_000 },
+    );
+  },
+);
+
+When('I exit the cell with Escape', async function () {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  await this.page.keyboard.press('Escape');
+  await this.page.waitForFunction(
+    (generation) =>
+      window.straboTest?.model()?.structureLevel !== 'cell' &&
+      window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the Structure view returns to the grid', async function () {
+  await this.page.waitForFunction(
+    () => window.straboTest?.model()?.structureLevel === 'grid',
+    undefined,
+    { timeout: 15_000 },
+  );
+});

@@ -603,6 +603,17 @@ var RESOLUTION_LABELS = {
 
 // ui/strabo-graph-query.js
 var API_PATH = "/api/strabo";
+var STRUCTURE_TIER_LABELS = {
+  frontend: "Frontend",
+  api: "API surface",
+  domain: "Domain/service",
+  data: "Data",
+  integration: "Integration",
+  infra: "Infra/config",
+  build: "Build/tooling",
+  tests: "Tests",
+  unclassified: "Unclassified"
+};
 function buildGraphQuery(state2, options = {}) {
   const params = new URLSearchParams();
   if (state2.repository) {
@@ -627,7 +638,16 @@ function buildGraphQuery(state2, options = {}) {
     }
   } else if (state2.mode === "structure") {
     params.set("structure", "1");
-    if (state2.structureGrid) {
+    if (state2.structureCell) {
+      params.set("level", "cell");
+      params.set("cell", state2.structureCell);
+      if (state2.structureUnit) {
+        params.set("unit", state2.structureUnit);
+      }
+      if (state2.structureTier) {
+        params.set("tier", state2.structureTier);
+      }
+    } else if (state2.structureGrid) {
       params.set("level", "grid");
     }
   } else if (state2.mode === "block") {
@@ -648,7 +668,22 @@ function breadcrumb(state2) {
     return crumbs2;
   }
   if (state2.mode === "structure") {
-    return [{ label: "Structure", prefix: "" }];
+    const crumbs2 = [{ label: "Structure", prefix: "" }];
+    if (state2.structureCell || state2.structureUnit || state2.structureTier) {
+      if (state2.structureUnit) {
+        crumbs2.push({
+          label: state2.structureUnitLabel ?? state2.structureUnit,
+          prefix: state2.structureUnit
+        });
+      }
+      if (state2.structureTier) {
+        crumbs2.push({
+          label: STRUCTURE_TIER_LABELS[state2.structureTier] ?? state2.structureTier,
+          prefix: state2.structureCell ?? state2.structureTier
+        });
+      }
+    }
+    return crumbs2;
   }
   if (state2.mode !== "block") {
     return [];
@@ -664,8 +699,9 @@ function breadcrumb(state2) {
 // ui/strabo-graph-summary.js
 function mapCounts(model) {
   const isStructure = model.structure === true;
+  const isCell = isStructure && model.structureLevel === "cell";
   const isGrid = isStructure && model.structureLevel === "grid";
-  const isBlock = model.prefixLength !== void 0 || model.system === true || isStructure;
+  const isBlock = model.prefixLength !== void 0 || model.system === true || isStructure && !isCell;
   const byKey = /* @__PURE__ */ new Map();
   let tests = 0;
   let modules = 0;
@@ -678,7 +714,7 @@ function mapCounts(model) {
     } else {
       modules += 1;
     }
-    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isGrid ? node.tier ?? "cell" : isBlock ? String(node.id) : topLevelDirectory(node.id);
+    const key = model.systemUnit ? node.collapsed ? "outside units" : node.systemLayer ?? "unit" : isCell ? node.collapsed ? "outside units" : topLevelDirectory(node.id) : isGrid ? node.tier ?? "cell" : isBlock ? String(node.id) : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
   const entries = [...byKey.entries()].sort((a, b2) => b2[1] - a[1] || a[0].localeCompare(b2[0])).map(([key, count]) => ({
@@ -686,7 +722,7 @@ function mapCounts(model) {
     count,
     // Block ids are whole directories; file ids filter by their directory prefix. A
     // Structure band is a roll-up, so its chip never filters the map.
-    filter: isStructure ? "" : key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
+    filter: isCell ? key === "." ? "" : `${key}/` : isStructure ? "" : key === "." ? "" : isBlock && !model.systemUnit ? key : `${key}/`
   }));
   return { tests, modules, entries };
 }
@@ -706,6 +742,14 @@ function readingLegend(model, locLens = false) {
       "size = files",
       "edge = import between units",
       "support = unit footer"
+    ];
+  }
+  if (model?.structure && model.structureLevel === "cell") {
+    return [
+      "file = member",
+      "island = directory",
+      "edge = recorded import",
+      "ring = hub"
     ];
   }
   if (model?.structure && model.structureLevel === "grid") {
@@ -783,7 +827,7 @@ function summarizeDiagnostics(model) {
 function graphSummary(model) {
   const nodes = (model?.nodes ?? []).filter((node) => node.kind !== "axis").length;
   const edges = (model?.edges ?? []).length;
-  const nodeWord = model?.structure ? model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
+  const nodeWord = model?.structure ? model.structureLevel === "cell" ? nodes === 1 ? "file" : "files" : model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
   const edgeWord = edges === 1 ? "edge" : "edges";
   return `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
 }
@@ -11605,11 +11649,16 @@ function createUrlState(app2) {
         "mode",
         state2.mode === "file" ? "file" : state2.mode === "system" ? "system" : state2.mode === "structure" ? "structure" : ""
       );
-      set("unit", state2.mode === "system" ? state2.systemUnit ?? "" : "");
+      set(
+        "unit",
+        state2.mode === "system" ? state2.systemUnit ?? "" : state2.mode === "structure" ? state2.structureUnit ?? "" : ""
+      );
+      set("tier", state2.mode === "structure" ? state2.structureTier ?? "" : "");
+      set("cell", state2.mode === "structure" ? state2.structureCell ?? "" : "");
       set("outside", state2.mode === "system" && state2.showOutside ? "1" : "");
       set(
         "level",
-        state2.mode === "structure" && state2.structureGrid ? "grid" : ""
+        state2.mode === "structure" ? state2.structureCell ? "cell" : state2.structureGrid ? "grid" : "" : ""
       );
       set("node", store2.get().ui.node ?? "");
       set("panel", store2.get().ui.memberOpen ? "member-map" : "");
@@ -11634,7 +11683,12 @@ function createUrlState(app2) {
     state2.systemUnit = mode === "system" ? params.get("unit") : null;
     state2.systemUnitLabel = state2.systemUnit;
     state2.showOutside = mode === "system" && params.get("outside") === "1";
-    state2.structureGrid = mode === "structure" && params.get("level") === "grid";
+    const level = params.get("level");
+    state2.structureGrid = mode === "structure" && (level === "grid" || level === "cell");
+    state2.structureCell = mode === "structure" && level === "cell" ? params.get("cell") : null;
+    state2.structureUnit = mode === "structure" ? params.get("unit") ?? (state2.structureCell ? state2.structureCell.split("|")[0] || null : null) : null;
+    state2.structureUnitLabel = state2.structureUnit;
+    state2.structureTier = mode === "structure" ? params.get("tier") ?? (state2.structureCell ? state2.structureCell.split("|")[1] || null : null) : null;
     return params;
   }
   async function restoreUrlPanel() {
@@ -27029,6 +27083,24 @@ function createSelectionController(app2) {
       app2.units.openUnit(id);
       return;
     }
+    if (state2.mode === "structure") {
+      const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+      if (!node) {
+        return;
+      }
+      if (node.cell || node.unit && node.tier && node.kind === "tier") {
+        app2.structure?.openCell(node.cell ?? `${node.unit}|${node.tier}`, node.unit, node.tier);
+        return;
+      }
+      if (node.tier && !state2.structureCell) {
+        app2.structure?.openCell(id, node.unit, node.tier);
+        return;
+      }
+      if (state2.structureCell && !node.collapsed) {
+        app2.source.viewSource(id);
+        return;
+      }
+    }
     if (state2.mode === "block") {
       state2.prefix = id;
       state2.filter = "";
@@ -27053,8 +27125,11 @@ function createSelectionController(app2) {
   }
   function isFileNode(id) {
     const node = (app2.current?.nodes ?? []).find((candidate) => candidate.id === id);
-    if (!node || node.kind === "unit" || node.kind === "shelf") {
+    if (!node || node.kind === "unit" || node.kind === "shelf" || node.kind === "axis") {
       return false;
+    }
+    if (state2.mode === "structure") {
+      return Boolean(state2.structureCell && !node.collapsed && node.kind !== "tier");
     }
     return state2.mode === "file" || Boolean(node.systemUnit && !id.endsWith("#support"));
   }
@@ -28116,6 +28191,10 @@ function bindKeyboardShortcuts(app2) {
         app2.units.closeUnit();
         return;
       }
+      if (state2.mode === "structure" && state2.structureCell && !inField) {
+        app2.structure?.closeCell();
+        return;
+      }
       if (!inField) app2.selection.clearSelection();
       return;
     }
@@ -28124,6 +28203,19 @@ function bindKeyboardShortcuts(app2) {
       if (node && !node.systemUnit) {
         event.preventDefault();
         app2.units.openUnit(app2.selected);
+        return;
+      }
+    }
+    if (event.key === "Enter" && !inField && state2.mode === "structure" && app2.selected) {
+      const node = app2.current?.nodes.find((candidate) => candidate.id === app2.selected);
+      if (node && (node.cell || node.unit && node.tier)) {
+        event.preventDefault();
+        app2.structure?.openCell(node.cell ?? `${node.unit}|${node.tier}`, node.unit, node.tier);
+        return;
+      }
+      if (node && node.tier && !state2.structureCell) {
+        event.preventDefault();
+        app2.structure?.openCell(app2.selected, node.unit, node.tier);
         return;
       }
     }
@@ -28138,6 +28230,7 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "i") elements2.tbImpact.click();
     else if (key === "o" && state2.mode === "system" && state2.systemUnit) elements2.tbOutside.click();
     else if (key === "u" && state2.mode === "system" && state2.systemUnit) app2.units.closeUnit();
+    else if (key === "u" && state2.mode === "structure" && state2.structureCell) app2.structure?.closeCell();
     else if (key === "p") elements2.tbPath.click();
     else if (key === "b") elements2.tbBoundaries.click();
     else if (key === "x" && state2.mode === "structure") elements2.tbGrid?.click();
@@ -28215,7 +28308,12 @@ var store = createStore({
     /** Set once a single-unit repository has auto-opened, so L0 is not re-entered (L19). */
     systemAutoOpened: false,
     /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
-    structureGrid: false
+    structureGrid: false,
+    /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
+    structureCell: null,
+    structureUnit: null,
+    structureUnitLabel: null,
+    structureTier: null
   },
   member: {
     order: "source",
@@ -28281,6 +28379,22 @@ app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
+app.structure = {
+  openCell(cellId, unit, tier) {
+    if (!cellId && !tier) return;
+    state.structureCell = cellId ?? (unit ? `${unit}|${tier}` : tier);
+    state.structureUnit = unit ?? (cellId?.includes("|") ? cellId.split("|")[0] || null : null);
+    state.structureTier = tier ?? (cellId?.includes("|") ? cellId.split("|")[1] || null : null);
+    scan();
+  },
+  closeCell() {
+    state.structureCell = null;
+    state.structureUnit = null;
+    state.structureUnitLabel = null;
+    state.structureTier = null;
+    scan();
+  }
+};
 var freshness = createFreshnessBadge(elements.freshness, {
   request,
   onRebuild: () => scan({ refresh: true }),
@@ -28316,6 +28430,17 @@ async function scan({ refresh = false } = {}) {
       state.systemUnitLabel = null;
       state.unitFile = null;
     }
+    if (model.structureLevel === "cell") {
+      state.structureCell = model.structureCell ?? state.structureCell;
+      state.structureUnit = model.structureUnit ?? state.structureUnit;
+      state.structureUnitLabel = model.structureUnitName ?? state.structureUnit;
+      state.structureTier = model.structureTier ?? state.structureTier;
+    } else if (state.mode === "structure") {
+      state.structureCell = null;
+      state.structureUnit = null;
+      state.structureUnitLabel = null;
+      state.structureTier = null;
+    }
     store.set("ui", { node: null });
     view.render(model);
     view.focusFile(null);
@@ -28336,6 +28461,12 @@ async function scan({ refresh = false } = {}) {
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === "system") {
         if (!prefix) app.units.closeUnit();
+        return;
+      }
+      if (state.mode === "structure") {
+        if (!prefix || prefix === state.structureUnit) {
+          app.structure.closeCell();
+        }
         return;
       }
       state.prefix = prefix;
@@ -28475,6 +28606,10 @@ elements.detail.addEventListener("change", () => {
   }
   if (state.mode !== "structure") {
     state.structureGrid = false;
+    state.structureCell = null;
+    state.structureUnit = null;
+    state.structureUnitLabel = null;
+    state.structureTier = null;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -28570,6 +28705,8 @@ if (window.STRABO_TEST) {
     drill: app.selection.onDrill,
     openUnit: app.units.openUnit,
     closeUnit: app.units.closeUnit,
+    openStructureCell: (cellId, unit, tier) => app.structure.openCell(cellId, unit, tier),
+    closeStructureCell: () => app.structure.closeCell(),
     toggleOutsideLinks: app.units.toggleOutsideLinks,
     toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,

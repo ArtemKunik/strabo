@@ -517,6 +517,63 @@ test('a grid cell edge carries the cross-unit class (Y4)', async () => {
   assert.match(edges[0]?.classes ?? '', /edge-structure-cross-unit/);
 });
 
+test('buildGraphQuery sends level=cell and cell/unit/tier in structure cell drill-down (Y5)', () => {
+  const query = buildGraphQuery({
+    repository: '/demo',
+    mode: 'structure',
+    structureCell: 'orders|data',
+    structureUnit: 'orders',
+    structureTier: 'data',
+  });
+  assert.ok(query.includes('structure=1'));
+  assert.ok(query.includes('level=cell'));
+  assert.ok(query.includes('cell=orders%7Cdata'));
+  assert.ok(query.includes('unit=orders'));
+  assert.ok(query.includes('tier=data'));
+});
+
+test('breadcrumb reads Structure › unit › tier in a structure cell drill-down (Y5)', () => {
+  assert.deepEqual(breadcrumb({ mode: 'structure' }), [
+    { label: 'Structure', prefix: '' },
+  ]);
+  assert.deepEqual(
+    breadcrumb({
+      mode: 'structure',
+      structureCell: 'orders|data',
+      structureUnit: 'orders',
+      structureUnitLabel: 'orders-api',
+      structureTier: 'data',
+    }),
+    [
+      { label: 'Structure', prefix: '' },
+      { label: 'orders-api', prefix: 'orders' },
+      { label: 'Data', prefix: 'orders|data' },
+    ],
+  );
+});
+
+test('the reading legend names files and islands in a structure cell drill-down (Y5)', () => {
+  assert.deepEqual(readingLegend({ structure: true, structureLevel: 'cell' }), [
+    'file = member',
+    'island = directory',
+    'edge = recorded import',
+    'ring = hub',
+  ]);
+});
+
+test('a structure cell drill-down counts files in graphSummary (Y5)', () => {
+  const model = {
+    structure: true,
+    structureLevel: 'cell',
+    nodes: [
+      { id: 'orders/src/data/orders.ts', kind: 'module' },
+      { id: 'orders/src/data/audit.ts', kind: 'module' },
+    ],
+    edges: [{ source: 'orders/src/data/orders.ts', target: 'orders/src/data/audit.ts' }],
+  };
+  assert.equal(graphSummary(model), '2 files · 1 edge');
+});
+
 test('buildGraphQuery sends the open unit and outside links in a system drill-down', () => {
   const query = buildGraphQuery({
     repository: '/demo',

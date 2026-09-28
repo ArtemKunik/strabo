@@ -10,6 +10,7 @@ import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
 import {
+  buildStructureCellViewModel,
   buildStructureGridViewModel,
   buildStructureViewModel,
   buildSystemUnitViewModel,
@@ -52,11 +53,49 @@ export function createGraphRouter(config: StraboConfig): Router {
       };
 
       // The Structure view rolls the file graph up into role tiers (Phase 35 Y3); `level=grid`
-      // draws the unit × tier grid instead (Y4). It is an explicit request and takes precedence
-      // over a stale URL's unit/block parameters.
+      // draws the unit × tier grid instead (Y4); `level=cell` drills down into a cell's files (Y5).
+      // It is an explicit request and takes precedence over a stale URL's unit/block parameters.
       if (parseBoolean(request.query.structure)) {
         const report = buildTierReport(repository.root, repository.name, cached.report.graph);
         const level = asString(request.query.level);
+        const cellParam = asString(request.query.cell);
+        const unitParam = asString(request.query.unit) ?? asString(request.query.systemUnit);
+        const tierParam = asString(request.query.tier);
+
+        if (level === 'cell' || cellParam || (unitParam && tierParam)) {
+          let cellUnit = unitParam;
+          let cellTier = tierParam;
+          if (cellParam) {
+            const parts = cellParam.split('|');
+            if (parts.length === 2) {
+              cellUnit = parts[0] || undefined;
+              cellTier = parts[1];
+            } else if (cellParam.startsWith('shelf:')) {
+              cellTier = cellParam.slice(6);
+            } else {
+              cellTier = cellParam;
+            }
+          }
+          if (cellTier) {
+            const cellModel = buildStructureCellViewModel(
+              report,
+              cached.report.graph,
+              descriptor,
+              cache,
+              {
+                unit: cellUnit,
+                tier: cellTier as never,
+                showOutside: parseBoolean(request.query.outside),
+                selectedFile: asString(request.query.selected),
+              },
+            );
+            if (cellModel) {
+              response.json(cellModel);
+              return;
+            }
+          }
+        }
+
         response.json(
           level === 'grid'
             ? buildStructureGridViewModel(report, descriptor, cache)

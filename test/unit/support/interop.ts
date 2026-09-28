@@ -16,7 +16,7 @@ before(() => {
 });
 
 after(() => {
-  fs.rmSync(stateDir, { recursive: true, force: true });
+  fs.rmSync(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 export const config: StraboConfig = {

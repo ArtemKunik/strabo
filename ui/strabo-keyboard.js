@@ -70,6 +70,11 @@ export function bindKeyboardShortcuts(app) {
         app.units.closeUnit();
         return;
       }
+      // Escape inside an open cell goes back to the Structure grid.
+      if (state.mode === 'structure' && state.structureCell && !inField) {
+        app.structure?.closeCell();
+        return;
+      }
       if (!inField) app.selection.clearSelection();
       return;
     }
@@ -79,6 +84,19 @@ export function bindKeyboardShortcuts(app) {
         // Enter opens the focused unit, matching a double-click.
         event.preventDefault();
         app.units.openUnit(app.selected);
+        return;
+      }
+    }
+    if (event.key === 'Enter' && !inField && state.mode === 'structure' && app.selected) {
+      const node = app.current?.nodes.find((candidate) => candidate.id === app.selected);
+      if (node && (node.cell || (node.unit && node.tier))) {
+        event.preventDefault();
+        app.structure?.openCell(node.cell ?? `${node.unit}|${node.tier}`, node.unit, node.tier);
+        return;
+      }
+      if (node && node.tier && !state.structureCell) {
+        event.preventDefault();
+        app.structure?.openCell(app.selected, node.unit, node.tier);
         return;
       }
     }
@@ -93,6 +111,7 @@ export function bindKeyboardShortcuts(app) {
     else if (key === 'i') elements.tbImpact.click();
     else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
     else if (key === 'u' && state.mode === 'system' && state.systemUnit) app.units.closeUnit();
+    else if (key === 'u' && state.mode === 'structure' && state.structureCell) app.structure?.closeCell();
     else if (key === 'p') elements.tbPath.click();
     else if (key === 'b') elements.tbBoundaries.click();
     else if (key === 'x' && state.mode === 'structure') elements.tbGrid?.click();

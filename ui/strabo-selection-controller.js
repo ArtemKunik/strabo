@@ -297,6 +297,24 @@ export function createSelectionController(app) {
       app.units.openUnit(id);
       return;
     }
+    if (state.mode === 'structure') {
+      const node = app.current?.nodes.find((candidate) => candidate.id === id);
+      if (!node) {
+        return;
+      }
+      if (node.cell || (node.unit && node.tier && node.kind === 'tier')) {
+        app.structure?.openCell(node.cell ?? `${node.unit}|${node.tier}`, node.unit, node.tier);
+        return;
+      }
+      if (node.tier && !state.structureCell) {
+        app.structure?.openCell(id, node.unit, node.tier);
+        return;
+      }
+      if (state.structureCell && !node.collapsed) {
+        app.source.viewSource(id);
+        return;
+      }
+    }
     if (state.mode === 'block') {
       state.prefix = id;
       state.filter = '';
@@ -324,8 +342,11 @@ export function createSelectionController(app) {
   /** True when `id` is a file the viewer can read, not a directory block, unit, or shelf. */
   function isFileNode(id) {
     const node = (app.current?.nodes ?? []).find((candidate) => candidate.id === id);
-    if (!node || node.kind === 'unit' || node.kind === 'shelf') {
+    if (!node || node.kind === 'unit' || node.kind === 'shelf' || node.kind === 'axis') {
       return false;
+    }
+    if (state.mode === 'structure') {
+      return Boolean(state.structureCell && !node.collapsed && node.kind !== 'tier');
     }
     return state.mode === 'file' || Boolean(node.systemUnit && !id.endsWith('#support'));
   }

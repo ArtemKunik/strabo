@@ -91,6 +91,7 @@ export function buildTierReport(
   const summary = emptyTierCounts();
   let mixed = 0;
   for (const entry of files) {
+    entry.unit = assignment.get(entry.file) ?? '.';
     summary[entry.tier] += 1;
     if (entry.mixed) {
       mixed += 1;
@@ -343,6 +344,7 @@ export function buildTierReport(
         lines: cell.lines,
         mixed: files.filter((entry) => cell.members.includes(entry.file) && entry.mixed).length,
         coverage: summariseFileCoverage(cell.members, coverage),
+        members: [...cell.members].sort(),
       });
     }
   }

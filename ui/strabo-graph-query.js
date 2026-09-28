@@ -7,6 +7,18 @@
 
 export const API_PATH = '/api/strabo';
 
+export const STRUCTURE_TIER_LABELS = {
+  frontend: 'Frontend',
+  api: 'API surface',
+  domain: 'Domain/service',
+  data: 'Data',
+  integration: 'Integration',
+  infra: 'Infra/config',
+  build: 'Build/tooling',
+  tests: 'Tests',
+  unclassified: 'Unclassified',
+};
+
 /**
  * Build the `/graph` query string for the current view state.
  *
@@ -37,7 +49,16 @@ export function buildGraphQuery(state, options = {}) {
     }
   } else if (state.mode === 'structure') {
     params.set('structure', '1');
-    if (state.structureGrid) {
+    if (state.structureCell) {
+      params.set('level', 'cell');
+      params.set('cell', state.structureCell);
+      if (state.structureUnit) {
+        params.set('unit', state.structureUnit);
+      }
+      if (state.structureTier) {
+        params.set('tier', state.structureTier);
+      }
+    } else if (state.structureGrid) {
       params.set('level', 'grid');
     }
   } else if (state.mode === 'block') {
@@ -54,7 +75,8 @@ export function buildGraphQuery(state, options = {}) {
  * Breadcrumb segments for the current drill-down, root last.
  *
  * Block mode walks the path prefix; System mode is `System › unit` when a unit is open,
- * and a single `System` crumb at L0. File mode has no drill-down.
+ * and a single `System` crumb at L0. Structure mode is `Structure › unit › tier` when inside
+ * a cell drill-down (Phase 35 Y5). File mode has no drill-down.
  */
 export function breadcrumb(state) {
   if (state.mode === 'system') {
@@ -65,7 +87,22 @@ export function breadcrumb(state) {
     return crumbs;
   }
   if (state.mode === 'structure') {
-    return [{ label: 'Structure', prefix: '' }];
+    const crumbs = [{ label: 'Structure', prefix: '' }];
+    if (state.structureCell || state.structureUnit || state.structureTier) {
+      if (state.structureUnit) {
+        crumbs.push({
+          label: state.structureUnitLabel ?? state.structureUnit,
+          prefix: state.structureUnit,
+        });
+      }
+      if (state.structureTier) {
+        crumbs.push({
+          label: STRUCTURE_TIER_LABELS[state.structureTier] ?? state.structureTier,
+          prefix: state.structureCell ?? state.structureTier,
+        });
+      }
+    }
+    return crumbs;
   }
   if (state.mode !== 'block') {
     return [];

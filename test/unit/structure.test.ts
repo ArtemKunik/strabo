@@ -8,7 +8,11 @@ import express from 'express';
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import { createStraboRouter, scanRepository } from '../../src/index.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
-import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
+import {
+  buildStructureCellViewModel,
+  buildStructureGridViewModel,
+  buildStructureViewModel,
+} from '../../src/view/view-model.ts';
 
 const root = path.resolve('test/fixtures/structure-repo');
 const servers: Array<ReturnType<typeof express.application.listen>> = [];
@@ -188,4 +192,84 @@ test('GET /graph?structure=1 serves the role-tier structure', async () => {
   assert.equal(model.structure, true);
   assert.equal(model.nodes.some((node) => node.id === 'frontend' && node.kind === 'tier'), true);
   assert.equal(model.nodes.some((node) => node.tier === 'tests' && node.kind === 'shelf'), true);
+});
+
+test('buildStructureCellViewModel draws cell files with collapsed context (Y5)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+
+  // Grid cells carry their member files
+  const dataCell = report.grid.cells.find((c) => c.id === 'orders|data');
+  assert.deepEqual(dataCell?.members, [
+    'orders/src/data/audit.ts',
+    'orders/src/data/orders.ts',
+  ]);
+
+  const model = buildStructureCellViewModel(
+    report,
+    graph,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { unit: 'orders', tier: 'data' },
+  );
+
+  assert.ok(model);
+  assert.equal(model.structure, true);
+  assert.equal(model.structureLevel, 'cell');
+  assert.equal(model.structureUnit, 'orders');
+  assert.equal(model.structureUnitName, 'orders-api');
+  assert.equal(model.structureTier, 'data');
+  assert.equal(model.structureCell, 'orders|data');
+
+  // The member files of orders|data are present as non-collapsed module nodes
+  const activeNodes = model.nodes.filter((n) => !n.collapsed);
+  assert.deepEqual(
+    activeNodes.map((n) => n.id).sort(),
+    ['orders/src/data/audit.ts', 'orders/src/data/orders.ts'],
+  );
+  assert.equal(activeNodes[0]?.tier, 'data');
+  assert.equal(activeNodes[0]?.unit, 'orders');
+  assert.equal(activeNodes[0]?.unitName, 'orders-api');
+
+  // The other unit (web) sits as a collapsed box for context
+  const collapsed = model.nodes.filter((n) => n.collapsed);
+  assert.equal(collapsed.length, 1);
+  assert.equal(collapsed[0]?.id, 'web');
+  assert.equal(collapsed[0]?.label, 'web');
+
+  // Positions are generated for both member files and collapsed units
+  assert.equal(model.positions.length, model.nodes.length);
+});
+
+test('GET /graph?structure=1&level=cell&unit=orders&tier=data serves cell drill-down (Y5)', async () => {
+  const host = express();
+  host.use(express.json());
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/graph?structure=1&level=cell&unit=orders&tier=data`);
+  assert.equal(response.status, 200);
+  const model = (await response.json()) as {
+    structure?: boolean;
+    structureLevel?: string;
+    structureUnit?: string;
+    structureUnitName?: string;
+    structureTier?: string;
+    nodes: Array<{ id: string; collapsed?: boolean }>;
+  };
+  assert.equal(model.structureLevel, 'cell');
+  assert.equal(model.structureUnit, 'orders');
+  assert.equal(model.structureUnitName, 'orders-api');
+  assert.equal(model.structureTier, 'data');
+  assert.equal(
+    model.nodes.some((n) => n.id === 'orders/src/data/orders.ts' && !n.collapsed),
+    true,
+  );
 });

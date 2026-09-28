@@ -81,6 +81,8 @@ export interface TierClassification {
   lines: number;
   /** Data tables named in the file, from SQL, ORM annotations, or string-literal SQL. */
   tables: TableReference[];
+  /** The build unit this file belongs to (Phase 35 Y5). */
+  unit?: string;
 }
 
 export interface DeclaredTier {
@@ -187,6 +189,8 @@ export interface TierGridCell {
   mixed: number;
   /** Coverage over the cell's files from one source: measured, or the reach fallback. */
   coverage: FileCoverageAggregate;
+  /** Member files in this cell, sorted by path (Phase 35 Y5). */
+  members?: string[];
 }
 
 /** One aggregated recorded edge between two grid cells. */

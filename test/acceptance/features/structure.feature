@@ -45,6 +45,17 @@ Feature: Application logical structure from the tier lens
     And the Structure grid draws a cell for "web" in "frontend"
     And the cross-unit flow from "web" in "frontend" to "orders-api" in "api" is drawn
 
+  @drilldown
+  Scenario: Drilling into a cell opens its files with breadcrumb navigation
+    Given I open the structure fixture repository
+    When I switch to structure detail
+    And I turn on the structure grid
+    And I drill into the cell for "orders-api" in "data"
+    Then the view shows the files of "orders-api" in "data"
+    And the breadcrumb reads "Structure › orders-api › Data"
+    When I exit the cell with Escape
+    Then the Structure view returns to the grid
+
   @wip @spine
   Scenario: Opening a recorded call follows the end-to-end spine
     Given I open the structure fixture repository

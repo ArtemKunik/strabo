@@ -10,8 +10,9 @@ import { topLevelDirectory } from './strabo-graph-ids.js';
 /** Counts for the tests / components strip, in file, block, or system mode. */
 export function mapCounts(model) {
   const isStructure = model.structure === true;
+  const isCell = isStructure && model.structureLevel === 'cell';
   const isGrid = isStructure && model.structureLevel === 'grid';
-  const isBlock = model.prefixLength !== undefined || model.system === true || isStructure;
+  const isBlock = model.prefixLength !== undefined || model.system === true || (isStructure && !isCell);
   const byKey = new Map();
   let tests = 0;
   let modules = 0;
@@ -28,15 +29,20 @@ export function mapCounts(model) {
     }
     // A System drill-down lists the open unit's layers, not one chip per file. A grid cell
     // is keyed by its tier, so the strip reads as the rows rather than one chip per cell.
+    // A Structure cell drill-down lists directory prefixes of its member files.
     const key = model.systemUnit
       ? node.collapsed
         ? 'outside units'
         : node.systemLayer ?? 'unit'
-      : isGrid
-        ? node.tier ?? 'cell'
-        : isBlock
-          ? String(node.id)
-          : topLevelDirectory(node.id);
+      : isCell
+        ? node.collapsed
+          ? 'outside units'
+          : topLevelDirectory(node.id)
+        : isGrid
+          ? node.tier ?? 'cell'
+          : isBlock
+            ? String(node.id)
+            : topLevelDirectory(node.id);
     byKey.set(key, (byKey.get(key) ?? 0) + 1);
   }
 
@@ -47,7 +53,15 @@ export function mapCounts(model) {
       count,
       // Block ids are whole directories; file ids filter by their directory prefix. A
       // Structure band is a roll-up, so its chip never filters the map.
-      filter: isStructure ? '' : key === '.' ? '' : isBlock && !model.systemUnit ? key : `${key}/`,
+      filter: isCell
+        ? key === '.' ? '' : `${key}/`
+        : isStructure
+          ? ''
+          : key === '.'
+            ? ''
+            : isBlock && !model.systemUnit
+              ? key
+              : `${key}/`,
     }));
 
   return { tests, modules, entries };
@@ -75,6 +89,14 @@ export function readingLegend(model, locLens = false) {
       'size = files',
       'edge = import between units',
       'support = unit footer',
+    ];
+  }
+  if (model?.structure && model.structureLevel === 'cell') {
+    return [
+      'file = member',
+      'island = directory',
+      'edge = recorded import',
+      'ring = hub',
     ];
   }
   if (model?.structure && model.structureLevel === 'grid') {
@@ -167,13 +189,17 @@ export function graphSummary(model) {
   // A System L0 map is units, not files; the drill-down and the file map are nodes. Naming
   // the unit is what stops "45 nodes" reading as if the shelves were still peers.
   const nodeWord = model?.structure
-    ? model.structureLevel === 'grid'
+    ? model.structureLevel === 'cell'
       ? nodes === 1
-        ? 'cell'
-        : 'cells'
-      : nodes === 1
-        ? 'tier'
-        : 'tiers'
+        ? 'file'
+        : 'files'
+      : model.structureLevel === 'grid'
+        ? nodes === 1
+          ? 'cell'
+          : 'cells'
+        : nodes === 1
+          ? 'tier'
+          : 'tiers'
     : model?.system && !model?.systemUnit
       ? nodes === 1
         ? 'unit'

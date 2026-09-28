@@ -834,3 +834,143 @@ export function buildStructureGridViewModel(
     },
   };
 }
+
+export interface StructureCellViewOptions {
+  /** The build unit to filter to; absent when drilling from a whole-repository tier band. */
+  unit?: string;
+  /** The role tier of the cell. */
+  tier: Tier;
+  /** Draw the selected file's links to other units/cells. */
+  showOutside?: boolean;
+  /** The selected file whose outside links are drawn. */
+  selectedFile?: string;
+}
+
+/**
+ * Drill-down model for one cell (unit × tier) in the Structure lens (Phase 35 Y5).
+ *
+ * Draws today's file map filtered to the cell's member files, with intra-cell import edges,
+ * central hub files, and collapsed boxes for the remaining units as context.
+ */
+export function buildStructureCellViewModel(
+  report: TierReport,
+  graph: Graph,
+  repository: RepositoryDescriptor,
+  cache: ScanCacheMetadata,
+  options: StructureCellViewOptions,
+): ViewModel | null {
+  const matching = report.files.filter((entry) => {
+    const matchUnit = options.unit !== undefined ? (entry.unit ?? '.') === options.unit : true;
+    return matchUnit && entry.tier === options.tier;
+  });
+  if (matching.length === 0) {
+    return null;
+  }
+  const memberFiles = matching.map((e) => e.file).sort();
+  const memberSet = new Set(memberFiles);
+
+  const unitInfo = report.grid.units.find((u) => u.id === options.unit);
+  const unitName = unitInfo?.name ?? options.unit;
+  const cellId = options.unit ? `${options.unit}|${options.tier}` : options.tier;
+
+  const metrics = computeGraphMetrics(graph, buildAdjacency(graph));
+  const kindOf = new Map(graph.nodes.map((node) => [node.id, node.kind]));
+  const linesOf = new Map(graph.nodes.map((node) => [node.id, node.lines]));
+  const classificationOf = new Map(report.files.map((entry) => [entry.file, entry]));
+
+  const nodes: ViewNode[] = [];
+  for (const file of memberFiles) {
+    const cls = classificationOf.get(file);
+    const why = cls?.evidence?.[0]
+      ? `tier \`${options.tier}\` · ${cls.evidence[0].detail}`
+      : `tier \`${options.tier}\``;
+    nodes.push({
+      id: file,
+      kind: kindOf.get(file) ?? 'module',
+      directory: parentOf(file),
+      label: file.split('/').pop() ?? file,
+      ...(linesOf.get(file) !== undefined ? { lines: linesOf.get(file) } : {}),
+      workspacePath: file,
+      fanIn: metrics.fanIn.get(file) ?? 0,
+      fanOut: metrics.fanOut.get(file) ?? 0,
+      transitiveDependencies: metrics.transitiveDependencies.get(file) ?? 0,
+      transitiveDependents: metrics.transitiveDependents.get(file) ?? 0,
+      tier: options.tier,
+      unit: options.unit,
+      unitName,
+      why,
+    });
+  }
+
+  // Collapsed unit boxes for the other units so context remains visible
+  for (const other of report.grid.units) {
+    if (other.id === options.unit) {
+      continue;
+    }
+    nodes.push({
+      id: other.id,
+      kind: 'unit' as const,
+      directory: '.',
+      label: other.name,
+      workspacePath: other.id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: other.files,
+      files: other.files,
+      collapsed: true,
+    });
+  }
+
+  const edges: ViewEdge[] = [];
+  for (const edge of graph.edges ?? []) {
+    if (memberSet.has(edge.source) && memberSet.has(edge.target)) {
+      edges.push({
+        ...edge,
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        scope: 'unit',
+      });
+    }
+  }
+
+  const fileGraph: Graph = {
+    nodes: nodes.filter((n) => !n.collapsed).map((n) => ({
+      id: n.id,
+      directory: n.directory,
+      kind: n.kind,
+    })),
+    edges,
+    diagnostics: [],
+    excluded: [],
+  };
+  const positions = buildPositions(fileGraph);
+  const maxY = Math.max(0, ...positions.map((p) => p.y));
+  let cursorX = 0;
+  for (const other of report.grid.units) {
+    if (other.id === options.unit) {
+      continue;
+    }
+    positions.push({ id: other.id, x: cursorX, y: maxY + 240 });
+    cursorX += 240;
+  }
+
+  return {
+    repository,
+    nodes,
+    edges,
+    positions,
+    hubs: rankHubs(metrics).filter((id) => memberSet.has(id)),
+    diagnostics: [],
+    excluded: [],
+    cache,
+    structure: true,
+    structureLevel: 'cell',
+    structureUnit: options.unit,
+    structureUnitName: unitName,
+    structureTier: options.tier,
+    structureCell: cellId,
+    structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+  };
+}

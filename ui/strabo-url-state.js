@@ -43,11 +43,26 @@ export function createUrlState(app) {
               ? 'structure'
               : '',
       );
-      set('unit', state.mode === 'system' ? state.systemUnit ?? '' : '');
+      set(
+        'unit',
+        state.mode === 'system'
+          ? state.systemUnit ?? ''
+          : state.mode === 'structure'
+            ? state.structureUnit ?? ''
+            : '',
+      );
+      set('tier', state.mode === 'structure' ? state.structureTier ?? '' : '');
+      set('cell', state.mode === 'structure' ? state.structureCell ?? '' : '');
       set('outside', state.mode === 'system' && state.showOutside ? '1' : '');
       set(
         'level',
-        state.mode === 'structure' && state.structureGrid ? 'grid' : '',
+        state.mode === 'structure'
+          ? state.structureCell
+            ? 'cell'
+            : state.structureGrid
+              ? 'grid'
+              : ''
+          : '',
       );
       set('node', store.get().ui.node ?? '');
       set('panel', store.get().ui.memberOpen ? 'member-map' : '');
@@ -76,8 +91,19 @@ export function createUrlState(app) {
     state.systemUnit = mode === 'system' ? params.get('unit') : null;
     state.systemUnitLabel = state.systemUnit;
     state.showOutside = mode === 'system' && params.get('outside') === '1';
-    // A Structure deep link may name the grid sub-level.
-    state.structureGrid = mode === 'structure' && params.get('level') === 'grid';
+    // A Structure deep link may name the grid or cell sub-level.
+    const level = params.get('level');
+    state.structureGrid = mode === 'structure' && (level === 'grid' || level === 'cell');
+    state.structureCell = mode === 'structure' && level === 'cell' ? params.get('cell') : null;
+    state.structureUnit =
+      mode === 'structure'
+        ? params.get('unit') ?? (state.structureCell ? state.structureCell.split('|')[0] || null : null)
+        : null;
+    state.structureUnitLabel = state.structureUnit;
+    state.structureTier =
+      mode === 'structure'
+        ? params.get('tier') ?? (state.structureCell ? state.structureCell.split('|')[1] || null : null)
+        : null;
     return params;
   }
 

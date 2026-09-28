@@ -2287,10 +2287,13 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   the deep link (`level=grid`), and the legend names the axes, cells, and cross-unit styling. The
   tier �-layer `@grid` acceptance scenario runs (a cell's own file list and the L2 drill-down are
   Y5). Coverage in `test/unit/structure.test.ts` and `test/unit/browser-core.test.ts`.
-- **Y5 - L2 / L3 drill-down.** Open a cell to its files, then into today's file map filtered to
-  the cell, reusing the System drill ladder (`buildSystemUnitViewModel`,
-  `src/view/view-model.ts`) with a tier key function. Breadcrumb *Structure › unit › tier*. Escape
-  or the breadcrumb returns.
+- **Y5 - L2 / L3 drill-down.** *Done.* `TierGridCell` carries member files (`members`).
+  Served by `GET /graph?structure=1&level=cell&unit=...&tier=...` via `buildStructureCellViewModel`:
+  the cell's component files are drawn inside the file map with intra-cell edges, central hub files,
+  and collapsed boxes for the other units as context. Double-click or Enter opens a cell, breadcrumb reads
+  *Structure › unit › tier*, Escape (or clicking the breadcrumb / pressing U) returns to the grid,
+  and deep links support `level=cell&cell=...`. Coverage in `test/unit/structure.test.ts`,
+  `test/unit/browser-core.test.ts`, and the `@drilldown` scenario in `structure.feature`.
 - **Y6 - End-to-end spine.** The most behavioral reading, from data already recorded: one spine
   per declared route, `call site (frontend) → endpoint (api) → handler (domain) → table (data)`,
   built from `traces`, `tableTrace`, and `tables`. A call with no matching endpoint or a handler

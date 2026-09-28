@@ -116,6 +116,11 @@ const store = createStore({
     systemAutoOpened: false,
     /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
     structureGrid: false,
+    /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
+    structureCell: null,
+    structureUnit: null,
+    structureUnitLabel: null,
+    structureTier: null,
   },
   member: {
     order: 'source',
@@ -204,6 +209,22 @@ app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
+app.structure = {
+  openCell(cellId, unit, tier) {
+    if (!cellId && !tier) return;
+    state.structureCell = cellId ?? (unit ? `${unit}|${tier}` : tier);
+    state.structureUnit = unit ?? (cellId?.includes('|') ? cellId.split('|')[0] || null : null);
+    state.structureTier = tier ?? (cellId?.includes('|') ? cellId.split('|')[1] || null : null);
+    scan();
+  },
+  closeCell() {
+    state.structureCell = null;
+    state.structureUnit = null;
+    state.structureUnitLabel = null;
+    state.structureTier = null;
+    scan();
+  },
+};
 
 /** The freshness badge reads `/status` and rebuilds the map through a cache bypass. */
 const freshness = createFreshnessBadge(elements.freshness, {
@@ -256,6 +277,17 @@ async function scan({ refresh = false } = {}) {
       state.systemUnitLabel = null;
       state.unitFile = null;
     }
+    if (model.structureLevel === 'cell') {
+      state.structureCell = model.structureCell ?? state.structureCell;
+      state.structureUnit = model.structureUnit ?? state.structureUnit;
+      state.structureUnitLabel = model.structureUnitName ?? state.structureUnit;
+      state.structureTier = model.structureTier ?? state.structureTier;
+    } else if (state.mode === 'structure') {
+      state.structureCell = null;
+      state.structureUnit = null;
+      state.structureUnitLabel = null;
+      state.structureTier = null;
+    }
     store.set('ui', { node: null });
     view.render(model);
     view.focusFile(null);
@@ -278,6 +310,12 @@ async function scan({ refresh = false } = {}) {
     renderBreadcrumb(elements.breadcrumb, state, (prefix) => {
       if (state.mode === 'system') {
         if (!prefix) app.units.closeUnit();
+        return;
+      }
+      if (state.mode === 'structure') {
+        if (!prefix || prefix === state.structureUnit) {
+          app.structure.closeCell();
+        }
         return;
       }
       state.prefix = prefix;
@@ -448,6 +486,10 @@ elements.detail.addEventListener('change', () => {
   // The grid is a Structure sub-level; leaving Structure returns to the bands next visit.
   if (state.mode !== 'structure') {
     state.structureGrid = false;
+    state.structureCell = null;
+    state.structureUnit = null;
+    state.structureUnitLabel = null;
+    state.structureTier = null;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -556,6 +598,8 @@ if (window.STRABO_TEST) {
     drill: app.selection.onDrill,
     openUnit: app.units.openUnit,
     closeUnit: app.units.closeUnit,
+    openStructureCell: (cellId, unit, tier) => app.structure.openCell(cellId, unit, tier),
+    closeStructureCell: () => app.structure.closeCell(),
     toggleOutsideLinks: app.units.toggleOutsideLinks,
     toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,

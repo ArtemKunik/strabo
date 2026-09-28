@@ -178,13 +178,20 @@ export interface ViewModel {
    * The structure drawing on screen: `bands` is the tier stack (Y3), `grid` the unit × tier
    * grid (Y4). Absent means `bands`, so an older client still reads.
    */
-  structureLevel?: 'bands' | 'grid';
+  structureLevel?: 'bands' | 'grid' | 'cell';
   /** In a grid, the rows (ranked tiers) and columns (build units), for axis labels. */
   structureGrid?: {
     tiers: string[];
     units: Array<{ id: string; name: string; files: number }>;
     crossUnitEdges: number;
   };
+  /** In a Structure cell drill-down (Phase 35 Y5), the unit id and display name. */
+  structureUnit?: string;
+  structureUnitName?: string;
+  /** In a Structure cell drill-down, the role tier. */
+  structureTier?: string;
+  /** The cell's own id `<unit>|<tier>`, for breadcrumb and state restore. */
+  structureCell?: string;
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */
