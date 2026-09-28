@@ -2294,11 +2294,12 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   *Structure › unit › tier*, Escape (or clicking the breadcrumb / pressing U) returns to the grid,
   and deep links support `level=cell&cell=...`. Coverage in `test/unit/structure.test.ts`,
   `test/unit/browser-core.test.ts`, and the `@drilldown` scenario in `structure.feature`.
-- **Y6 - End-to-end spine.** The most behavioral reading, from data already recorded: one spine
-  per declared route, `call site (frontend) → endpoint (api) → handler (domain) → table (data)`,
-  built from `traces`, `tableTrace`, and `tables`. A call with no matching endpoint or a handler
-  with no table shows a dangling stub, never a fabricated hop. Opened from a cell or an edge to
-  answer "why do these two cells connect".
+- **Y6 - End-to-end spine.** *Done.* Built from `traces`, `tableTrace`, and graph edges: each spine
+  traces `call site (frontend) → endpoint (api) → handler (domain) → table (data)` through role tiers
+  without fabricated hops. Carried on `TierReport` (`spines`) and `ViewModel` (`structureSpines`).
+  The inspector renders behavioral spines for tier bands and cells with 4-hop cards (`[data-role="spine-view"]`)
+  and dangling stubs for missing hops. Tested in `test/unit/structure.test.ts` and the acceptance
+  scenario `@spine` in `structure.feature`.
 - **Y7 - Intended vs observed.** `strabo.rules.yml` (`src/analysis/rules.ts`) already states the
   architecture an operator intends. Draw intent as a ghost band/edge and the observed `tierFlow`
   solid, so a mismatch reads as a violation on the same picture; the findings stay the same

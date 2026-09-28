@@ -56,7 +56,7 @@ Feature: Application logical structure from the tier lens
     When I exit the cell with Escape
     Then the Structure view returns to the grid
 
-  @wip @spine
+  @spine
   Scenario: Opening a recorded call follows the end-to-end spine
     Given I open the structure fixture repository
     When I switch to structure detail

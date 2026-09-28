@@ -4532,6 +4532,10 @@ function renderInspector(container, model, id, handlers = {}) {
     container.append(narrator);
     return;
   }
+  if (model.structure && (node?.kind === "tier" || node?.kind === "shelf" || node?.kind === "axis")) {
+    appendStructureSpines(container, model, id, node, handlers);
+    return;
+  }
   const tabs = document.createElement("div");
   tabs.className = "inspector-tabs";
   tabs.setAttribute("role", "tablist");
@@ -4772,6 +4776,136 @@ function appendOutsideLinks(container, model, id, node, handlers) {
   if (isFile || links.length > 0) {
     container.append(block);
   }
+}
+function appendStructureSpines(container, model, id, node, handlers) {
+  const tier = node?.tier ?? id;
+  const unit = node?.unit;
+  const allSpines = model.structureSpines ?? [];
+  const section2 = document.createElement("section");
+  section2.className = "structure-spines-section";
+  section2.dataset.role = "tier-spines";
+  const heading3 = document.createElement("h3");
+  heading3.textContent = "Behavioral spines";
+  section2.append(heading3);
+  const intro = document.createElement("p");
+  intro.className = "passport-why";
+  intro.textContent = "End-to-end behavioral trace: call site \u2192 declared endpoint \u2192 handler \u2192 table.";
+  section2.append(intro);
+  if (handlers.activeSpine) {
+    renderSpineView(section2, handlers.activeSpine, handlers);
+  }
+  const originating = allSpines.filter(
+    (s15) => s15.call.tier === tier || unit && s15.call.unit === unit
+  );
+  const passing = allSpines.filter(
+    (s15) => !originating.includes(s15) && (s15.hops.some((h3) => h3.tier === tier) || unit && s15.hops.some((h3) => h3.unit === unit))
+  );
+  const displayList = originating.length > 0 ? originating : passing.length > 0 ? passing : allSpines;
+  if (displayList.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "unavailable";
+    empty.dataset.role = "spines-empty";
+    empty.textContent = "No recorded outbound calls or behavioral spines found for this tier.";
+    section2.append(empty);
+    container.append(section2);
+    return;
+  }
+  const list2 = document.createElement("div");
+  list2.className = "spine-list";
+  list2.dataset.role = "spine-list";
+  for (const spine of displayList) {
+    const card = document.createElement("div");
+    card.className = "spine-card";
+    card.dataset.role = "spine-card";
+    const header = document.createElement("div");
+    header.className = "spine-card-header";
+    const callLabel = document.createElement("strong");
+    callLabel.textContent = `${spine.call.method ?? "CALL"} ${spine.call.path ?? spine.call.target}`;
+    header.append(callLabel);
+    const fileLocation = document.createElement("span");
+    fileLocation.className = "evidence";
+    fileLocation.textContent = `${spine.call.file}:${spine.call.line}`;
+    header.append(fileLocation);
+    card.append(header);
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "spine-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "primary";
+    openBtn.dataset.role = "open-spine";
+    openBtn.dataset.spineId = spine.id;
+    openBtn.textContent = handlers.activeSpine?.id === spine.id ? "Spine active" : "View spine";
+    openBtn.addEventListener("click", () => {
+      renderSpineView(section2, spine, handlers);
+      handlers.onOpenSpine?.(spine);
+    });
+    buttonRow.append(openBtn);
+    card.append(buttonRow);
+    list2.append(card);
+  }
+  section2.append(list2);
+  container.append(section2);
+}
+function renderSpineView(container, spine, handlers = {}) {
+  const existing = container.querySelector('[data-role="spine-view"]');
+  if (existing) {
+    existing.remove();
+  }
+  const view2 = document.createElement("div");
+  view2.className = "spine-view";
+  view2.dataset.role = "spine-view";
+  const header = document.createElement("div");
+  header.className = "spine-view-header";
+  const title = document.createElement("h4");
+  title.textContent = "End-to-End Spine";
+  header.append(title);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "icon-button";
+  closeBtn.textContent = "\u2715";
+  closeBtn.title = "Close spine view";
+  closeBtn.addEventListener("click", () => {
+    view2.remove();
+    handlers.onCloseSpine?.();
+  });
+  header.append(closeBtn);
+  view2.append(header);
+  const hopsContainer = document.createElement("div");
+  hopsContainer.className = "spine-hops";
+  const hopRoles = ["call", "endpoint", "handler", "table"];
+  for (const role of hopRoles) {
+    const hop = (spine.hops ?? []).find((h3) => h3.role === role);
+    const hopCard = document.createElement("div");
+    hopCard.className = `spine-hop spine-hop-${role}`;
+    hopCard.dataset.role = `spine-${role}`;
+    const roleBadge = document.createElement("span");
+    roleBadge.className = "spine-role-badge";
+    roleBadge.textContent = role.toUpperCase();
+    hopCard.append(roleBadge);
+    if (hop) {
+      const tierBadge = document.createElement("span");
+      tierBadge.className = `kind-chip kind-${hop.tier}`;
+      tierBadge.textContent = hop.tier;
+      hopCard.append(tierBadge);
+      const label = document.createElement("strong");
+      label.className = "spine-hop-label";
+      label.textContent = hop.label;
+      hopCard.append(label);
+      const detail = document.createElement("span");
+      detail.className = "spine-hop-detail";
+      detail.textContent = hop.detail;
+      hopCard.append(detail);
+    } else {
+      const stub = document.createElement("span");
+      stub.className = "spine-stub";
+      stub.dataset.role = "spine-stub";
+      stub.textContent = `(no matching ${role} detected)`;
+      hopCard.append(stub);
+    }
+    hopsContainer.append(hopCard);
+  }
+  view2.append(hopsContainer);
+  container.prepend(view2);
 }
 
 // ui/strabo-panel-functions.js
@@ -26922,11 +27056,21 @@ function createSelectionController(app2) {
         outsideShown: state2.showOutside,
         onShowOutside: () => app2.units.toggleOutsideLinks(),
         onExpandUnit: (unit) => app2.units.toggleExpandedUnit(unit)
-      } : {}
+      } : {},
+      activeSpine: state2.activeSpine,
+      onOpenSpine: (spine) => app2.structure?.openSpine(spine),
+      onCloseSpine: () => app2.structure?.closeSpine()
     });
-    if (!app2.current?.system) {
+    const inspectorWindow = app2.floatingWindows?.find((controller) => controller.key === "inspector");
+    if (inspectorWindow && !inspectorWindow.isOpen()) {
+      inspectorWindow.open();
+    }
+    if (!app2.current?.system && !app2.current?.structure) {
       loadMembers(id);
       app2.coverage?.loadFileCoverage(id, isFileNode(id));
+    } else if (app2.current?.structure && isFileNode(id)) {
+      loadMembers(id);
+      app2.coverage?.loadFileCoverage(id, true);
     }
     app2.windows.refreshDock();
   }
@@ -28313,7 +28457,8 @@ var store = createStore({
     structureCell: null,
     structureUnit: null,
     structureUnitLabel: null,
-    structureTier: null
+    structureTier: null,
+    activeSpine: null
   },
   member: {
     order: "source",
@@ -28393,6 +28538,32 @@ app.structure = {
     state.structureUnitLabel = null;
     state.structureTier = null;
     scan();
+  },
+  openSpine(spineOrId) {
+    let spine = null;
+    if (typeof spineOrId === "object" && spineOrId !== null) {
+      spine = spineOrId;
+    } else {
+      spine = (app.current?.structureSpines ?? []).find(
+        (s15) => s15.id === spineOrId || s15.call.tier === spineOrId || s15.call.file === spineOrId
+      ) ?? null;
+    }
+    state.activeSpine = spine;
+    if (spine) {
+      const tierId = spine.call.tier;
+      if (tierId && (!app.selected || app.selected !== tierId)) {
+        app.selection.selectNode(tierId);
+      } else if (app.selected) {
+        app.selection.selectNode(app.selected);
+      }
+    }
+    return spine;
+  },
+  closeSpine() {
+    state.activeSpine = null;
+    if (app.selected) {
+      app.selection.selectNode(app.selected);
+    }
   }
 };
 var freshness = createFreshnessBadge(elements.freshness, {
@@ -28610,6 +28781,7 @@ elements.detail.addEventListener("change", () => {
     state.structureUnit = null;
     state.structureUnitLabel = null;
     state.structureTier = null;
+    state.activeSpine = null;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -28707,6 +28879,9 @@ if (window.STRABO_TEST) {
     closeUnit: app.units.closeUnit,
     openStructureCell: (cellId, unit, tier) => app.structure.openCell(cellId, unit, tier),
     closeStructureCell: () => app.structure.closeCell(),
+    openSpine: (spineOrId) => app.structure.openSpine(spineOrId),
+    closeSpine: () => app.structure.closeSpine(),
+    activeSpine: () => state.activeSpine,
     toggleOutsideLinks: app.units.toggleOutsideLinks,
     toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,

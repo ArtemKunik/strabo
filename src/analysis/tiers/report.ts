@@ -14,6 +14,7 @@ import {
   type TableTraceEntry,
   type Tier,
   type TierCallSite,
+  type TierClassification,
   type TierDirection,
   type TierEndpointSite,
   type TierFlow,
@@ -24,6 +25,8 @@ import {
   type TierMatrixCell,
   type TierReport,
   type TierShelfEntry,
+  type TierSpine,
+  type TierSpineHop,
   type TierTrace,
   type TierUnitReport,
 } from './types.ts';
@@ -523,6 +526,8 @@ export function buildTierReport(
       call.method && call.path ? endpointByKey.get(`${call.method}\u0000${call.path}`) ?? null : null,
   }));
 
+  const spines = buildSpines(traces, tableTrace, files, graph.edges ?? [], assignment);
+
   return {
     files,
     units: unitReports,
@@ -542,8 +547,199 @@ export function buildTierReport(
     calls,
     endpoints,
     traces,
+    spines,
     summary: { ...summary, total: files.length, mixed },
     skipped,
     truncated: all.length - selected.length,
   };
+}
+
+/**
+ * Build the behavioral end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6).
+ *
+ * Each declared route or recorded outbound call walks to its matching endpoint, domain handler,
+ * and data table reference. Gaps stay as stubs rather than being fabricated.
+ */
+function buildSpines(
+  traces: TierTrace[],
+  tableTrace: TableTraceEntry[],
+  files: TierClassification[],
+  graphEdges: Array<{ source: string; target: string; kind?: string }>,
+  assignment: Map<string, string>,
+): TierSpine[] {
+  const tierOf = new Map(files.map((e) => [e.file, e.tier]));
+  const forward = new Map<string, string[]>();
+  for (const edge of graphEdges) {
+    if (edge.kind === 'call') continue;
+    const targets = forward.get(edge.source) ?? [];
+    targets.push(edge.target);
+    forward.set(edge.source, targets);
+  }
+
+  const reachableFrom = (start: string): string[] => {
+    const visited = new Set<string>();
+    const queue = [start];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const next of forward.get(current) ?? []) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return [...visited];
+  };
+
+  const tableByFile = new Map<string, TableTraceEntry[]>();
+  for (const entry of tableTrace) {
+    const list = tableByFile.get(entry.file) ?? [];
+    list.push(entry);
+    tableByFile.set(entry.file, list);
+  }
+
+  return traces.map((trace) => {
+    const { call, endpoint } = trace;
+    const targetUnit = endpoint?.unit ?? call.unit;
+    const reached = reachableFrom(call.file);
+    const unitFiles = files.filter((f) => (assignment.get(f.file) ?? '.') === targetUnit);
+
+    let handlerFile: string | null = null;
+    let handlerTier: Tier | null = null;
+
+    const reachedDomain = reached.find(
+      (f) => (assignment.get(f) ?? '.') === targetUnit && tierOf.get(f) === 'domain',
+    );
+    const reachedApi = reached.find(
+      (f) => (assignment.get(f) ?? '.') === targetUnit && tierOf.get(f) === 'api' && f !== call.file,
+    );
+    if (reachedDomain) {
+      handlerFile = reachedDomain;
+      handlerTier = 'domain';
+    } else if (reachedApi) {
+      handlerFile = reachedApi;
+      handlerTier = 'api';
+    } else {
+      const domainCandidate = unitFiles.find((f) => f.tier === 'domain');
+      const apiCandidate = unitFiles.find((f) => f.tier === 'api');
+      if (domainCandidate) {
+        handlerFile = domainCandidate.file;
+        handlerTier = 'domain';
+      } else if (apiCandidate) {
+        handlerFile = apiCandidate.file;
+        handlerTier = 'api';
+      }
+    }
+
+    let matchedTable: TableTraceEntry | null = null;
+    const pathToken = (call.path ?? endpoint?.path ?? '')
+      .split('/')
+      .filter(Boolean)
+      .pop()
+      ?.toLowerCase();
+
+    const searchPool = handlerFile
+      ? [handlerFile, ...reachableFrom(handlerFile)]
+      : reached;
+
+    for (const f of searchPool) {
+      const entries = tableByFile.get(f);
+      if (entries && entries.length > 0) {
+        if (pathToken) {
+          const nameMatch = entries.find(
+            (e) => e.table.toLowerCase() === pathToken || pathToken.includes(e.table.toLowerCase()),
+          );
+          if (nameMatch) {
+            matchedTable = nameMatch;
+            break;
+          }
+        }
+        if (!matchedTable) {
+          matchedTable = entries[0] ?? null;
+        }
+      }
+    }
+
+    if (!matchedTable && targetUnit) {
+      const unitTables = tableTrace.filter((e) => e.unit === targetUnit);
+      if (pathToken) {
+        matchedTable =
+          unitTables.find(
+            (e) => e.table.toLowerCase() === pathToken || pathToken.includes(e.table.toLowerCase()),
+          ) ?? null;
+      }
+      if (!matchedTable && unitTables.length > 0) {
+        matchedTable = unitTables[0] ?? null;
+      }
+    }
+
+    const hops: TierSpineHop[] = [];
+
+    // Hop 1: Call site
+    hops.push({
+      tier: call.tier,
+      role: 'call',
+      file: call.file,
+      unit: call.unit,
+      label: `${call.method ?? 'CALL'} ${call.path ?? call.target}`,
+      detail: `${call.file}:${call.line}`,
+      line: call.line,
+    });
+
+    // Hop 2: Endpoint
+    if (endpoint) {
+      hops.push({
+        tier: endpoint.tier,
+        role: 'endpoint',
+        file: endpoint.file,
+        unit: endpoint.unit,
+        label: `${endpoint.method} ${endpoint.path}`,
+        detail: endpoint.file,
+      });
+    }
+
+    // Hop 3: Handler
+    if (handlerFile && handlerTier) {
+      hops.push({
+        tier: handlerTier,
+        role: 'handler',
+        file: handlerFile,
+        unit: targetUnit,
+        label: handlerFile.split('/').pop() ?? handlerFile,
+        detail: handlerFile,
+      });
+    }
+
+    // Hop 4: Table
+    if (matchedTable) {
+      hops.push({
+        tier: 'data',
+        role: 'table',
+        file: matchedTable.file,
+        unit: matchedTable.unit,
+        label: matchedTable.table,
+        detail: `table "${matchedTable.table}" · ${matchedTable.evidence}`,
+        line: matchedTable.line,
+      });
+    }
+
+    const handler =
+      handlerFile && handlerTier
+        ? {
+            file: handlerFile,
+            tier: handlerTier,
+            unit: targetUnit,
+            label: handlerFile.split('/').pop() ?? handlerFile,
+          }
+        : null;
+
+    return {
+      id: `${call.file}:${call.line}->${endpoint ? `${endpoint.method} ${endpoint.path}` : 'stub'}->${matchedTable ? matchedTable.table : 'stub'}`,
+      call,
+      endpoint,
+      handler,
+      table: matchedTable,
+      hops,
+    };
+  });
 }

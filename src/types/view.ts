@@ -1,3 +1,4 @@
+import type { TierSpine } from '../analysis/tiers/types.ts';
 import type { Diagnostic, Exclusion, GraphEdge, GraphNode } from './graph.ts';
 import type { RepositoryDescriptor, ScanCacheMetadata } from './scan.ts';
 
@@ -192,6 +193,8 @@ export interface ViewModel {
   structureTier?: string;
   /** The cell's own id `<unit>|<tier>`, for breadcrumb and state restore. */
   structureCell?: string;
+  /** The end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6). */
+  structureSpines?: TierSpine[];
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */

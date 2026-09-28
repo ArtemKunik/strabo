@@ -108,11 +108,21 @@ export function createSelectionController(app) {
             onExpandUnit: (unit) => app.units.toggleExpandedUnit(unit),
           }
         : {}),
+      activeSpine: state.activeSpine,
+      onOpenSpine: (spine) => app.structure?.openSpine(spine),
+      onCloseSpine: () => app.structure?.closeSpine(),
     });
-    if (!app.current?.system) {
+    const inspectorWindow = app.floatingWindows?.find((controller) => controller.key === 'inspector');
+    if (inspectorWindow && !inspectorWindow.isOpen()) {
+      inspectorWindow.open();
+    }
+    if (!app.current?.system && !app.current?.structure) {
       loadMembers(id);
       // The Coverage tab loads on demand, like Members and Functions; a directory says so.
       app.coverage?.loadFileCoverage(id, isFileNode(id));
+    } else if (app.current?.structure && isFileNode(id)) {
+      loadMembers(id);
+      app.coverage?.loadFileCoverage(id, true);
     }
     app.windows.refreshDock();
   }

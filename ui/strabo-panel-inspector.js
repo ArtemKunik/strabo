@@ -142,6 +142,13 @@ export function renderInspector(container, model, id, handlers = {}) {
     return;
   }
 
+  // In Structure view, roll-up nodes (bands, shelves, axes, cells) have no file members or
+  // function tabs. They show behavioral spines (Phase 35 Y6) connecting call sites to tables.
+  if (model.structure && (node?.kind === 'tier' || node?.kind === 'shelf' || node?.kind === 'axis')) {
+    appendStructureSpines(container, model, id, node, handlers);
+    return;
+  }
+
   const tabs = document.createElement('div');
   tabs.className = 'inspector-tabs';
   tabs.setAttribute('role', 'tablist');
@@ -428,4 +435,175 @@ function appendOutsideLinks(container, model, id, node, handlers) {
   if (isFile || links.length > 0) {
     container.append(block);
   }
+}
+
+/**
+ * Render the Behavioral Spines section for a Structure tier, cell, or shelf (Phase 35 Y6).
+ *
+ * Each recorded outbound call or route traces end-to-end:
+ * `call site (frontend) → declared endpoint (api) → handler (domain) → table (data)`
+ * Gaps stay as stubs rather than being fabricated.
+ */
+function appendStructureSpines(container, model, id, node, handlers) {
+  const tier = node?.tier ?? id;
+  const unit = node?.unit;
+  const allSpines = model.structureSpines ?? [];
+
+  const section = document.createElement('section');
+  section.className = 'structure-spines-section';
+  section.dataset.role = 'tier-spines';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'Behavioral spines';
+  section.append(heading);
+
+  const intro = document.createElement('p');
+  intro.className = 'passport-why';
+  intro.textContent = 'End-to-end behavioral trace: call site → declared endpoint → handler → table.';
+  section.append(intro);
+
+  if (handlers.activeSpine) {
+    renderSpineView(section, handlers.activeSpine, handlers);
+  }
+
+  const originating = allSpines.filter(
+    (s) => s.call.tier === tier || (unit && s.call.unit === unit),
+  );
+  const passing = allSpines.filter(
+    (s) => !originating.includes(s) && (s.hops.some((h) => h.tier === tier) || (unit && s.hops.some((h) => h.unit === unit))),
+  );
+  const displayList = originating.length > 0 ? originating : (passing.length > 0 ? passing : allSpines);
+
+  if (displayList.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'unavailable';
+    empty.dataset.role = 'spines-empty';
+    empty.textContent = 'No recorded outbound calls or behavioral spines found for this tier.';
+    section.append(empty);
+    container.append(section);
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'spine-list';
+  list.dataset.role = 'spine-list';
+
+  for (const spine of displayList) {
+    const card = document.createElement('div');
+    card.className = 'spine-card';
+    card.dataset.role = 'spine-card';
+
+    const header = document.createElement('div');
+    header.className = 'spine-card-header';
+
+    const callLabel = document.createElement('strong');
+    callLabel.textContent = `${spine.call.method ?? 'CALL'} ${spine.call.path ?? spine.call.target}`;
+    header.append(callLabel);
+
+    const fileLocation = document.createElement('span');
+    fileLocation.className = 'evidence';
+    fileLocation.textContent = `${spine.call.file}:${spine.call.line}`;
+    header.append(fileLocation);
+
+    card.append(header);
+
+    const buttonRow = document.createElement('div');
+    buttonRow.className = 'spine-actions';
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'primary';
+    openBtn.dataset.role = 'open-spine';
+    openBtn.dataset.spineId = spine.id;
+    openBtn.textContent = handlers.activeSpine?.id === spine.id ? 'Spine active' : 'View spine';
+    openBtn.addEventListener('click', () => {
+      renderSpineView(section, spine, handlers);
+      handlers.onOpenSpine?.(spine);
+    });
+    buttonRow.append(openBtn);
+    card.append(buttonRow);
+
+    list.append(card);
+  }
+
+  section.append(list);
+  container.append(section);
+}
+
+/**
+ * Render the 4-hop end-to-end spine view (Phase 35 Y6):
+ * call (frontend) → endpoint (api) → handler (domain) → table (data).
+ */
+function renderSpineView(container, spine, handlers = {}) {
+  const existing = container.querySelector('[data-role="spine-view"]');
+  if (existing) {
+    existing.remove();
+  }
+
+  const view = document.createElement('div');
+  view.className = 'spine-view';
+  view.dataset.role = 'spine-view';
+
+  const header = document.createElement('div');
+  header.className = 'spine-view-header';
+  const title = document.createElement('h4');
+  title.textContent = 'End-to-End Spine';
+  header.append(title);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'icon-button';
+  closeBtn.textContent = '✕';
+  closeBtn.title = 'Close spine view';
+  closeBtn.addEventListener('click', () => {
+    view.remove();
+    handlers.onCloseSpine?.();
+  });
+  header.append(closeBtn);
+  view.append(header);
+
+  const hopsContainer = document.createElement('div');
+  hopsContainer.className = 'spine-hops';
+
+  const hopRoles = ['call', 'endpoint', 'handler', 'table'];
+
+  for (const role of hopRoles) {
+    const hop = (spine.hops ?? []).find((h) => h.role === role);
+    const hopCard = document.createElement('div');
+    hopCard.className = `spine-hop spine-hop-${role}`;
+    hopCard.dataset.role = `spine-${role}`;
+
+    const roleBadge = document.createElement('span');
+    roleBadge.className = 'spine-role-badge';
+    roleBadge.textContent = role.toUpperCase();
+    hopCard.append(roleBadge);
+
+    if (hop) {
+      const tierBadge = document.createElement('span');
+      tierBadge.className = `kind-chip kind-${hop.tier}`;
+      tierBadge.textContent = hop.tier;
+      hopCard.append(tierBadge);
+
+      const label = document.createElement('strong');
+      label.className = 'spine-hop-label';
+      label.textContent = hop.label;
+      hopCard.append(label);
+
+      const detail = document.createElement('span');
+      detail.className = 'spine-hop-detail';
+      detail.textContent = hop.detail;
+      hopCard.append(detail);
+    } else {
+      const stub = document.createElement('span');
+      stub.className = 'spine-stub';
+      stub.dataset.role = 'spine-stub';
+      stub.textContent = `(no matching ${role} detected)`;
+      hopCard.append(stub);
+    }
+
+    hopsContainer.append(hopCard);
+  }
+
+  view.append(hopsContainer);
+  container.prepend(view);
 }

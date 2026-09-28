@@ -691,6 +691,7 @@ export function buildStructureViewModel(
     cache,
     structure: true,
     structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureSpines: report.spines,
   };
 }
 
@@ -832,6 +833,7 @@ export function buildStructureGridViewModel(
       units: grid.units,
       crossUnitEdges: grid.summary.crossUnitEdges,
     },
+    structureSpines: report.spines,
   };
 }
 
@@ -972,5 +974,6 @@ export function buildStructureCellViewModel(
     structureTier: options.tier,
     structureCell: cellId,
     structureSummary: { total: report.tierFlow.total, intraRatio: report.tierFlow.intraRatio },
+    structureSpines: report.spines,
   };
 }

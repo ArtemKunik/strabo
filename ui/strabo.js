@@ -121,6 +121,7 @@ const store = createStore({
     structureUnit: null,
     structureUnitLabel: null,
     structureTier: null,
+    activeSpine: null,
   },
   member: {
     order: 'source',
@@ -223,6 +224,33 @@ app.structure = {
     state.structureUnitLabel = null;
     state.structureTier = null;
     scan();
+  },
+  openSpine(spineOrId) {
+    let spine = null;
+    if (typeof spineOrId === 'object' && spineOrId !== null) {
+      spine = spineOrId;
+    } else {
+      spine =
+        (app.current?.structureSpines ?? []).find(
+          (s) => s.id === spineOrId || s.call.tier === spineOrId || s.call.file === spineOrId,
+        ) ?? null;
+    }
+    state.activeSpine = spine;
+    if (spine) {
+      const tierId = spine.call.tier;
+      if (tierId && (!app.selected || app.selected !== tierId)) {
+        app.selection.selectNode(tierId);
+      } else if (app.selected) {
+        app.selection.selectNode(app.selected);
+      }
+    }
+    return spine;
+  },
+  closeSpine() {
+    state.activeSpine = null;
+    if (app.selected) {
+      app.selection.selectNode(app.selected);
+    }
   },
 };
 
@@ -490,6 +518,7 @@ elements.detail.addEventListener('change', () => {
     state.structureUnit = null;
     state.structureUnitLabel = null;
     state.structureTier = null;
+    state.activeSpine = null;
   }
   app.prefs.writeViewPrefs();
   scan();
@@ -600,6 +629,9 @@ if (window.STRABO_TEST) {
     closeUnit: app.units.closeUnit,
     openStructureCell: (cellId, unit, tier) => app.structure.openCell(cellId, unit, tier),
     closeStructureCell: () => app.structure.closeCell(),
+    openSpine: (spineOrId) => app.structure.openSpine(spineOrId),
+    closeSpine: () => app.structure.closeSpine(),
+    activeSpine: () => state.activeSpine,
     toggleOutsideLinks: app.units.toggleOutsideLinks,
     toggleExpandedUnit: app.units.toggleExpandedUnit,
     outsideShown: () => state.showOutside,

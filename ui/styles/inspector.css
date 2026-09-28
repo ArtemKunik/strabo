@@ -208,3 +208,105 @@
   color: var(--ink-2);
 }
 
+/* Phase 35 Y6: Behavioral spines */
+.structure-spines-section {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spine-card {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.spine-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.spine-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.spine-view {
+  padding: 10px;
+  background: var(--bg-0);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.spine-view-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.spine-view h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.spine-hops {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spine-hop {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-1);
+  border-left: 3px solid var(--accent);
+}
+
+.spine-role-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--ink-2);
+  align-self: flex-start;
+}
+
+.spine-hop-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-1);
+}
+
+.spine-hop-detail {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
+.spine-stub {
+  border-left-color: var(--warn);
+  color: var(--ink-3);
+  font-style: italic;
+  font-size: 11px;
+}
+

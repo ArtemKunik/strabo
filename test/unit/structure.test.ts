@@ -273,3 +273,73 @@ test('GET /graph?structure=1&level=cell&unit=orders&tier=data serves cell drill-
     true,
   );
 });
+
+test('the tier report carries end-to-end spines connecting call → endpoint → handler → table (Y6)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+
+  assert.ok(report.spines.length >= 1, 'should have at least 1 spine');
+  const spine = report.spines[0];
+  assert.ok(spine);
+
+  // Call site in web/src/ui/home.ts (frontend)
+  assert.equal(spine.call.file, 'web/src/ui/home.ts');
+  assert.equal(spine.call.tier, 'frontend');
+  assert.equal(spine.call.unit, 'web');
+  assert.equal(spine.call.path, '/orders');
+
+  // Declared endpoint in orders/openapi.yaml (api)
+  assert.ok(spine.endpoint);
+  assert.equal(spine.endpoint.file, 'orders/openapi.yaml');
+  assert.equal(spine.endpoint.tier, 'api');
+  assert.equal(spine.endpoint.method, 'GET');
+  assert.equal(spine.endpoint.path, '/orders');
+
+  // Domain handler in orders/src/domain/orders.ts (domain)
+  assert.ok(spine.handler);
+  assert.equal(spine.handler.tier, 'domain');
+  assert.equal(spine.handler.file, 'orders/src/domain/orders.ts');
+
+  // Table reference in orders/src/data/orders.ts (data)
+  assert.ok(spine.table);
+  assert.equal(spine.table.table, 'orders');
+  assert.equal(spine.table.file, 'orders/src/data/orders.ts');
+  assert.equal(spine.table.tier, 'data');
+
+  // 4 hops along the spine
+  assert.equal(spine.hops.length, 4);
+  assert.deepEqual(
+    spine.hops.map((h) => [h.role, h.tier]),
+    [
+      ['call', 'frontend'],
+      ['endpoint', 'api'],
+      ['handler', 'domain'],
+      ['table', 'data'],
+    ],
+  );
+
+  // View models carry structureSpines
+  const bandsModel = buildStructureViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+  );
+  assert.ok(bandsModel.structureSpines && bandsModel.structureSpines.length >= 1);
+
+  const gridModel = buildStructureGridViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+  );
+  assert.ok(gridModel.structureSpines && gridModel.structureSpines.length >= 1);
+
+  const cellModel = buildStructureCellViewModel(
+    report,
+    graph,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { unit: 'orders', tier: 'data' },
+  );
+  assert.ok(cellModel?.structureSpines && cellModel.structureSpines.length >= 1);
+});
+

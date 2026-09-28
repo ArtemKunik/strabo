@@ -258,3 +258,44 @@ Then('the Structure view returns to the grid', async function () {
     { timeout: 15_000 },
   );
 });
+
+When('I open the recorded call from the {string} band', async function (tier) {
+  await this.page.evaluate((bandTier) => {
+    const model = window.straboTest?.model();
+    const band = model?.nodes?.find(
+      (node) => (node.tier === bandTier || node.id === bandTier) && node.kind === 'tier',
+    );
+    if (band) {
+      window.straboTest.select(band.id);
+    }
+  }, tier);
+  await this.page.waitForSelector('[data-role="open-spine"]', { timeout: 15_000 });
+  await this.page.click('[data-role="open-spine"]');
+  await this.page.waitForSelector('[data-role="spine-view"]', { timeout: 15_000 });
+});
+
+Then('the spine follows the call to its declared endpoint', async function () {
+  await this.page.waitForFunction(
+    () => {
+      const endpointEl = document.querySelector('[data-role="spine-endpoint"]');
+      if (!endpointEl) return false;
+      const text = endpointEl.textContent ?? '';
+      return text.includes('/orders') || text.includes('openapi');
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the spine reaches the table {string}', async function (tableName) {
+  await this.page.waitForFunction(
+    (expected) => {
+      const tableEl = document.querySelector('[data-role="spine-table"]');
+      if (!tableEl) return false;
+      const text = tableEl.textContent ?? '';
+      return text.includes(expected);
+    },
+    tableName,
+    { timeout: 15_000 },
+  );
+});

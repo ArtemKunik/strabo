@@ -285,6 +285,37 @@ export interface TierTrace {
   endpoint: TierEndpointSite | null;
 }
 
+/** One hop along an end-to-end spine: call, endpoint, handler, or table (Phase 35 Y6). */
+export interface TierSpineHop {
+  tier: Tier;
+  role: 'call' | 'endpoint' | 'handler' | 'table';
+  file: string;
+  unit: string;
+  label: string;
+  detail: string;
+  line?: number;
+}
+
+/**
+ * An end-to-end behavioral spine through the role tiers (Phase 35 Y6):
+ * `call site (frontend) → endpoint (api) → handler (domain) → table (data)`
+ *
+ * Missing hops stay as null / dangling stubs, never fabricated.
+ */
+export interface TierSpine {
+  id: string;
+  call: TierCallSite;
+  endpoint: TierEndpointSite | null;
+  handler: {
+    file: string;
+    tier: Tier;
+    unit: string;
+    label: string;
+  } | null;
+  table: TableTraceEntry | null;
+  hops: TierSpineHop[];
+}
+
 export interface TierReport {
   files: TierClassification[];
   units: TierUnitReport[];
@@ -304,6 +335,8 @@ export interface TierReport {
   endpoints: TierEndpointSite[];
   /** A call site joined to the endpoint it reaches here by method and path, when one matches. */
   traces: TierTrace[];
+  /** The end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6). */
+  spines: TierSpine[];
   summary: Record<Tier, number> & { total: number; mixed: number; unclassified: number };
   skipped: string[];
   /** Files beyond the scan ceiling; not read, so they are not claimed as unclassified. */
