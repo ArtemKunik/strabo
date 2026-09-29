@@ -56,38 +56,86 @@ function qualifiedName(id) {
   return id.split('/').slice(-2).join('/');
 }
 
+/** Edge label for Structure mode to display weights and violation badges on canvas. */
+function structureEdgeLabel(edge) {
+  const weight = typeof edge.weight === 'number' && edge.weight > 0 ? edge.weight : null;
+  if (edge.tierKind === 'upward') {
+    return weight ? `⚠️ ${weight} upward` : '⚠️ upward';
+  }
+  if (edge.tierKind === 'skip-layer') {
+    return weight ? `↷ ${weight} skip` : '↷ skip';
+  }
+  if (edge.violation) {
+    return weight ? `⚠️ ${weight} violation` : '⚠️ violation';
+  }
+  if (edge.ghost) {
+    return 'intent (0)';
+  }
+  if (weight) {
+    return `${weight} import${weight === 1 ? '' : 's'}`;
+  }
+  return '';
+}
+
 /** Join API nodes to metrics and positions. */
 export function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
   const ambiguous = ambiguousFileIds(model);
-  const nodes = (model.nodes ?? []).map((node) => ({
-    group: 'nodes',
-    classes: [`kind-${node.kind}`, node.ghost === true ? 'node-ghost' : ''].filter(Boolean).join(' '),
-    data: {
-      id: node.id,
-      // A block node has no path tail to fall back on, so the server's compressed,
-      // unit-anchored label is preferred before the bare last segment.
-      label:
-        node.label ??
-        model.directoryLabels?.[node.id] ??
-        (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split('/').pop()),
-      path: node.id,
-      kind: node.kind,
-      ghost: node.ghost === true,
-      // Fill is one neutral surface for every node; directory is carried by position
-      // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
-      // its component count instead of blast radius; the hub ring is reserved for files,
-      // so a unit's only outline is selection (L18).
-      diameter: nodeDiameter(node),
-      // The large-file lens reads these: `lines` is the file's line count (absent on
-      // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
-      lines: typeof node.lines === 'number' ? node.lines : null,
-      locDiameter: locDiameter(node.lines),
-      hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
-    },
-    position: positionOf(positions.get(node.id)),
-  }));
+  const nodes = (model.nodes ?? []).map((node) => {
+    let label =
+      node.label ??
+      model.directoryLabels?.[node.id] ??
+      (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split('/').pop());
+
+    if (model.structure && (node.kind === 'tier' || node.kind === 'shelf')) {
+      const title = node.label ?? node.id;
+      const count = typeof node.files === 'number' ? node.files : (typeof node.size === 'number' ? node.size : null);
+      if (count !== null) {
+        const fileStr = `${count} ${count === 1 ? 'file' : 'files'}`;
+        const lineStr =
+          typeof node.lines === 'number' && node.lines > 0
+            ? ` · ${node.lines >= 1000 ? `${(node.lines / 1000).toFixed(1)}k` : node.lines} loc`
+            : '';
+        label = `${title}\n${fileStr}${lineStr}`;
+      }
+    }
+
+    return {
+      group: 'nodes',
+      classes: [
+        `kind-${node.kind}`,
+        node.ghost === true ? 'node-ghost' : '',
+        model.structure ? 'structure-node' : '',
+        model.structure && node.kind === 'tier' ? 'structure-tier' : '',
+        model.structure && node.kind === 'shelf' ? 'structure-shelf' : '',
+        model.structure && node.tier ? `tier-${node.tier}` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+      data: {
+        id: node.id,
+        label,
+        path: node.id,
+        kind: node.kind,
+        tier: node.tier,
+        ghost: node.ghost === true,
+        // Fill is one neutral surface for every node; directory is carried by position
+        // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
+        // its component count instead of blast radius; the hub ring is reserved for files,
+        // so a unit's only outline is selection (L18).
+        diameter: nodeDiameter(node),
+        // The large-file lens reads these: `lines` is the file's line count (absent on
+        // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
+        lines: typeof node.lines === 'number' ? node.lines : null,
+        files: typeof node.files === 'number' ? node.files : null,
+        fileShare: typeof node.fileShare === 'number' ? node.fileShare : null,
+        locDiameter: locDiameter(node.lines),
+        hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
+      },
+      position: positionOf(positions.get(node.id)),
+    };
+  });
 
   const edges = (model.edges ?? []).map((edge, index) => ({
     group: 'edges',
@@ -113,10 +161,12 @@ export function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      tierKind: edge.tierKind,
       ghost: edge.ghost === true,
       intended: edge.intended === true,
       violation: edge.violation === true,
       ruleId: edge.ruleId,
+      label: model.structure ? structureEdgeLabel(edge) : undefined,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),

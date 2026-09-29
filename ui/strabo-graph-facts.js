@@ -50,8 +50,14 @@ export function passportFor(model, id) {
   if (typeof node.files === 'number') {
     metrics.push({ label: 'Files', value: node.files });
   }
+  if (typeof node.fileShare === 'number') {
+    metrics.push({ label: 'File share', value: `${Math.round(node.fileShare * 100)}%` });
+  }
   if (typeof node.periphery === 'number' && node.periphery > 0) {
     metrics.push({ label: 'Support files', value: node.periphery });
+  }
+  if (node.mixed === true) {
+    metrics.push({ label: 'Mixed roles', value: 'yes' });
   }
   // A unit card carries facts a file does not: its size, layers, reach, and coupling (L22).
   const card = node.kind === 'unit' ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : undefined;
@@ -234,6 +240,11 @@ export function edgeEvidenceFor(model, edgeId) {
     specifier: evidence.specifier ?? null,
     resolution: evidence.resolution ?? null,
     resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? 'not recorded',
+    tierKind: edge.tierKind ?? null,
+    weight: typeof edge.weight === 'number' ? edge.weight : null,
+    violation: edge.violation === true,
+    ruleId: edge.ruleId ?? null,
+    crossUnit: typeof edge.crossUnit === 'number' ? edge.crossUnit : null,
     provenance: graphProvenanceFromModel(model),
   };
 }

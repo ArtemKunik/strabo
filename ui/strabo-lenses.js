@@ -153,6 +153,14 @@ export function applyTier(cy, tierByFile, filterTier = 'all') {
   const enabled = tierByFile instanceof Map;
   cy.batch(() => {
     for (const node of cy.nodes()) {
+      const structureTier = node.data('tier');
+      if (node.data('kind') === 'tier' || (node.data('kind') === 'shelf' && structureTier)) {
+        if (structureTier) {
+          node.addClass(`tier-${structureTier}`);
+        }
+        node.removeClass('tier-hidden');
+        continue;
+      }
       for (const tier of TIER_ORDER) {
         node.removeClass(`tier-${tier}`);
       }

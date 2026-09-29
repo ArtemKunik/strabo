@@ -647,12 +647,27 @@ export function buildStructureViewModel(
     tier: Tier,
     kind: 'tier' | 'shelf',
   ): ViewNode => {
-    const fact = perTier.get(tier);
+    const fact = perTier.get(tier) ?? report.shelf.find((entry) => entry.tier === tier);
     const files = fact?.files ?? 0;
+    const lines = fact?.lines ?? 0;
+    const tierFiles = (report.files ?? []).filter((f) => f.tier === tier);
+    const dirCounts = new Map<string, number>();
+    for (const f of tierFiles) {
+      const parts = f.file.split('/');
+      const first = parts[0] ?? '.';
+      const second = parts[1];
+      const dir = second ? `${first}/${second}` : first;
+      dirCounts.set(dir, (dirCounts.get(dir) ?? 0) + 1);
+    }
+    const topDirs = [...dirCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([dir]) => dir);
+
     return {
       id: tier,
       kind,
-      directory: '.',
+      directory: kind === 'shelf' ? 'shelf' : 'stack',
       label: STRUCTURE_LABELS[tier] ?? tier,
       workspacePath: tier,
       fanIn: 0,
@@ -661,8 +676,11 @@ export function buildStructureViewModel(
       transitiveDependents: 0,
       size: files,
       files,
+      lines,
+      fileShare: fact && 'fileShare' in fact ? (fact.fileShare as number) : undefined,
       tier,
       mixed: fact?.mixed ?? 0,
+      why: topDirs.length > 0 ? topDirs.join(', ') : undefined,
     };
   };
 
@@ -747,6 +765,7 @@ export function buildStructureViewModel(
     structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
     structureIntent: report.intent,
+    directoryLabels: { stack: 'Architecture Stack', shelf: 'Support Tiers' },
   };
 }
 

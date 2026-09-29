@@ -59,7 +59,44 @@ export function stylesheet() {
     { selector: 'node.kind-shelf', style: { 'border-width': 1.5, 'border-style': 'dashed', 'border-color': theme.nodeLine, opacity: 0.85 } },
     // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
     // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
-    { selector: 'node.kind-tier', style: { 'border-width': 2, 'border-color': theme.nodeLine, 'background-opacity': 1 } },
+    {
+      selector: 'node.kind-tier',
+      style: {
+        'border-width': 2.5,
+        'border-color': theme.nodeLine,
+        'background-opacity': 1,
+        'text-wrap': 'wrap',
+        'text-max-width': 140,
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'text-margin-y': 0,
+        'font-weight': 600,
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 11),
+      },
+    },
+    {
+      selector: 'node.structure-shelf',
+      style: {
+        'border-width': 2,
+        'border-style': 'dashed',
+        'border-color': theme.nodeLine,
+        'text-opacity': 1,
+        'text-wrap': 'wrap',
+        'text-max-width': 110,
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'text-margin-y': 0,
+        'font-weight': 600,
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
+      },
+    },
+    // Distinct semantic tier border colors for Structure view nodes
+    ...TIER_ORDER.map((tier) => ({
+      selector: `node.structure-node.tier-${tier}`,
+      style: {
+        'border-color': tier === 'unclassified' ? theme.tierUnclassified : theme.tier[tier],
+      },
+    })),
     // A Structure grid axis header is a bare label: no box, just its text, so the columns and
     // rows read without competing with the cells.
     { selector: 'node.kind-axis', style: { 'background-opacity': 0, 'border-opacity': 0, 'font-weight': 700, width: 10, height: 10 } },
@@ -71,8 +108,8 @@ export function stylesheet() {
     { selector: 'node.loc-sized', style: { width: 'data(locDiameter)', height: 'data(locDiameter)' } },
     { selector: 'node.large-file', style: { 'border-width': 2.5, 'border-color': theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
-    // the card's header row. Selection is the only outline it earns (L18).
-    { selector: 'node.kind-unit, node.kind-shelf', style: { 'text-opacity': 0, 'border-width': 1.5 } },
+    // the card's header row. Selection is the only outline it earns (L18). Structure shelves keep labels.
+    { selector: 'node.kind-unit, node.kind-shelf:not(.structure-shelf)', style: { 'text-opacity': 0, 'border-width': 1.5 } },
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
     { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -164,8 +201,46 @@ export function stylesheet() {
         'arrow-scale': 0.9,
       },
     },
-    { selector: 'edge.edge-tier-upward', style: { width: 2.75, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
-    { selector: 'edge.edge-tier-skip', style: { width: 2.25, 'line-style': 'dashed', 'line-color': theme.affected, 'target-arrow-color': theme.affected, opacity: 1 } },
+    {
+      selector: 'edge[label]',
+      style: {
+        label: 'data(label)',
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 9),
+        'font-weight': 600,
+        color: theme.ink,
+        'text-background-color': theme.nodeFill,
+        'text-background-opacity': 0.9,
+        'text-background-padding': 3,
+        'text-background-shape': 'round-rectangle',
+        'text-border-color': theme.nodeLine,
+        'text-border-width': 1,
+        'text-border-opacity': 0.6,
+        'text-rotation': 'autorotate',
+      },
+    },
+    {
+      selector: 'edge.edge-tier-upward',
+      style: {
+        width: 3.25,
+        'line-color': theme.cycle,
+        'target-arrow-color': theme.cycle,
+        color: theme.cycle,
+        'text-border-color': theme.cycle,
+        opacity: 1,
+      },
+    },
+    {
+      selector: 'edge.edge-tier-skip',
+      style: {
+        width: 2.75,
+        'line-style': 'dashed',
+        'line-color': theme.affected,
+        'target-arrow-color': theme.affected,
+        color: theme.affected,
+        'text-border-color': theme.affected,
+        opacity: 1,
+      },
+    },
     { selector: 'edge.edge-ghost', style: { width: 1.75, 'line-style': 'dashed', opacity: 0.45, 'line-color': theme.edge, 'target-arrow-color': theme.edge } },
     { selector: 'edge.edge-violation', style: { width: 3, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,

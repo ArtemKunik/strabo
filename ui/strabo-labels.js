@@ -118,14 +118,21 @@ export function applyLabelBudget(cy, force = false) {
   }
   cy.scratch('_straboLabelDetail', detailed);
   cy.scratch('_straboLabelBudgetZoom', zoom);
+  const isStructureNode = (node) =>
+    node.data('kind') === 'tier' || (node.data('kind') === 'shelf' && Boolean(node.data('tier')));
   const wanted = cy
     .nodes()
     // A unit or shelf draws no canvas label and a filtered-out node is not drawn at all:
-    // neither may take label room from a node that is.
-    .filter((node) => node.visible() && node.data('kind') !== 'unit' && node.data('kind') !== 'shelf')
-    .filter((node) => labelsForceAll || detailed || node.data('hub') || node.selected())
+    // neither may take label room from a node that is. Structure view tiers and shelves retain labels.
+    .filter((node) => node.visible() && (isStructureNode(node) || (node.data('kind') !== 'unit' && node.data('kind') !== 'shelf')))
+    .filter((node) => isStructureNode(node) || labelsForceAll || detailed || node.data('hub') || node.selected())
     .toArray();
-  const shown = chooseLabels(wanted, zoom);
+  const structureNodes = wanted.filter(isStructureNode);
+  const regularNodes = wanted.filter((node) => !isStructureNode(node));
+  const shown = chooseLabels(regularNodes, zoom);
+  for (const node of structureNodes) {
+    shown.add(node.id());
+  }
   cy.batch(() => {
     cy.nodes().forEach((node) => {
       node.toggleClass('label-hidden', !shown.has(node.id()));

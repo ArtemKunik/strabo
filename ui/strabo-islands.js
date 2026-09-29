@@ -12,7 +12,7 @@
  * projects them with the viewport's own pan and zoom.
  */
 
-import { diameter } from './strabo-graph-sizing.js';
+import { nodeDiameter } from './strabo-graph-sizing.js';
 
 /** Gap between the outermost node edge and the plate, in model units. */
 export const ISLAND_PADDING = 26;
@@ -53,7 +53,7 @@ export function islandBounds(model, options = {}) {
   const visible = options.visible ?? null;
   // The server may supply a compressed, unit-anchored label per directory; fall back to the
   // recorded path when it does not.
-  const labels = options.labels ?? null;
+  const labels = options.labels ?? model?.directoryLabels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const groups = new Map();
 
@@ -67,7 +67,7 @@ export function islandBounds(model, options = {}) {
     }
     const directory = node.directory ?? '.';
     // Half the drawn node, so the plate encloses the circle rather than its centre.
-    const radius = diameter(node.transitiveDependents) / 2;
+    const radius = nodeDiameter(node) / 2;
     const group = groups.get(directory) ?? {
       directory,
       count: 0,

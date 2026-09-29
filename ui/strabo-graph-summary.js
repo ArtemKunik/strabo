@@ -226,5 +226,16 @@ export function graphSummary(model) {
         ? 'node'
         : 'nodes';
   const edgeWord = edges === 1 ? 'edge' : 'edges';
-  return `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
+  let summary = `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
+  if (model?.structure) {
+    const upward = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation).length;
+    const skip = (model?.edges ?? []).filter((e) => e.tierKind === 'skip').length;
+    if (upward > 0 || skip > 0) {
+      const parts = [];
+      if (upward > 0) parts.push(`${upward} upward`);
+      if (skip > 0) parts.push(`${skip} skip`);
+      summary += ` (${parts.join(', ')})`;
+    }
+  }
+  return summary;
 }

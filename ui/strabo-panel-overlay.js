@@ -253,7 +253,15 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
 
   const heading = document.createElement('h3');
   heading.className = 'overlay-summary';
-  heading.textContent = `Edge · ${evidence.kind}`;
+  const headingDetail =
+    evidence.tierKind === 'upward'
+      ? ' · Upward (Architecture Violation)'
+      : evidence.tierKind === 'skip'
+        ? ' · Skip-layer'
+        : evidence.violation
+          ? ' · Architecture Violation'
+          : ` · ${evidence.kind}`;
+  heading.textContent = `Edge${headingDetail}`;
   container.append(heading);
 
   const route = document.createElement('p');
@@ -265,6 +273,15 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
 
   const facts = document.createElement('dl');
   facts.className = 'passport-metrics';
+  if (evidence.tierKind) {
+    appendFact(facts, 'Flow direction', evidence.tierKind === 'upward' ? 'Upward (against stack order)' : 'Skip-layer');
+  }
+  if (evidence.ruleId) {
+    appendFact(facts, 'Rule', evidence.ruleId);
+  }
+  if (typeof evidence.weight === 'number') {
+    appendFact(facts, 'Recorded imports', String(evidence.weight));
+  }
   appendFact(facts, 'Specifier', evidence.specifier ?? 'not recorded');
   appendFact(facts, 'Line', evidence.line === null ? 'not recorded' : String(evidence.line));
   appendFact(facts, 'Resolution', evidence.resolutionLabel);

@@ -182,34 +182,74 @@ function ambiguousFileIds(model) {
 function qualifiedName(id) {
   return id.split("/").slice(-2).join("/");
 }
+function structureEdgeLabel(edge) {
+  const weight = typeof edge.weight === "number" && edge.weight > 0 ? edge.weight : null;
+  if (edge.tierKind === "upward") {
+    return weight ? `\u26A0\uFE0F ${weight} upward` : "\u26A0\uFE0F upward";
+  }
+  if (edge.tierKind === "skip-layer") {
+    return weight ? `\u21B7 ${weight} skip` : "\u21B7 skip";
+  }
+  if (edge.violation) {
+    return weight ? `\u26A0\uFE0F ${weight} violation` : "\u26A0\uFE0F violation";
+  }
+  if (edge.ghost) {
+    return "intent (0)";
+  }
+  if (weight) {
+    return `${weight} import${weight === 1 ? "" : "s"}`;
+  }
+  return "";
+}
 function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const hubs = new Set(model.hubs ?? []);
   const ambiguous = ambiguousFileIds(model);
-  const nodes = (model.nodes ?? []).map((node) => ({
-    group: "nodes",
-    classes: [`kind-${node.kind}`, node.ghost === true ? "node-ghost" : ""].filter(Boolean).join(" "),
-    data: {
-      id: node.id,
-      // A block node has no path tail to fall back on, so the server's compressed,
-      // unit-anchored label is preferred before the bare last segment.
-      label: node.label ?? model.directoryLabels?.[node.id] ?? (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split("/").pop()),
-      path: node.id,
-      kind: node.kind,
-      ghost: node.ghost === true,
-      // Fill is one neutral surface for every node; directory is carried by position
-      // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
-      // its component count instead of blast radius; the hub ring is reserved for files,
-      // so a unit's only outline is selection (L18).
-      diameter: nodeDiameter(node),
-      // The large-file lens reads these: `lines` is the file's line count (absent on
-      // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
-      lines: typeof node.lines === "number" ? node.lines : null,
-      locDiameter: locDiameter(node.lines),
-      hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf"
-    },
-    position: positionOf(positions.get(node.id))
-  }));
+  const nodes = (model.nodes ?? []).map((node) => {
+    let label = node.label ?? model.directoryLabels?.[node.id] ?? (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split("/").pop());
+    if (model.structure && (node.kind === "tier" || node.kind === "shelf")) {
+      const title = node.label ?? node.id;
+      const count = typeof node.files === "number" ? node.files : typeof node.size === "number" ? node.size : null;
+      if (count !== null) {
+        const fileStr = `${count} ${count === 1 ? "file" : "files"}`;
+        const lineStr = typeof node.lines === "number" && node.lines > 0 ? ` \xB7 ${node.lines >= 1e3 ? `${(node.lines / 1e3).toFixed(1)}k` : node.lines} loc` : "";
+        label = `${title}
+${fileStr}${lineStr}`;
+      }
+    }
+    return {
+      group: "nodes",
+      classes: [
+        `kind-${node.kind}`,
+        node.ghost === true ? "node-ghost" : "",
+        model.structure ? "structure-node" : "",
+        model.structure && node.kind === "tier" ? "structure-tier" : "",
+        model.structure && node.kind === "shelf" ? "structure-shelf" : "",
+        model.structure && node.tier ? `tier-${node.tier}` : ""
+      ].filter(Boolean).join(" "),
+      data: {
+        id: node.id,
+        label,
+        path: node.id,
+        kind: node.kind,
+        tier: node.tier,
+        ghost: node.ghost === true,
+        // Fill is one neutral surface for every node; directory is carried by position
+        // (the island plates), never by hue. See Phase 13 M1. A System-view unit sizes by
+        // its component count instead of blast radius; the hub ring is reserved for files,
+        // so a unit's only outline is selection (L18).
+        diameter: nodeDiameter(node),
+        // The large-file lens reads these: `lines` is the file's line count (absent on
+        // aggregate nodes), `locDiameter` its size when the lens swaps the encoding.
+        lines: typeof node.lines === "number" ? node.lines : null,
+        files: typeof node.files === "number" ? node.files : null,
+        fileShare: typeof node.fileShare === "number" ? node.fileShare : null,
+        locDiameter: locDiameter(node.lines),
+        hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf"
+      },
+      position: positionOf(positions.get(node.id))
+    };
+  });
   const edges = (model.edges ?? []).map((edge, index) => ({
     group: "edges",
     // A Structure-view edge states how it runs through the layer order; the stylesheet
@@ -228,10 +268,12 @@ function buildElements(model) {
       semanticSource: edge.semanticSource ?? edge.source,
       semanticTarget: edge.semanticTarget ?? edge.target,
       kind: edge.kind,
+      tierKind: edge.tierKind,
       ghost: edge.ghost === true,
       intended: edge.intended === true,
       violation: edge.violation === true,
       ruleId: edge.ruleId,
+      label: model.structure ? structureEdgeLabel(edge) : void 0,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),
@@ -454,8 +496,14 @@ function passportFor(model, id) {
   if (typeof node.files === "number") {
     metrics.push({ label: "Files", value: node.files });
   }
+  if (typeof node.fileShare === "number") {
+    metrics.push({ label: "File share", value: `${Math.round(node.fileShare * 100)}%` });
+  }
   if (typeof node.periphery === "number" && node.periphery > 0) {
     metrics.push({ label: "Support files", value: node.periphery });
+  }
+  if (node.mixed === true) {
+    metrics.push({ label: "Mixed roles", value: "yes" });
   }
   const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
   if (card) {
@@ -579,6 +627,11 @@ function edgeEvidenceFor(model, edgeId) {
     specifier: evidence.specifier ?? null,
     resolution: evidence.resolution ?? null,
     resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? "not recorded",
+    tierKind: edge.tierKind ?? null,
+    weight: typeof edge.weight === "number" ? edge.weight : null,
+    violation: edge.violation === true,
+    ruleId: edge.ruleId ?? null,
+    crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
     provenance: graphProvenanceFromModel(model)
   };
 }
@@ -849,7 +902,18 @@ function graphSummary(model) {
   const edges = (model?.edges ?? []).length;
   const nodeWord = model?.structure ? model.structureLevel === "cell" ? nodes === 1 ? "file" : "files" : model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
   const edgeWord = edges === 1 ? "edge" : "edges";
-  return `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
+  let summary = `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
+  if (model?.structure) {
+    const upward = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation).length;
+    const skip = (model?.edges ?? []).filter((e) => e.tierKind === "skip").length;
+    if (upward > 0 || skip > 0) {
+      const parts = [];
+      if (upward > 0) parts.push(`${upward} upward`);
+      if (skip > 0) parts.push(`${skip} skip`);
+      summary += ` (${parts.join(", ")})`;
+    }
+  }
+  return summary;
 }
 
 // ui/strabo-islands.js
@@ -866,7 +930,7 @@ function islandBounds(model, options = {}) {
   }
   const padding = options.padding ?? ISLAND_PADDING;
   const visible = options.visible ?? null;
-  const labels = options.labels ?? null;
+  const labels = options.labels ?? model?.directoryLabels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
   const groups = /* @__PURE__ */ new Map();
   for (const node of model.nodes ?? []) {
@@ -878,7 +942,7 @@ function islandBounds(model, options = {}) {
       continue;
     }
     const directory = node.directory ?? ".";
-    const radius = diameter(node.transitiveDependents) / 2;
+    const radius = nodeDiameter(node) / 2;
     const group = groups.get(directory) ?? {
       directory,
       count: 0,
@@ -2548,8 +2612,14 @@ function applyLabelBudget(cy, force = false) {
   }
   cy.scratch("_straboLabelDetail", detailed);
   cy.scratch("_straboLabelBudgetZoom", zoom);
-  const wanted = cy.nodes().filter((node) => node.visible() && node.data("kind") !== "unit" && node.data("kind") !== "shelf").filter((node) => labelsForceAll || detailed || node.data("hub") || node.selected()).toArray();
-  const shown = chooseLabels(wanted, zoom);
+  const isStructureNode = (node) => node.data("kind") === "tier" || node.data("kind") === "shelf" && Boolean(node.data("tier"));
+  const wanted = cy.nodes().filter((node) => node.visible() && (isStructureNode(node) || node.data("kind") !== "unit" && node.data("kind") !== "shelf")).filter((node) => isStructureNode(node) || labelsForceAll || detailed || node.data("hub") || node.selected()).toArray();
+  const structureNodes = wanted.filter(isStructureNode);
+  const regularNodes = wanted.filter((node) => !isStructureNode(node));
+  const shown = chooseLabels(regularNodes, zoom);
+  for (const node of structureNodes) {
+    shown.add(node.id());
+  }
   cy.batch(() => {
     cy.nodes().forEach((node) => {
       node.toggleClass("label-hidden", !shown.has(node.id()));
@@ -2657,7 +2727,44 @@ function stylesheet() {
     { selector: "node.kind-shelf", style: { "border-width": 1.5, "border-style": "dashed", "border-color": theme.nodeLine, opacity: 0.85 } },
     // A Structure-view tier band is a card too; its canvas label stays (unlike a unit card,
     // which has a side panel), so the band reads without selecting it (Phase 35 Y3).
-    { selector: "node.kind-tier", style: { "border-width": 2, "border-color": theme.nodeLine, "background-opacity": 1 } },
+    {
+      selector: "node.kind-tier",
+      style: {
+        "border-width": 2.5,
+        "border-color": theme.nodeLine,
+        "background-opacity": 1,
+        "text-wrap": "wrap",
+        "text-max-width": 140,
+        "text-valign": "center",
+        "text-halign": "center",
+        "text-margin-y": 0,
+        "font-weight": 600,
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 11)
+      }
+    },
+    {
+      selector: "node.structure-shelf",
+      style: {
+        "border-width": 2,
+        "border-style": "dashed",
+        "border-color": theme.nodeLine,
+        "text-opacity": 1,
+        "text-wrap": "wrap",
+        "text-max-width": 110,
+        "text-valign": "center",
+        "text-halign": "center",
+        "text-margin-y": 0,
+        "font-weight": 600,
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
+      }
+    },
+    // Distinct semantic tier border colors for Structure view nodes
+    ...TIER_ORDER.map((tier) => ({
+      selector: `node.structure-node.tier-${tier}`,
+      style: {
+        "border-color": tier === "unclassified" ? theme.tierUnclassified : theme.tier[tier]
+      }
+    })),
     // A Structure grid axis header is a bare label: no box, just its text, so the columns and
     // rows read without competing with the cells.
     { selector: "node.kind-axis", style: { "background-opacity": 0, "border-opacity": 0, "font-weight": 700, width: 10, height: 10 } },
@@ -2669,8 +2776,8 @@ function stylesheet() {
     { selector: "node.loc-sized", style: { width: "data(locDiameter)", height: "data(locDiameter)" } },
     { selector: "node.large-file", style: { "border-width": 2.5, "border-color": theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
-    // the card's header row. Selection is the only outline it earns (L18).
-    { selector: "node.kind-unit, node.kind-shelf", style: { "text-opacity": 0, "border-width": 1.5 } },
+    // the card's header row. Selection is the only outline it earns (L18). Structure shelves keep labels.
+    { selector: "node.kind-unit, node.kind-shelf:not(.structure-shelf)", style: { "text-opacity": 0, "border-width": 1.5 } },
     { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
     { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -2762,8 +2869,46 @@ function stylesheet() {
         "arrow-scale": 0.9
       }
     },
-    { selector: "edge.edge-tier-upward", style: { width: 2.75, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
-    { selector: "edge.edge-tier-skip", style: { width: 2.25, "line-style": "dashed", "line-color": theme.affected, "target-arrow-color": theme.affected, opacity: 1 } },
+    {
+      selector: "edge[label]",
+      style: {
+        label: "data(label)",
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 9),
+        "font-weight": 600,
+        color: theme.ink,
+        "text-background-color": theme.nodeFill,
+        "text-background-opacity": 0.9,
+        "text-background-padding": 3,
+        "text-background-shape": "round-rectangle",
+        "text-border-color": theme.nodeLine,
+        "text-border-width": 1,
+        "text-border-opacity": 0.6,
+        "text-rotation": "autorotate"
+      }
+    },
+    {
+      selector: "edge.edge-tier-upward",
+      style: {
+        width: 3.25,
+        "line-color": theme.cycle,
+        "target-arrow-color": theme.cycle,
+        color: theme.cycle,
+        "text-border-color": theme.cycle,
+        opacity: 1
+      }
+    },
+    {
+      selector: "edge.edge-tier-skip",
+      style: {
+        width: 2.75,
+        "line-style": "dashed",
+        "line-color": theme.affected,
+        "target-arrow-color": theme.affected,
+        color: theme.affected,
+        "text-border-color": theme.affected,
+        opacity: 1
+      }
+    },
     { selector: "edge.edge-ghost", style: { width: 1.75, "line-style": "dashed", opacity: 0.45, "line-color": theme.edge, "target-arrow-color": theme.edge } },
     { selector: "edge.edge-violation", style: { width: 3, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
@@ -3438,6 +3583,14 @@ function applyTier(cy, tierByFile, filterTier = "all") {
   const enabled = tierByFile instanceof Map;
   cy.batch(() => {
     for (const node of cy.nodes()) {
+      const structureTier = node.data("tier");
+      if (node.data("kind") === "tier" || node.data("kind") === "shelf" && structureTier) {
+        if (structureTier) {
+          node.addClass(`tier-${structureTier}`);
+        }
+        node.removeClass("tier-hidden");
+        continue;
+      }
       for (const tier2 of TIER_ORDER) {
         node.removeClass(`tier-${tier2}`);
       }
@@ -9942,7 +10095,8 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.dataset.delegateEdge = evidence.id;
   const heading3 = document.createElement("h3");
   heading3.className = "overlay-summary";
-  heading3.textContent = `Edge \xB7 ${evidence.kind}`;
+  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip" ? " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
+  heading3.textContent = `Edge${headingDetail}`;
   container.append(heading3);
   const route = document.createElement("p");
   route.className = "edge-route";
@@ -9952,6 +10106,15 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.append(route);
   const facts = document.createElement("dl");
   facts.className = "passport-metrics";
+  if (evidence.tierKind) {
+    appendFact(facts, "Flow direction", evidence.tierKind === "upward" ? "Upward (against stack order)" : "Skip-layer");
+  }
+  if (evidence.ruleId) {
+    appendFact(facts, "Rule", evidence.ruleId);
+  }
+  if (typeof evidence.weight === "number") {
+    appendFact(facts, "Recorded imports", String(evidence.weight));
+  }
   appendFact(facts, "Specifier", evidence.specifier ?? "not recorded");
   appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
   appendFact(facts, "Resolution", evidence.resolutionLabel);

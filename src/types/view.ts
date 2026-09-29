@@ -33,6 +33,8 @@ export interface ViewNode extends GraphNode {
   shelf?: UnitShelfFact;
   /** The role tier a Structure-view band/shelf node stands for (Phase 35 Y3). */
   tier?: string;
+  /** Share of codebase files in this tier (0..1). */
+  fileShare?: number;
   /** Of a band's files, how many the classifier flagged mixed, drawn as a badge. */
   mixed?: number;
   /** In a Structure grid (Y4), the build unit a cell node stands for, and its display name. */
