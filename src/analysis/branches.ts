@@ -74,8 +74,8 @@ export type BranchesResult =
  *
  * A remote branch that some local branch already tracks is folded into that local branch's
  * upstream column rather than listed twice. Counts come from the local object store: they
- * are as fresh as the last fetch. Strabo never fetches implicitly; the operator asks for a
- * fetch, push, or sync through the Branches panel's actions (`src/analysis/branch-actions.ts`).
+ * are as fresh as the last fetch. Strabo never fetches implicitly, and it never writes to
+ * Git; the operator's own workflow owns fetch, push, and sync.
  */
 export async function listBranches(root: string, requestedBase?: string): Promise<BranchesResult> {
   try {

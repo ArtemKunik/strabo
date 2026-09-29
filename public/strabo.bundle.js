@@ -2044,14 +2044,14 @@ function orderMetricFiles(files) {
 function totalMembers(memberMap, key) {
   return (memberMap?.types ?? []).reduce((sum, type) => sum + (type[key] ?? []).length, 0);
 }
-function memberMapSteps(memberMap, context2 = {}) {
+function memberMapSteps(memberMap, context = {}) {
   const types = memberMap?.types ?? [];
   const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, "fields");
   const methods = totalMembers(memberMap, "methods");
   const reExports = memberMap?.reExports ?? [];
   const flow = memberMap?.dataFlow;
-  const consumers = context2.consumers ?? null;
+  const consumers = context.consumers ?? null;
   const subject = types.length > 1 ? `This file (${types.length} types) contains` : `${primary?.name ?? "This file"} contains`;
   const reExportModules = new Set(reExports.map((entry) => entry.from)).size;
   const barrel = fields === 0 && methods === 0 && reExports.length > 0;
@@ -2767,22 +2767,6 @@ function stylesheet() {
         "font-size": (ele) => labelFontSize(ele.cy().zoom(), 11)
       }
     },
-    {
-      selector: "node.structure-shelf",
-      style: {
-        "border-width": 2,
-        "border-style": "dashed",
-        "border-color": theme.nodeLine,
-        "text-opacity": 1,
-        "text-wrap": "wrap",
-        "text-max-width": 110,
-        "text-valign": "center",
-        "text-halign": "center",
-        "text-margin-y": 0,
-        "font-weight": 600,
-        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
-      }
-    },
     // Distinct semantic tier border colors for Structure view nodes
     ...TIER_ORDER.map((tier) => ({
       selector: `node.structure-node.tier-${tier}`,
@@ -2802,7 +2786,23 @@ function stylesheet() {
     { selector: "node.large-file", style: { "border-width": 2.5, "border-color": theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
     // the card's header row. Selection is the only outline it earns (L18). Structure shelves keep labels.
-    { selector: "node.kind-unit, node.kind-shelf:not(.structure-shelf)", style: { "text-opacity": 0, "border-width": 1.5 } },
+    { selector: "node.kind-unit, node.kind-shelf", style: { "text-opacity": 0, "border-width": 1.5 } },
+    {
+      selector: "node.structure-shelf, node.kind-shelf.structure-shelf",
+      style: {
+        "border-width": 2,
+        "border-style": "dashed",
+        "border-color": theme.nodeLine,
+        "text-opacity": 1,
+        "text-wrap": "wrap",
+        "text-max-width": 110,
+        "text-valign": "center",
+        "text-halign": "center",
+        "text-margin-y": 0,
+        "font-weight": 600,
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
+      }
+    },
     { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
     { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -4456,18 +4456,18 @@ function fileStem(file) {
 function recordedList(items) {
   return Array.isArray(items) && items.length > 0 ? items.join(", ") : "none recorded";
 }
-function buildMemberNarratorEvidence(memberMap, context2 = {}) {
+function buildMemberNarratorEvidence(memberMap, context = {}) {
   const types = memberMap?.types ?? [];
   if (types.length === 0) {
     return "No type is recorded for this file.";
   }
-  const file = context2.file ?? memberMap?.file;
+  const file = context.file ?? memberMap?.file;
   const moduleName = file ? fileStem(file) : null;
   const lines = [];
   if (file) {
     lines.push(`File: ${file}`);
   }
-  for (const [label, ids] of [["imports", context2.imports], ["used-by", context2.usedBy]]) {
+  for (const [label, ids] of [["imports", context.imports], ["used-by", context.usedBy]]) {
     if (Array.isArray(ids)) {
       const distinct = [...new Set(ids)];
       lines.push(`Recorded ${label} (${distinct.length}): ${recordedList(distinct.slice(0, 12))}`);
@@ -4506,7 +4506,7 @@ function buildMemberNarratorEvidence(memberMap, context2 = {}) {
     lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
     lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
   }
-  const inventory = context2.functions ? buildNarratorEvidence({ functions: context2.functions }) : "";
+  const inventory = context.functions ? buildNarratorEvidence({ functions: context.functions }) : "";
   if (inventory && !inventory.startsWith("No function inventory")) {
     lines.push("", "Function metrics, signals, and same-file calls:", inventory);
   }
@@ -9005,17 +9005,6 @@ function branchTags(branch, now = Date.now()) {
   if (age !== null && age >= STALE_BRANCH_DAYS) tags.push({ text: "stale", tone: "worse" });
   return tags;
 }
-function branchActionButton(role, text, title, handler, busy) {
-  const button3 = document.createElement("button");
-  button3.type = "button";
-  button3.className = "branch-action";
-  button3.dataset.role = role;
-  button3.textContent = text;
-  button3.title = title;
-  button3.disabled = Boolean(busy);
-  button3.addEventListener("click", () => handler());
-  return button3;
-}
 function renderBranches(container, result, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -9069,27 +9058,6 @@ function renderBranches(container, result, handlers = {}) {
   summary.dataset.role = "branches-summary";
   summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
   container.append(summary);
-  const actions = document.createElement("div");
-  actions.className = "branch-actions";
-  actions.dataset.role = "branch-actions";
-  if (handlers.onFetch) {
-    actions.append(branchActionButton("branch-fetch", "Fetch", "Update the remote-tracking refs", handlers.onFetch, handlers.busy));
-  }
-  if (handlers.onPull && result.current) {
-    actions.append(
-      branchActionButton("branch-pull", `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy)
-    );
-  }
-  if (actions.childElementCount > 0) {
-    if (handlers.busy) {
-      const running = document.createElement("span");
-      running.className = "evidence";
-      running.dataset.role = "branch-busy";
-      running.textContent = "Running\u2026";
-      actions.append(running);
-    }
-    container.append(actions);
-  }
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
@@ -9136,36 +9104,65 @@ function renderBranches(container, result, handlers = {}) {
       }
       item.append(tagLine);
     }
-    const behindCount = branch.upstream?.behind ?? 0;
-    if (handlers.onPullBranch && branch.kind === "local" && !branch.current && !branch.upstream?.gone && behindCount > 0) {
-      const pull = document.createElement("button");
-      pull.type = "button";
-      pull.className = "branch-action";
-      pull.dataset.role = "branch-pull-branch";
-      pull.dataset.branch = branch.name;
-      pull.textContent = `Pull \u2193${behindCount}`;
-      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? "its upstream"}`;
-      pull.disabled = Boolean(handlers.busy);
-      pull.addEventListener("click", () => handlers.onPullBranch(branch));
-      item.append(pull);
-    }
-    const pushCount = branch.upstream?.ahead ?? 0;
-    const publish = branch.kind === "local" && !branch.isBase && (!branch.upstream || branch.upstream.gone);
-    if (handlers.onPush && branch.kind === "local" && !branch.isBase && (pushCount > 0 || publish)) {
-      const push = document.createElement("button");
-      push.type = "button";
-      push.className = "branch-action";
-      push.dataset.role = "branch-push";
-      push.dataset.branch = branch.name;
-      push.textContent = pushCount > 0 ? `Push \u2191${pushCount}` : "Publish";
-      push.title = pushCount > 0 ? `Push ${branch.name} to ${branch.upstream?.name ?? "its remote"}` : `Publish ${branch.name} to the remote`;
-      push.disabled = Boolean(handlers.busy);
-      push.addEventListener("click", () => handlers.onPush(branch));
-      item.append(push);
+    const actions = branchActions(branch, handlers);
+    if (actions) {
+      item.append(actions);
     }
     list2.append(item);
   }
   container.append(list2);
+}
+function branchActions(branch, handlers) {
+  const buttons = [];
+  if (branch.kind === "local" && !branch.isBase) {
+    const publish = !branch.upstream || branch.upstream.gone;
+    if (handlers.onPush && (publish || branch.upstream.ahead > 0)) {
+      buttons.push({
+        label: publish ? "Publish" : "Push",
+        role: "branch-push",
+        title: publish ? `Publish ${branch.name} and set its upstream` : `Push ${branch.name} to ${branch.upstream.name}`,
+        run: () => handlers.onPush(branch.name)
+      });
+    }
+    if (handlers.onMergeRequest) {
+      buttons.push({
+        label: "Create MR",
+        role: "branch-merge-request",
+        title: `Open a new merge request for ${branch.name}`,
+        run: () => handlers.onMergeRequest(branch.name)
+      });
+    }
+    const stale = branch.upstream?.gone === true || branch.againstBase?.merged === true;
+    if (handlers.onDrop && stale && !branch.current) {
+      buttons.push({
+        label: "Drop",
+        role: "branch-drop",
+        title: branch.upstream?.gone ? `Drop ${branch.name}: its upstream is gone` : `Drop ${branch.name}: merged into the base`,
+        run: () => handlers.onDrop(branch.name)
+      });
+    }
+  }
+  if (buttons.length === 0) {
+    return null;
+  }
+  const row = document.createElement("span");
+  row.className = "branch-actions";
+  row.dataset.role = "branch-actions";
+  for (const spec of buttons) {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = `branch-action ${spec.role}`;
+    action.dataset.role = spec.role;
+    action.dataset.branch = branch.name;
+    action.textContent = spec.label;
+    action.title = spec.title;
+    action.addEventListener("click", (event) => {
+      event.stopPropagation();
+      spec.run();
+    });
+    row.append(action);
+  }
+  return row;
 }
 function divergenceBar(counts, maxCount) {
   const bar = document.createElement("span");
@@ -9209,6 +9206,29 @@ function renderBranchDivergence(container, branch, handlers = {}) {
     merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
   }
   container.append(merge);
+  const actions = document.createElement("p");
+  actions.className = "branch-actions review-branch-actions";
+  actions.dataset.role = "review-branch-actions";
+  const addAction = (label, role, title, run) => {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = `branch-action ${role}`;
+    action.dataset.role = role;
+    action.dataset.branch = branch.branch;
+    action.textContent = label;
+    action.title = title;
+    action.addEventListener("click", () => run(branch.branch));
+    actions.append(action);
+  };
+  if (handlers.onPush) {
+    addAction("Push", "branch-push", `Push ${branch.branch} to its upstream`, handlers.onPush);
+  }
+  if (handlers.onMergeRequest) {
+    addAction("Create MR", "branch-merge-request", `Push ${branch.branch} and open a new merge request`, handlers.onMergeRequest);
+  }
+  if (actions.childElementCount > 0) {
+    container.append(actions);
+  }
   const fileList = (role, heading3, entries, describe) => {
     if (entries.length === 0) return;
     const title = document.createElement("h4");
@@ -10274,25 +10294,6 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     container.append(empty);
     renderList();
     list2.refresh();
-  }
-  if (Array.isArray(options.actions) && options.actions.length > 0) {
-    const actions = document.createElement("div");
-    actions.className = "overlay-actions";
-    for (const action of options.actions) {
-      const actionButton = document.createElement("button");
-      actionButton.type = "button";
-      actionButton.className = "overlay-action";
-      actionButton.textContent = action.label;
-      if (action.title) {
-        actionButton.title = action.title;
-      }
-      if (action.disabled) {
-        actionButton.disabled = true;
-      }
-      actionButton.addEventListener("click", () => action.onClick?.());
-      actions.append(actionButton);
-    }
-    container.append(actions);
   }
 }
 function renderEdgeEvidence(container, evidence, handlers = {}) {
@@ -11540,7 +11541,6 @@ function defaultSettings() {
     labels: true,
     allLabels: false,
     reduceMotion: false,
-    commitEnabled: false,
     locThreshold: LOC_THRESHOLD_DEFAULT
   };
 }
@@ -11554,7 +11554,6 @@ function sanitize(parsed, defaults) {
   if (typeof parsed.labels === "boolean") settings.labels = parsed.labels;
   if (typeof parsed.allLabels === "boolean") settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
-  if (typeof parsed.commitEnabled === "boolean") settings.commitEnabled = parsed.commitEnabled;
   const locThreshold = sanitizeLocThreshold(parsed.locThreshold);
   if (locThreshold !== null) settings.locThreshold = locThreshold;
   return settings;
@@ -11932,18 +11931,6 @@ function renderingSection() {
   );
   return group;
 }
-function commitSection(prefs, handlers) {
-  const group = section("Commit");
-  group.append(
-    field("Narrator commit", checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.("commitEnabled", value)))
-  );
-  group.append(
-    note2(
-      "Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default."
-    )
-  );
-  return group;
-}
 function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
   container.replaceChildren();
@@ -11976,7 +11963,6 @@ function renderSettings(container, handlers = {}) {
   );
   container.append(local);
   container.append(renderingSection());
-  container.append(commitSection(prefs, handlers));
   const remote = section("Server");
   if (!server) {
     remote.append(note2("Loading server settings\u2026"));
@@ -12830,13 +12816,279 @@ function createMemberMapController(app2) {
   };
 }
 
+// ui/strabo-delegate.js
+var menuElement = null;
+var toastStack = null;
+var promptDialog = null;
+var promptDialogResolve = null;
+var sessionOpener = null;
+function setDelegateSessionOpener(opener) {
+  sessionOpener = typeof opener === "function" ? opener : null;
+}
+var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
+function ensureMenu() {
+  if (!menuElement) {
+    menuElement = document.createElement("div");
+    menuElement.id = "agent-menu";
+    menuElement.className = "agent-menu";
+    menuElement.setAttribute("role", "menu");
+    menuElement.hidden = true;
+    document.body.append(menuElement);
+  }
+  return menuElement;
+}
+function ensureToasts() {
+  if (!toastStack) {
+    toastStack = document.createElement("div");
+    toastStack.id = "toast-stack";
+    toastStack.className = "toast-stack";
+    toastStack.setAttribute("aria-live", "polite");
+    document.body.append(toastStack);
+  }
+  return toastStack;
+}
+function closeContextMenu() {
+  if (menuElement) {
+    menuElement.hidden = true;
+    menuElement.replaceChildren();
+  }
+}
+function showContextMenu({ x, y, title, items }) {
+  const menu = ensureMenu();
+  menu.replaceChildren();
+  if (title) {
+    const header = document.createElement("div");
+    header.className = "agent-menu-title";
+    header.textContent = title;
+    menu.append(header);
+  }
+  for (const item of items ?? []) {
+    if (item.separator) {
+      const sep = document.createElement("div");
+      sep.className = "agent-menu-sep";
+      sep.setAttribute("aria-hidden", "true");
+      menu.append(sep);
+      continue;
+    }
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "agent-menu-item";
+    button3.setAttribute("role", "menuitem");
+    if (item.title) {
+      button3.title = item.title;
+    }
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    button3.append(label);
+    if (item.hint) {
+      const hint = document.createElement("span");
+      hint.className = "agent-menu-hint";
+      hint.textContent = item.hint;
+      button3.append(hint);
+    }
+    if (typeof item.action === "function") {
+      button3.addEventListener("click", () => {
+        closeContextMenu();
+        item.action();
+      });
+    } else {
+      button3.disabled = true;
+    }
+    menu.append(button3);
+  }
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
+  const first = menu.querySelector(".agent-menu-item:not(:disabled)");
+  first?.focus();
+  const onPointerDown = (event) => {
+    if (!menu.contains(event.target)) {
+      cleanup();
+    }
+  };
+  const onKeyDown = (event) => {
+    if (event.key === "Escape") {
+      cleanup();
+    }
+  };
+  const onScroll = () => cleanup();
+  function cleanup() {
+    closeContextMenu();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKeyDown, true);
+    window.removeEventListener("resize", onScroll);
+    document.removeEventListener("scroll", onScroll, true);
+  }
+  setTimeout(() => {
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("resize", onScroll);
+    document.addEventListener("scroll", onScroll, true);
+  }, 0);
+  return cleanup;
+}
+function showToast(message, action = null, { timeout = 6e3 } = {}) {
+  const stack = ensureToasts();
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.setAttribute("role", "status");
+  const text = document.createElement("span");
+  text.textContent = message;
+  toast.append(text);
+  if (action) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.className = "toast-action";
+    button3.textContent = action.label;
+    button3.addEventListener("click", () => {
+      action.onClick?.();
+      toast.remove();
+    });
+    toast.append(button3);
+  }
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "toast-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss notification");
+  dismiss.textContent = "\xD7";
+  dismiss.addEventListener("click", () => toast.remove());
+  toast.append(dismiss);
+  stack.append(toast);
+  setTimeout(() => toast.remove(), timeout);
+  return toast;
+}
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
+function settlePromptReview(value) {
+  const resolve = promptDialogResolve;
+  promptDialogResolve = null;
+  resolve?.(value);
+}
+function ensurePromptDialog() {
+  if (promptDialog) {
+    return promptDialog;
+  }
+  const dialog = document.createElement("dialog");
+  dialog.id = "prompt-dialog";
+  dialog.className = "dialog prompt-dialog";
+  dialog.setAttribute("aria-label", "Review the task before sending it to an agent");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading3 = document.createElement("strong");
+  heading3.className = "prompt-dialog-title";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => dialog.close());
+  header.append(heading3, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Task prompt");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", async () => {
+    await copyText(text.value);
+    copy.textContent = "Copied";
+    setTimeout(() => {
+      copy.textContent = "Copy";
+    }, 1500);
+  });
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog.close());
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "primary prompt-dialog-send";
+  send.addEventListener("click", () => {
+    const reviewed = text.value;
+    settlePromptReview(reviewed);
+    dialog.close();
+  });
+  actions.append(cancel, send);
+  footer.append(copy, actions);
+  dialog.append(header, target, text, footer);
+  dialog.addEventListener("close", () => settlePromptReview(null));
+  document.body.append(dialog);
+  promptDialog = dialog;
+  return dialog;
+}
+function showPromptReview({ agent, title, prompt }) {
+  const dialog = ensurePromptDialog();
+  settlePromptReview(null);
+  const agentName = AGENT_LABELS[agent] ?? agent;
+  dialog.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
+  dialog.querySelector(".prompt-dialog-target").textContent = title;
+  const text = dialog.querySelector(".prompt-dialog-text");
+  text.value = prompt;
+  dialog.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
+  const pending = new Promise((resolve) => {
+    promptDialogResolve = resolve;
+  });
+  if (!dialog.open) {
+    dialog.showModal();
+  }
+  text.focus();
+  text.setSelectionRange(text.value.length, text.value.length);
+  return pending;
+}
+async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
+  const response = await fetch(`${API_PATH}/delegate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ agent, repository, target, prompt, title, ...dryRun ? { dryRun: true } : {} })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Delegate failed (${response.status})`);
+  }
+  if (body.sessionId && sessionOpener) {
+    sessionOpener(body.sessionId, body);
+  }
+  return body;
+}
+
 // ui/strabo-git-controller.js
 function createGitController(app2) {
   const { store: store2, state: state2, view: view2, elements: elements2, request: request2 } = app2;
+  async function postJson(path, body) {
+    const response = await fetch(`${API_PATH}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+    }
+    return payload;
+  }
   let selectedCommitHash = null;
   let selectedBranchName = null;
   let branchBase = null;
-  let branchesBusy = false;
   let reviewHistory = [];
   let currentReviewRequest = null;
   let selectedWorktree = null;
@@ -12899,7 +13151,6 @@ function createGitController(app2) {
     if (result?.available && result.base) branchBase = result.base.name;
     renderBranches(elements2.branchesPanel, result, {
       selected: selectedBranchName,
-      busy: branchesBusy,
       onSelect: (branch) => {
         selectBranch(branch.name).catch((error) => {
           elements2.status.textContent = `Error: ${error.message}`;
@@ -12911,44 +13162,89 @@ function createGitController(app2) {
           elements2.status.textContent = `Error: ${error.message}`;
         });
       },
-      onFetch: () => runBranchAction("fetch", {}),
-      onPull: () => runBranchAction("pull", { branch: result?.current }),
-      onPullBranch: (branch) => runBranchAction("pull", { branch: branch.name }),
-      onPush: (branch) => runBranchAction("push", { branch: branch.name }),
+      onPush: (name) => pushBranch(name),
+      onMergeRequest: (name) => createMergeRequest(name),
+      onDrop: (name) => dropBranch(name),
       onClose: () => {
         elements2.branchesPanel.hidden = true;
       }
     });
   }
-  async function runBranchAction(action, payload) {
-    if (branchesBusy) return;
-    if ((action === "sync" || action === "pull") && !payload.branch) {
-      elements2.status.textContent = `${action === "pull" ? "Pull" : "Sync"} needs a checked-out branch.`;
-      return;
-    }
-    branchesBusy = true;
-    await loadBranches().catch((error) => {
-      elements2.status.textContent = `Error: ${error.message}`;
-    });
+  async function pushBranch(name) {
+    elements2.status.textContent = `Pushing ${name}\u2026`;
     try {
-      const params = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
-      const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      const result = await postJson("/analysis/branches/push", { branch: name });
+      if (!result?.available) {
+        const detail = result?.detail ?? "the push did not run";
+        elements2.status.textContent = `Push failed: ${detail}`;
+        showToast(`Push failed: ${detail}`);
+        return;
       }
-      elements2.status.textContent = body.available === false ? `${action} failed: ${body.detail}` : body.message;
+      elements2.status.textContent = result.message;
+      showToast(result.message);
+      await loadBranches();
     } catch (error) {
       elements2.status.textContent = `Error: ${error.message}`;
-    } finally {
-      branchesBusy = false;
-      await loadBranches().catch((error) => {
-        elements2.status.textContent = `Error: ${error.message}`;
+      showToast(`Push failed: ${error.message}`);
+    }
+  }
+  async function createMergeRequest(name) {
+    elements2.status.textContent = `Preparing a merge request for ${name}\u2026`;
+    try {
+      const pushed = await postJson("/analysis/branches/push", { branch: name });
+      if (pushed?.available === false) {
+        const detail = pushed?.detail ?? "the branch was not pushed";
+        elements2.status.textContent = `Create MR: ${detail}`;
+        showToast(`Create MR: ${detail}`);
+        return;
+      }
+      const params = new URLSearchParams({ branch: name });
+      if (branchBase) params.set("base", branchBase);
+      const mr2 = await request2(`/analysis/branches/merge-request?${params.toString()}`);
+      if (!mr2?.available) {
+        const detail = mr2?.detail ?? "no merge-request URL is known";
+        elements2.status.textContent = `Create MR: ${detail}`;
+        showToast(`Create MR: ${detail}`, mr2?.webUrl ? { label: "Open repo", onClick: () => window.open(mr2.webUrl, "_blank", "noopener") } : null);
+        return;
+      }
+      window.open(mr2.url, "_blank", "noopener");
+      elements2.status.textContent = `Merge request for ${name} \u2192 ${mr2.url}`;
+      showToast(`Opened ${mr2.forge} merge request for ${name}.`, {
+        label: "Copy URL",
+        onClick: () => copyText(mr2.url)
       });
+      await loadBranches();
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+      showToast(`Create MR failed: ${error.message}`);
+    }
+  }
+  async function dropBranch(name) {
+    const confirmed = typeof globalThis.confirm !== "function" || globalThis.confirm(`Drop the local branch "${name}"? This deletes it with git branch -D.`);
+    if (!confirmed) {
+      return;
+    }
+    elements2.status.textContent = `Dropping ${name}\u2026`;
+    try {
+      const result = await postJson("/analysis/branches/drop", { branches: [name] });
+      if (!result?.available) {
+        const detail = result?.detail ?? "the branch was not dropped";
+        elements2.status.textContent = `Drop failed: ${detail}`;
+        showToast(`Drop failed: ${detail}`);
+        return;
+      }
+      const skipped = (result.skipped ?? []).find((entry) => entry.name === name);
+      const message = result.dropped?.includes(name) ? `Dropped ${name}.` : `Did not drop ${name}: ${skipped?.detail ?? skipped?.reason ?? "not stale"}`;
+      elements2.status.textContent = message;
+      showToast(message);
+      await loadBranches();
+      if (!elements2.reviewPanel.hidden && currentReviewRequest?.branchName === name) {
+        closeReview();
+        view2.overlay(null);
+      }
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+      showToast(`Drop failed: ${error.message}`);
     }
   }
   async function selectBranch(name) {
@@ -13226,6 +13522,8 @@ function createGitController(app2) {
       ...navigation,
       onSelect: (id) => selectFromReview(id),
       onOpenDiff: (file, entry) => openReviewDiff(data, file, entry),
+      onPush: (name) => pushBranch(name),
+      onMergeRequest: (name) => createMergeRequest(name),
       narratorStatus: app2.narratorStatus,
       onNarrate: () => app2.narration.narrateReview(data),
       onOpenNarratorSettings: app2.settings.openNarratorSettings
@@ -13468,264 +13766,9 @@ function createGitController(app2) {
   };
 }
 
-// ui/strabo-delegate.js
-var menuElement = null;
-var toastStack = null;
-var promptDialog = null;
-var promptDialogResolve = null;
-var sessionOpener = null;
-function setDelegateSessionOpener(opener) {
-  sessionOpener = typeof opener === "function" ? opener : null;
-}
-var AGENT_LABELS = { opencode: "OpenCode", claude: "Claude" };
-function ensureMenu() {
-  if (!menuElement) {
-    menuElement = document.createElement("div");
-    menuElement.id = "agent-menu";
-    menuElement.className = "agent-menu";
-    menuElement.setAttribute("role", "menu");
-    menuElement.hidden = true;
-    document.body.append(menuElement);
-  }
-  return menuElement;
-}
-function ensureToasts() {
-  if (!toastStack) {
-    toastStack = document.createElement("div");
-    toastStack.id = "toast-stack";
-    toastStack.className = "toast-stack";
-    toastStack.setAttribute("aria-live", "polite");
-    document.body.append(toastStack);
-  }
-  return toastStack;
-}
-function closeContextMenu() {
-  if (menuElement) {
-    menuElement.hidden = true;
-    menuElement.replaceChildren();
-  }
-}
-function showContextMenu({ x, y, title, items }) {
-  const menu = ensureMenu();
-  menu.replaceChildren();
-  if (title) {
-    const header = document.createElement("div");
-    header.className = "agent-menu-title";
-    header.textContent = title;
-    menu.append(header);
-  }
-  for (const item of items ?? []) {
-    if (item.separator) {
-      const sep = document.createElement("div");
-      sep.className = "agent-menu-sep";
-      sep.setAttribute("aria-hidden", "true");
-      menu.append(sep);
-      continue;
-    }
-    const button3 = document.createElement("button");
-    button3.type = "button";
-    button3.className = "agent-menu-item";
-    button3.setAttribute("role", "menuitem");
-    if (item.title) {
-      button3.title = item.title;
-    }
-    const label = document.createElement("span");
-    label.textContent = item.label;
-    button3.append(label);
-    if (item.hint) {
-      const hint = document.createElement("span");
-      hint.className = "agent-menu-hint";
-      hint.textContent = item.hint;
-      button3.append(hint);
-    }
-    if (typeof item.action === "function") {
-      button3.addEventListener("click", () => {
-        closeContextMenu();
-        item.action();
-      });
-    } else {
-      button3.disabled = true;
-    }
-    menu.append(button3);
-  }
-  menu.hidden = false;
-  const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))}px`;
-  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))}px`;
-  const first = menu.querySelector(".agent-menu-item:not(:disabled)");
-  first?.focus();
-  const onPointerDown = (event) => {
-    if (!menu.contains(event.target)) {
-      cleanup();
-    }
-  };
-  const onKeyDown = (event) => {
-    if (event.key === "Escape") {
-      cleanup();
-    }
-  };
-  const onScroll = () => cleanup();
-  function cleanup() {
-    closeContextMenu();
-    document.removeEventListener("pointerdown", onPointerDown, true);
-    document.removeEventListener("keydown", onKeyDown, true);
-    window.removeEventListener("resize", onScroll);
-    document.removeEventListener("scroll", onScroll, true);
-  }
-  setTimeout(() => {
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("resize", onScroll);
-    document.addEventListener("scroll", onScroll, true);
-  }, 0);
-  return cleanup;
-}
-function showToast(message, action = null, { timeout = 6e3 } = {}) {
-  const stack = ensureToasts();
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.setAttribute("role", "status");
-  const text = document.createElement("span");
-  text.textContent = message;
-  toast.append(text);
-  if (action) {
-    const button3 = document.createElement("button");
-    button3.type = "button";
-    button3.className = "toast-action";
-    button3.textContent = action.label;
-    button3.addEventListener("click", () => {
-      action.onClick?.();
-      toast.remove();
-    });
-    toast.append(button3);
-  }
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "toast-dismiss";
-  dismiss.setAttribute("aria-label", "Dismiss notification");
-  dismiss.textContent = "\xD7";
-  dismiss.addEventListener("click", () => toast.remove());
-  toast.append(dismiss);
-  stack.append(toast);
-  setTimeout(() => toast.remove(), timeout);
-  return toast;
-}
-async function copyText(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  document.body.append(area);
-  area.select();
-  document.execCommand("copy");
-  area.remove();
-}
-function settlePromptReview(value) {
-  const resolve = promptDialogResolve;
-  promptDialogResolve = null;
-  resolve?.(value);
-}
-function ensurePromptDialog() {
-  if (promptDialog) {
-    return promptDialog;
-  }
-  const dialog2 = document.createElement("dialog");
-  dialog2.id = "prompt-dialog";
-  dialog2.className = "dialog prompt-dialog";
-  dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
-  const header = document.createElement("header");
-  header.className = "dialog-header";
-  const heading3 = document.createElement("strong");
-  heading3.className = "prompt-dialog-title";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "dialog-close";
-  close.setAttribute("aria-label", "Close");
-  close.textContent = "\xD7";
-  close.addEventListener("click", () => dialog2.close());
-  header.append(heading3, close);
-  const target = document.createElement("p");
-  target.className = "dialog-path prompt-dialog-target";
-  const text = document.createElement("textarea");
-  text.className = "prompt-dialog-text";
-  text.spellcheck = false;
-  text.setAttribute("aria-label", "Task prompt");
-  const footer = document.createElement("footer");
-  footer.className = "dialog-footer";
-  const copy = document.createElement("button");
-  copy.type = "button";
-  copy.textContent = "Copy";
-  copy.addEventListener("click", async () => {
-    await copyText(text.value);
-    copy.textContent = "Copied";
-    setTimeout(() => {
-      copy.textContent = "Copy";
-    }, 1500);
-  });
-  const actions = document.createElement("span");
-  actions.className = "dialog-footer-actions";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => dialog2.close());
-  const send = document.createElement("button");
-  send.type = "button";
-  send.className = "primary prompt-dialog-send";
-  send.addEventListener("click", () => {
-    const reviewed = text.value;
-    settlePromptReview(reviewed);
-    dialog2.close();
-  });
-  actions.append(cancel, send);
-  footer.append(copy, actions);
-  dialog2.append(header, target, text, footer);
-  dialog2.addEventListener("close", () => settlePromptReview(null));
-  document.body.append(dialog2);
-  promptDialog = dialog2;
-  return dialog2;
-}
-function showPromptReview({ agent, title, prompt }) {
-  const dialog2 = ensurePromptDialog();
-  settlePromptReview(null);
-  const agentName = AGENT_LABELS[agent] ?? agent;
-  dialog2.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
-  dialog2.querySelector(".prompt-dialog-target").textContent = title;
-  const text = dialog2.querySelector(".prompt-dialog-text");
-  text.value = prompt;
-  dialog2.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
-  const pending = new Promise((resolve) => {
-    promptDialogResolve = resolve;
-  });
-  if (!dialog2.open) {
-    dialog2.showModal();
-  }
-  text.focus();
-  text.setSelectionRange(text.value.length, text.value.length);
-  return pending;
-}
-async function launchAgent(agent, { repository, target, prompt, title, dryRun = false }) {
-  const response = await fetch(`${API_PATH}/delegate`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ agent, repository, target, prompt, title, ...dryRun ? { dryRun: true } : {} })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Delegate failed (${response.status})`);
-  }
-  if (body.sessionId && sessionOpener) {
-    sessionOpener(body.sessionId, body);
-  }
-  return body;
-}
-
 // ui/strabo-settings-controller.js
 function createSettingsController(app2) {
-  const { state: state2, elements: elements2, request: request2 } = app2;
+  const { elements: elements2, request: request2 } = app2;
   let serverSettings = null;
   let settingsStatus = "";
   let settingsStatusError = false;
@@ -13739,9 +13782,6 @@ function createSettingsController(app2) {
       app2.lenses.applyLocLens();
     }
     renderSettingsView();
-    if (key === "commitEnabled" && state2.overlay === "impact") {
-      app2.lenses.applyOverlay();
-    }
   }
   function renderSettingsView() {
     if (!elements2.settingsPanel) return;
@@ -14790,12 +14830,21 @@ function numberCell(text, title) {
   }
   return cell;
 }
-function renderTierPanel(container, report, filter = "all") {
+function renderTierPanel(container, report, filter = "all", options = {}) {
   container.replaceChildren();
   container.hidden = false;
   container.className = "overlay-panel";
   const title = document.createElement("h3");
   title.textContent = "Tier lens";
+  if (options.onClose) {
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.className = "panel-dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss tier lens panel");
+    dismiss.textContent = "\xD7";
+    dismiss.addEventListener("click", () => options.onClose());
+    title.append(dismiss);
+  }
   container.append(title);
   const note4 = document.createElement("p");
   note4.className = "overlay-note";
@@ -14925,183 +14974,6 @@ function renderTierPanel(container, report, filter = "all") {
   }
 }
 
-// ui/strabo-commit.js
-async function requestCommitMessage(repository) {
-  const response = await fetch(`${API_PATH}/narrator/commit-message`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(repository ? { repository } : {})
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Could not generate a message (${response.status}).`);
-  }
-  return body;
-}
-async function commitWorkingTree(repository, message, { push = true } = {}) {
-  const response = await fetch(`${API_PATH}/analysis/commit`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message, push, ...repository ? { repository } : {} })
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error ?? `Commit failed (${response.status}).`);
-  }
-  return body;
-}
-var dialog = null;
-var context = null;
-function ensureDialog() {
-  if (dialog) {
-    return dialog;
-  }
-  const element3 = document.createElement("dialog");
-  element3.id = "commit-dialog";
-  element3.className = "dialog prompt-dialog commit-dialog";
-  element3.setAttribute("aria-label", "Review the commit message before committing");
-  const header = document.createElement("header");
-  header.className = "dialog-header";
-  const heading3 = document.createElement("strong");
-  heading3.className = "commit-dialog-title";
-  heading3.textContent = "Commit changes";
-  const close = document.createElement("button");
-  close.type = "button";
-  close.className = "dialog-close";
-  close.setAttribute("aria-label", "Close");
-  close.textContent = "\xD7";
-  close.addEventListener("click", () => element3.close());
-  header.append(heading3, close);
-  const target = document.createElement("p");
-  target.className = "dialog-path prompt-dialog-target";
-  const status = document.createElement("p");
-  status.className = "dialog-note commit-status";
-  status.setAttribute("role", "status");
-  const text = document.createElement("textarea");
-  text.className = "prompt-dialog-text commit-message";
-  text.spellcheck = false;
-  text.setAttribute("aria-label", "Commit message");
-  const footer = document.createElement("footer");
-  footer.className = "dialog-footer";
-  const generate = document.createElement("button");
-  generate.type = "button";
-  generate.className = "commit-generate";
-  generate.textContent = "Generate again";
-  generate.addEventListener("click", () => void generateMessage());
-  const pushLabel = document.createElement("label");
-  pushLabel.className = "commit-push";
-  const pushToggle = document.createElement("input");
-  pushToggle.type = "checkbox";
-  pushToggle.checked = true;
-  pushToggle.className = "commit-push-toggle";
-  pushLabel.append(pushToggle, document.createTextNode("Push after commit"));
-  const left = document.createElement("span");
-  left.className = "commit-footer-left";
-  left.append(generate, pushLabel);
-  const actions = document.createElement("span");
-  actions.className = "dialog-footer-actions";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => element3.close());
-  const confirm2 = document.createElement("button");
-  confirm2.type = "button";
-  confirm2.className = "primary commit-confirm";
-  confirm2.textContent = "Commit & push";
-  confirm2.addEventListener("click", () => void submit());
-  actions.append(cancel, confirm2);
-  footer.append(left, actions);
-  element3.append(header, target, status, text, footer);
-  document.body.append(element3);
-  dialog = element3;
-  return element3;
-}
-async function generateMessage() {
-  if (!dialog || !context) {
-    return;
-  }
-  const text = dialog.querySelector(".commit-message");
-  const status = dialog.querySelector(".commit-status");
-  const generate = dialog.querySelector(".commit-generate");
-  const confirm2 = dialog.querySelector(".commit-confirm");
-  generate.disabled = true;
-  confirm2.disabled = true;
-  status.classList.remove("is-error");
-  status.textContent = "Generating a message with the narrator\u2026";
-  try {
-    const result = await requestCommitMessage(context.repository);
-    if (result?.available && typeof result.message === "string" && result.message.trim() !== "") {
-      text.value = result.message.trim();
-      const model = result.model ?? "the narrator";
-      status.textContent = `Generated by ${model}${result.cached ? " (cached)" : ""}. Review and edit before committing.`;
-    } else {
-      status.textContent = `Narrator unavailable (${result?.detail ?? result?.reason ?? "not configured"}). Write a message, or set the narrator up in Settings.`;
-      if (!text.value.trim()) {
-        text.value = "";
-      }
-    }
-  } catch (error) {
-    status.textContent = error.message ?? "Could not generate a message.";
-    status.classList.add("is-error");
-  } finally {
-    generate.disabled = false;
-    confirm2.disabled = false;
-    text.focus();
-    text.setSelectionRange(text.value.length, text.value.length);
-  }
-}
-async function submit() {
-  if (!dialog || !context) {
-    return;
-  }
-  const text = dialog.querySelector(".commit-message");
-  const status = dialog.querySelector(".commit-status");
-  const generate = dialog.querySelector(".commit-generate");
-  const confirm2 = dialog.querySelector(".commit-confirm");
-  const push = dialog.querySelector(".commit-push-toggle")?.checked !== false;
-  const message = text.value.trim();
-  if (message === "") {
-    status.classList.add("is-error");
-    status.textContent = "A commit message is required.";
-    text.focus();
-    return;
-  }
-  generate.disabled = true;
-  confirm2.disabled = true;
-  status.classList.remove("is-error");
-  status.textContent = push ? "Committing and pushing\u2026" : "Committing\u2026";
-  try {
-    const result = await commitWorkingTree(context.repository, message, { push });
-    if (!result?.available) {
-      status.classList.add("is-error");
-      status.textContent = result?.detail ?? "The commit did not run.";
-      return;
-    }
-    showToast(result.message);
-    dialog.close();
-    context.onCommitted?.(result);
-  } catch (error) {
-    status.classList.add("is-error");
-    status.textContent = error.message ?? "The commit did not run.";
-  } finally {
-    generate.disabled = false;
-    confirm2.disabled = false;
-  }
-}
-function openCommitDialog({ repository, onCommitted } = {}) {
-  const element3 = ensureDialog();
-  context = { repository: repository ?? null, onCommitted };
-  element3.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
-  element3.querySelector(".commit-message").value = "";
-  const status = element3.querySelector(".commit-status");
-  status.classList.remove("is-error");
-  status.textContent = "Generating a message with the narrator\u2026";
-  if (!element3.open) {
-    element3.showModal();
-  }
-  void generateMessage();
-}
-
 // ui/strabo-lens-controller.js
 function createLensController(app2) {
   const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
@@ -15139,7 +15011,9 @@ function createLensController(app2) {
     view2.applyTier(tierOfFile(tierReportCache.report), state2.tier === "all" ? "all" : state2.tier);
     view2.applyTierDirections(tierDirectionClasses(tierReportCache.report));
     if (state2.overlay === "none") {
-      renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier);
+      renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier, {
+        onClose: closeLensPanel
+      });
     }
   }
   async function loadChangesWith(id) {
@@ -15158,16 +15032,20 @@ function createLensController(app2) {
     }
     return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
   }
-  function clearOverlay() {
-    state2.overlay = "none";
-    elements2.overlay.value = "none";
-    view2.overlay(null);
-    view2.setHiddenCoupling(null, false);
-    renderOverlayPanel(elements2.overlayPanel, "", null);
-    if (state2.tier !== "off") {
-      void applyTierLens();
+  function closeLensPanel() {
+    if (state2.overlay !== "none") {
+      state2.overlay = "none";
+      elements2.overlay.value = "none";
+      view2.overlay(null);
+      view2.setHiddenCoupling(null, false);
+      app2.prefs?.writeViewPrefs?.();
     }
+    renderOverlayPanel(elements2.overlayPanel, "", null);
+    elements2.overlayPanel.hidden = true;
     app2.windows.refreshDock();
+  }
+  function clearOverlay() {
+    closeLensPanel();
   }
   async function applyOverlay(generation) {
     const kind = state2.overlay;
@@ -15188,22 +15066,10 @@ function createLensController(app2) {
     const overlay2 = overlayFor(kind, data);
     view2.overlay(overlay2.classes);
     view2.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
-    const actions = [];
-    if (kind === "impact" && app2.clientPrefs.commitEnabled) {
-      actions.push({
-        label: "Commit\u2026",
-        title: "Generate a commit message with the narrator, then commit and push",
-        onClick: () => openCommitDialog({
-          repository: state2.repository,
-          onCommitted: () => applyOverlay()
-        })
-      });
-    }
     renderOverlayPanel(elements2.overlayPanel, OVERLAY_TITLES[kind], overlay2, {
       kind,
-      onClose: clearOverlay,
-      onSelect: (id) => app2.selection.selectNode(id),
-      ...actions.length > 0 ? { actions } : {}
+      onClose: closeLensPanel,
+      onSelect: (id) => app2.selection.selectNode(id)
     });
     app2.windows.refreshDock();
   }
@@ -15380,6 +15246,7 @@ function createLensController(app2) {
     applyOverlay,
     applyTierLens,
     clearOverlay,
+    closeLensPanel,
     enrichUnitCards,
     loadChangesWith,
     updateCoChangeButton,
@@ -25773,8 +25640,8 @@ function registerCitationLinks(term, { openSourceAt } = {}) {
         callback(void 0);
         return;
       }
-      callback({
-        links: citations.map((citation) => ({
+      callback(
+        citations.map((citation) => ({
           range: {
             start: { x: citation.index + 1, y: bufferLineNumber },
             end: { x: citation.index + citation.length, y: bufferLineNumber }
@@ -25783,7 +25650,7 @@ function registerCitationLinks(term, { openSourceAt } = {}) {
           decorations: { underline: true, pointerCursor: true },
           activate: () => openSourceAt?.(citation.path, citation.line)
         }))
-      });
+      );
     }
   };
   const disposable = term.registerLinkProvider(provider);
@@ -27694,12 +27561,12 @@ function createDelegation(app2) {
     if (resolved) {
       return { ...resolved, selection };
     }
-    const context2 = fallbackDelegateTarget();
+    const context = fallbackDelegateTarget();
     const excerpt = selection.replace(/\s+/g, " ");
     return {
       kind: "selection",
       label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
-      evidence: context2.evidence,
+      evidence: context.evidence,
       selection
     };
   }
@@ -28534,7 +28401,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     close() {
       const hadFocus = win.contains(document.activeElement);
       if (config.onClose) config.onClose();
-      else element3.hidden = true;
+      element3.hidden = true;
       win.hidden = true;
       lastHidden = true;
       renderDock();
@@ -28803,7 +28670,12 @@ function createFloatingPanels(app2) {
         onBlocked: () => {
           elements2.status.textContent = "Select an overlay or a tier colour first \u2014 the panel has nothing to show.";
         },
-        onClose: () => app2.lenses.clearOverlay()
+        onOpen: () => {
+          if (state2.overlay === "none" && state2.tier !== "off") {
+            void app2.lenses.applyTierLens();
+          }
+        },
+        onClose: () => app2.lenses.closeLensPanel()
       },
       {
         key: "edge",

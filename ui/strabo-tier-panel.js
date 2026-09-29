@@ -34,7 +34,7 @@ function numberCell(text, title) {
   return cell;
 }
 
-export function renderTierPanel(container, report, filter = 'all') {
+export function renderTierPanel(container, report, filter = 'all', options = {}) {
   container.replaceChildren();
   // The panel is shared with the analysis overlays, whose render hides it when their report
   // is absent; taking it over means showing it.
@@ -43,6 +43,15 @@ export function renderTierPanel(container, report, filter = 'all') {
 
   const title = document.createElement('h3');
   title.textContent = 'Tier lens';
+  if (options.onClose) {
+    const dismiss = document.createElement('button');
+    dismiss.type = 'button';
+    dismiss.className = 'panel-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss tier lens panel');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => options.onClose());
+    title.append(dismiss);
+  }
   container.append(title);
 
   const note = document.createElement('p');

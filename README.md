@@ -24,7 +24,7 @@ import. Select a module to open its passport.*
 
 Implemented and running: scanner, resolvers, graph cache, HTTP API, and the browser app,
 including review overlays, the Change impact passport, the Module Passport, the Member map,
-the Repository passport, Git review, branch review and actions, workspace analysis,
+the Repository passport, Git review, branch review, workspace analysis,
 dependency risk, and the opt-in narrator. Design internals and the deliberately parked
 surface live in [docs/DESIGN.md](docs/DESIGN.md); the phased plan and what is still
 pending live in [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -87,7 +87,9 @@ in [docs/USAGE.md](docs/USAGE.md).
 - **Change impact passport** — a bounded risk score, complexity move, coherence, blast
   radius, and recorded signals for each changed file.
   See [docs/FEATURES.md](docs/FEATURES.md#change-impact-passport).
-- **Branches** — list, fetch, push/publish, and sync, through explicit, validated buttons.
+- **Branches** — local and remote branch listing with upstream sync, divergence from a base,
+  and a branch review, plus three explicit buttons: push/publish, create merge request, and
+  drop stale branches. Those are the only places Strabo writes to Git, and none force-pushes.
   See [docs/FEATURES.md](docs/FEATURES.md#branches).
 - **Workspace analysis** — cross-repo package and service flows, shared data contracts and
   drift, plus schema snapshots, compatibility, migration preflight, and a live read-only
@@ -100,10 +102,8 @@ in [docs/USAGE.md](docs/USAGE.md).
 - **Delegate to an agent** — hand a node, edge, commit, or review to `opencode` or `claude`
   in an interactive TUI, seeded with the recorded evidence.
   See [docs/FEATURES.md](docs/FEATURES.md#delegate-to-an-agent).
-- **Commit and narrator (opt-in)** — a commit message written from recorded changes, and a
-  narrative layer over evidence, both inert until configured.
-  See [docs/FEATURES.md](docs/FEATURES.md#commit-narrator-opt-in) and
-  [docs/FEATURES.md](docs/FEATURES.md#llm-narrator-opt-in).
+- **LLM narrator (opt-in)** — a narrative layer over recorded evidence, inert until
+  configured. See [docs/FEATURES.md](docs/FEATURES.md#llm-narrator-opt-in).
 
 ### A closer look
 

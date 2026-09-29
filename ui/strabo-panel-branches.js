@@ -55,20 +55,6 @@ export function branchTags(branch, now = Date.now()) {
 }
 
 
-/** A small action button shared by the branch panel's header and rows. */
-function branchActionButton(role, text, title, handler, busy) {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'branch-action';
-  button.dataset.role = role;
-  button.textContent = text;
-  button.title = title;
-  button.disabled = Boolean(busy);
-  button.addEventListener('click', () => handler());
-  return button;
-}
-
-
 /**
  * Branches against a base: commits ahead and behind, sync with the upstream, and age.
  * Selecting one opens its branch review. Counts are as fresh as the last fetch, and the
@@ -138,28 +124,6 @@ export function renderBranches(container, result, handlers = {}) {
   }`;
   container.append(summary);
 
-  const actions = document.createElement('div');
-  actions.className = 'branch-actions';
-  actions.dataset.role = 'branch-actions';
-  if (handlers.onFetch) {
-    actions.append(branchActionButton('branch-fetch', 'Fetch', 'Update the remote-tracking refs', handlers.onFetch, handlers.busy));
-  }
-  if (handlers.onPull && result.current) {
-    actions.append(
-      branchActionButton('branch-pull', `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, handlers.onPull, handlers.busy),
-    );
-  }
-  if (actions.childElementCount > 0) {
-    if (handlers.busy) {
-      const running = document.createElement('span');
-      running.className = 'evidence';
-      running.dataset.role = 'branch-busy';
-      running.textContent = 'Running…';
-      actions.append(running);
-    }
-    container.append(actions);
-  }
-
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0)),
@@ -212,39 +176,76 @@ export function renderBranches(container, result, handlers = {}) {
       item.append(tagLine);
     }
 
-    const behindCount = branch.upstream?.behind ?? 0;
-    if (handlers.onPullBranch && branch.kind === 'local' && !branch.current && !branch.upstream?.gone && behindCount > 0) {
-      const pull = document.createElement('button');
-      pull.type = 'button';
-      pull.className = 'branch-action';
-      pull.dataset.role = 'branch-pull-branch';
-      pull.dataset.branch = branch.name;
-      pull.textContent = `Pull ↓${behindCount}`;
-      pull.title = `Fast-forward ${branch.name} from ${branch.upstream?.name ?? 'its upstream'}`;
-      pull.disabled = Boolean(handlers.busy);
-      pull.addEventListener('click', () => handlers.onPullBranch(branch));
-      item.append(pull);
-    }
-
-    const pushCount = branch.upstream?.ahead ?? 0;
-    const publish = branch.kind === 'local' && !branch.isBase && (!branch.upstream || branch.upstream.gone);
-    if (handlers.onPush && branch.kind === 'local' && !branch.isBase && (pushCount > 0 || publish)) {
-      const push = document.createElement('button');
-      push.type = 'button';
-      push.className = 'branch-action';
-      push.dataset.role = 'branch-push';
-      push.dataset.branch = branch.name;
-      push.textContent = pushCount > 0 ? `Push ↑${pushCount}` : 'Publish';
-      push.title = pushCount > 0
-        ? `Push ${branch.name} to ${branch.upstream?.name ?? 'its remote'}`
-        : `Publish ${branch.name} to the remote`;
-      push.disabled = Boolean(handlers.busy);
-      push.addEventListener('click', () => handlers.onPush(branch));
-      item.append(push);
+    const actions = branchActions(branch, handlers);
+    if (actions) {
+      item.append(actions);
     }
     list.append(item);
   }
   container.append(list);
+}
+
+
+/**
+ * The write actions a branch row offers, as explicit buttons. Push appears on a local branch
+ * with unpublished or ahead work; Create MR on any local branch; Drop on a branch the listing
+ * already calls stale. Every action is optional, so a read-only embedding renders none.
+ */
+function branchActions(branch, handlers) {
+  const buttons = [];
+  if (branch.kind === 'local' && !branch.isBase) {
+    const publish = !branch.upstream || branch.upstream.gone;
+    if (handlers.onPush && (publish || branch.upstream.ahead > 0)) {
+      buttons.push({
+        label: publish ? 'Publish' : 'Push',
+        role: 'branch-push',
+        title: publish
+          ? `Publish ${branch.name} and set its upstream`
+          : `Push ${branch.name} to ${branch.upstream.name}`,
+        run: () => handlers.onPush(branch.name),
+      });
+    }
+    if (handlers.onMergeRequest) {
+      buttons.push({
+        label: 'Create MR',
+        role: 'branch-merge-request',
+        title: `Open a new merge request for ${branch.name}`,
+        run: () => handlers.onMergeRequest(branch.name),
+      });
+    }
+    const stale = branch.upstream?.gone === true || branch.againstBase?.merged === true;
+    if (handlers.onDrop && stale && !branch.current) {
+      buttons.push({
+        label: 'Drop',
+        role: 'branch-drop',
+        title: branch.upstream?.gone
+          ? `Drop ${branch.name}: its upstream is gone`
+          : `Drop ${branch.name}: merged into the base`,
+        run: () => handlers.onDrop(branch.name),
+      });
+    }
+  }
+  if (buttons.length === 0) {
+    return null;
+  }
+  const row = document.createElement('span');
+  row.className = 'branch-actions';
+  row.dataset.role = 'branch-actions';
+  for (const spec of buttons) {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = `branch-action ${spec.role}`;
+    action.dataset.role = spec.role;
+    action.dataset.branch = branch.name;
+    action.textContent = spec.label;
+    action.title = spec.title;
+    action.addEventListener('click', (event) => {
+      event.stopPropagation();
+      spec.run();
+    });
+    row.append(action);
+  }
+  return row;
 }
 
 
@@ -304,6 +305,30 @@ export function renderBranchDivergence(container, branch, handlers = {}) {
     merge.textContent = `Conflicts with ${branch.base} in ${branch.conflicts.paths.length} file(s).`;
   }
   container.append(merge);
+
+  const actions = document.createElement('p');
+  actions.className = 'branch-actions review-branch-actions';
+  actions.dataset.role = 'review-branch-actions';
+  const addAction = (label, role, title, run) => {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = `branch-action ${role}`;
+    action.dataset.role = role;
+    action.dataset.branch = branch.branch;
+    action.textContent = label;
+    action.title = title;
+    action.addEventListener('click', () => run(branch.branch));
+    actions.append(action);
+  };
+  if (handlers.onPush) {
+    addAction('Push', 'branch-push', `Push ${branch.branch} to its upstream`, handlers.onPush);
+  }
+  if (handlers.onMergeRequest) {
+    addAction('Create MR', 'branch-merge-request', `Push ${branch.branch} and open a new merge request`, handlers.onMergeRequest);
+  }
+  if (actions.childElementCount > 0) {
+    container.append(actions);
+  }
 
   const fileList = (role, heading, entries, describe) => {
     if (entries.length === 0) return;

@@ -1,11 +1,9 @@
 import { Router } from 'express';
 
-import { buildCommitEvidence } from '../../analysis/commit.ts';
 import { computeCoverageGaps, type CoverageGapOptions } from '../../analysis/coverage-gaps.ts';
 import { collectCoverageTrend, type CoverageTrendOptions } from '../../analysis/coverage-trend.ts';
 import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
-import { reviewWorkingTree } from '../../analysis/review.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
@@ -246,51 +244,6 @@ export function createNarratorRouter(
           buildCoverageWeeklyRequest({ repository: repository.name, report }),
         ),
       );
-    } catch (error) {
-      sendError(response, error);
-    }
-  });
-
-  /**
-   * Generate a Git commit message for the current working tree with the narrator.
-   *
-   * The evidence is built server-side from the scan — the changed files with their statuses
-   * and line counts, and the reverse-dependency impact — never from the browser, so a caller
-   * cannot steer what is described. Like every narrator call it is inert until an endpoint and
-   * model are configured, and it writes nothing: the operator confirms the message before it
-   * reaches `POST /analysis/commit`.
-   */
-  router.post('/narrator/commit-message', async (request, response) => {
-    try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'commit messages are generated only for the Strabo page.' });
-        return;
-      }
-      const repository = resolve(request);
-      const cached = await getCachedGraph(repository.root);
-      const review = await reviewWorkingTree(repository.root, cached.report.graph);
-      if (!review.available) {
-        response.json({ available: false, reason: review.reason, detail: review.detail ?? null });
-        return;
-      }
-      if (review.files.length === 0) {
-        response.json({
-          available: false,
-          reason: 'nothing-to-commit',
-          detail: 'There are no working-tree changes to describe.',
-        });
-        return;
-      }
-      const reply = await narrator.narrate({
-        kind: 'commit-message',
-        instruction: 'Write the Git commit message for the recorded working-tree changes.',
-        evidence: buildCommitEvidence(review),
-      });
-      if (!reply.available) {
-        response.json(reply);
-        return;
-      }
-      response.json({ available: true, message: reply.text, model: reply.model, cached: reply.cached });
     } catch (error) {
       sendError(response, error);
     }

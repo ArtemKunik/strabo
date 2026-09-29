@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-29T09:50:08.910Z",
+  "root": "D:\\source\\strabo",
+  "rootName": "strabo",
+  "revision": {
+    "head": "a165639f98c2d237ee97de083dc0e3841975a27a",
+    "dirty": true,
+    "gitUrl": "https://github.com/ArtemKunik/strabo.git"
+  },
+  "fingerprint": "a165639f98c2d237ee97de083dc0e3841975a27a:77b5f27ac990d4ad01c6ccc5af42023ca0c5738a54be403a7205a5e2adc77fce",
+  "corpus": null,
+  "cacheDir": "C:\\Users\\artem\\AppData\\Local\\Temp\\strabo-cache\\bench",
+  "outputPath": "D:\\source\\strabo\\docs\\bench\\strabo.json",
+  "files": {
+    "scanned": 521,
+    "edges": 4958,
+    "diagnostics": 0,
+    "excluded": 229
+  },
+  "graphCache": {
+    "cold": {
+      "status": "miss",
+      "ms": 2964.1926999999996
+    },
+    "memory": {
+      "status": "memory",
+      "ms": 197.48480000000018
+    },
+    "disk": {
+      "status": "disk",
+      "ms": 195.34529999999995
+    }
+  },
+  "history": {
+    "available": true,
+    "windowDays": 90,
+    "commitsScanned": 199
+  },
+  "parseCache": {
+    "version": 1,
+    "entries": 0,
+    "hits": 0,
+    "misses": 0
+  },
+  "stages": [
+    {
+      "stage": "walk",
+      "coldMs": 9.318899999999985,
+      "warmMs": null,
+      "approximate": false,
+      "source": "collectSourceFiles",
+      "includes": "directory walk"
+    },
+    {
+      "stage": "read",
+      "coldMs": 207.46109999999987,
+      "warmMs": null,
+      "approximate": true,
+      "source": "harness read loop (mirrors scan.ts:44-76)",
+      "includes": "git check-ignore, stat, size cap, readFileSync, minified check"
+    },
+    {
+      "stage": "parse",
+      "coldMs": 0.5355999999999312,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanPolyglotEdges",
+      "includes": "polyglot extract and resolve"
+    },
+    {
+      "stage": "extract",
+      "coldMs": 97.14889999999991,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanJsTsEdges",
+      "includes": "JS/TS reference extraction and resolve"
+    },
+    {
+      "stage": "resolve",
+      "coldMs": 1763.7628,
+      "warmMs": null,
+      "approximate": true,
+      "source": "scanJsTsCalls",
+      "includes": "JS/TS call parse and extract"
+    },
+    {
+      "stage": "metrics",
+      "coldMs": 13.778800000000047,
+      "warmMs": null,
+      "approximate": false,
+      "source": "buildAdjacency + computeGraphMetrics",
+      "includes": "adjacency and transitive reach"
+    },
+    {
+      "stage": "analysis",
+      "coldMs": 8.861700000000383,
+      "warmMs": null,
+      "approximate": false,
+      "source": "computeRepositoryPassport",
+      "includes": "passport; recomputes metrics, cycles, and coverage"
+    },
+    {
+      "stage": "history",
+      "coldMs": 1703.4855000000002,
+      "warmMs": 161.8791999999994,
+      "approximate": false,
+      "source": "collectHistory",
+      "includes": "one bounded git log --numstat window"
+    }
+  ],
+  "firstPaint": {
+    "passport": {
+      "coldMs": 1.9583000000002357,
+      "warmMs": 2.1567999999997483,
+      "approximate": false,
+      "source": "computeRepositoryPassport (GET /analysis/passport)",
+      "includes": "languages, entry points, directories, top files, cycles, unreached files"
+    },
+    "system": {
+      "coldMs": 53.184400000000096,
+      "warmMs": 26.35990000000129,
+      "approximate": false,
+      "source": "buildSystemReport + buildSystemViewModel (GET /graph?system=1)",
+      "includes": "unit roll-up, layers, communities, unit cards, positions"
+    }
+  },
+  "notes": [
+    "Stage rows call the nearest production function; scanRepository exposes no per-stage seam.",
+    "parse, extract, and resolve overlap: each enclosing edge pass also performs the other two steps, so the rows are not additive.",
+    "The cold graph-cache miss is timed after the cold stage pass, so its parser runtime is warm; one-time grammar loading is inside the stage pass, not that number.",
+    "Node construction (entry points, line counts) and external-import collection are not separately measured.",
+    "First paint rows time the builder the server calls for that payload; the System row also builds the report and reads manifests, so it is not a pure in-memory number."
+  ]
+}

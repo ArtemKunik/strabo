@@ -67,14 +67,30 @@ packages and imports for Java and Kotlin, namespaces for C#, `mod`/`use crate::`
 quoted includes for C++, and standalone schema for SQL. The manifest records the per-language
 and per-extension counts from this run.
 
+## Real git tree (Phase 21 G4)
+
+The gate also calls for a run on a real repository. The only one available was the Strabo
+checkout itself, committed as `strabo.json`:
+
+```bash
+npm run bench -- --out docs/bench/strabo.json .
+```
+
+It is a real git tree, so `revision`, `fingerprint`, and `history` are populated and the
+graph-cache disk tier is a real hit — the paths the synthetic corpus cannot exercise. It is
+small (~500 files), so it is **not** the 20k-50k-file operator number the gate names; the
+synthetic corpus stands in for scale.
+
 ## Committed result
 
-`synthetic-20k.json` is a real run on that corpus:
+`synthetic-20k.json` is a real run on the synthetic corpus, and `strabo.json` is the run on
+the Strabo checkout:
 
 ```bash
 node scripts/bench-corpus.mjs --out <tmp>/strabo-bench-corpus --files 20000 --seed 20260925
 npm run bench -- --out docs/bench/synthetic-20k.json \
   --corpus <tmp>/strabo-bench-corpus.manifest.json <tmp>/strabo-bench-corpus
+npm run bench -- --out docs/bench/strabo.json .
 ```
 
 Caveats, stated in the result's `notes` as well:

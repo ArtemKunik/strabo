@@ -3357,36 +3357,6 @@ body.screen-off-graph .float-window {
   border: 1px solid var(--line);
 }
 
-/* Fetch / Sync in the header, Push on a row: the only branch actions that write. */
-.branch-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 2px;
-}
-
-.branch-action {
-  padding: 1px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-2);
-  color: var(--ink-1);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.branch-action:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-
-.branch-action:disabled {
-  color: var(--ink-3);
-  cursor: default;
-}
-
 .divergence {
   display: inline-flex;
   align-items: center;
@@ -3448,6 +3418,39 @@ body.screen-off-graph .float-window {
 
 .merge-verdict.conflicted {
   border-left-color: var(--status-critical);
+}
+
+/* The explicit write actions a branch row or a branch review offers. */
+.branch-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-branch-actions {
+  margin: 6px 0;
+}
+
+.branch-action {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--input-bg);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.branch-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.branch-action.branch-drop:hover {
+  border-color: var(--status-critical);
+  color: var(--status-critical);
 }
 
 .overlay-panel {
@@ -3550,31 +3553,6 @@ body.screen-off-graph .float-window {
 }
 
 .overlay-toggle-changed[aria-pressed='true'] {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-/* Buttons an overlay contributes, e.g. the opt-in Commit action on Change impact. */
-.overlay-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
-}
-
-.overlay-action {
-  flex: 1 1 auto;
-  padding: 6px 10px;
-  font: inherit;
-  color: var(--ink-1);
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-s);
-  cursor: pointer;
-}
-
-.overlay-action:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -4522,34 +4500,6 @@ table.change-metrics td:first-child .link {
 .dialog-footer-actions {
   display: flex;
   gap: 8px;
-}
-
-/* ------------------------------------------------------ Narrator commit dialog */
-.commit-dialog .commit-message {
-  height: 26vh;
-  min-height: 140px;
-}
-
-.commit-dialog .commit-status {
-  min-height: 16px;
-}
-
-.commit-dialog .commit-status.is-error {
-  color: var(--status-critical);
-}
-
-.commit-footer-left {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-
-.commit-push {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  color: var(--ink-3);
-  font-size: 12px;
 }
 
 /* ---------------------------------------------------------------- Member map */

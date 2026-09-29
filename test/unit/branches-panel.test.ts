@@ -9,6 +9,7 @@ globalThis.window = dom.window as unknown as typeof globalThis.window;
 globalThis.HTMLElement = dom.window.HTMLElement;
 
 const { branchTags, formatAge, renderBranches, renderReview, renderReviewLoading } = await import('../../ui/strabo-panels.js');
+const { renderBranchDivergence } = await import('../../ui/strabo-panel-branches.js');
 
 const NOW = Date.parse('2026-09-21T12:00:00Z');
 const tip = (date: string) => ({ hash: 'h', shortHash: 'h', author: 'Ada', date, subject: 's' });
@@ -73,82 +74,96 @@ test('renderBranches lists branches with divergence and offers the base picker',
   assert.deepEqual(bases, ['feature']);
 });
 
+test('renderBranches offers push, merge-request, and drop actions', () => {
+  const target = document.createElement('div');
+  const calls: string[] = [];
+  renderBranches(
+    target,
+    {
+      available: true,
+      current: 'main',
+      head: 'h',
+      base: { name: 'main', hash: 'h', source: 'conventional' },
+      capped: false,
+      branches: [
+        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: null, againstBase: { ahead: 4, behind: 2, merged: false } },
+        { name: 'merged', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: null, againstBase: { ahead: 0, behind: 0, merged: true } },
+        { name: 'gone', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/gone', ahead: 0, behind: 0, gone: true }, againstBase: null },
+      ],
+    },
+    {
+      onPush: (name: string) => calls.push(`push:${name}`),
+      onMergeRequest: (name: string) => calls.push(`mr:${name}`),
+      onDrop: (name: string) => calls.push(`drop:${name}`),
+    },
+  );
+
+  const names = (role: string) =>
+    [...target.querySelectorAll(`[data-role="${role}"]`)].map((button) => (button as HTMLElement).dataset.branch);
+  assert.deepEqual(names('branch-push'), ['feature', 'merged', 'gone']);
+  assert.deepEqual(names('branch-merge-request'), ['feature', 'merged', 'gone']);
+  assert.deepEqual(names('branch-drop'), ['merged', 'gone']);
+
+  (target.querySelector('[data-role="branch-drop"]') as HTMLButtonElement).click();
+  (target.querySelector('[data-role="branch-push"]') as HTMLButtonElement).click();
+  (target.querySelector('[data-role="branch-merge-request"]') as HTMLButtonElement).click();
+  assert.deepEqual(calls, ['drop:merged', 'push:feature', 'mr:feature']);
+});
+
+test('renderBranches omits write actions when no handlers are given', () => {
+  const target = document.createElement('div');
+  renderBranches(target, {
+    available: true,
+    current: 'main',
+    head: 'h',
+    base: { name: 'main', hash: 'h', source: 'conventional' },
+    capped: false,
+    branches: [
+      { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+      { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: null, againstBase: { ahead: 4, behind: 0, merged: false } },
+    ],
+  });
+  assert.equal(target.querySelector('[data-role="branch-actions"]'), null);
+});
+
+test('renderBranchDivergence offers push and create-MR actions', () => {
+  const target = document.createElement('div');
+  const calls: string[] = [];
+  renderBranchDivergence(
+    target,
+    {
+      branch: 'feature',
+      base: 'main',
+      tipHash: 't',
+      baseHash: 'b',
+      mergeBase: 'abcdef123456',
+      ahead: 2,
+      behind: 1,
+      baseChanged: [],
+      baseChangedCapped: false,
+      overlap: [],
+      conflicts: { available: true, clean: true, paths: [] },
+      movedUnderneath: [],
+      checkedOut: true,
+    },
+    {
+      onPush: (name: string) => calls.push(`push:${name}`),
+      onMergeRequest: (name: string) => calls.push(`mr:${name}`),
+    },
+  );
+
+  const actions = target.querySelector('[data-role="review-branch-actions"]');
+  assert.ok(actions);
+  (actions.querySelector('[data-role="branch-push"]') as HTMLButtonElement).click();
+  (actions.querySelector('[data-role="branch-merge-request"]') as HTMLButtonElement).click();
+  assert.deepEqual(calls, ['push:feature', 'mr:feature']);
+});
+
 test('renderBranches says why no branches are listed', () => {
   const target = document.createElement('div');
   renderBranches(target, { available: false, reason: 'no-git', detail: 'not a git repository' });
   assert.equal(target.querySelector('[data-role="branches-unavailable"]')?.textContent, 'No branches: not a git repository');
-});
-
-test('renderBranches offers Fetch and Pull, a per-branch Pull when behind, and Push only when ahead', () => {
-  const target = document.createElement('div');
-  const actions: string[] = [];
-  renderBranches(
-    target,
-    {
-      available: true,
-      current: 'main',
-      head: 'h',
-      base: { name: 'main', hash: 'h', source: 'conventional' },
-      capped: false,
-      branches: [
-        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
-        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 2, behind: 0, gone: false }, againstBase: null },
-        { name: 'behind', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/behind', ahead: 0, behind: 3, gone: false }, againstBase: null },
-        { name: 'in-sync', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/in-sync', ahead: 0, behind: 0, gone: false }, againstBase: null },
-        { name: 'unpublished', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: null, againstBase: null },
-      ],
-    },
-    {
-      onFetch: () => actions.push('fetch'),
-      onPull: () => actions.push('pull'),
-      onPullBranch: (branch: { name: string }) => actions.push(`pull:${branch.name}`),
-      onPush: (branch: { name: string }) => actions.push(`push:${branch.name}`),
-    },
-  );
-
-  const fetch = target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement;
-  const pull = target.querySelector('[data-role="branch-pull"]') as HTMLButtonElement;
-  assert.ok(fetch && pull);
-  assert.equal(pull.textContent, 'Pull main');
-  fetch.click();
-  pull.click();
-  assert.deepEqual(actions, ['fetch', 'pull']);
-
-  const pulls = [...target.querySelectorAll('[data-role="branch-pull-branch"]')] as HTMLButtonElement[];
-  assert.deepEqual(pulls.map((button) => button.dataset.branch), ['behind']);
-  assert.equal(pulls[0]?.textContent, 'Pull ↓3');
-  pulls[0]?.click();
-  assert.equal(actions.at(-1), 'pull:behind');
-
-  const pushes = [...target.querySelectorAll('[data-role="branch-push"]')] as HTMLButtonElement[];
-  assert.deepEqual(pushes.map((button) => button.dataset.branch), ['feature', 'unpublished']);
-  assert.equal(pushes[0]?.textContent, 'Push ↑2');
-  assert.equal(pushes[1]?.textContent, 'Publish');
-  pushes[0]?.click();
-  assert.equal(actions.at(-1), 'push:feature');
-});
-
-test('renderBranches disables branch actions while one is running', () => {
-  const target = document.createElement('div');
-  renderBranches(
-    target,
-    {
-      available: true,
-      current: 'main',
-      head: 'h',
-      base: { name: 'main', hash: 'h', source: 'conventional' },
-      capped: false,
-      branches: [
-        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
-        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 1, behind: 0, gone: false }, againstBase: null },
-      ],
-    },
-    { onFetch: () => {}, onPull: () => {}, onPush: () => {}, busy: true },
-  );
-  assert.equal((target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement).disabled, true);
-  assert.equal((target.querySelector('[data-role="branch-pull"]') as HTMLButtonElement).disabled, true);
-  assert.equal((target.querySelector('[data-role="branch-push"]') as HTMLButtonElement).disabled, true);
-  assert.ok(target.querySelector('[data-role="branch-busy"]'));
 });
 
 test('renderReviewLoading says the review is computing instead of claiming Git is missing', () => {

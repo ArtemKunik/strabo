@@ -139,34 +139,6 @@ test('the impact-passport endpoint serves one file card and rejects a missing fi
   assert.ok(Array.isArray(card.signals));
 });
 
-test('the branch action routes refuse a cross-origin request and require a branch', async () => {
-  const host = express();
-  host.use('/api/strabo', createStraboRouter(config));
-  const base = await listen(host);
-  const repository = `?repository=${encodeURIComponent(path.join(fixtures, 'block-repo'))}`;
-
-  const crossOrigin = await fetch(`${base}/api/strabo/analysis/branches/fetch${repository}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
-    body: JSON.stringify({}),
-  });
-  assert.equal(crossOrigin.status, 403);
-
-  const missingBranch = await fetch(`${base}/api/strabo/analysis/branches/push${repository}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
-  });
-  assert.equal(missingBranch.status, 400);
-
-  const missingPullBranch = await fetch(`${base}/api/strabo/analysis/branches/pull${repository}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({}),
-  });
-  assert.equal(missingPullBranch.status, 400);
-});
-
 test('the symbol endpoint serves the function inventory with body metrics', async () => {
   const host = express();
   host.use('/api/strabo', createStraboRouter(config));

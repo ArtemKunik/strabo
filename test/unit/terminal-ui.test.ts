@@ -32,7 +32,7 @@ import {
   tabBadge,
   tabLabels,
 } from '../../ui/strabo-terminal-tabs.js';
-import { findCitations } from '../../ui/strabo-terminal-linkify.js';
+import { findCitations, registerCitationLinks } from '../../ui/strabo-terminal-linkify.js';
 import {
   acceptOutput,
   backlogDelta,
@@ -320,6 +320,48 @@ test('findCitations returns every citation on a line in order', () => {
   assert.equal(found[1].column, 4);
   assert.deepEqual(findCitations(''), []);
 });
+
+test('registerCitationLinks passes links array to xterm callback', () => {
+  let registeredProvider = null;
+  const mockTerm = {
+    registerLinkProvider(provider) {
+      registeredProvider = provider;
+      return { dispose() {} };
+    },
+    buffer: {
+      active: {
+        getLine(lineNum) {
+          return {
+            translateToString() {
+              return 'error at src/index.ts:42';
+            },
+          };
+        },
+      },
+    },
+  };
+
+  let opened = null;
+  const dispose = registerCitationLinks(mockTerm, {
+    openSourceAt(path, line) {
+      opened = { path, line };
+    },
+  });
+
+  assert.ok(registeredProvider, 'provider was registered');
+  let result = null;
+  registeredProvider.provideLinks(1, (links) => {
+    result = links;
+  });
+
+  assert.ok(Array.isArray(result), 'callback receives an array of links');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].text, 'src/index.ts:42');
+  result[0].activate();
+  assert.deepEqual(opened, { path: 'src/index.ts', line: 42 });
+  dispose();
+});
+
 
 /* ------------------------------------------------------------- multiplexer */
 

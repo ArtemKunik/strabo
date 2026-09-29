@@ -74,22 +74,6 @@ export function stylesheet() {
         'font-size': (ele) => labelFontSize(ele.cy().zoom(), 11),
       },
     },
-    {
-      selector: 'node.structure-shelf',
-      style: {
-        'border-width': 2,
-        'border-style': 'dashed',
-        'border-color': theme.nodeLine,
-        'text-opacity': 1,
-        'text-wrap': 'wrap',
-        'text-max-width': 110,
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'text-margin-y': 0,
-        'font-weight': 600,
-        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
-      },
-    },
     // Distinct semantic tier border colors for Structure view nodes
     ...TIER_ORDER.map((tier) => ({
       selector: `node.structure-node.tier-${tier}`,
@@ -109,7 +93,23 @@ export function stylesheet() {
     { selector: 'node.large-file', style: { 'border-width': 2.5, 'border-color': theme.nodeLine } },
     // A unit/shelf draws no canvas label: its card states the name, and the box is left to
     // the card's header row. Selection is the only outline it earns (L18). Structure shelves keep labels.
-    { selector: 'node.kind-unit, node.kind-shelf:not(.structure-shelf)', style: { 'text-opacity': 0, 'border-width': 1.5 } },
+    { selector: 'node.kind-unit, node.kind-shelf', style: { 'text-opacity': 0, 'border-width': 1.5 } },
+    {
+      selector: 'node.structure-shelf, node.kind-shelf.structure-shelf',
+      style: {
+        'border-width': 2,
+        'border-style': 'dashed',
+        'border-color': theme.nodeLine,
+        'text-opacity': 1,
+        'text-wrap': 'wrap',
+        'text-max-width': 110,
+        'text-valign': 'center',
+        'text-halign': 'center',
+        'text-margin-y': 0,
+        'font-weight': 600,
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
+      },
+    },
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
     { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a

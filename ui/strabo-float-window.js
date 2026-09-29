@@ -131,7 +131,7 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
     close() {
       const hadFocus = win.contains(document.activeElement);
       if (config.onClose) config.onClose();
-      else element.hidden = true;
+      element.hidden = true;
       win.hidden = true;
       lastHidden = true;
       renderDock();

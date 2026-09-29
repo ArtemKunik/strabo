@@ -15,7 +15,6 @@ import { tierDirectionClasses } from './strabo-tiers.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
 import { renderOverlayPanel } from './strabo-panels.js';
 import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
-import { openCommitDialog } from './strabo-commit.js';
 
 export function createLensController(app) {
   const { state, view, elements, request } = app;
@@ -65,7 +64,9 @@ export function createLensController(app) {
     // The panel is shared with the analysis overlays, which take precedence when one is on.
     // With no overlay, the tier matrix is what the panel shows.
     if (state.overlay === 'none') {
-      renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier);
+      renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier, {
+        onClose: closeLensPanel,
+      });
     }
   }
 
@@ -92,17 +93,21 @@ export function createLensController(app) {
     return { available: true, partners: coChangePartnersFor(coChangeReport, id) };
   }
 
-  function clearOverlay() {
-    state.overlay = 'none';
-    elements.overlay.value = 'none';
-    view.overlay(null);
-    view.setHiddenCoupling(null, false);
-    renderOverlayPanel(elements.overlayPanel, '', null);
-    // Clearing the overlay hands the shared panel back to the tier lens when one is on.
-    if (state.tier !== 'off') {
-      void applyTierLens();
+  function closeLensPanel() {
+    if (state.overlay !== 'none') {
+      state.overlay = 'none';
+      elements.overlay.value = 'none';
+      view.overlay(null);
+      view.setHiddenCoupling(null, false);
+      app.prefs?.writeViewPrefs?.();
     }
+    renderOverlayPanel(elements.overlayPanel, '', null);
+    elements.overlayPanel.hidden = true;
     app.windows.refreshDock();
+  }
+
+  function clearOverlay() {
+    closeLensPanel();
   }
 
   /**
@@ -131,25 +136,10 @@ export function createLensController(app) {
     // K3: the hidden-coupling lens draws the no-import-path co-change edges itself, distinctly
     // from the general co-change lens, and clears them for every other overlay.
     view.setHiddenCoupling(kind === 'hidden-coupling' ? data : null, kind === 'hidden-coupling');
-    // The Change impact list is the working tree's own changes, so it is where the opt-in
-    // commit action lives. It generates a message with the narrator, then commits and pushes.
-    const actions = [];
-    if (kind === 'impact' && app.clientPrefs.commitEnabled) {
-      actions.push({
-        label: 'Commit…',
-        title: 'Generate a commit message with the narrator, then commit and push',
-        onClick: () =>
-          openCommitDialog({
-            repository: state.repository,
-            onCommitted: () => applyOverlay(),
-          }),
-      });
-    }
     renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
       kind,
-      onClose: clearOverlay,
+      onClose: closeLensPanel,
       onSelect: (id) => app.selection.selectNode(id),
-      ...(actions.length > 0 ? { actions } : {}),
     });
     app.windows.refreshDock();
   }
@@ -389,6 +379,7 @@ export function createLensController(app) {
     applyOverlay,
     applyTierLens,
     clearOverlay,
+    closeLensPanel,
     enrichUnitCards,
     loadChangesWith,
     updateCoChangeButton,

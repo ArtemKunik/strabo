@@ -278,21 +278,29 @@ sync against its upstream (`N to push`, `M to pull`, `upstream gone`, `no upstre
 divergence from a base you can pick (the remote's default branch by default), and its age.
 Counts come from the local object store and are as fresh as the last fetch.
 
-Branches is the one place Strabo writes to Git, and only through explicit buttons:
+Listing reads Git and never changes it; the counts are labelled *as of the last fetch* rather
+than implying a live remote, and selecting a branch opens its branch review. Three explicit
+buttons are the one place Strabo writes to Git:
 
-- **Fetch** runs `git fetch --prune` on the remote(s) the listed branches track (else
-  `origin`, or the repository's only remote), so the ahead/behind counts update.
-- **Push** appears on a local branch that is ahead of its upstream; a branch with no
-  upstream gets **Publish**, which pushes it and sets the upstream. It never force-pushes.
-- **Sync** runs on the checked-out branch: fetch, then fast-forward when behind (it refuses
-  a diverged branch or a dirty tree rather than merging), then push when ahead.
+- **Push / Publish** sends a local branch to its upstream; a branch with no upstream is
+  published and gets one set. A *Push* button appears when the branch is ahead of its
+  upstream, a *Publish* button when it has none (or its upstream is gone). It never
+  force-pushes, so a diverged branch fails with Git's own reason.
+- **Create MR** pushes the branch if it needs it, then builds the forge's new-merge-request
+  page from the remote URL and opens it in a tab. GitHub, GitLab, and Bitbucket are named;
+  any other host returns its repository page with `unknown-forge`. No token is stored and the
+  server never calls the forge — `GET /analysis/branches/merge-request` only computes the URL.
+- **Drop** deletes a local branch the listing already calls stale: its upstream is gone, or
+  it is fully merged into the base. The checked-out and base branches are never dropped, and
+  a live, unmerged branch is refused with a reason. Deletion is `git branch -D`, which is only
+  reached after that staleness check.
 
 The three actions are state-changing, so they are accepted only from the page's own origin
-(`isSameOriginRequest`). Every branch and remote name is validated against a strict pattern
-before it reaches Git, arguments are passed as a vector (never a shell), credential prompts
-are disabled so an unauthenticated push fails with a reason instead of hanging, and each
-action is time-bounded. A failure is classified (`no-git`, `auth`, `not-fast-forward`,
-`dirty`, `timeout`, …) and shown in the status bar.
+(`isSameOriginRequest`). Every branch name is validated against a strict pattern before it
+reaches Git, arguments are passed as a vector (never a shell), credential prompts are
+disabled so an unauthenticated push fails with a reason instead of hanging, and each action
+is time-bounded. A failure is classified (`no-git`, `auth`, `no-remote`, `unknown-forge`,
+`not-stale`, `timeout`, …) and shown in the status bar.
 
 ## Workspace analysis
 
@@ -503,19 +511,19 @@ fixed, read-only set enforced on both sides — a directive can select a node, o
 Source viewer already allows, highlight, open a review, toast, or switch screens, and nothing
 else.
 
-### Session persistence (opt-in daemon)
+### Session persistence (detached daemon)
 
-By default the PTYs live in the server process, so a restart takes the sessions with it.
-With **`STRABO_TERMINAL_DAEMON=1`** (or `--terminal-daemon`) they instead run in
-**`strabo-termd`**, a detached background process that owns the PTYs; the server talks to it
-over a per-workspace Unix socket (a named pipe on Windows) under the OS temp directory, and
-the socket's directory holds a token file that gates access (mode `0600` on POSIX). Because
-the daemon outlives the server, sessions survive a restart — including `POST /settings/restart`
-— and the server reconnects to them when it comes back. Output replay resumes from the
-client's cursor, so only what was missed is sent rather than a fresh shell. The daemon is off
-by default: an embedded host, or a machine without the native `node-pty` build, should not
-spawn a background process. When the daemon cannot be reached the server falls back to the
-in-process registry, so the terminal still works rather than failing.
+The PTYs run in **`strabo-termd`**, a detached background process that owns them, so sessions
+survive a restart of the server. The server talks to it over a per-workspace Unix socket (a
+named pipe on Windows) under the OS temp directory, and the socket's directory holds a token
+file that gates access (mode `0600` on POSIX). Because the daemon outlives the server,
+sessions survive a restart — including `POST /settings/restart` — and the server reconnects to
+them when it comes back. Output replay resumes from the client's cursor, so only what was
+missed is sent rather than a fresh shell. This is on by default;
+`STRABO_TERMINAL_DAEMON=0` (or `--no-terminal-daemon`) keeps the PTYs in the server process
+instead, and an embedded host that builds `StraboConfig` directly stays in-process too. When
+the daemon cannot be reached the server falls back to the in-process registry, so the terminal
+still works rather than failing.
 
 ## Review and History tabs
 
@@ -580,20 +588,6 @@ one node; right-clicking a node outside the group targets only that node, leavin
 untouched underneath. The generated prompt renders one evidence subsection per file rather
 than merging every file's facts into a single list, so it stays clear which claim belongs
 to which file.
-
-## Commit (narrator, opt-in)
-
-With **Settings → Commit → Narrator commit** on, the **Change impact** panel — whose list is
-the working tree's own changes — gains a **Commit…** action. It asks
-`POST /narrator/commit-message` for a message written from the recorded changes: every
-changed file with its status and line counts, plus the reverse-dependency impact. The evidence
-is built server-side from the scan, never sent by the browser, so a caller cannot steer what is
-described. The message appears in a dialog to read and edit before anything runs; confirming
-commits the whole working tree (`git add -A`) with that message and pushes the current branch,
-and **Push after commit** can be turned off. The message reaches Git as an argument, never a
-shell, and the push is never forced, so a diverged branch is reported after the commit is made
-rather than overwritten. The preference is browser-local and off by default; the narrator must
-be configured to generate a message, and one can be typed by hand when it is not.
 
 ## LLM narrator (opt-in)
 

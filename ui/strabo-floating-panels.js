@@ -116,7 +116,12 @@ export function createFloatingPanels(app) {
         onBlocked: () => {
           elements.status.textContent = 'Select an overlay or a tier colour first — the panel has nothing to show.';
         },
-        onClose: () => app.lenses.clearOverlay(),
+        onOpen: () => {
+          if (state.overlay === 'none' && state.tier !== 'off') {
+            void app.lenses.applyTierLens();
+          }
+        },
+        onClose: () => app.lenses.closeLensPanel(),
       },
       {
         key: 'edge',

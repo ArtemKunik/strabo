@@ -140,3 +140,18 @@ test('renderTierPanel says so when nothing was classified', () => {
   renderTierPanel(container, { files: [], matrix: { tiers: [], units: [], cells: [], perTier: [] }, summary: { total: 0 } });
   assert.match(container.textContent, /No file was classified into a tier/);
 });
+
+test('renderTierPanel renders dismiss button when given onClose handler', () => {
+  const container = document.createElement('div');
+  let closed = false;
+  renderTierPanel(container, sampleReport(), 'all', {
+    onClose: () => {
+      closed = true;
+    },
+  });
+  const dismiss = container.querySelector('button.panel-dismiss');
+  assert.ok(dismiss, 'dismiss button is rendered in the header');
+  dismiss?.click();
+  assert.equal(closed, true, 'onClose handler was called on dismiss click');
+});
+

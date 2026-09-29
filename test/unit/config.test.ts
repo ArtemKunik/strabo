@@ -51,6 +51,14 @@ test('readEnv permits coverage refresh only from the environment or a CLI flag',
   assert.equal(readEnv({}, ['--allow-coverage-refresh']).allowCoverageRefresh, true);
 });
 
+test('readEnv keeps the terminal daemon on unless it is explicitly disabled', () => {
+  assert.equal(readEnv({}).terminalDaemon, true);
+  assert.equal(readEnv({ STRABO_TERMINAL_DAEMON: '1' }).terminalDaemon, true);
+  assert.equal(readEnv({ STRABO_TERMINAL_DAEMON: '0' }).terminalDaemon, false);
+  assert.equal(readEnv({ STRABO_TERMINAL_DAEMON: 'off' }).terminalDaemon, false);
+  assert.equal(readEnv({}, ['--no-terminal-daemon']).terminalDaemon, false);
+});
+
 test('readEnv ignores the host arguments unless they are passed in', () => {
   const env = readEnv({ STRABO_ROOT: 'from-env' });
 

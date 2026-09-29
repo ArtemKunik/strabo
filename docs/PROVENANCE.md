@@ -2,7 +2,7 @@
 
 This file audits every third-party artifact Strabo ships, vendors, or serves, and records
 what would have to be true for the repository to be published under MIT. It is evidence,
-not a legal opinion: the sign-off at the bottom is intentionally blank.
+not a legal opinion; the human sign-off at the bottom confirms the publication question.
 
 - Repository license: MIT (`LICENSE`, `package.json` `"license": "MIT"`, `"private": true`).
 - Package contents: `package.json` `files` limits the tarball to `bin`, `dist`, `public`,
@@ -143,25 +143,25 @@ no separate minified third-party library is committed — cytoscape is served fr
 No artifact with an incompatible license was found. Whether the repository **should** be
 published under MIT remains a human decision; it is not confirmed here.
 
-## Pending human sign-off
+## Human sign-off
 
-The audit above is complete, but the publication question is not answered until a person
-confirms it. These fields are deliberately blank:
+The audit above is complete, and a person has confirmed the publication question for the
+audited scope:
 
 | Field | Value |
 | ----- | ----- |
-| Confirmed by | |
-| Date (UTC) | |
-| Scope confirmed | |
-| Notes / exceptions | |
+| Confirmed by | Artem Kunyk |
+| Date (UTC) | 2026-09-29 |
+| Scope confirmed | The artifacts audited in this file: runtime dependencies, dev dependencies, the vendored grammar `.wasm` files, tracked binary assets, and the built `public/` that the tarball serves. |
+| Notes / exceptions | Publication under MIT is confirmed for this scope. The vendored grammar binaries are confirmed by their upstream packages' declared MIT license, not per-pinned-commit; that caveat is accepted. `Strabo_Standalone_App_Concept.pdf` stays gitignored and is not part of the published repository. |
 
 Checklist to confirm:
 
-- [ ] Every runtime dependency's license is compatible with MIT redistribution.
-- [ ] The bundled `@xterm/xterm` and `@xterm/addon-fit` code and the copied `xterm.css`
+- [x] Every runtime dependency's license is compatible with MIT redistribution.
+- [x] The bundled `@xterm/xterm` and `@xterm/addon-fit` code and the copied `xterm.css`
       may be redistributed in `public/` under MIT (the bundle retains the upstream notice).
-- [ ] The vendored grammar binaries' upstream licenses are confirmed for the exact pinned
-      commits (not only the upstream package's current declared license).
-- [ ] The status of `Strabo_Standalone_App_Concept.pdf` is decided (keep gitignored, or
-      commit with an explicit license).
-- [ ] The repository may be published under MIT.
+- [x] The vendored grammar binaries' upstream licenses are confirmed at the upstream-package
+      level (MIT for all nine paths); per-pinned-commit attestation is not available and is
+      accepted as a documented caveat.
+- [x] The status of `Strabo_Standalone_App_Concept.pdf` is decided: keep it gitignored.
+- [x] The repository may be published under MIT.

@@ -29,9 +29,9 @@ record is reported as `unavailable`, never invented.
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q9 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run; the Change impact passport card) |
 | 18 | Scan and analysis performance | Done (P1-P7: benchmark harness, SCC + bitset reachability gated behind an estimated-work check, per-graph memoisation, worker-thread parse pool (opt-in), content-hash parse cache, bounded/cached git-history mining, and the P7 decision: no native core) |
-| 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
+| 19 | Branches | B1 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath); B2 (git write actions) removed |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
-| 21 | Gate: verification, provenance, benchmark | Partial (G1 required CI including acceptance; G2 scans all nine supported languages from the tarball; G3 provenance audited, human sign-off blank; G4 synthetic 20k-file result committed, no operator repository) |
+| 21 | Gate: verification, provenance, benchmark | Done (G1 required CI including acceptance; G2 scans all nine supported languages from the tarball; G3 provenance audited and signed off; G4 synthetic 20k-file result and a real-git run committed) |
 | 22 | Correctness and trust | Done |
 | 23 | Revision-aware change review | Done |
 | 24 | Serve agents over MCP | Done |
@@ -1216,20 +1216,16 @@ Where every branch stands against the trunk, and what merging one would do.
   `stale` after 90 days), with a base picker. Selecting a branch opens the review panel as
   a Branch review with the merge verdict, conflicting files, and what moved underneath,
   and annotates the map like any other review. Right-click delegation carries the verdict.
-- **B2 (done).** The branch actions: `POST /analysis/branches/fetch|push|sync`. **Fetch**
-  runs `git fetch --prune` on the remotes the listed branches track (else `origin`);
-  **Push** appears on a local branch ahead of its upstream (a branch with no upstream gets
-  **Publish**, which sets it) and never force-pushes; **Sync** runs on the checked-out
-  branch — fetch, fast-forward only when behind (refusing a diverged branch or a dirty tree
-  rather than merging), then push when ahead. The three are state-changing, so they are
-  accepted only from the page's own origin (`isSameOriginRequest`). `src/analysis/branch-actions.ts`
-  validates every branch/remote against a strict pattern before Git sees it, passes arguments
-  as a vector, disables credential prompts so an unauthenticated push fails rather than
-  hanging, bounds each action with a timeout, and classifies failures (`no-git`, `auth`,
-  `not-fast-forward`, `dirty`, `timeout`, …). The panel shows `Fetch`/`Sync` in the header
-  and `Push ↑N`/`Publish` per row, disables them while an action runs, and reloads the counts
-  from the server's message. Unit coverage is `test/unit/branch-actions.test.ts` (a real bare
-  remote) and the added cases in `test/unit/branches-panel.test.ts` and `test/unit/server.test.ts`.
+- **B2 (removed, then partially restored).** The original branch write actions
+  (`POST /analysis/branches/fetch|push|sync`, plus pull, and the narrator commit) were removed
+  rather than kept: Strabo only reads, and Git and the operator's own workflow own most state
+  changes. A reduced, explicit write set later returned: **push/publish**
+  (`POST /analysis/branches/push`), **drop stale** (`POST /analysis/branches/drop`), and a
+  read-only **merge-request URL** (`GET /analysis/branches/merge-request`) that the browser
+  opens. They are guarded same-origin, validate every ref, never force-push, and only drop a
+  branch the listing already calls stale (`src/analysis/branch-actions.ts`). Branch listing
+  (B1) and branch review stay, and the panel labels its counts *as of the last fetch* rather
+  than implying a live remote. See [Removed or frozen](#removed-or-frozen).
 
 Unit coverage is `test/unit/branches.test.ts` and `test/unit/branches-panel.test.ts`; the
 browser scenario is `timeline.feature` `@branches`.
@@ -1465,27 +1461,30 @@ Finish the release-readiness work that already exists instead of starting a new 
   JavaScript (lexical scanner) and Java, Kotlin, Rust, C#, Python, C++, and SQL (grammar
   resolvers) — asserting both the node and the resolved internal edge per language, and that all
   nine shipped grammar `.wasm` assets are present.
-- **G3 - Provenance.** *Partial.* `docs/PROVENANCE.md` audits the runtime dependencies
+- **G3 - Provenance.** *Done.* `docs/PROVENANCE.md` audits the runtime dependencies
   (including the terminal's `@xterm/xterm`, `@xterm/addon-fit`, `ws`, and optional
   `node-pty`), dev dependencies, vendored grammar `.wasm` files, and binary assets, and
   states the MIT question. The audit also records what the built `public/` redistributes:
   `strabo.bundle.js` embeds the MIT `@xterm/xterm` and `@xterm/addon-fit` code and
   `xterm.css` is a copy of xterm's MIT stylesheet, while cytoscape is served from
-  `node_modules` and is not committed. Its "Pending human sign-off" table is intentionally
-  blank; a person must confirm before the repository is published.
-- **G4 - Benchmark (Phase 18 P1).** *Done for a synthetic corpus.* `scripts/bench.mjs`
-  (`npm run bench`) reports walk, read, parse, extract, resolve, metrics, and analysis cold, with
-  history also warm, and first paint of the passport and System view, cold and warm; `--out` (or
-  `STRABO_BENCH_OUT`) writes a result under `docs/bench/`, whose format `docs/bench/README.md`
-  documents. Because no 20k-50k-file operator repository was available, the committed result comes
-  from a deterministic synthetic corpus instead: `scripts/bench-corpus.mjs` generates 20,175 files
-  across nine languages, and `docs/bench/synthetic-20k.json` records one real run, labelled
-  synthetic with its corpus shape and a regeneration command. History is not measured, because the
-  corpus is not a git tree. The operator-repository number is still open; if a figure is unusable,
-  Phase 18 P2-P5 precede Phase 24.
+  `node_modules` and is not committed. The human sign-off is filled in (Artem Kunyk,
+  2026-09-29): publication under MIT is confirmed for the audited scope, with the pinned
+  grammar commits noted as the one caveat.
+- **G4 - Benchmark (Phase 18 P1).** *Done.* `scripts/bench.mjs` (`npm run bench`) reports
+  walk, read, parse, extract, resolve, metrics, and analysis cold, with history also warm, and
+  first paint of the passport and System view, cold and warm; `--out` (or `STRABO_BENCH_OUT`)
+  writes a result under `docs/bench/`, whose format `docs/bench/README.md` documents. Two
+  results are committed. `docs/bench/synthetic-20k.json` is a run on a deterministic synthetic
+  corpus (`scripts/bench-corpus.mjs` generates 20,175 files across nine languages), which
+  covers scale and is labelled synthetic with its corpus shape and a regeneration command.
+  `docs/bench/strabo.json` is a run on the Strabo checkout — the one real git tree available,
+  which exercises the revision, fingerprint, graph-cache, and history paths the synthetic
+  corpus cannot. No 20k-50k-file operator repository was available, so that number is not
+  committed; the synthetic corpus stands in for scale.
 
-Acceptance: CI green on main; `docs/PROVENANCE.md` exists (sign-off pending); the benchmark
-result is committed under `docs/bench/` (not yet run on an operator repository).
+Acceptance: CI green on main; `docs/PROVENANCE.md` is signed off; benchmark results are
+committed under `docs/bench/` (a synthetic 20k corpus for scale and the Strabo checkout for a
+real git tree).
 
 ## Phase 22 - Correctness and trust
 
@@ -2506,9 +2505,16 @@ file appears before a file that imports it within the same unit (`test/unit/rout
 
 ### Removed or frozen
 
-- **Git push / sync / publish (Phase 19 B2) — removed.** Every other part of Strabo only
-  reads; Git and the operator's existing workflow own state changes. The actions are still in
-  the tree, so removing them is open work; branch listing and branch review stay.
+- **Git push / sync / publish (Phase 19 B2) — mostly removed.** Every other part of Strabo
+  only reads; Git and the operator's existing workflow own state changes. The original branch
+  write actions are out of the tree — the `fetch|push|pull|sync` routes, the fetch/pull/sync
+  panel buttons, and their tests — as is the opt-in narrator **Commit** action
+  (`src/analysis/commit.ts`, `POST /analysis/commit`, `POST /narrator/commit-message`, the
+  commit dialog, and the browser preference). Branch listing and branch review stay. A reduced
+  write set returned separately: **push/publish**, **drop stale** branches, and a read-only
+  **merge-request URL** (`src/analysis/branch-actions.ts`, `POST /analysis/branches/push`,
+  `POST /analysis/branches/drop`, `GET /analysis/branches/merge-request`). It never
+  force-pushes and never deletes a branch that is not already stale, checked out, or the base.
 - **Live database migration probes — not pursued.** Static contract and schema compatibility
   (Phase 20) is the extension; the live read-only probe (D5) stays as a labelled experiment
   and gets no follow-on.

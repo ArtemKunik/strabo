@@ -76,36 +76,6 @@
   border: 1px solid var(--line);
 }
 
-/* Fetch / Sync in the header, Push on a row: the only branch actions that write. */
-.branch-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 2px;
-}
-
-.branch-action {
-  padding: 1px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-2);
-  color: var(--ink-1);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.branch-action:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent-ink);
-}
-
-.branch-action:disabled {
-  color: var(--ink-3);
-  cursor: default;
-}
-
 .divergence {
   display: inline-flex;
   align-items: center;
@@ -167,5 +137,38 @@
 
 .merge-verdict.conflicted {
   border-left-color: var(--status-critical);
+}
+
+/* The explicit write actions a branch row or a branch review offers. */
+.branch-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-branch-actions {
+  margin: 6px 0;
+}
+
+.branch-action {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--input-bg);
+  color: var(--ink-1);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.branch-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.branch-action.branch-drop:hover {
+  border-color: var(--status-critical);
+  color: var(--status-critical);
 }
 

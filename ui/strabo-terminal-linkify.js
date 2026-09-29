@@ -83,8 +83,8 @@ export function registerCitationLinks(term, { openSourceAt } = {}) {
         callback(undefined);
         return;
       }
-      callback({
-        links: citations.map((citation) => ({
+      callback(
+        citations.map((citation) => ({
           range: {
             start: { x: citation.index + 1, y: bufferLineNumber },
             end: { x: citation.index + citation.length, y: bufferLineNumber },
@@ -93,7 +93,7 @@ export function registerCitationLinks(term, { openSourceAt } = {}) {
           decorations: { underline: true, pointerCursor: true },
           activate: () => openSourceAt?.(citation.path, citation.line),
         })),
-      });
+      );
     },
   };
   const disposable = term.registerLinkProvider(provider);

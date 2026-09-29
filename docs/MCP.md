@@ -53,7 +53,7 @@ opencode, in `opencode.json`:
   stderr, and never opens a network listener, so it is not reachable from the network and
   cannot be used to write to the repository.
 - Only `initialize`, `ping`, `tools/list`, and `tools/call` are answered. State-changing HTTP
-  routes — `PUT /settings`, the branch fetch/push/sync actions — are not exposed as tools.
+  routes — `PUT /settings` and `POST /settings/restart` — are not exposed as tools.
 - Every path resolves through the configured scan ceiling, the same boundary the server uses.
   A `repository` argument outside the ceiling is refused, not silently clamped.
 - Starting the server is explicit: the bare `strabo` command serves the HTTP UI; only

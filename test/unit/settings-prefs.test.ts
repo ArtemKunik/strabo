@@ -53,7 +53,6 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
     labels: false,
     allLabels: false,
     reduceMotion: false,
-    commitEnabled: false,
     locThreshold: LOC_THRESHOLD_DEFAULT,
   });
 });
@@ -61,7 +60,7 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
 test('writeSettings round-trips a sanitized preference set', () => {
   const storage = fakeStorage();
   writeSettings(
-    { theme: 'light', defaultDetail: 'file', labels: false, allLabels: true, reduceMotion: true, commitEnabled: true, locThreshold: 450 },
+    { theme: 'light', defaultDetail: 'file', labels: false, allLabels: true, reduceMotion: true, locThreshold: 450 },
     storage,
   );
   assert.deepEqual(readSettings(storage), {
@@ -70,7 +69,6 @@ test('writeSettings round-trips a sanitized preference set', () => {
     labels: false,
     allLabels: true,
     reduceMotion: true,
-    commitEnabled: true,
     locThreshold: 450,
   });
 });
@@ -98,14 +96,6 @@ test('sanitizeLocThreshold coerces and clamps a typed value', () => {
   assert.equal(sanitizeLocThreshold('abc'), null);
   assert.equal(sanitizeLocThreshold(undefined), null);
   assert.equal(sanitizeLocThreshold(LOC_THRESHOLD_MAX + 1000), LOC_THRESHOLD_MAX);
-});
-
-test('the commit action is off by default and only a boolean turns it on', () => {
-  assert.equal(defaultSettings().commitEnabled, false);
-  const storage = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ commitEnabled: 'yes' }) });
-  assert.equal(readSettings(storage).commitEnabled, false);
-  const on = fakeStorage({ [SETTINGS_KEY]: JSON.stringify({ commitEnabled: true }) });
-  assert.equal(readSettings(on).commitEnabled, true);
 });
 
 test('resolveTheme follows the OS only for the system setting', () => {

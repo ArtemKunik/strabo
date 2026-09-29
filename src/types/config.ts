@@ -67,9 +67,11 @@ export interface StraboConfig {
   autoRebuild?: boolean;
   /**
    * Run terminal sessions in a detached `strabo-termd` daemon so they survive a server
-   * restart. Off by default: the in-process registry is simpler, and an embedded host
-   * or a machine without the native `node-pty` build should not spawn a background process.
-   * `STRABO_TERMINAL_DAEMON=1` or `--terminal-daemon` turns it on.
+   * restart. On by default, because a restart must not take the operator's sessions with
+   * it; `STRABO_TERMINAL_DAEMON=0` (or `--no-terminal-daemon`) restores the in-process
+   * registry. An embedder that builds `StraboConfig` directly leaves this unset and keeps
+   * its sessions in-process. When the daemon cannot be reached the registry falls back to
+   * in-process sessions rather than failing.
    */
   terminalDaemon?: boolean;
   integrations?: StraboIntegrations;
