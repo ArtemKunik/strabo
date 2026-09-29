@@ -1,8 +1,33 @@
 import type { EdgeRelationship, Graph, GraphEdge } from '../types.ts';
+import { transitiveReach } from './reachability.ts';
 
 export interface Adjacency {
   forward: Map<string, string[]>;
   backward: Map<string, string[]>;
+}
+
+/**
+ * Per-graph caches for the two whole-graph derivations several analyses call.
+ *
+ * The graph object is the key (a `WeakMap`), so a fresh scan gets a fresh cache and an old
+ * one is collected; an unchanged graph served from the cache recomputes nothing. The
+ * adjacency cache is keyed by its options (there are three variants); the metrics cache is
+ * keyed by the adjacency identity, since a caller that passes its own adjacency must not read
+ * another one's numbers.
+ */
+const adjacencyCache = new WeakMap<Graph, Map<string, Adjacency>>();
+
+const metricsCache = new WeakMap<Graph, WeakMap<Adjacency, GraphMetrics>>();
+
+/** A stable key for one adjacency-options combination. */
+function adjacencyKey(options: AdjacencyOptions): string {
+  return `${options.includeDeclare === true ? 'd' : ''}${options.includeReExports === true ? 'r' : ''}`;
+}
+
+/** Drop a graph's memoised adjacency and metrics; tests call this to isolate cases. */
+export function clearAnalysisCache(graph: Graph): void {
+  adjacencyCache.delete(graph);
+  metricsCache.delete(graph);
 }
 
 /**
@@ -45,6 +70,22 @@ export interface AdjacencyOptions {
  * pass `{ includeDeclare: true }` to count every drawn edge.
  */
 export function buildAdjacency(graph: Graph, options: AdjacencyOptions = {}): Adjacency {
+  let byKey = adjacencyCache.get(graph);
+  if (!byKey) {
+    byKey = new Map<string, Adjacency>();
+    adjacencyCache.set(graph, byKey);
+  }
+  const key = adjacencyKey(options);
+  const cached = byKey.get(key);
+  if (cached) {
+    return cached;
+  }
+  const build = buildAdjacencyUncached(graph, options);
+  byKey.set(key, build);
+  return build;
+}
+
+function buildAdjacencyUncached(graph: Graph, options: AdjacencyOptions): Adjacency {
   const forward = new Map<string, string[]>();
   const backward = new Map<string, string[]>();
   for (const node of graph.nodes) {
@@ -85,12 +126,29 @@ export interface GraphMetrics {
 /**
  * Direct fan-in/fan-out plus transitive dependencies and dependents.
  *
- * The concept calls for an SCC-reachability algorithm when the bitset allocation is
- * safe, otherwise a cycle-safe iterative depth-first traversal. The DFS below is the safe
- * baseline; the optimised path is tracked as a follow-up.
+ * Transitive reach is computed by SCC condensation + bitset reachability (Phase 18 P2) when
+ * the allocation is safe, so a cycle's members share one set and each component is built once;
+ * otherwise a cycle-safe iterative depth-first traversal runs. The two are equivalent by
+ * construction and asserted so in the tests.
  */
 export function computeGraphMetrics(graph: Graph, adjacency?: Adjacency): GraphMetrics {
-  const { forward, backward } = adjacency ?? buildAdjacency(graph);
+  const resolved = adjacency ?? buildAdjacency(graph);
+  let byAdjacency = metricsCache.get(graph);
+  if (!byAdjacency) {
+    byAdjacency = new WeakMap<Adjacency, GraphMetrics>();
+    metricsCache.set(graph, byAdjacency);
+  }
+  const cached = byAdjacency.get(resolved);
+  if (cached) {
+    return cached;
+  }
+  const computed = computeGraphMetricsUncached(graph, resolved);
+  byAdjacency.set(resolved, computed);
+  return computed;
+}
+
+function computeGraphMetricsUncached(graph: Graph, adjacency: Adjacency): GraphMetrics {
+  const { forward, backward } = adjacency;
   const fanIn = new Map<string, number>();
   const fanOut = new Map<string, number>();
   for (const node of graph.nodes) {
@@ -98,11 +156,21 @@ export function computeGraphMetrics(graph: Graph, adjacency?: Adjacency): GraphM
     fanOut.set(node.id, new Set(forward.get(node.id) ?? []).size);
   }
 
+  const ids = graph.nodes.map((node) => node.id);
+  const dependents = transitiveReach(ids, backward);
+  const dependencies = transitiveReach(ids, forward);
+
   const transitiveDependents = new Map<string, number>();
   const transitiveDependencies = new Map<string, number>();
   for (const node of graph.nodes) {
-    transitiveDependents.set(node.id, reachableSize(node.id, backward));
-    transitiveDependencies.set(node.id, reachableSize(node.id, forward));
+    transitiveDependents.set(
+      node.id,
+      dependents?.get(node.id) ?? reachableSize(node.id, backward),
+    );
+    transitiveDependencies.set(
+      node.id,
+      dependencies?.get(node.id) ?? reachableSize(node.id, forward),
+    );
   }
   return { fanIn, fanOut, transitiveDependents, transitiveDependencies };
 }
