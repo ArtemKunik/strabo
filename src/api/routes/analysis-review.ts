@@ -42,7 +42,8 @@ export function createReviewRouter(context: AnalysisContext): Router {
   /**
    * The structural diff between HEAD and `base`: dependency edges, cycles, wrong-way tier
    * edges, entry points, and test reach that appeared or disappeared. The base graph is
-   * scanned from a temporary worktree; an unreadable base is returned `unavailable`.
+   * built from the commit's own blobs (never the working tree); an unreadable base is
+   * returned `unavailable`.
    */
   router.get('/analysis/structural-diff', async (request, response) => {
     try {

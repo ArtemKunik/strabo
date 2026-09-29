@@ -72,18 +72,28 @@ Canonical names and aliases share one implementation, so they cannot drift.
 | `strabo_path` | `get_dependency_path` | the shortest recorded path between two files, each hop with evidence |
 | `strabo_coverage` | `get_coverage` | test coverage at the project, folder, or file scope from the repository's own measured report, with test-reach as the labelled fallback |
 
-Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_dead_code`,
-`get_scope_fence` (changed paths outside a declared zone, plus inside changes imported from
-outside), `get_public_api_diff` (exported symbols added, removed, or re-signed between two
-revisions, with their recorded consumers), `get_clones` (functions whose normalised bodies
-hash the same), `get_string_edges` (environment variables, HTTP routes, and feature flags,
-with dynamic keys reported as not resolved), `strabo_rules` (the declared architecture rules
-and the edges that violate them), `get_drift` (one structural-measure series per recent
-revision, a gap rather than a zero where the cache has no measure), `get_data_contracts`
-(the governed data contracts: definitions with declared-vs-DTO origin, governed boundaries
-with conformance, uncontracted crossings, orphaned contracts, unverified matches),
-`get_contract_consumers` (downstream files and units for one contract id or field), and
-`check_contract_conformance` (schema fields, access roles, and recorded deviations per
+Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_tier_flow`
+(the application logical structure from the tier lens: ranked tiers, cross-tier dependency
+edges with weights and cross-unit flags, support tiers on the shelf, and the intra-tier
+ratio), `get_dead_code`, `get_scope_fence` (changed paths outside a declared zone, plus
+inside changes imported from outside), `get_uncovered_changes` (changed-line coverage:
+git-diff additions intersected with the repository's measured coverage report, with
+uncovered modified functions, public-surface functions first), `get_public_api_diff`
+(exported symbols added, removed, or re-signed between two revisions, with their recorded
+consumers), `get_clones` (functions whose normalised bodies hash the same), `get_string_edges`
+(environment variables, HTTP routes, and feature flags, with dynamic keys reported as not
+resolved), `strabo_rules` (the declared architecture rules and the edges that violate them),
+`get_drift` (one structural-measure series per recent revision, a gap rather than a zero
+where the cache has no measure), `get_data_products` (the recorded data layer: datasets,
+declared data products with their ports, owners, contracts, and conformance findings,
+undeclared product candidates, and event/message flows), `get_data_lineage` (static lineage
+for one dataset or all of it: the recorded `derives` edges with their evidence lines and the
+upstream and downstream datasets), `get_dataset_consumers` (who reads a dataset or column:
+recorded readers, downstream datasets, governing contracts, and owning data products),
+`get_data_contracts` (the governed data contracts: definitions with declared-vs-DTO origin,
+governed boundaries with conformance, uncontracted crossings, orphaned contracts, unverified
+matches), `get_contract_consumers` (downstream files and units for one contract id or field),
+and `check_contract_conformance` (schema fields, access roles, and recorded deviations per
 governed edge; uncontracted pairs are reported, never conforming).
 
 File-level tools carry the recorded edge, not only the target path: each edge is the graph's

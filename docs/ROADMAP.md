@@ -1541,17 +1541,18 @@ Several items already landed in part; each entry names what remains.
 The change passport computes impact on the current graph and compares with HEAD. Make the
 comparison honest.
 
-- **R1 - Graphs per revision.** *Done.* The base graph is built from committed blobs via
-  `git show <rev>:<path>` (`src/analysis/structural-diff.ts`; the temp worktree is gone) and
+- **R1 - Graphs per revision.** *Done.* The base graph is built from committed blobs (read
+  with `git cat-file --batch`, falling back to `git show <rev>:<path>`; never the working tree,
+  no temporary worktree) (`src/analysis/structural-diff.ts`) and
   cached by resolved commit sha: an in-memory LRU in front of an on-disk store under
   `cacheRoot()` (`REVISION_GRAPH_VERSION`, atomic writes, malformed or version-mismatched
   entries ignored and rebuilt). Acceptance: the same revision is served from cache and a
   changed revision gets a distinct key (`test/unit/revision-graph.test.ts`).
 - **R2 - Comparisons named by kind.** *Done.* The review result union names
-  `commit | working-tree | branch` (`src/analysis/review.ts:32`); a commit review uses
-  `--first-parent` (`src/analysis/review.ts:88`), a branch review is `merge-base..tip`
-  (`src/analysis/branches.ts:157,167-168`), and the panel titles each
-  (`ui/strabo-panel-review.js:149-154`). A generic two-revision review is served only by
+  `commit | working-tree | branch` (`src/analysis/review.ts:49`); a commit review uses
+  `--first-parent` (`src/analysis/review.ts:104-107`), a branch review is `merge-base..tip`
+  (`src/analysis/branches.ts:153,163-164`), and the panel titles each
+  (`ui/strabo-panel-review.js:247-254`). A generic two-revision review is served only by
   range metrics / structural diff.
 - **R3 - Function and graph deltas.** *Done.* Functions added, removed, and changed carry both
   sides' metrics and signals, and edges added and removed come from the two-graph structural
@@ -1571,12 +1572,13 @@ Expose recorded facts to coding agents, so an agent can ask what a file reaches 
 edits. This supersedes the earlier interoperability phase's MCP follow-up.
 
 - **S1 - `strabo mcp [path]`.** *Done.* Stdio JSON-RPC over the same scanner, cache, and
-  `resolveRepositoryRoot` boundary (`src/cli.ts:54,68-72`, `src/mcp/server.ts:100-129`).
+  `resolveRepositoryRoot` boundary (`src/cli.ts:76-77,90-94`, `src/mcp/server.ts:100-129`).
   Read-only: only `initialize`, `ping`, `tools/list`, and `tools/call` are answered
   (`src/mcp/server.ts:39-63`). No network listener.
 - **S2 - Tools returning evidence, never prose.** *Done.* `strabo_passport`, `strabo_file`,
-  `strabo_impact`, `strabo_review`, and `strabo_path` are aliases of the canonical tools
-  (`src/mcp/tools.ts:47-53`); `strabo_file` returns imports, importers, reach, owners, the
+  `strabo_impact`, `strabo_review`, `strabo_path`, and `strabo_coverage` are aliases of the
+  canonical tools (`src/mcp/tools.ts:52-60`); `strabo_file` returns imports, importers, reach,
+  owners, the
   source line + specifier behind each edge, and now tier and unit composed from the canonical
   tier lens, with `tierUnavailable` in the `unavailable` contract; `strabo_impact` attaches
   tier/unit to each affected entry (`src/mcp/tools.ts`, `docs/MCP.md`).
@@ -1584,7 +1586,9 @@ edits. This supersedes the earlier interoperability phase's MCP follow-up.
   `listsTruncated`, and a per-list `path/shown/total/omitted/nextOffset`; an over-cap body is
   replaced by a marker naming the cap (`src/mcp/tools.ts:16-23,108-191`).
 - **S4 - `docs/MCP.md`.** *Done.* Config for Claude Code and opencode, the read-only
-  boundary, and the `unavailable` contract (`docs/MCP.md`).
+  boundary, and the `unavailable` contract (`docs/MCP.md`). The tool list names all 25
+  canonical tools and all six aliases, including the coverage, tier-flow, and data-layer
+  tools added by later phases.
 
 Delegate stays, but MCP becomes the cross-platform way agents consume Strabo.
 
