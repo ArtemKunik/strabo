@@ -48,18 +48,35 @@ export async function withParseCache<T>(
   key: string,
   produce: () => Promise<T> | T,
 ): Promise<T> {
-  const cached = store.get(key);
-  if (cached) {
-    hits += 1;
-    return cached.value as T;
+  const cached = readParseCache<T>(key);
+  if (cached !== undefined) {
+    return cached;
   }
-  misses += 1;
   const value = await produce();
+  writeParseCache(key, value);
+  return value;
+}
+
+/**
+ * Read one cached extraction, or `undefined` on a miss. A hit is counted here, so a caller
+ * that batches misses (the pool) and writes them back records the statistics correctly.
+ */
+export function readParseCache<T>(key: string): T | undefined {
+  const cached = store.get(key);
+  if (!cached) {
+    misses += 1;
+    return undefined;
+  }
+  hits += 1;
+  return cached.value as T;
+}
+
+/** Store one extraction under the cap, evicting the least-recently-inserted entry when full. */
+export function writeParseCache<T>(key: string, value: T): void {
   store.set(key, { value, serial: (serial += 1) });
   if (store.size > MAX_ENTRIES) {
     evictOldest();
   }
-  return value;
 }
 
 /** Drop the oldest entries until the store is back under the cap. */

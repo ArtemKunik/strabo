@@ -219,8 +219,12 @@ export {
   clearParseCache,
   parseCacheKey,
   parseCacheStats,
+  readParseCache,
   withParseCache,
+  writeParseCache,
 } from './scan/parse-cache.ts';
+export { DEFAULT_POOL_SIZE, extractWithPool, workersAvailable } from './scan/languages/extract-pool.ts';
+export type { ExtractTask, ExtractOutcome } from './scan/languages/extract-pool.ts';
 export { computeRiskyUntested, riskyUntestedCaption } from './analysis/coverage-risk.ts';
 export type {
   RiskyUntestedInput,

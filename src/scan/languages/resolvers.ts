@@ -5,7 +5,8 @@ import { type CppFileFacts, extractCppFacts, resolveCpp } from './cpp.ts';
 import { type CSharpFileFacts, extractCSharpFacts, resolveCSharp } from './csharp.ts';
 import { type JavaFileFacts, extractJavaFacts, resolveJava } from './java.ts';
 import { type KotlinFileFacts, extractKotlinFacts, resolveKotlin } from './kotlin.ts';
-import { parseCacheKey, withParseCache } from '../parse-cache.ts';
+import { parseCacheKey, readParseCache, writeParseCache } from '../parse-cache.ts';
+import { extractWithPool } from './extract-pool.ts';
 import { GrammarUnavailableError } from './parser-runtime.ts';
 import { type PythonFileFacts, extractPythonFacts, resolvePython } from './python.ts';
 import { type RustFileFacts, extractRustFacts, resolveRust } from './rust.ts';
@@ -71,6 +72,15 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
     extensions,
     async resolve(files, contentByFile, diagnostics) {
       const facts: TFacts[] = [];
+      // Read every file first, and consult the content-hash cache (P5) for each. Only the
+      // misses become pool tasks (P4), so an unchanged file is neither read again from the
+      // parser nor sent to a worker. A file that cannot be read is a diagnostic, not a task.
+      const misses: Array<{ file: string; content: string; key: string }> = [];
+      interface Resolved {
+        facts: TFacts | null;
+        diagnostics: Diagnostic[];
+      }
+      const byFile = new Map<string, Resolved>();
       for (const file of files) {
         const content = readContent(file, contentByFile);
         if (content === null) {
@@ -83,19 +93,41 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
           });
           continue;
         }
-        try {
-          // The extraction is pure over one file's content, so it is cached by content hash
-          // (P5): an unchanged file is not re-parsed on the next scan. A failure is not
-          // cached, so a transient grammar load failure is retried rather than remembered.
-          const extraction = await withParseCache(
-            parseCacheKey(language, content),
-            () => extract(file, content),
-          );
-          facts.push(extraction.facts);
-          diagnostics.push(...extraction.diagnostics);
-        } catch (error) {
-          diagnostics.push(toDiagnostic(file, error));
+        const key = parseCacheKey(language, content);
+        const cached = readParseCache<{ facts: TFacts; diagnostics: Diagnostic[] }>(key);
+        if (cached) {
+          byFile.set(file, { facts: cached.facts, diagnostics: cached.diagnostics });
+        } else {
+          misses.push({ file, content, key });
         }
+      }
+
+      if (misses.length > 0) {
+        const outcomes = await extractWithPool(
+          misses.map((entry) => ({ language, file: entry.file, content: entry.content })),
+        );
+        misses.forEach((entry, index) => {
+          const outcome = outcomes[index]!;
+          if (outcome.facts === undefined) {
+            byFile.set(entry.file, { facts: null, diagnostics: outcome.diagnostics });
+            return;
+          }
+          const record = { facts: outcome.facts as TFacts, diagnostics: outcome.diagnostics };
+          byFile.set(entry.file, record);
+          // Only a real extraction is cached; a failure is retried next scan.
+          writeParseCache(entry.key, record);
+        });
+      }
+
+      for (const file of files) {
+        const resolved = byFile.get(file);
+        if (!resolved) {
+          continue;
+        }
+        if (resolved.facts !== null) {
+          facts.push(resolved.facts);
+        }
+        diagnostics.push(...resolved.diagnostics);
       }
       const resolution = resolve(facts);
       return { edges: resolution.edges, diagnostics: resolution.diagnostics };
