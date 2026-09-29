@@ -50,6 +50,7 @@ export {
 export {
   renderReview,
   renderReviewLoading,
+  renderContractImpact,
   scopeFenceGroups,
   structuralDiffGroups,
   structuralEdgeLabel,

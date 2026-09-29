@@ -29,6 +29,40 @@ import { passportProvenanceText } from './strabo-panel-workspace.js';
 
 
 /**
+ * The Contract Impact section (Phase 36 K4): when a contract file (`.proto`, OpenAPI
+ * YAML/JSON, JSON Schema, dbt model contract, or DTO) is edited in a branch or review,
+ * the impacted consumers and severity (`breaking` vs `additive`). Pure: renders the
+ * impacts the server computed; an empty list renders an explicit all-clear.
+ */
+export function renderContractImpact(container, impacts) {
+  const section = document.createElement('div');
+  section.dataset.role = 'contract-impact';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Contract Impact';
+  section.append(heading);
+  const list = Array.isArray(impacts) ? impacts : [];
+  if (list.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'unavailable';
+    note.textContent = 'No edited file defines a recorded contract.';
+    section.append(note);
+  } else {
+    const items = document.createElement('ul');
+    for (const impact of list.slice(0, 50)) {
+      const item = document.createElement('li');
+      const consumers = (impact.consumers ?? []).join(', ') || 'no recorded consumer';
+      item.textContent =
+        `${impact.contract} · ${impact.severity} · ` +
+        `${(impact.changes ?? []).length} field change(s) · consumers: ${consumers}`;
+      items.append(item);
+    }
+    section.append(items);
+  }
+  container.append(section);
+}
+
+
+/**
  * Show that a review is being computed. The panel's window opens before the request
  * settles, and a full review of a large change can take tens of seconds, so without this
  * the window would show whatever the previous render left behind.

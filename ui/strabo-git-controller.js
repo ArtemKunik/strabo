@@ -7,6 +7,7 @@
 
 import {
   renderBranches,
+  renderContractImpact,
   renderReview,
   renderReviewLoading,
   renderRisk,
@@ -293,14 +294,46 @@ export function createGitController(app) {
     view.overlay(overlay.classes);
     elements.reviewPanel.hidden = false;
     renderReview(elements.reviewPanel, data, reviewHandlers(data, navigation));
+    void augmentWithContractImpact(elements.reviewPanel, data, ticket);
     // The full-screen Review tab mirrors the panel's evidence, so re-render it too when it is
     // the active screen; otherwise the tab would show the review it had before this one.
     if (store.get().ui.screen === 'review') {
       renderReview(elements.reviewScreenBody, data, reviewHandlers(data, navigation, () => app.setScreen('graph')));
+      void augmentWithContractImpact(elements.reviewScreenBody, data, ticket);
     }
     const label = branchName ?? (commit ? commit.shortHash : 'working tree');
     const where = !query && worktree ? ` in ${worktreeName(worktree)}` : '';
     elements.status.textContent = `Review ${label}${where}: ${overlay.summary}`;
+  }
+
+  /**
+   * The Contract Impact section (Phase 36 K4): when a contract file is edited in the
+   * reviewed change, name the impacted consumers and severity. A late response is
+   * dropped, and a failed load leaves the recorded review standing alone.
+   */
+  async function augmentWithContractImpact(container, data, ticket) {
+    const files = (data?.files ?? []).map((file) => file.path).filter((path) => typeof path === 'string');
+    if (files.length === 0 || ticket !== reviewTicket) {
+      return;
+    }
+    let impacts = null;
+    try {
+      const response = await fetch(`${API_PATH}/analysis/contracts/impact`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ files }),
+      });
+      if (!response.ok) {
+        return;
+      }
+      impacts = (await response.json())?.impacts ?? null;
+    } catch {
+      return;
+    }
+    if (ticket !== reviewTicket || !container.isConnected) {
+      return;
+    }
+    renderContractImpact(container, impacts);
   }
 
   /** Step the Review panel down to the review it replaced, if any. */
