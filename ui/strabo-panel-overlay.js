@@ -709,7 +709,17 @@ export function renderTimeline(container, result, onSelect, options = {}) {
     title.append(dismiss);
   }
 
-  renderDriftChart(container, options.drift);
+  // The drift series can take seconds to build server-side while the commit list is already
+  // readable, so a pending drift shows a placeholder the chart replaces when it arrives.
+  if (options.drift) {
+    renderDriftChart(container, options.drift);
+  } else if (options.driftPending) {
+    const pending = document.createElement('p');
+    pending.className = 'drift-pending';
+    pending.dataset.role = 'drift-pending';
+    pending.textContent = 'Building the architecture-drift timeline…';
+    container.append(pending);
+  }
 
   if (!result || result.available === false) {
     const note = document.createElement('p');

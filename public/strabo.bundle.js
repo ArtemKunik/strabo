@@ -10698,7 +10698,15 @@ function renderTimeline(container, result, onSelect, options = {}) {
     dismiss.addEventListener("click", () => options.onClose());
     title.append(dismiss);
   }
-  renderDriftChart(container, options.drift);
+  if (options.drift) {
+    renderDriftChart(container, options.drift);
+  } else if (options.driftPending) {
+    const pending = document.createElement("p");
+    pending.className = "drift-pending";
+    pending.dataset.role = "drift-pending";
+    pending.textContent = "Building the architecture-drift timeline\u2026";
+    container.append(pending);
+  }
   if (!result || result.available === false) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
@@ -13319,32 +13327,37 @@ function createGitController(app2) {
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const result = await request2(`/analysis/timeline${query}`);
     const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
-    const draw = (metrics, drift2) => renderTimeline(elements2.timelinePanel, result, (commit) => {
+    const draw = (metrics, drift, driftPending) => renderTimeline(elements2.timelinePanel, result, (commit) => {
       selectCommit(commit).catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
     }, {
       selectedHash: selectedCommitHash,
       metrics,
-      drift: drift2,
+      drift,
+      driftPending,
       onClose: () => {
         elements2.timelinePanel.hidden = true;
       }
     });
-    draw(null, null);
+    draw(null, null, true);
     if (result?.available === false) {
       return;
     }
-    const [history, drift] = await Promise.all([
-      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
-      request2(`/analysis/drift${driftQuery}`).catch(() => null)
-    ]);
-    if (!elements2.timelinePanel.hidden && (history?.available || drift !== null)) {
-      draw(
-        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-        drift
-      );
-    }
+    const loaded = { metrics: null, drift: null };
+    const redraw = () => {
+      if (!elements2.timelinePanel.hidden) {
+        draw(loaded.metrics, loaded.drift, false);
+      }
+    };
+    request2(`/analysis/drift${driftQuery}`).then((drift) => {
+      loaded.drift = drift ?? null;
+      redraw();
+    }).catch(() => redraw());
+    request2(`/analysis/change-metrics/history${query}`).then((history) => {
+      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
+      redraw();
+    }).catch(() => redraw());
   }
   async function toggleBranches() {
     if (!elements2.branchesPanel.hidden) {
@@ -13825,29 +13838,34 @@ function createGitController(app2) {
     if (ticket !== historyScreenTicket) {
       return;
     }
-    const draw = (metrics, drift2) => renderTimeline(list2, result, (commit) => {
+    const draw = (metrics, drift, driftPending) => renderTimeline(list2, result, (commit) => {
       selectHistoryCommit(commit).catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
     }, {
       selectedHash: selectedCommitHash,
       metrics,
-      drift: drift2
+      drift,
+      driftPending
     });
-    draw(null, null);
+    draw(null, null, true);
     if (result?.available === false) {
       return;
     }
-    const [history, drift] = await Promise.all([
-      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
-      request2(`/analysis/drift${driftQuery}`).catch(() => null)
-    ]);
-    if (ticket === historyScreenTicket && !elements2.historyScreen?.hidden) {
-      draw(
-        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-        drift
-      );
-    }
+    const loaded = { metrics: null, drift: null };
+    const redraw = () => {
+      if (ticket === historyScreenTicket && !elements2.historyScreen?.hidden) {
+        draw(loaded.metrics, loaded.drift, false);
+      }
+    };
+    request2(`/analysis/drift${driftQuery}`).then((drift) => {
+      loaded.drift = drift ?? null;
+      redraw();
+    }).catch(() => redraw());
+    request2(`/analysis/change-metrics/history${query}`).then((history) => {
+      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
+      redraw();
+    }).catch(() => redraw());
   }
   async function selectHistoryCommit(commit) {
     selectedCommitHash = commit.hash;

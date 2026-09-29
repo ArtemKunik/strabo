@@ -84,7 +84,7 @@ export function createGitController(app) {
     const driftQuery = state.repository
       ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
       : '?limit=20';
-    const draw = (metrics, drift) =>
+    const draw = (metrics, drift, driftPending) =>
       renderTimeline(elements.timelinePanel, result, (commit) => {
         selectCommit(commit).catch((error) => {
           elements.status.textContent = `Error: ${error.message}`;
@@ -93,27 +93,38 @@ export function createGitController(app) {
         selectedHash: selectedCommitHash,
         metrics,
         drift,
+        driftPending,
         onClose: () => {
           elements.timelinePanel.hidden = true;
         },
       });
-    draw(null, null);
+    draw(null, null, true);
     if (result?.available === false) {
       return;
     }
     // Per-commit change metrics and the architecture-drift series arrive after the list:
-    // uncached commits are measured on the server, so the timeline is usable first and the
-    // badges and chart fill in when they are ready.
-    const [history, drift] = await Promise.all([
-      request(`/analysis/change-metrics/history${query}`).catch(() => null),
-      request(`/analysis/drift${driftQuery}`).catch(() => null),
-    ]);
-    if (!elements.timelinePanel.hidden && (history?.available || drift !== null)) {
-      draw(
-        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-        drift,
-      );
-    }
+    // uncached commits are measured on the server, so the timeline is usable first. The two
+    // are fetched and drawn independently, so the chart never waits on the slower metrics.
+    const loaded = { metrics: null, drift: null };
+    const redraw = () => {
+      if (!elements.timelinePanel.hidden) {
+        draw(loaded.metrics, loaded.drift, false);
+      }
+    };
+    request(`/analysis/drift${driftQuery}`)
+      .then((drift) => {
+        loaded.drift = drift ?? null;
+        redraw();
+      })
+      .catch(() => redraw());
+    request(`/analysis/change-metrics/history${query}`)
+      .then((history) => {
+        loaded.metrics = history?.available
+          ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
+          : null;
+        redraw();
+      })
+      .catch(() => redraw());
   }
 
   /**
@@ -757,7 +768,7 @@ export function createGitController(app) {
     if (ticket !== historyScreenTicket) {
       return;
     }
-    const draw = (metrics, drift) =>
+    const draw = (metrics, drift, driftPending) =>
       renderTimeline(list, result, (commit) => {
         selectHistoryCommit(commit).catch((error) => {
           elements.status.textContent = `Error: ${error.message}`;
@@ -766,25 +777,37 @@ export function createGitController(app) {
         selectedHash: selectedCommitHash,
         metrics,
         drift,
+        driftPending,
       });
     // The commit list is the whole point of the screen, so it renders as soon as `git log`
     // answers. The per-commit metrics and the drift series are cached server-side but can
     // still take seconds to build from a cold revision cache, so they fill in afterward
-    // rather than holding the list hostage.
-    draw(null, null);
+    // rather than holding the list hostage. They are drawn independently: the chart appears
+    // when the drift arrives instead of waiting on the slower metrics pass.
+    draw(null, null, true);
     if (result?.available === false) {
       return;
     }
-    const [history, drift] = await Promise.all([
-      request(`/analysis/change-metrics/history${query}`).catch(() => null),
-      request(`/analysis/drift${driftQuery}`).catch(() => null),
-    ]);
-    if (ticket === historyScreenTicket && !elements.historyScreen?.hidden) {
-      draw(
-        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-        drift,
-      );
-    }
+    const loaded = { metrics: null, drift: null };
+    const redraw = () => {
+      if (ticket === historyScreenTicket && !elements.historyScreen?.hidden) {
+        draw(loaded.metrics, loaded.drift, false);
+      }
+    };
+    request(`/analysis/drift${driftQuery}`)
+      .then((drift) => {
+        loaded.drift = drift ?? null;
+        redraw();
+      })
+      .catch(() => redraw());
+    request(`/analysis/change-metrics/history${query}`)
+      .then((history) => {
+        loaded.metrics = history?.available
+          ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
+          : null;
+        redraw();
+      })
+      .catch(() => redraw());
   }
 
   /** Select a commit in the History list and open its full review in the pane beside it. */
