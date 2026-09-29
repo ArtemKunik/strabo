@@ -116,6 +116,8 @@ const store = createStore({
     systemAutoOpened: false,
     /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
     structureGrid: false,
+    /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
+    structureDirection: 'vertical',
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
     structureCell: null,
     structureUnit: null,
@@ -315,6 +317,9 @@ async function scan({ refresh = false } = {}) {
       state.structureUnit = null;
       state.structureUnitLabel = null;
       state.structureTier = null;
+      if (model.structureDirection) {
+        state.structureDirection = model.structureDirection;
+      }
     }
     store.set('ui', { node: null });
     view.render(model);
@@ -497,6 +502,23 @@ function applyModeChrome() {
     elements.tbGrid.classList.toggle('active', inStructure && state.structureGrid);
     elements.tbGrid.setAttribute('aria-pressed', String(inStructure && state.structureGrid));
   }
+  if (elements.tbDirection) {
+    const inBands = state.mode === 'structure' && !state.structureGrid && !state.structureCell;
+    elements.tbDirection.hidden = !inBands;
+    const isHorizontal = state.structureDirection === 'horizontal';
+    elements.tbDirection.classList.toggle('active', inBands && isHorizontal);
+    elements.tbDirection.setAttribute('aria-pressed', String(inBands && isHorizontal));
+    elements.tbDirection.title = isHorizontal
+      ? 'Switch to vertical stack (H)'
+      : 'Switch to horizontal layout (left to right) (H)';
+  }
+  if (elements.structureDirectionField) {
+    elements.structureDirectionField.hidden =
+      state.mode !== 'structure' || state.structureGrid || Boolean(state.structureCell);
+  }
+  if (elements.structureDirection) {
+    elements.structureDirection.value = state.structureDirection ?? 'vertical';
+  }
 }
 
 elements.detail.addEventListener('change', () => {
@@ -571,6 +593,25 @@ if (elements.tbGrid) {
       return;
     }
     state.structureGrid = !state.structureGrid;
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.tbDirection) {
+  elements.tbDirection.addEventListener('click', () => {
+    if (state.mode !== 'structure') {
+      return;
+    }
+    state.structureDirection = state.structureDirection === 'horizontal' ? 'vertical' : 'horizontal';
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.structureDirection) {
+  elements.structureDirection.addEventListener('change', () => {
+    state.structureDirection = elements.structureDirection.value;
     applyModeChrome();
     app.prefs.schedulePrefsSave();
     scan();

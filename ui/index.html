@@ -102,6 +102,13 @@
                 <option value="structure">Structure</option>
               </select>
             </label>
+            <label id="field-structure-direction" class="view-field control-structure-direction" hidden>
+              <span class="view-field-label">Orientation</span>
+              <select id="structure-direction">
+                <option value="vertical" selected>Vertical stack</option>
+                <option value="horizontal">Left to right</option>
+              </select>
+            </label>
             <label class="view-field control-tier">
               <span class="view-field-label">Color by tier</span>
               <select id="tier">
@@ -262,6 +269,17 @@
             aria-label="Show the unit by tier grid"
           >
             <span aria-hidden="true">▩</span>
+          </button>
+          <button
+            id="tb-direction"
+            type="button"
+            class="tb-icon"
+            hidden
+            aria-pressed="false"
+            title="Switch to horizontal layout (left to right) (H)"
+            aria-label="Toggle horizontal or vertical layout"
+          >
+            <span aria-hidden="true">↔</span>
           </button>
           <button
             id="tb-calls"

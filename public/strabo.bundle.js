@@ -698,6 +698,9 @@ function buildGraphQuery(state2, options = {}) {
     }
   } else if (state2.mode === "structure") {
     params.set("structure", "1");
+    if (state2.structureDirection === "horizontal") {
+      params.set("direction", "horizontal");
+    }
     if (state2.structureCell) {
       params.set("level", "cell");
       params.set("cell", state2.structureCell);
@@ -859,6 +862,8 @@ function shortcutSheet() {
     { keys: "O", action: "Show the selected file\u2019s links to other units" },
     { keys: "P", action: "Trace a path between two nodes" },
     { keys: "B", action: "Toggle directories / files" },
+    { keys: "X", action: "Toggle the unit \xD7 tier grid (Structure mode)" },
+    { keys: "H / O", action: "Toggle horizontal / vertical layout (Structure mode)" },
     { keys: "L", action: "Show a file name under every file" },
     { keys: "Z", action: "Show only files above the line-count threshold, sized by lines" },
     { keys: "C", action: "Show recorded function calls instead of imports" },
@@ -10407,6 +10412,32 @@ function edgeEndpoint(id, onSelect) {
 function driftSeriesClass(index) {
   return `drift-series-${index < 3 ? index + 1 : "other"}`;
 }
+var DRIFT_WIDTH = 320;
+var DRIFT_HEIGHT = 140;
+var DRIFT_PAD_X = 12;
+var DRIFT_PAD_TOP = 14;
+var DRIFT_PAD_BOTTOM = 18;
+var driftChartSeq = 0;
+function driftSmoothPath(points) {
+  if (points.length === 0) return "";
+  const first = points[0];
+  if (points.length === 1) return `M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`;
+  let d = `M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const low = Math.min(p1.y, p2.y);
+    const high = Math.max(p1.y, p2.y);
+    const c1y = Math.min(high, Math.max(low, p1.y + (p2.y - p0.y) / 6));
+    const c2y = Math.min(high, Math.max(low, p2.y - (p3.y - p1.y) / 6));
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)} ${c2x.toFixed(1)} ${c2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
 function renderDriftChart(container, drift) {
   if (!drift) {
     return;
@@ -10424,54 +10455,199 @@ function renderDriftChart(container, drift) {
   if (points.length === 0 || series.length === 0) {
     return;
   }
-  const width = 320;
-  const height = 120;
-  const padding = 8;
+  const plotWidth = DRIFT_WIDTH - DRIFT_PAD_X * 2;
+  const plotHeight = DRIFT_HEIGHT - DRIFT_PAD_TOP - DRIFT_PAD_BOTTOM;
+  const count = Math.max(1, ...series.map((entry) => (entry.points ?? []).length));
+  const xFor = (index) => count <= 1 ? DRIFT_PAD_X + plotWidth / 2 : DRIFT_PAD_X + index * plotWidth / (count - 1);
+  const wrap = document.createElement("div");
+  wrap.className = "drift-chart-wrap";
   const svg = svgElement("svg", {
     class: "drift-chart",
     "data-role": "drift-chart",
-    viewBox: `0 0 ${width} ${height}`,
-    preserveAspectRatio: "none"
+    viewBox: `0 0 ${DRIFT_WIDTH} ${DRIFT_HEIGHT}`,
+    preserveAspectRatio: "none",
+    role: "img",
+    "aria-label": `Architecture drift over ${points.length} revisions`
   });
   svg.setAttribute("width", "100%");
-  svg.setAttribute("height", "120");
-  series.forEach((entry, index) => {
+  svg.setAttribute("height", String(DRIFT_HEIGHT));
+  const grid = svgElement("g", { class: "drift-grid-lines" });
+  for (let step = 0; step <= 4; step += 1) {
+    const y = DRIFT_PAD_TOP + step * plotHeight / 4;
+    grid.append(
+      svgElement("line", {
+        class: "drift-grid",
+        x1: String(DRIFT_PAD_X),
+        x2: String(DRIFT_WIDTH - DRIFT_PAD_X),
+        y1: y.toFixed(1),
+        y2: y.toFixed(1)
+      })
+    );
+  }
+  svg.append(grid);
+  const clipId = `drift-plot-${driftChartSeq += 1}`;
+  const clip = svgElement("clipPath", { id: clipId });
+  clip.append(
+    svgElement("rect", {
+      x: String(DRIFT_PAD_X - 4),
+      y: String(DRIFT_PAD_TOP - 4),
+      width: String(plotWidth + 8),
+      height: String(plotHeight + 8),
+      rx: "8"
+    })
+  );
+  const defs = svgElement("defs", {});
+  defs.append(clip);
+  svg.append(defs);
+  const plot = svgElement("g", { "clip-path": `url(#${clipId})` });
+  svg.append(plot);
+  const geometry = series.map((entry, index) => {
     const values = (entry.points ?? []).map((point) => point.value);
     const defined = values.filter((value) => value !== null && value !== void 0);
     const min = defined.length > 0 ? Math.min(...defined) : 0;
     const max = defined.length > 0 ? Math.max(...defined) : 0;
     const span = max - min;
-    const xFor = (i) => values.length <= 1 ? width / 2 : padding + i * (width - padding * 2) / (values.length - 1);
-    const yFor = (value) => span === 0 ? height / 2 : height - padding - (value - min) / span * (height - padding * 2);
+    const yFor = (value) => span === 0 ? DRIFT_PAD_TOP + plotHeight / 2 : DRIFT_PAD_TOP + (1 - (value - min) / span) * plotHeight;
+    return { entry, index, values, yFor };
+  });
+  const groups = geometry.map(({ entry, index, values, yFor }) => {
+    const seriesCls = driftSeriesClass(index);
+    const group = svgElement("g", {
+      class: "drift-series",
+      "data-role": "drift-series",
+      "data-series-key": entry.key ?? String(index)
+    });
     let segment = [];
-    const flush = () => {
+    const emit = () => {
       if (segment.length === 0) return;
-      svg.append(
-        svgElement("polyline", {
-          class: driftSeriesClass(index),
-          points: segment.join(" "),
-          fill: "none",
-          "stroke-width": "2",
-          "vector-effect": "non-scaling-stroke"
-        })
-      );
+      if (segment.length === 1) {
+        group.append(
+          svgElement("circle", {
+            class: `drift-mark drift-node ${seriesCls}`,
+            cx: segment[0].x.toFixed(1),
+            cy: segment[0].y.toFixed(1),
+            r: "2.6"
+          })
+        );
+      } else {
+        const d = driftSmoothPath(segment);
+        group.append(
+          svgElement("path", { class: `drift-halo ${seriesCls}`, d, "data-role": "drift-halo" })
+        );
+        group.append(svgElement("path", { class: `drift-line ${seriesCls}`, d }));
+      }
       segment = [];
     };
     values.forEach((value, i) => {
       if (value === null || value === void 0) {
-        flush();
+        emit();
         return;
       }
-      segment.push(`${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`);
+      segment.push({ x: xFor(i), y: yFor(value) });
     });
-    flush();
+    emit();
+    let lastIndex = -1;
+    values.forEach((value, i) => {
+      if (value !== null && value !== void 0) lastIndex = i;
+    });
+    if (lastIndex >= 0) {
+      group.append(
+        svgElement("circle", {
+          class: `drift-mark drift-endpoint ${seriesCls}`,
+          cx: xFor(lastIndex).toFixed(1),
+          cy: yFor(values[lastIndex]).toFixed(1),
+          r: "3"
+        })
+      );
+    }
+    plot.append(group);
+    return group;
   });
-  container.append(svg);
+  const crosshair = svgElement("line", {
+    class: "drift-crosshair",
+    x1: "0",
+    x2: "0",
+    y1: String(DRIFT_PAD_TOP),
+    y2: String(DRIFT_PAD_TOP + plotHeight)
+  });
+  plot.append(crosshair);
+  const cursorDots = geometry.map(({ index }) => {
+    const dot = svgElement("circle", {
+      class: `drift-mark drift-cursor-dot ${driftSeriesClass(index)}`,
+      cx: "0",
+      cy: "0",
+      r: "3.4"
+    });
+    dot.setAttribute("opacity", "0");
+    plot.append(dot);
+    return dot;
+  });
+  const tooltip = document.createElement("div");
+  tooltip.className = "drift-tooltip";
+  tooltip.hidden = true;
+  const tooltipHead = document.createElement("div");
+  tooltipHead.className = "drift-tooltip-head";
+  const tooltipList = document.createElement("div");
+  tooltipList.className = "drift-tooltip-list";
+  tooltip.append(tooltipHead, tooltipList);
+  wrap.append(svg, tooltip);
+  container.append(wrap);
+  const hidden = /* @__PURE__ */ new Set();
+  const showAt = (viewX) => {
+    const ratio = (viewX - DRIFT_PAD_X) / plotWidth;
+    const index = Math.max(0, Math.min(count - 1, Math.round(ratio * (count - 1))));
+    const x = xFor(index);
+    crosshair.setAttribute("x1", x.toFixed(1));
+    crosshair.setAttribute("x2", x.toFixed(1));
+    crosshair.classList.add("is-on");
+    const revision = points[index];
+    tooltipHead.textContent = revision ? `${revision.short}${revision.date ? ` \xB7 ${revision.date.slice(0, 10)}` : ""}` : `#${index + 1}`;
+    tooltipList.replaceChildren();
+    geometry.forEach(({ entry, values, yFor }, seriesIndex) => {
+      const dot = cursorDots[seriesIndex];
+      const value = values[index];
+      if (value === null || value === void 0 || hidden.has(seriesIndex)) {
+        dot.setAttribute("opacity", "0");
+        return;
+      }
+      dot.setAttribute("cx", x.toFixed(1));
+      dot.setAttribute("cy", yFor(value).toFixed(1));
+      dot.setAttribute("opacity", "1");
+      const row = document.createElement("div");
+      row.className = "drift-tooltip-row";
+      const swatch = document.createElement("span");
+      swatch.className = `drift-legend-swatch ${driftSeriesClass(seriesIndex)}`;
+      swatch.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "drift-tooltip-label";
+      label.textContent = entry.label;
+      const valueSpan = document.createElement("span");
+      valueSpan.className = "drift-tooltip-value";
+      valueSpan.textContent = String(value);
+      row.append(swatch, label, valueSpan);
+      tooltipList.append(row);
+    });
+    const percent = x / DRIFT_WIDTH * 100;
+    tooltip.style.left = `${Math.max(14, Math.min(86, percent))}%`;
+    tooltip.hidden = false;
+  };
+  const hide = () => {
+    crosshair.classList.remove("is-on");
+    cursorDots.forEach((dot) => dot.setAttribute("opacity", "0"));
+    tooltip.hidden = true;
+  };
+  svg.addEventListener("pointermove", (event) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    showAt((event.clientX - rect.left) / rect.width * DRIFT_WIDTH);
+  });
+  svg.addEventListener("pointerleave", hide);
   const legend = document.createElement("div");
   legend.className = "drift-legend";
   legend.dataset.role = "drift-legend";
   series.forEach((entry, index) => {
-    const item = document.createElement("span");
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "drift-legend-item";
     const values = (entry.points ?? []).map(
       (point) => point.value === null || point.value === void 0 ? "\u2014" : String(point.value)
@@ -10483,8 +10659,27 @@ function renderDriftChart(container, drift) {
     const text = document.createElement("span");
     text.className = "drift-legend-text";
     text.textContent = `${entry.label}: ${shown}`;
-    item.title = `${entry.label}: ${values.join(" \u2192 ")}`;
+    item.title = `${entry.label}: ${values.join(" \u2192 ")} \xB7 click to hide`;
     item.append(swatch, text);
+    item.addEventListener("pointerenter", () => {
+      svg.classList.add("drift-focus");
+      groups[index].classList.add("is-active");
+    });
+    item.addEventListener("pointerleave", () => {
+      svg.classList.remove("drift-focus");
+      groups[index].classList.remove("is-active");
+    });
+    item.addEventListener("click", () => {
+      if (hidden.has(index)) {
+        hidden.delete(index);
+        groups[index].classList.remove("is-hidden");
+        item.classList.remove("is-off");
+        return;
+      }
+      hidden.add(index);
+      groups[index].classList.add("is-hidden");
+      item.classList.add("is-off");
+    });
     legend.append(item);
   });
   container.append(legend);
@@ -12148,6 +12343,8 @@ function queryElements(doc = document) {
     repository: doc.getElementById("repository"),
     browse: doc.getElementById("browse"),
     detail: doc.getElementById("detail"),
+    structureDirection: doc.getElementById("structure-direction"),
+    structureDirectionField: doc.getElementById("field-structure-direction"),
     refresh: doc.getElementById("refresh"),
     filter: doc.getElementById("filter"),
     filterClear: doc.getElementById("filter-clear"),
@@ -12183,6 +12380,7 @@ function queryElements(doc = document) {
     tbPath: doc.getElementById("tb-path"),
     tbBoundaries: doc.getElementById("tb-boundaries"),
     tbGrid: doc.getElementById("tb-grid"),
+    tbDirection: doc.getElementById("tb-direction"),
     tbCalls: doc.getElementById("tb-calls"),
     tbCoChange: doc.getElementById("tb-cochange"),
     tbLabels: doc.getElementById("tb-labels"),
@@ -12285,6 +12483,9 @@ function createViewPrefs(app2) {
       if (parsed.structureGrid === true) {
         prefs.structureGrid = true;
       }
+      if (parsed.structureDirection === "horizontal" || parsed.structureDirection === "vertical") {
+        prefs.structureDirection = parsed.structureDirection;
+      }
       return prefs;
     } catch {
       return null;
@@ -12302,7 +12503,8 @@ function createViewPrefs(app2) {
           coChange: state2.coChange,
           locLens: state2.locLens,
           tier: state2.tier,
-          structureGrid: state2.structureGrid
+          structureGrid: state2.structureGrid,
+          structureDirection: state2.structureDirection
         })
       );
     } catch {
@@ -12358,6 +12560,9 @@ function createViewPrefs(app2) {
     }
     if (prefs.structureGrid && state2.mode === "structure") {
       state2.structureGrid = true;
+    }
+    if (prefs.structureDirection && state2.mode === "structure") {
+      state2.structureDirection = prefs.structureDirection;
     }
   }
   return {
@@ -12452,6 +12657,10 @@ function createUrlState(app2) {
         "level",
         state2.mode === "structure" ? state2.structureCell ? "cell" : state2.structureGrid ? "grid" : "" : ""
       );
+      set(
+        "direction",
+        state2.mode === "structure" && state2.structureDirection === "horizontal" ? "horizontal" : ""
+      );
       set("node", store2.get().ui.node ?? "");
       set("panel", store2.get().ui.memberOpen ? "member-map" : "");
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -12481,6 +12690,8 @@ function createUrlState(app2) {
     state2.structureUnit = mode === "structure" ? params.get("unit") ?? (state2.structureCell ? state2.structureCell.split("|")[0] || null : null) : null;
     state2.structureUnitLabel = state2.structureUnit;
     state2.structureTier = mode === "structure" ? params.get("tier") ?? (state2.structureCell ? state2.structureCell.split("|")[1] || null : null) : null;
+    const dir = params.get("direction") ?? params.get("orientation");
+    state2.structureDirection = dir === "horizontal" || dir === "lr" ? "horizontal" : "vertical";
     return params;
   }
   async function restoreUrlPanel() {
@@ -13095,6 +13306,7 @@ function createGitController(app2) {
   let worktreePinned = false;
   let worktreesFor = null;
   let worktrees = [];
+  let historyScreenTicket = 0;
   let historyReviewTicket = 0;
   let historyDiffTicket = 0;
   let historyReviewData = null;
@@ -13600,6 +13812,7 @@ function createGitController(app2) {
     if (!list2) {
       return;
     }
+    const ticket = ++historyScreenTicket;
     closeHistoryReview();
     list2.replaceChildren();
     const note4 = document.createElement("p");
@@ -13608,20 +13821,33 @@ function createGitController(app2) {
     list2.append(note4);
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const driftQuery = state2.repository ? `?limit=20&repository=${encodeURIComponent(state2.repository)}` : "?limit=20";
-    const [result, history, drift] = await Promise.all([
-      request2(`/analysis/timeline${query}`),
-      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
-      request2(`/analysis/drift${driftQuery}`).catch(() => null)
-    ]);
-    renderTimeline(list2, result, (commit) => {
+    const result = await request2(`/analysis/timeline${query}`);
+    if (ticket !== historyScreenTicket) {
+      return;
+    }
+    const draw = (metrics, drift2) => renderTimeline(list2, result, (commit) => {
       selectHistoryCommit(commit).catch((error) => {
         elements2.status.textContent = `Error: ${error.message}`;
       });
     }, {
       selectedHash: selectedCommitHash,
-      metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-      drift
+      metrics,
+      drift: drift2
     });
+    draw(null, null);
+    if (result?.available === false) {
+      return;
+    }
+    const [history, drift] = await Promise.all([
+      request2(`/analysis/change-metrics/history${query}`).catch(() => null),
+      request2(`/analysis/drift${driftQuery}`).catch(() => null)
+    ]);
+    if (ticket === historyScreenTicket && !elements2.historyScreen?.hidden) {
+      draw(
+        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+        drift
+      );
+    }
   }
   async function selectHistoryCommit(commit) {
     selectedCommitHash = commit.hash;
@@ -27648,19 +27874,24 @@ function createSelectionController(app2) {
     renderInspector(elements2.inspector, app2.current, id, {
       onSelect: (target) => selectNode(target),
       onTrace: (from, to) => tracePath(from, to),
-      onOpenWorkspace: (target) => openFile(target),
+      // Everything below reads one file, so it is offered only when the selected node is one.
+      // A roll-up node (tier band, shelf, unit) declares no members to map and no file to
+      // open, so showing these would offer a control that cannot act.
+      ...isFileNode(id) ? { onOpenWorkspace: (target) => openFile(target) } : {},
       onBack: passportBack,
       backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
       ...isFileNode(id) ? { onViewSource: (target) => app2.source.viewSource(target) } : {},
       // The reading route is repository-wide; a Module Passport opens it at its own file.
       ...isFileNode(id) ? { onOpenRoute: (target) => app2.panels.showRoute(target) } : {},
-      onOpenMemberMap: (target) => {
-        app2.memberMap.openMemberMap(target).then(() => {
-          app2.floatingWindows.find((controller) => controller.key === "inspector")?.close();
-        }).catch((error) => {
-          elements2.status.textContent = `Error: ${error.message}`;
-        });
-      },
+      ...isFileNode(id) ? {
+        onOpenMemberMap: (target) => {
+          app2.memberMap.openMemberMap(target).then(() => {
+            app2.floatingWindows.find((controller) => controller.key === "inspector")?.close();
+          }).catch((error) => {
+            elements2.status.textContent = `Error: ${error.message}`;
+          });
+        }
+      } : {},
       // A System-view unit may ask the opt-in narrator to name its group.
       ...app2.current?.system && !app2.current?.systemUnit ? { narratorStatus: app2.narratorStatus, onNarrate: () => app2.narration.narrateGroup(id), onOpenNarratorSettings: app2.settings.openNarratorSettings } : {},
       // Inside a unit, the selected file may show its cross-unit links (L17).
@@ -29005,6 +29236,7 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "p") elements2.tbPath.click();
     else if (key === "b") elements2.tbBoundaries.click();
     else if (key === "x" && state2.mode === "structure") elements2.tbGrid?.click();
+    else if ((key === "h" || key === "o") && state2.mode === "structure" && !state2.structureGrid && !state2.structureCell) elements2.tbDirection?.click();
     else if (key === "c" && state2.mode === "file") elements2.tbCalls?.click();
     else if (key === "h" && state2.mode === "file") elements2.tbCoChange?.click();
     else if (key === "l" && state2.mode === "file") elements2.tbLabels?.click();
@@ -29080,6 +29312,8 @@ var store = createStore({
     systemAutoOpened: false,
     /** In Structure mode, draw the unit × tier grid (Y4) rather than the tier bands (Y3). */
     structureGrid: false,
+    /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
+    structureDirection: "vertical",
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
     structureCell: null,
     structureUnit: null,
@@ -29238,6 +29472,9 @@ async function scan({ refresh = false } = {}) {
       state.structureUnit = null;
       state.structureUnitLabel = null;
       state.structureTier = null;
+      if (model.structureDirection) {
+        state.structureDirection = model.structureDirection;
+      }
     }
     store.set("ui", { node: null });
     view.render(model);
@@ -29390,6 +29627,20 @@ function applyModeChrome() {
     elements.tbGrid.classList.toggle("active", inStructure && state.structureGrid);
     elements.tbGrid.setAttribute("aria-pressed", String(inStructure && state.structureGrid));
   }
+  if (elements.tbDirection) {
+    const inBands = state.mode === "structure" && !state.structureGrid && !state.structureCell;
+    elements.tbDirection.hidden = !inBands;
+    const isHorizontal = state.structureDirection === "horizontal";
+    elements.tbDirection.classList.toggle("active", inBands && isHorizontal);
+    elements.tbDirection.setAttribute("aria-pressed", String(inBands && isHorizontal));
+    elements.tbDirection.title = isHorizontal ? "Switch to vertical stack (H)" : "Switch to horizontal layout (left to right) (H)";
+  }
+  if (elements.structureDirectionField) {
+    elements.structureDirectionField.hidden = state.mode !== "structure" || state.structureGrid || Boolean(state.structureCell);
+  }
+  if (elements.structureDirection) {
+    elements.structureDirection.value = state.structureDirection ?? "vertical";
+  }
 }
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
@@ -29460,6 +29711,25 @@ if (elements.tbGrid) {
       return;
     }
     state.structureGrid = !state.structureGrid;
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.tbDirection) {
+  elements.tbDirection.addEventListener("click", () => {
+    if (state.mode !== "structure") {
+      return;
+    }
+    state.structureDirection = state.structureDirection === "horizontal" ? "vertical" : "horizontal";
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.structureDirection) {
+  elements.structureDirection.addEventListener("change", () => {
+    state.structureDirection = elements.structureDirection.value;
     applyModeChrome();
     app.prefs.schedulePrefsSave();
     scan();

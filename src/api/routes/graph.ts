@@ -96,10 +96,12 @@ export function createGraphRouter(config: StraboConfig): Router {
           }
         }
 
+        const direction = asString(request.query.direction) ?? asString(request.query.orientation);
+        const isHorizontal = direction === 'horizontal' || direction === 'lr';
         response.json(
           level === 'grid'
             ? buildStructureGridViewModel(report, descriptor, cache)
-            : buildStructureViewModel(report, descriptor, cache),
+            : buildStructureViewModel(report, descriptor, cache, { direction: isHorizontal ? 'horizontal' : 'vertical' }),
         );
         return;
       }

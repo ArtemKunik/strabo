@@ -21,6 +21,13 @@ Feature: Application logical structure from the tier lens
     And the Structure view draws a band for "data"
     And the Structure legend names role tiers, not layers
 
+  @bands @passport
+  Scenario: A roll-up band offers no per-file member map
+    Given I open the structure fixture repository
+    When I switch to structure detail
+    And I select the "frontend" band
+    Then the Module Passport for the "frontend" band offers no member map
+
   @wrong-way
   Scenario: A wrong-way dependency rides on the band drawing
     Given I open the structure fixture repository

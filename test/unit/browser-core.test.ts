@@ -506,6 +506,18 @@ test('buildGraphQuery sends level=grid only when the structure grid is on (Y4)',
   assert.ok(grid.includes('level=grid'));
 });
 
+test('buildGraphQuery sends direction=horizontal when structureDirection is horizontal', () => {
+  const horizontal = buildGraphQuery({
+    repository: '/demo',
+    mode: 'structure',
+    structureDirection: 'horizontal',
+    depth: 1,
+    prefix: '',
+  });
+  assert.ok(horizontal.includes('structure=1'));
+  assert.ok(horizontal.includes('direction=horizontal'));
+});
+
 test('the reading legend names the grid axes and cells (Y4)', () => {
   assert.deepEqual(readingLegend({ structure: true, structureLevel: 'grid' }), [
     'column = build unit',

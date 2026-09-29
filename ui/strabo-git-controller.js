@@ -60,6 +60,9 @@ export function createGitController(app) {
   /** The repository's worktrees, its main root first. */
   let worktrees = [];
 
+  /** Bumped by every History list load, so a slow earlier load cannot refill the list. */
+  let historyScreenTicket = 0;
+
   /** Bumped by every inline History review and by closing, so a late response is dropped. */
   let historyReviewTicket = 0;
 
@@ -739,6 +742,7 @@ export function createGitController(app) {
     if (!list) {
       return;
     }
+    const ticket = ++historyScreenTicket;
     closeHistoryReview();
     list.replaceChildren();
     const note = document.createElement('p');
@@ -749,20 +753,38 @@ export function createGitController(app) {
     const driftQuery = state.repository
       ? `?limit=20&repository=${encodeURIComponent(state.repository)}`
       : '?limit=20';
-    const [result, history, drift] = await Promise.all([
-      request(`/analysis/timeline${query}`),
+    const result = await request(`/analysis/timeline${query}`);
+    if (ticket !== historyScreenTicket) {
+      return;
+    }
+    const draw = (metrics, drift) =>
+      renderTimeline(list, result, (commit) => {
+        selectHistoryCommit(commit).catch((error) => {
+          elements.status.textContent = `Error: ${error.message}`;
+        });
+      }, {
+        selectedHash: selectedCommitHash,
+        metrics,
+        drift,
+      });
+    // The commit list is the whole point of the screen, so it renders as soon as `git log`
+    // answers. The per-commit metrics and the drift series are cached server-side but can
+    // still take seconds to build from a cold revision cache, so they fill in afterward
+    // rather than holding the list hostage.
+    draw(null, null);
+    if (result?.available === false) {
+      return;
+    }
+    const [history, drift] = await Promise.all([
       request(`/analysis/change-metrics/history${query}`).catch(() => null),
       request(`/analysis/drift${driftQuery}`).catch(() => null),
     ]);
-    renderTimeline(list, result, (commit) => {
-      selectHistoryCommit(commit).catch((error) => {
-        elements.status.textContent = `Error: ${error.message}`;
-      });
-    }, {
-      selectedHash: selectedCommitHash,
-      metrics: history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
-      drift,
-    });
+    if (ticket === historyScreenTicket && !elements.historyScreen?.hidden) {
+      draw(
+        history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null,
+        drift,
+      );
+    }
   }
 
   /** Select a commit in the History list and open its full review in the pane beside it. */

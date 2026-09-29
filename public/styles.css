@@ -3227,20 +3227,154 @@ body.screen-off-graph .float-window {
 
 /* Architecture drift: one line per structural measure, then a bounded key that names each
    line, shows its newest and oldest value, and never overflows the screen. */
+.drift-chart-wrap {
+  position: relative;
+  margin: 6px 0 10px;
+}
+
 .drift-chart {
   display: block;
   width: 100%;
-  height: 120px;
-  margin: 4px 0 8px;
+  height: 140px;
   border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--bg-2);
+  border-radius: 10px;
+  background:
+    radial-gradient(120% 150% at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 58%),
+    linear-gradient(180deg, var(--bg-2), var(--bg-1));
+}
+
+/* Bounded categorical set (R8): three series hues plus one neutral, never cycled. The hue
+   travels as `color`, so a line, its halo, its markers, and its swatch stay in step. */
+.drift-series-1 { color: var(--series-1); }
+.drift-series-2 { color: var(--series-2); }
+.drift-series-3 { color: var(--series-3); }
+.drift-series-other { color: var(--series-other); }
+
+.drift-series {
+  transition: opacity 0.15s ease;
+}
+
+.drift-chart.drift-focus .drift-series {
+  opacity: 0.16;
+}
+
+.drift-chart.drift-focus .drift-series.is-active {
+  opacity: 1;
+}
+
+.drift-series.is-hidden {
+  opacity: 0;
+}
+
+.drift-grid {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.drift-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.drift-halo {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.16;
+  filter: blur(2px);
+  vector-effect: non-scaling-stroke;
+}
+
+.drift-mark {
+  fill: currentColor;
+}
+
+.drift-node {
+  opacity: 0.8;
+}
+
+.drift-endpoint {
+  stroke: var(--bg-1);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.drift-crosshair {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.drift-crosshair.is-on {
+  opacity: 0.5;
+}
+
+.drift-cursor-dot {
+  transition: opacity 0.12s ease;
+}
+
+.drift-tooltip {
+  position: absolute;
+  top: 8px;
+  z-index: 5;
+  min-width: 128px;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-s);
+  background: var(--veiled-surface);
+  box-shadow: var(--shadow-1);
+  font-size: 11px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.drift-tooltip[hidden] {
+  display: none;
+}
+
+.drift-tooltip-head {
+  margin-bottom: 5px;
+  color: var(--ink-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.drift-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.drift-tooltip-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-3);
+}
+
+.drift-tooltip-value {
+  flex: none;
+  color: var(--ink-1);
+  font-family: var(--font-mono);
 }
 
 .drift-legend {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 2px 20px;
+  gap: 4px 12px;
   margin: 0 0 10px;
   font-size: 11px;
 }
@@ -3250,20 +3384,39 @@ body.screen-off-graph .float-window {
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 2px 0;
+  margin: 0;
+  padding: 3px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.drift-legend-item:hover,
+.drift-legend-item:focus-visible {
+  background: var(--wash);
+}
+
+.drift-legend-item.is-off {
+  opacity: 0.45;
+}
+
+.drift-legend-item.is-off .drift-legend-text {
+  text-decoration: line-through;
 }
 
 .drift-legend-swatch {
   flex: none;
   width: 9px;
   height: 9px;
-  border-radius: 2px;
-  background: var(--series-other);
+  border-radius: 3px;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
 }
-
-.drift-legend-swatch.drift-series-1 { background: var(--series-1); }
-.drift-legend-swatch.drift-series-2 { background: var(--series-2); }
-.drift-legend-swatch.drift-series-3 { background: var(--series-3); }
 
 .drift-legend-text {
   min-width: 0;
@@ -3272,12 +3425,6 @@ body.screen-off-graph .float-window {
   text-overflow: ellipsis;
   color: var(--ink-3);
 }
-
-/* Bounded categorical set (R8): three series hues plus one neutral, never cycled. */
-.drift-series-1 { stroke: var(--series-1); }
-.drift-series-2 { stroke: var(--series-2); }
-.drift-series-3 { stroke: var(--series-3); }
-.drift-series-other { stroke: var(--series-other); }
 
 /* Branches: one row per branch, with divergence from the base drawn around a centre line. */
 .branches-panel li.branch-row {

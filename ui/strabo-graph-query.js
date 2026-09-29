@@ -49,6 +49,9 @@ export function buildGraphQuery(state, options = {}) {
     }
   } else if (state.mode === 'structure') {
     params.set('structure', '1');
+    if (state.structureDirection === 'horizontal') {
+      params.set('direction', 'horizontal');
+    }
     if (state.structureCell) {
       params.set('level', 'cell');
       params.set('cell', state.structureCell);

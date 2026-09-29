@@ -153,6 +153,8 @@ export function shortcutSheet() {
     { keys: 'O', action: 'Show the selected file’s links to other units' },
     { keys: 'P', action: 'Trace a path between two nodes' },
     { keys: 'B', action: 'Toggle directories / files' },
+    { keys: 'X', action: 'Toggle the unit × tier grid (Structure mode)' },
+    { keys: 'H / O', action: 'Toggle horizontal / vertical layout (Structure mode)' },
     { keys: 'L', action: 'Show a file name under every file' },
     { keys: 'Z', action: 'Show only files above the line-count threshold, sized by lines' },
     { keys: 'C', action: 'Show recorded function calls instead of imports' },

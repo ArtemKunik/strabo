@@ -202,6 +202,8 @@ export interface ViewModel {
    * grid (Y4). Absent means `bands`, so an older client still reads.
    */
   structureLevel?: 'bands' | 'grid' | 'cell';
+  /** The orientation of the tier stack in Structure view: 'vertical' (top to bottom) or 'horizontal' (left to right). */
+  structureDirection?: 'vertical' | 'horizontal';
   /** In a grid, the rows (ranked tiers) and columns (build units), for axis labels. */
   structureGrid?: {
     tiers: string[];

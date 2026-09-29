@@ -78,6 +78,30 @@ test('buildStructureViewModel draws bands in rank order and shelves the support 
   assert.equal(kindOfEdge('frontend', 'api')?.crossUnit, 1);
 });
 
+test('buildStructureViewModel draws bands from left to right when direction is horizontal', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  const model = buildStructureViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { direction: 'horizontal' },
+  );
+
+  assert.equal(model.structure, true);
+  assert.equal(model.structureDirection, 'horizontal');
+
+  // The bands stack left to right: frontend furthest left (smallest x), data to the right.
+  const xOf = new Map(model.positions.map((position) => [position.id, position.x]));
+  const yOf = new Map(model.positions.map((position) => [position.id, position.y]));
+  assert.ok((xOf.get('frontend') ?? 0) < (xOf.get('data') ?? 0));
+  assert.equal(yOf.get('frontend'), 0);
+  assert.equal(yOf.get('data'), 0);
+
+  // The shelf sits below the stack.
+  assert.equal(yOf.get('tests'), 240);
+});
+
 test('the tier report carries the unit × tier grid with adjacency (Y4)', async () => {
   const { graph } = await scanRepository(root);
   const report = buildTierReport(root, 'structure-repo', graph);
@@ -198,6 +222,32 @@ test('GET /graph?structure=1 serves the role-tier structure', async () => {
   assert.equal(model.structure, true);
   assert.equal(model.nodes.some((node) => node.id === 'frontend' && node.kind === 'tier'), true);
   assert.equal(model.nodes.some((node) => node.tier === 'tests' && node.kind === 'shelf'), true);
+});
+
+test('GET /graph?structure=1&direction=horizontal serves horizontal structure view', async () => {
+  const host = express();
+  host.use(express.json());
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/graph?structure=1&direction=horizontal`);
+  assert.equal(response.status, 200);
+  const model = (await response.json()) as {
+    structure?: boolean;
+    structureDirection?: string;
+    positions: Array<{ id: string; x: number; y: number }>;
+  };
+  assert.equal(model.structure, true);
+  assert.equal(model.structureDirection, 'horizontal');
+  const xOf = new Map(model.positions.map((p) => [p.id, p.x]));
+  assert.ok((xOf.get('frontend') ?? 0) < (xOf.get('data') ?? 0));
 });
 
 test('buildStructureCellViewModel draws cell files with collapsed context (Y5)', async () => {

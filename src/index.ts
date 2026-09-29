@@ -422,7 +422,7 @@ export type {
 } from './analysis/string-edges.ts';
 export { checkDeclaredRules, readDeclaredRules, DECLARED_RULES_FILE } from './analysis/rules.ts';
 export type { DeclaredRule, RuleAllow, RuleViolation, RulesReport } from './analysis/rules.ts';
-export { collectDrift, computeDriftMeasures, DRIFT_MEASURES } from './analysis/drift.ts';
+export { clearDriftCache, collectDrift, computeDriftMeasures, DRIFT_MEASURES } from './analysis/drift.ts';
 export type { DriftMeasure, DriftOptions, DriftPoint, DriftReport, DriftSeries } from './analysis/drift.ts';
 export { computeRepositoryPassport } from './analysis/passport.ts';
 export type {

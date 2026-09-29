@@ -274,6 +274,34 @@ When('I open the recorded call from the {string} band', async function (tier) {
   await this.page.waitForSelector('[data-role="spine-view"]', { timeout: 15_000 });
 });
 
+When('I select the {string} band', async function (tier) {
+  await this.page.evaluate((bandTier) => {
+    const model = window.straboTest?.model();
+    const band = model?.nodes?.find(
+      (node) => (node.tier === bandTier || node.id === bandTier) && node.kind === 'tier',
+    );
+    if (band) {
+      window.straboTest.select(band.id);
+    }
+  }, tier);
+  await this.page.waitForFunction(
+    (bandTier) => {
+      const inspector = document.getElementById('inspector');
+      return Boolean(inspector) && !inspector.hidden && (inspector.textContent ?? '').includes(bandTier);
+    },
+    tier,
+    { timeout: 15_000 },
+  );
+});
+
+Then('the Module Passport for the {string} band offers no member map', async function (tier) {
+  await this.page.waitForSelector('#inspector .inspector-actions', { timeout: 15_000 });
+  const memberButtons = await this.page.evaluate(
+    () => document.querySelectorAll('#inspector #open-member-map').length,
+  );
+  assert.equal(memberButtons, 0, `the ${tier} band passport should not offer a member map`);
+});
+
 Then('the spine follows the call to its declared endpoint', async function () {
   await this.page.waitForFunction(
     () => {

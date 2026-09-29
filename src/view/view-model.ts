@@ -622,24 +622,33 @@ const STRUCTURE_LABELS: Record<string, string> = {
   unclassified: 'Unclassified',
 };
 
+export interface StructureViewOptions {
+  direction?: 'vertical' | 'horizontal';
+}
+
 /**
  * Turn the tier report into the Structure view (Phase 35 Y3).
  *
  * One band per ranked tier, stacked in dependency order (frontend at the top, data at the
- * bottom) and joined by the `tierFlow` edges; the support tiers sit on a shelf beside the
- * stack rather than in it. Every node is a roll-up, so its size is its file count and its
- * `mixed` count rides along for a badge. Only recorded edges are drawn; a tier or pair with
- * no edge simply has none, never a fabricated one.
+ * bottom, or left to right when horizontal) and joined by the `tierFlow` edges; the support
+ * tiers sit on a shelf beside the stack rather than in it. Every node is a roll-up, so its
+ * size is its file count and its `mixed` count rides along for a badge. Only recorded edges
+ * are drawn; a tier or pair with no edge simply has none, never a fabricated one.
  */
 export function buildStructureViewModel(
   report: TierReport,
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
+  options: StructureViewOptions = {},
 ): ViewModel {
   const perTier = new Map(report.matrix.perTier.map((entry) => [entry.tier, entry]));
+  const isHorizontal = options.direction === 'horizontal';
   const BAND_Y = 170;
-  const SHELF_X = 460;
-  const SHELF_Y = 150;
+  const BAND_X = 260;
+  const SHELF_X = isHorizontal ? 0 : 460;
+  const SHELF_Y = isHorizontal ? 240 : 150;
+  const SHELF_STEP_X = 180;
+  const SHELF_STEP_Y = 150;
 
   const nodes: ViewNode[] = [];
   const positions: ViewPosition[] = [];
@@ -684,15 +693,23 @@ export function buildStructureViewModel(
     };
   };
 
-  // The stack: ranked tiers in dependency order, frontend highest on the canvas.
+  // The stack: ranked tiers in dependency order, frontend highest (or furthest left) on the canvas.
   report.tierFlow.tiers.forEach((tier, index) => {
     nodes.push(tierNode(tier, 'tier'));
-    positions.push({ id: tier, x: 0, y: index * BAND_Y });
+    positions.push({
+      id: tier,
+      x: isHorizontal ? index * BAND_X : 0,
+      y: isHorizontal ? 0 : index * BAND_Y,
+    });
   });
   // The shelf: support tiers beside the stack, never a band.
   report.shelf.forEach((entry, index) => {
     nodes.push(tierNode(entry.tier, 'shelf'));
-    positions.push({ id: entry.tier, x: SHELF_X, y: index * SHELF_Y });
+    positions.push({
+      id: entry.tier,
+      x: isHorizontal ? SHELF_X + index * SHELF_STEP_X : SHELF_X,
+      y: isHorizontal ? SHELF_Y : index * SHELF_STEP_Y,
+    });
   });
 
   // Ghost bands: intended tiers from rules that have no files in the repository yet (Y7)
@@ -704,7 +721,11 @@ export function buildStructureViewModel(
       node.ghost = true;
       node.why = `intended tier · ${ghostBand.ruleId}`;
       nodes.push(node);
-      positions.push({ id: ghostBand.tier, x: 0, y: ghostIndex * BAND_Y });
+      positions.push({
+        id: ghostBand.tier,
+        x: isHorizontal ? ghostIndex * BAND_X : 0,
+        y: isHorizontal ? 0 : ghostIndex * BAND_Y,
+      });
       ghostIndex += 1;
       existingTiers.add(ghostBand.tier);
     }
@@ -762,6 +783,7 @@ export function buildStructureViewModel(
     excluded: [],
     cache,
     structure: true,
+    structureDirection: isHorizontal ? 'horizontal' : 'vertical',
     structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
     structureEndpoints: report.endpoints,

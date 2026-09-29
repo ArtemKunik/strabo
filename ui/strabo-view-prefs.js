@@ -60,6 +60,9 @@ export function createViewPrefs(app) {
       if (parsed.structureGrid === true) {
         prefs.structureGrid = true;
       }
+      if (parsed.structureDirection === 'horizontal' || parsed.structureDirection === 'vertical') {
+        prefs.structureDirection = parsed.structureDirection;
+      }
       return prefs;
     } catch {
       return null;
@@ -79,6 +82,7 @@ export function createViewPrefs(app) {
           locLens: state.locLens,
           tier: state.tier,
           structureGrid: state.structureGrid,
+          structureDirection: state.structureDirection,
         }),
       );
     } catch {
@@ -145,6 +149,9 @@ export function createViewPrefs(app) {
     // The grid is a Structure sub-level; it only applies when Structure is the mode.
     if (prefs.structureGrid && state.mode === 'structure') {
       state.structureGrid = true;
+    }
+    if (prefs.structureDirection && state.mode === 'structure') {
+      state.structureDirection = prefs.structureDirection;
     }
   }
 

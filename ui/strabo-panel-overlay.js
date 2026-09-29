@@ -370,10 +370,49 @@ function driftSeriesClass(index) {
 }
 
 
+const DRIFT_WIDTH = 320;
+const DRIFT_HEIGHT = 140;
+const DRIFT_PAD_X = 12;
+const DRIFT_PAD_TOP = 14;
+const DRIFT_PAD_BOTTOM = 18;
+
+/** Unique per chart, so a floating panel and the screen can share a document safely. */
+let driftChartSeq = 0;
+
+
+/** A Catmull-Rom path relaxed into cubic beziers, so a measure reads as a curve, not corners. */
+function driftSmoothPath(points) {
+  if (points.length === 0) return '';
+  const first = points[0];
+  if (points.length === 1) return `M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`;
+  let d = `M ${first.x.toFixed(1)} ${first.y.toFixed(1)}`;
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    // Keep each control's height inside its segment's endpoints, so a cubic (a convex
+    // combination of its controls) can never overshoot above a peak or below a trough.
+    const low = Math.min(p1.y, p2.y);
+    const high = Math.max(p1.y, p2.y);
+    const c1y = Math.min(high, Math.max(low, p1.y + (p2.y - p0.y) / 6));
+    const c2y = Math.min(high, Math.max(low, p2.y - (p3.y - p1.y) / 6));
+    d +=
+      ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}` +
+      ` ${c2x.toFixed(1)} ${c2y.toFixed(1)}` +
+      ` ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+
 /**
  * The architecture-drift chart: one line per structural measure across the newest
  * revisions. A measure the revision cache could not supply is a gap, so the line breaks
- * rather than dropping to zero, and an unavailable report says so.
+ * rather than dropping to zero, and an unavailable report says so. A crosshair and a
+ * tooltip read the values at a revision, and the legend keys, dims, and toggles the lines.
  */
 function renderDriftChart(container, drift) {
   if (!drift) {
@@ -393,59 +432,222 @@ function renderDriftChart(container, drift) {
     return;
   }
 
-  const width = 320;
-  const height = 120;
-  const padding = 8;
+  const plotWidth = DRIFT_WIDTH - DRIFT_PAD_X * 2;
+  const plotHeight = DRIFT_HEIGHT - DRIFT_PAD_TOP - DRIFT_PAD_BOTTOM;
+  const count = Math.max(1, ...series.map((entry) => (entry.points ?? []).length));
+  const xFor = (index) =>
+    count <= 1
+      ? DRIFT_PAD_X + plotWidth / 2
+      : DRIFT_PAD_X + (index * plotWidth) / (count - 1);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'drift-chart-wrap';
+
   const svg = svgElement('svg', {
     class: 'drift-chart',
     'data-role': 'drift-chart',
-    viewBox: `0 0 ${width} ${height}`,
+    viewBox: `0 0 ${DRIFT_WIDTH} ${DRIFT_HEIGHT}`,
     preserveAspectRatio: 'none',
+    role: 'img',
+    'aria-label': `Architecture drift over ${points.length} revisions`,
   });
   svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '120');
+  svg.setAttribute('height', String(DRIFT_HEIGHT));
 
-  series.forEach((entry, index) => {
+  const grid = svgElement('g', { class: 'drift-grid-lines' });
+  for (let step = 0; step <= 4; step += 1) {
+    const y = DRIFT_PAD_TOP + (step * plotHeight) / 4;
+    grid.append(
+      svgElement('line', {
+        class: 'drift-grid',
+        x1: String(DRIFT_PAD_X),
+        x2: String(DRIFT_WIDTH - DRIFT_PAD_X),
+        y1: y.toFixed(1),
+        y2: y.toFixed(1),
+      }),
+    );
+  }
+  svg.append(grid);
+
+  const clipId = `drift-plot-${(driftChartSeq += 1)}`;
+  const clip = svgElement('clipPath', { id: clipId });
+  clip.append(
+    svgElement('rect', {
+      x: String(DRIFT_PAD_X - 4),
+      y: String(DRIFT_PAD_TOP - 4),
+      width: String(plotWidth + 8),
+      height: String(plotHeight + 8),
+      rx: '8',
+    }),
+  );
+  const defs = svgElement('defs', {});
+  defs.append(clip);
+  svg.append(defs);
+  const plot = svgElement('g', { 'clip-path': `url(#${clipId})` });
+  svg.append(plot);
+
+  const geometry = series.map((entry, index) => {
     const values = (entry.points ?? []).map((point) => point.value);
     const defined = values.filter((value) => value !== null && value !== undefined);
     const min = defined.length > 0 ? Math.min(...defined) : 0;
     const max = defined.length > 0 ? Math.max(...defined) : 0;
     const span = max - min;
-    const xFor = (i) =>
-      values.length <= 1 ? width / 2 : padding + (i * (width - padding * 2)) / (values.length - 1);
     const yFor = (value) =>
-      span === 0 ? height / 2 : height - padding - ((value - min) / span) * (height - padding * 2);
+      span === 0
+        ? DRIFT_PAD_TOP + plotHeight / 2
+        : DRIFT_PAD_TOP + (1 - (value - min) / span) * plotHeight;
+    return { entry, index, values, yFor };
+  });
+
+  const groups = geometry.map(({ entry, index, values, yFor }) => {
+    const seriesCls = driftSeriesClass(index);
+    const group = svgElement('g', {
+      class: 'drift-series',
+      'data-role': 'drift-series',
+      'data-series-key': entry.key ?? String(index),
+    });
 
     let segment = [];
-    const flush = () => {
+    const emit = () => {
       if (segment.length === 0) return;
-      svg.append(
-        svgElement('polyline', {
-          class: driftSeriesClass(index),
-          points: segment.join(' '),
-          fill: 'none',
-          'stroke-width': '2',
-          'vector-effect': 'non-scaling-stroke',
-        }),
-      );
+      if (segment.length === 1) {
+        group.append(
+          svgElement('circle', {
+            class: `drift-mark drift-node ${seriesCls}`,
+            cx: segment[0].x.toFixed(1),
+            cy: segment[0].y.toFixed(1),
+            r: '2.6',
+          }),
+        );
+      } else {
+        const d = driftSmoothPath(segment);
+        group.append(
+          svgElement('path', { class: `drift-halo ${seriesCls}`, d, 'data-role': 'drift-halo' }),
+        );
+        group.append(svgElement('path', { class: `drift-line ${seriesCls}`, d }));
+      }
       segment = [];
     };
     values.forEach((value, i) => {
       if (value === null || value === undefined) {
-        flush();
+        emit();
         return;
       }
-      segment.push(`${xFor(i).toFixed(1)},${yFor(value).toFixed(1)}`);
+      segment.push({ x: xFor(i), y: yFor(value) });
     });
-    flush();
+    emit();
+
+    let lastIndex = -1;
+    values.forEach((value, i) => {
+      if (value !== null && value !== undefined) lastIndex = i;
+    });
+    if (lastIndex >= 0) {
+      group.append(
+        svgElement('circle', {
+          class: `drift-mark drift-endpoint ${seriesCls}`,
+          cx: xFor(lastIndex).toFixed(1),
+          cy: yFor(values[lastIndex]).toFixed(1),
+          r: '3',
+        }),
+      );
+    }
+
+    plot.append(group);
+    return group;
   });
-  container.append(svg);
+
+  const crosshair = svgElement('line', {
+    class: 'drift-crosshair',
+    x1: '0',
+    x2: '0',
+    y1: String(DRIFT_PAD_TOP),
+    y2: String(DRIFT_PAD_TOP + plotHeight),
+  });
+  plot.append(crosshair);
+
+  const cursorDots = geometry.map(({ index }) => {
+    const dot = svgElement('circle', {
+      class: `drift-mark drift-cursor-dot ${driftSeriesClass(index)}`,
+      cx: '0',
+      cy: '0',
+      r: '3.4',
+    });
+    dot.setAttribute('opacity', '0');
+    plot.append(dot);
+    return dot;
+  });
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'drift-tooltip';
+  tooltip.hidden = true;
+  const tooltipHead = document.createElement('div');
+  tooltipHead.className = 'drift-tooltip-head';
+  const tooltipList = document.createElement('div');
+  tooltipList.className = 'drift-tooltip-list';
+  tooltip.append(tooltipHead, tooltipList);
+
+  wrap.append(svg, tooltip);
+  container.append(wrap);
+
+  const hidden = new Set();
+  const showAt = (viewX) => {
+    const ratio = (viewX - DRIFT_PAD_X) / plotWidth;
+    const index = Math.max(0, Math.min(count - 1, Math.round(ratio * (count - 1))));
+    const x = xFor(index);
+    crosshair.setAttribute('x1', x.toFixed(1));
+    crosshair.setAttribute('x2', x.toFixed(1));
+    crosshair.classList.add('is-on');
+    const revision = points[index];
+    tooltipHead.textContent = revision
+      ? `${revision.short}${revision.date ? ` · ${revision.date.slice(0, 10)}` : ''}`
+      : `#${index + 1}`;
+    tooltipList.replaceChildren();
+    geometry.forEach(({ entry, values, yFor }, seriesIndex) => {
+      const dot = cursorDots[seriesIndex];
+      const value = values[index];
+      if (value === null || value === undefined || hidden.has(seriesIndex)) {
+        dot.setAttribute('opacity', '0');
+        return;
+      }
+      dot.setAttribute('cx', x.toFixed(1));
+      dot.setAttribute('cy', yFor(value).toFixed(1));
+      dot.setAttribute('opacity', '1');
+      const row = document.createElement('div');
+      row.className = 'drift-tooltip-row';
+      const swatch = document.createElement('span');
+      swatch.className = `drift-legend-swatch ${driftSeriesClass(seriesIndex)}`;
+      swatch.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.className = 'drift-tooltip-label';
+      label.textContent = entry.label;
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'drift-tooltip-value';
+      valueSpan.textContent = String(value);
+      row.append(swatch, label, valueSpan);
+      tooltipList.append(row);
+    });
+    const percent = (x / DRIFT_WIDTH) * 100;
+    tooltip.style.left = `${Math.max(14, Math.min(86, percent))}%`;
+    tooltip.hidden = false;
+  };
+  const hide = () => {
+    crosshair.classList.remove('is-on');
+    cursorDots.forEach((dot) => dot.setAttribute('opacity', '0'));
+    tooltip.hidden = true;
+  };
+  svg.addEventListener('pointermove', (event) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    showAt(((event.clientX - rect.left) / rect.width) * DRIFT_WIDTH);
+  });
+  svg.addEventListener('pointerleave', hide);
 
   const legend = document.createElement('div');
   legend.className = 'drift-legend';
   legend.dataset.role = 'drift-legend';
   series.forEach((entry, index) => {
-    const item = document.createElement('span');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'drift-legend-item';
     const values = (entry.points ?? []).map((point) =>
       point.value === null || point.value === undefined ? '—' : String(point.value),
@@ -463,8 +665,27 @@ function renderDriftChart(container, drift) {
     const text = document.createElement('span');
     text.className = 'drift-legend-text';
     text.textContent = `${entry.label}: ${shown}`;
-    item.title = `${entry.label}: ${values.join(' → ')}`;
+    item.title = `${entry.label}: ${values.join(' → ')} · click to hide`;
     item.append(swatch, text);
+    item.addEventListener('pointerenter', () => {
+      svg.classList.add('drift-focus');
+      groups[index].classList.add('is-active');
+    });
+    item.addEventListener('pointerleave', () => {
+      svg.classList.remove('drift-focus');
+      groups[index].classList.remove('is-active');
+    });
+    item.addEventListener('click', () => {
+      if (hidden.has(index)) {
+        hidden.delete(index);
+        groups[index].classList.remove('is-hidden');
+        item.classList.remove('is-off');
+        return;
+      }
+      hidden.add(index);
+      groups[index].classList.add('is-hidden');
+      item.classList.add('is-off');
+    });
     legend.append(item);
   });
   container.append(legend);

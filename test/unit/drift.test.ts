@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, beforeEach, test } from 'node:test';
 
-import { collectDrift, computeDriftMeasures, DRIFT_MEASURES } from '../../src/analysis/drift.ts';
-import { clearStructuralDiffCache } from '../../src/analysis/structural-diff.ts';
+import { clearDriftCache, collectDrift, computeDriftMeasures, DRIFT_MEASURES } from '../../src/analysis/drift.ts';
+import { clearStructuralDiffCache, revisionGraphCachePath } from '../../src/analysis/structural-diff.ts';
 import type { Graph } from '../../src/types.ts';
 
 const created: string[] = [];
@@ -23,6 +23,7 @@ after(() => {
 
 beforeEach(() => {
   clearStructuralDiffCache();
+  clearDriftCache();
 });
 
 function git(root: string, ...args: string[]): string {
@@ -147,6 +148,26 @@ test('collectDrift walks three commits and reports the structural timeline', asy
     series('cycles')?.points.map((point) => point.revision),
     report.points.map((point) => point.revision),
   );
+});
+
+test("collectDrift caches a commit's measures rather than rebuilding its graph", async () => {
+  const root = tempRepo();
+  write(root, 'src/b.ts', 'export const b = 1;\n');
+  write(root, 'src/a.ts', "import './b.ts';\nexport const a = 1;\n");
+  commit(root, 'a imports b');
+
+  const first = await collectDrift(root, 'fixture');
+  assert.equal(first.available, true);
+
+  // Forget the revision graphs (memory and the parsed store) and remove the persisted file,
+  // so a second pass can only stay correct by serving the measures from the drift cache.
+  clearStructuralDiffCache();
+  fs.rmSync(revisionGraphCachePath(root), { force: true });
+
+  const second = await collectDrift(root, 'fixture');
+  assert.deepEqual(second.series, first.series);
+  // A measure-cache hit never reaches `revisionGraph`, so no store is rewritten.
+  assert.equal(fs.existsSync(revisionGraphCachePath(root)), false);
 });
 
 test('collectDrift reports an unavailable repository rather than an empty timeline', async () => {

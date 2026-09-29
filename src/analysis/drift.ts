@@ -70,6 +70,27 @@ const DEFAULT_LIMIT = 20;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 100;
 
+/**
+ * Per-commit structural measures, keyed by the resolved commit hash. A commit's tree never
+ * changes, so its measures are immutable: a cache hit skips both loading its revision graph
+ * from the disk store and re-running cycles/blast-radius over it. Bounded, since a long
+ * history would otherwise grow without limit.
+ */
+const measureCache = new Map<string, DriftMeasure[]>();
+const MEASURE_CACHE_LIMIT = 500;
+
+/** Drop the cached per-commit measures; tests call this so one case cannot read another's. */
+export function clearDriftCache(): void {
+  measureCache.clear();
+}
+
+function rememberMeasures(commit: string, measures: DriftMeasure[]): void {
+  measureCache.set(commit, measures);
+  while (measureCache.size > MEASURE_CACHE_LIMIT) {
+    measureCache.delete(measureCache.keys().next().value as string);
+  }
+}
+
 /** The eight measures for one revision graph: six counts, two honest `null`s. */
 export function computeDriftMeasures(graph: Graph): DriftMeasure[] {
   const cycles = computeCycles(graph);
@@ -148,9 +169,16 @@ export async function collectDrift(
 
   const points: DriftPoint[] = [];
   for (const commit of commits) {
+    const cached = measureCache.get(commit.revision);
+    if (cached) {
+      points.push({ ...commit, measures: cached });
+      continue;
+    }
     try {
       const result = await revisionGraph(root, commit.revision, repository);
-      points.push({ ...commit, measures: computeDriftMeasures(result.graph) });
+      const measures = computeDriftMeasures(result.graph);
+      rememberMeasures(commit.revision, measures);
+      points.push({ ...commit, measures });
     } catch {
       points.push({ ...commit, measures: emptyMeasures() });
     }

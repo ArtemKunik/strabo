@@ -111,24 +111,31 @@ export function createSelectionController(app) {
     renderInspector(elements.inspector, app.current, id, {
       onSelect: (target) => selectNode(target),
       onTrace: (from, to) => tracePath(from, to),
-      onOpenWorkspace: (target) => openFile(target),
+      // Everything below reads one file, so it is offered only when the selected node is one.
+      // A roll-up node (tier band, shelf, unit) declares no members to map and no file to
+      // open, so showing these would offer a control that cannot act.
+      ...(isFileNode(id) ? { onOpenWorkspace: (target) => openFile(target) } : {}),
       onBack: passportBack,
       backTitle: passportHistory.length > 0 ? 'Back to the previously selected module' : 'Back to the map',
       ...(isFileNode(id) ? { onViewSource: (target) => app.source.viewSource(target) } : {}),
       // The reading route is repository-wide; a Module Passport opens it at its own file.
       ...(isFileNode(id) ? { onOpenRoute: (target) => app.panels.showRoute(target) } : {}),
-      onOpenMemberMap: (target) => {
-        // The member map is a drill-down from the passport. Open it through its window
-        // controller (so it centres, raises above the passport, and takes focus), then
-        // retire the passport window instead of leaving the two stacked.
-        app.memberMap.openMemberMap(target)
-          .then(() => {
-            app.floatingWindows.find((controller) => controller.key === 'inspector')?.close();
-          })
-          .catch((error) => {
-            elements.status.textContent = `Error: ${error.message}`;
-          });
-      },
+      ...(isFileNode(id)
+        ? {
+            onOpenMemberMap: (target) => {
+              // The member map is a drill-down from the passport. Open it through its window
+              // controller (so it centres, raises above the passport, and takes focus), then
+              // retire the passport window instead of leaving the two stacked.
+              app.memberMap.openMemberMap(target)
+                .then(() => {
+                  app.floatingWindows.find((controller) => controller.key === 'inspector')?.close();
+                })
+                .catch((error) => {
+                  elements.status.textContent = `Error: ${error.message}`;
+                });
+            },
+          }
+        : {}),
       // A System-view unit may ask the opt-in narrator to name its group.
       ...(app.current?.system && !app.current?.systemUnit
         ? { narratorStatus: app.narratorStatus, onNarrate: () => app.narration.narrateGroup(id), onOpenNarratorSettings: app.settings.openNarratorSettings }
