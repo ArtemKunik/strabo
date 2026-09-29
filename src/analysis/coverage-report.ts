@@ -51,6 +51,12 @@ export interface CoverageFileEntry {
   reachPath?: string[] | null;
   /** Tests whose forward closure reaches this file: the tests to run. File scope only. */
   tests?: string[];
+  /**
+   * Tests the report attributes a covered line to (U6), from LCOV `TN:` blocks or coverage.py
+   * contexts. File scope only, and present only when the report recorded per-test data; the
+   * `tests` reachability list is the fallback and is always labelled as such.
+   */
+  coveringTests?: string[];
   /** Files that import this file. File scope only. */
   importers?: string[];
 }
@@ -298,13 +304,21 @@ export function fileCoverageReport(
   const basis = basisOf(measured);
   const tests = computeTestReachByFile(graph).get(file) ?? [];
   const importers = [...(buildAdjacency(graph).backward.get(file) ?? [])].sort();
+  // Per-test attribution (U6) when the report records it; absent means the format could not
+  // say, so the reachability `tests` list stands as the labelled fallback.
+  const coveringTests = (measured?.files ?? []).find((measuredFile) => measuredFile.file === file)?.coveringTests;
   return {
     scope: 'file',
     subject: file,
     threshold,
     totals: totalsOf([file], coverage, basis, threshold),
     provenance: provenanceOf(measured),
-    file: { ...entryOf(file, figure, basis, threshold), tests, importers },
+    file: {
+      ...entryOf(file, figure, basis, threshold),
+      tests,
+      importers,
+      ...(coveringTests && coveringTests.length > 0 ? { coveringTests } : {}),
+    },
   };
 }
 

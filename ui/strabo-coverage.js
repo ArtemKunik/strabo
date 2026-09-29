@@ -110,7 +110,18 @@ export function createCoverage(app) {
       if (token !== panelToken) {
         return;
       }
-      panelReport = report;
+      // The risky-and-untested list (U5) is a second, best-effort read; its absence must not
+      // fail the project panel, so a failure leaves `risk` off and the section unrendered.
+      let risk;
+      try {
+        risk = await app.request(`/analysis/coverage/risky${coverageQuery()}`);
+      } catch {
+        risk = undefined;
+      }
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = risk === undefined ? report : { ...report, risk };
     } catch (error) {
       if (token !== panelToken) {
         return;

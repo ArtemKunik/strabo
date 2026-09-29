@@ -17,7 +17,7 @@ import { detectCoverageCommand, type CoverageRefreshHint } from './coverage-refr
  * reachability in `coverage.ts` stays the fallback, and every figure carries which it is.
  */
 
-export type CoverageFormat = 'lcov' | 'cobertura' | 'jacoco';
+export type CoverageFormat = 'lcov' | 'cobertura' | 'jacoco' | 'coverage-py';
 
 export type CoverageUnavailableReason =
   | 'no-report-found'
@@ -54,11 +54,21 @@ export interface ParsedFileCoverage {
   functionsHit: number;
   /** Covered line numbers (1-based) recorded in the report, sorted ascending. */
   coveredLines?: number[];
+  /**
+   * Tests the report attributes a covered line to, sorted (U6). Present only when the format
+   * records per-test data (LCOV `TN:` blocks, coverage.py contexts); absent means the format
+   * cannot say which test covered the file, never that no test did.
+   */
+  coveringTests?: string[];
+  /** Covered lines per test, for a caller that needs function-level attribution (U6). */
+  coveredLinesByTest?: Record<string, number[]>;
 }
 
 export interface ParsedCoverageReport {
   format: CoverageFormat;
   files: ParsedFileCoverage[];
+  /** Test or session names the report records, sorted (U6); absent means none were named. */
+  sessions?: string[];
 }
 
 /** One file's measured coverage, mapped onto the scanned graph. */
@@ -205,6 +215,10 @@ export function detectCoverageFormat(filePath: string, content: string): Coverag
   if (/^\s*(TN:|SF:)/m.test(content)) {
     return 'lcov';
   }
+  // coverage.py JSON: a `files` object whose entries record `executed_lines`.
+  if (name.endsWith('.json') && content.includes('"files"') && content.includes('"executed_lines"')) {
+    return 'coverage-py';
+  }
   return null;
 }
 
@@ -222,80 +236,175 @@ export function parseCoverageText(
       return parseCobertura(content);
     case 'jacoco':
       return parseJacoco(content);
+    case 'coverage-py':
+      return parseCoveragePy(content);
     default:
       return null;
   }
 }
 
-/** Parse an LCOV tracefile: `SF` file records with `DA` lines and `FN`/`FNDA` functions. */
+/**
+ * Parse a coverage.py JSON report (`coverage json`).
+ *
+ * Each file's `executed_lines` give the covered lines, and its `contexts` — recorded with
+ * `--contexts` — give the covered lines per test context (U6). Functions are read from the
+ * `functions` block; a context that covered lines is a covering test, named rather than
+ * guessed. A malformed document is `null`, never an empty report.
+ */
+export function parseCoveragePy(content: string): ParsedCoverageReport | null {
+  let document: unknown;
+  try {
+    document = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (!isRecord(document) || !isRecord(document.files)) {
+    return null;
+  }
+  const files: ParsedFileCoverage[] = [];
+  const sessions = new Set<string>();
+  for (const [rawPath, value] of Object.entries(document.files)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const executed = numberArray(value.executed_lines);
+    const missing = numberArray(value.missing_lines);
+    const summary = isRecord(value.summary) ? value.summary : {};
+    const linesFound =
+      typeof summary.num_statements === 'number'
+        ? summary.num_statements
+        : executed.length + missing.length;
+    const coveredLines = [...executed].sort((a, b) => a - b);
+    const contexts = isRecord(value.contexts) ? value.contexts : {};
+    const coveredByTest: Record<string, number[]> = {};
+    for (const [context, contextValue] of Object.entries(contexts)) {
+      if (!isRecord(contextValue)) {
+        continue;
+      }
+      const covered = numberArray(contextValue.executed_lines);
+      if (covered.length > 0 && context) {
+        sessions.add(context);
+        coveredByTest[context] = [...covered].sort((a, b) => a - b);
+      }
+    }
+    const coveringTests = Object.keys(coveredByTest).sort();
+    const functions = isRecord(value.functions)
+      ? Object.entries(value.functions)
+          .filter(([, entry]) => isRecord(entry))
+          .map(([qualified, entry]) => {
+            const record = entry as Record<string, unknown>;
+            const functionExecuted = numberArray(record.executed_lines);
+            const functionMissing = numberArray(record.missing_lines);
+            const span = [...functionExecuted, ...functionMissing];
+            const name = qualified.split('.').pop() ?? qualified;
+            return {
+              name,
+              line: span.length > 0 ? Math.min(...span) : 0,
+              linesFound: span.length,
+              linesHit: functionExecuted.length,
+              lineCoverage: span.length > 0 ? percent(functionExecuted.length, span.length) : null,
+              hits: functionExecuted.length,
+            };
+          })
+          .sort((a, b) => a.line - b.line || a.name.localeCompare(b.name))
+      : [];
+    files.push({
+      rawPath,
+      linesFound,
+      linesHit: coveredLines.length,
+      lineCoverage: percent(coveredLines.length, linesFound),
+      functions,
+      functionsFound: functions.length,
+      functionsHit: functions.filter((fn) => (fn.hits ?? 0) > 0).length,
+      coveredLines,
+      ...(coveringTests.length > 0 ? { coveringTests, coveredLinesByTest: coveredByTest } : {}),
+    });
+  }
+  files.sort((a, b) => a.rawPath.localeCompare(b.rawPath));
+  return {
+    format: 'coverage-py',
+    files,
+    ...(sessions.size > 0 ? { sessions: [...sessions].sort() } : {}),
+  };
+}
+
+/** A JSON array of line numbers, or an empty list when the value is not one. */
+function numberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse an LCOV tracefile: `SF` file records with `DA` lines and `FN`/`FNDA` functions.
+ *
+ * When the tracefile carries `TN:` test names (one block per test, or one block naming a
+ * suite), the blocks for a file are merged and the covered lines are attributed to the test
+ * that recorded them, so a caller can answer "which tests cover this file" (U6). Without a
+ * `TN:`, no test is named and `coveringTests` stays absent rather than saying "none".
+ */
 export function parseLcov(content: string): ParsedCoverageReport {
   interface Accumulator {
     rawPath: string;
     lineNumbers: Set<number>;
     hitLines: Set<number>;
     functions: Map<string, { line: number; hits: number | null }>;
+    /** Covered lines per test name, when the tracefile names tests (U6). */
+    coveredByTest: Map<string, Set<number>>;
     lf: number;
     lh: number;
     fnf: number;
     fnh: number;
   }
 
-  const files: ParsedFileCoverage[] = [];
+  const byPath = new Map<string, Accumulator>();
+  const sessions = new Set<string>();
   let current: Accumulator | null = null;
+  let testName = '';
 
-  const flush = (): void => {
-    if (!current) {
-      return;
+  const accumulatorFor = (rawPath: string): Accumulator => {
+    const existing = byPath.get(rawPath);
+    if (existing) {
+      return existing;
     }
-    let linesFound = current.lineNumbers.size;
-    let linesHit = current.hitLines.size;
-    // A report may record only `LH`/`LF`; fall back to those when there are no `DA` lines.
-    if (linesFound === 0 && current.lf > 0) {
-      linesFound = current.lf;
-      linesHit = current.lh;
-    }
-    const functions = [...current.functions.entries()]
-      .map(([name, value]) => ({
-        name,
-        line: value.line,
-        linesFound: 0,
-        linesHit: 0,
-        lineCoverage: null,
-        hits: value.hits,
-      }))
-      .sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
-    files.push({
-      rawPath: current.rawPath,
-      linesFound,
-      linesHit,
-      lineCoverage: percent(linesHit, linesFound),
-      functions,
-      functionsFound: current.fnf > 0 ? current.fnf : functions.length,
-      functionsHit: current.fnh > 0 ? current.fnh : functions.filter((fn) => (fn.hits ?? 0) > 0).length,
-      coveredLines: [...current.hitLines].sort((a, b) => a - b),
-    });
-    current = null;
+    const created: Accumulator = {
+      rawPath,
+      lineNumbers: new Set(),
+      hitLines: new Set(),
+      functions: new Map(),
+      coveredByTest: new Map(),
+      lf: 0,
+      lh: 0,
+      fnf: 0,
+      fnh: 0,
+    };
+    byPath.set(rawPath, created);
+    return created;
   };
 
   for (const raw of content.split(/\r?\n/)) {
     const line = raw.trimEnd();
     if (line === 'end_of_record') {
-      flush();
+      current = null;
+      continue;
+    }
+    if (line.startsWith('TN:')) {
+      const name = line.slice(3).trim();
+      testName = name;
+      if (name) {
+        sessions.add(name);
+      }
       continue;
     }
     if (line.startsWith('SF:')) {
-      // A new `SF` before `end_of_record` still closes the previous file.
-      flush();
-      current = {
-        rawPath: line.slice(3).trim(),
-        lineNumbers: new Set(),
-        hitLines: new Set(),
-        functions: new Map(),
-        lf: 0,
-        lh: 0,
-        fnf: 0,
-        fnh: 0,
-      };
+      // A new `SF` before `end_of_record` still closes the previous file. A repeat of a path
+      // (one block per test) merges into the accumulator already held for it.
+      current = accumulatorFor(line.slice(3).trim());
       continue;
     }
     if (!current) {
@@ -309,6 +418,11 @@ export function parseLcov(content: string): ParsedCoverageReport {
         current.lineNumbers.add(lineNumber);
         if (count > 0) {
           current.hitLines.add(lineNumber);
+          if (testName) {
+            const lines = current.coveredByTest.get(testName) ?? new Set<number>();
+            lines.add(lineNumber);
+            current.coveredByTest.set(testName, lines);
+          }
         }
       }
     } else if (line.startsWith('FN:')) {
@@ -342,11 +456,58 @@ export function parseLcov(content: string): ParsedCoverageReport {
       current.fnh = intOr(line.slice(4), 0);
     }
   }
-  // A file record without a trailing `end_of_record` is still reported.
-  flush();
+  const files: ParsedFileCoverage[] = [...byPath.values()].map((accumulator) => {
+    let linesFound = accumulator.lineNumbers.size;
+    let linesHit = accumulator.hitLines.size;
+    // A report may record only `LH`/`LF`; fall back to those when there are no `DA` lines.
+    if (linesFound === 0 && accumulator.lf > 0) {
+      linesFound = accumulator.lf;
+      linesHit = accumulator.lh;
+    }
+    const functions = [...accumulator.functions.entries()]
+      .map(([name, value]) => ({
+        name,
+        line: value.line,
+        linesFound: 0,
+        linesHit: 0,
+        lineCoverage: null,
+        hits: value.hits,
+      }))
+      .sort((a, b) => a.line - b.line || a.name.localeCompare(b.name));
+    const coveringTests = [...accumulator.coveredByTest.entries()]
+      .filter(([, lines]) => lines.size > 0)
+      .map(([name]) => name)
+      .sort();
+    const coveredLinesByTest =
+      coveringTests.length > 0
+        ? Object.fromEntries(
+            coveringTests.map((name) => [
+              name,
+              [...(accumulator.coveredByTest.get(name) ?? [])].sort((a, b) => a - b),
+            ]),
+          )
+        : undefined;
+    return {
+      rawPath: accumulator.rawPath,
+      linesFound,
+      linesHit,
+      lineCoverage: percent(linesHit, linesFound),
+      functions,
+      functionsFound: accumulator.fnf > 0 ? accumulator.fnf : functions.length,
+      functionsHit:
+        accumulator.fnh > 0 ? accumulator.fnh : functions.filter((fn) => (fn.hits ?? 0) > 0).length,
+      coveredLines: [...accumulator.hitLines].sort((a, b) => a - b),
+      ...(coveringTests.length > 0 ? { coveringTests } : {}),
+      ...(coveredLinesByTest ? { coveredLinesByTest } : {}),
+    };
+  });
 
   files.sort((a, b) => a.rawPath.localeCompare(b.rawPath));
-  return { format: 'lcov', files };
+  return {
+    format: 'lcov',
+    files,
+    ...(sessions.size > 0 ? { sessions: [...sessions].sort() } : {}),
+  };
 }
 
 /**
@@ -560,8 +721,15 @@ export function parseJacoco(content: string): ParsedCoverageReport {
     };
   });
 
+  // JaCoCo reports the runs it recorded as `<sessioninfo>` names. They are sessions, not
+  // per-test line attribution; they are named as sessions rather than claimed as covering tests.
+  const sessions = [...content.matchAll(/<sessioninfo\b([^>]*?)\/?>/g)]
+    .map((match) => attr(match[1] ?? '', 'id'))
+    .filter((name): name is string => Boolean(name && name.trim()))
+    .sort();
+
   files.sort((a, b) => a.rawPath.localeCompare(b.rawPath));
-  return { format: 'jacoco', files };
+  return { format: 'jacoco', files, ...(sessions.length > 0 ? { sessions } : {}) };
 }
 
 /**

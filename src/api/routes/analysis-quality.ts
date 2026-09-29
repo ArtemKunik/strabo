@@ -10,8 +10,10 @@ import {
 } from '../../analysis/coverage-report.ts';
 import { computeFileHealth } from '../../analysis/file-health.ts';
 import { UNDER_COVERED_THRESHOLD } from '../../analysis/file-coverage.ts';
+import { computeRiskyUntested } from '../../analysis/coverage-risk.ts';
 import { buildFunctions, type FunctionsReport } from '../../analysis/functions.ts';
 import { rankHotspots } from '../../analysis/hotspots.ts';
+import { getFileAuthorHistory } from '../../analysis/ownership.ts';
 import { coverageProvenance } from '../../analysis/measured-coverage.ts';
 import { refreshCoverage } from '../../analysis/coverage-refresh.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
@@ -59,6 +61,8 @@ export function createQualityRouter(context: AnalysisContext): Router {
         repository: repository.name,
         measured,
         reachable: { basis: 'reachable', ...computeCoverage(cached.report.graph) },
+        // The file ids the overlay marks; a report-named path not here is `not in report`.
+        nodes: cached.report.graph.nodes.map((node) => node.id),
       });
     } catch (error) {
       sendError(response, error);
@@ -365,6 +369,75 @@ export function createQualityRouter(context: AnalysisContext): Router {
           filesScanned: selected.length,
           filesSkipped: skipped,
         }),
+        coverage: coverageProvenance(measured),
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Risky and untested functions (Phase 34 U5): the hotspots ranked by complexity × churn ×
+   * uncovered share, with each input returned beside the rank. Churn is read from Git for the
+   * hotspots only, bounded, so a wide repository does not pay a `git log` per file.
+   */
+  router.get('/analysis/coverage/risky', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const limit = parsePositiveInt(request.query.limit, 50) ?? 50;
+      const scannedCeiling = 400;
+      const churnCeiling = 60;
+
+      const candidates = cached.report.graph.nodes
+        .map((node) => node.id)
+        .filter((file) => symbolExtractorFor(file) !== null)
+        .sort();
+      const selected = candidates.slice(0, scannedCeiling);
+
+      const measured = await measuredCoverage(repository, cached.report.graph, selected);
+      const coverageByFile = new Map(
+        measured.files.filter((entry) => entry.inGraph).map((entry) => [entry.file, entry]),
+      );
+
+      const reports: FunctionsReport[] = [];
+      let skipped = candidates.length - selected.length;
+      for (const file of selected) {
+        const extractor = symbolExtractorFor(file);
+        if (!extractor) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          const content = fs.readFileSync(assertReadable(repository.root, file), 'utf8');
+          const result = await extractor.extract(file, content);
+          const entry = coverageByFile.get(file);
+          reports.push(buildFunctions(file, result.symbols, result.calls ?? [], entry?.functions ?? []));
+        } catch {
+          skipped += 1;
+        }
+      }
+
+      // Read churn for the hotspot files only: a git log per file is the expensive part.
+      const hotspots = rankHotspots(reports, {
+        limit: Number.MAX_SAFE_INTEGER,
+        filesScanned: selected.length,
+        filesSkipped: skipped,
+      });
+      const churnFiles = [...new Set(hotspots.hotspots.map((hotspot) => hotspot.file))].slice(0, churnCeiling);
+      const churnByFile = new Map<string, number>();
+      try {
+        for (const entry of await getFileAuthorHistory(repository.root, churnFiles)) {
+          churnByFile.set(entry.file, entry.commits);
+        }
+      } catch {
+        // No Git history: churn is simply not an input, and the caption says so.
+      }
+
+      const report = computeRiskyUntested({ hotspots, churnByFile });
+      response.json({
+        ...report,
+        rows: report.rows.slice(0, limit),
         coverage: coverageProvenance(measured),
       });
     } catch (error) {

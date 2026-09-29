@@ -22,6 +22,7 @@ export const OVERLAY_TITLES = {
   'hidden-coupling': 'Hidden coupling (co-change, no import path)',
   'declared-rules': 'Declared rules',
   data: 'Data',
+  coverage: 'Coverage',
 };
 
 /** The analysis endpoint each overlay reads. */
@@ -37,10 +38,11 @@ export const OVERLAY_ENDPOINTS = {
   'hidden-coupling': '/analysis/co-change',
   'declared-rules': '/analysis/rules',
   data: '/analysis/data/overlay',
+  coverage: '/analysis/coverage',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data'];
+export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage'];
 
 /**
  * Map a review analysis result onto node classes and a panel summary.
@@ -178,6 +180,8 @@ export function overlayFor(kind, data) {
       return declaredRulesOverlay(data);
     case 'data':
       return dataOverlay(data);
+    case 'coverage':
+      return coverageOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
@@ -241,6 +245,150 @@ export function dataOverlay(data) {
  * came from, so the overlay points at evidence rather than standing as a verdict. A report
  * with no declared rules is unavailable and annotates nothing.
  */
+/**
+ * The measured-coverage overlay (Phase 34 U1): a sequential scale over the report's own
+ * figures, replacing the binary test-reach reading as the primary answer.
+ *
+ * Four states are always distinct and named in the legend: a measured figure on the ramp,
+ * a measured 0% (the floor, marked apart so "covered a little" and "covered none" never read
+ * alike), a file the report does not name, and a file only test-reach reaches. A stale figure
+ * is greyed and counted, never shown as current. With no report the overlay falls back to
+ * reachability as a distinct pattern, not a colour on the same scale.
+ */
+export function coverageOverlay(data) {
+  const measured = data?.measured ?? null;
+  const reachable = data?.reachable ?? null;
+  const legend = COVERAGE_LEGEND;
+
+  if (measured?.available === true) {
+    const classes = new Map();
+    const inGraph = (measured.files ?? []).filter((file) => file.inGraph !== false);
+    const named = new Set(inGraph.map((file) => file.file));
+    let measuredZero = 0;
+    let stale = 0;
+    let noLineCounts = 0;
+    const rows = [];
+    for (const file of inGraph) {
+      const value = typeof file.lineCoverage === 'number' ? file.lineCoverage : null;
+      if (file.stale === true) {
+        classes.set(file.file, 'cov-stale');
+        stale += 1;
+      } else if (value === null) {
+        classes.set(file.file, 'cov-noreport');
+        noLineCounts += 1;
+      } else if (value <= 0) {
+        classes.set(file.file, 'cov-zero');
+        measuredZero += 1;
+      } else {
+        classes.set(file.file, coverageBucket(value));
+      }
+      rows.push({
+        id: file.file,
+        value,
+        stale: file.stale === true,
+        linesHit: file.linesHit ?? null,
+        linesFound: file.linesFound ?? null,
+      });
+    }
+    // A graph file the report does not name is `not in report`, never 0%.
+    let notInReport = 0;
+    for (const id of data?.nodes ?? []) {
+      if (!named.has(id)) {
+        classes.set(id, 'cov-noreport');
+        notInReport += 1;
+      }
+    }
+    const outOfGraph = measured.outOfGraph ?? [];
+    const worst = rows
+      .filter((row) => row.value !== null)
+      .sort((a, b) => a.value - b.value || a.id.localeCompare(b.id))
+      .slice(0, 200)
+      .map((row) => ({
+        id: row.id,
+        label: row.id,
+        detail: `${row.value}% · ${row.linesHit ?? '?'}/${row.linesFound ?? '?'} line(s)${row.stale ? ' · stale' : ''}`,
+      }));
+    const age = coverageReportAge(measured.reportAgeMs);
+    return {
+      classes,
+      legend,
+      summary:
+        `${inGraph.length} measured${measuredZero > 0 ? ` · ${measuredZero} at 0%` : ''}` +
+        `${stale > 0 ? ` · ${stale} stale` : ''} · ${notInReport} not in report` +
+        ` · report ${measured.reportPath ?? 'unknown'}${age}`,
+      meta: {
+        basis: 'measured',
+        filesMeasured: inGraph.length,
+        measuredZero,
+        stale,
+        notInReport,
+        noLineCounts,
+        outOfGraph: outOfGraph.length,
+        reportPath: measured.reportPath ?? null,
+        reportAgeMs: measured.reportAgeMs ?? null,
+      },
+      items: worst,
+      outOfGraph,
+      ...(noLineCounts > 0
+        ? { note: `${noLineCounts} named file(s) record no line counts.` }
+        : {}),
+    };
+  }
+
+  // No report: fall back to the measured-or-reaching answer with reachability as a pattern.
+  const reached = reachable?.reached ?? [];
+  const testFiles = reachable?.testFiles ?? [];
+  const classes = new Map();
+  for (const id of reached) {
+    classes.set(id, 'cov-reachable');
+  }
+  const reason = measured?.reason ?? 'no-report-found';
+  const refresh = measured?.refresh;
+  const command = refresh?.command ? ` · ${refresh.command}` : '';
+  return {
+    classes,
+    legend,
+    summary:
+      testFiles.length === 0
+        ? `no report (${reason}) · no test files identified`
+        : `no report (${reason}) · reachable only: ${reached.length} reached · ${testFiles.length} test file(s)${command}`,
+    meta: { basis: 'reachable', reached: reached.length, testFiles: testFiles.length },
+    items: [],
+    emptyNote:
+      'No coverage report was found, so files are drawn by whether a test reaches them; a report gives real percentages.',
+  };
+}
+
+/** The five measured bucket classes and the always-distinct states, for the legend. */
+export const COVERAGE_LEGEND = [
+  { cls: 'cov-90', label: 'measured 90%+' },
+  { cls: 'cov-70', label: 'measured 70-89%' },
+  { cls: 'cov-50', label: 'measured 50-69%' },
+  { cls: 'cov-30', label: 'measured 30-49%' },
+  { cls: 'cov-10', label: 'measured 1-29%' },
+  { cls: 'cov-zero', label: 'measured 0%' },
+  { cls: 'cov-noreport', label: 'not in report' },
+  { cls: 'cov-reachable', label: 'reachable only' },
+  { cls: 'cov-stale', label: 'stale figure' },
+];
+
+/** The measured ramp bucket for a 1-100 value: five steps, 10 low to 90 high. */
+export function coverageBucket(value) {
+  if (value >= 90) return 'cov-90';
+  if (value >= 70) return 'cov-70';
+  if (value >= 50) return 'cov-50';
+  if (value >= 30) return 'cov-30';
+  return 'cov-10';
+}
+
+/** A short, human report age for the coverge summary, or nothing when unknown. */
+function coverageReportAge(ageMs) {
+  if (typeof ageMs !== 'number' || !Number.isFinite(ageMs)) {
+    return '';
+  }
+  return ` (${coverageAge(ageMs)} old)`;
+}
+
 export function declaredRulesOverlay(report) {
   if (!report || report.available === false) {
     return { classes: new Map(), summary: '', items: [] };

@@ -214,6 +214,12 @@ export type {
   UncoveredFunctionChange,
   ChangedCoverageTotals,
 } from './analysis/changed-coverage.ts';
+export { computeRiskyUntested, riskyUntestedCaption } from './analysis/coverage-risk.ts';
+export type {
+  RiskyUntestedInput,
+  RiskyUntestedReport,
+  RiskyUntestedRow,
+} from './analysis/coverage-risk.ts';
 export { computeCoverageGaps } from './analysis/coverage-gaps.ts';
 export type {
   CoverageGap,
@@ -240,6 +246,7 @@ export {
   parseLcov,
   parseCobertura,
   parseJacoco,
+  parseCoveragePy,
   detectCoverageFormat,
   measuredFileFigure,
   coverageProvenance,

@@ -95,6 +95,20 @@ export function stylesheet() {
     { selector: 'node.tier-skip', style: { 'border-width': 3, 'border-style': 'dashed', 'border-color': theme.affected, 'background-opacity': 1 } },
     // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
     { selector: 'node.ov-smell', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.affected, 'background-opacity': 1 } },
+    // The coverage overlay (Phase 34 U1): a sequential measured ramp on the accent hue (the
+    // Phase 13 budget keeps hue for status and tiers, so the ramp is opacity, not new colours).
+    // The four states differ by shape as well as tone: a measured bucket is a solid accent
+    // fill, a measured 0% a heavy ring, `not in report` a dashed ring, `reachable only` a
+    // dotted ring, and a stale figure a grey dotted ring, never presented as current.
+    { selector: 'node.cov-90', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.85, 'border-color': theme.edgeAccent, 'border-width': 1.5 } },
+    { selector: 'node.cov-70', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.66, 'border-color': theme.edgeAccent, 'border-width': 1.5 } },
+    { selector: 'node.cov-50', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.5, 'border-color': theme.edgeAccent, 'border-width': 1.5 } },
+    { selector: 'node.cov-30', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.34, 'border-color': theme.edgeAccent, 'border-width': 1.5 } },
+    { selector: 'node.cov-10', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.2, 'border-color': theme.edgeAccent, 'border-width': 1.5 } },
+    { selector: 'node.cov-zero', style: { 'background-color': theme.edgeAccent, 'background-opacity': 0.1, 'border-color': theme.edgeAccent, 'border-width': 3, 'border-style': 'solid' } },
+    { selector: 'node.cov-noreport', style: { 'background-opacity': 0, 'border-color': theme.affected, 'border-width': 2.5, 'border-style': 'dashed' } },
+    { selector: 'node.cov-reachable', style: { 'background-opacity': 0, 'border-color': theme.cycle, 'border-width': 2.5, 'border-style': 'dotted' } },
+    { selector: 'node.cov-stale', style: { 'background-color': theme.unreached, 'background-opacity': 0.45, 'border-color': theme.unreached, 'border-width': 2, 'border-style': 'dotted' } },
     // Hidden coupling is a co-change pair with no import path: the status serious ring marks
     // the endpoints, and the distinct edge below carries the relationship (K3).
     { selector: 'node.ov-hidden-coupling', style: { 'border-width': 3, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },

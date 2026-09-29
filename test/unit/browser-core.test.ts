@@ -310,6 +310,52 @@ test('overlayFor maps cycles and test reach onto their node classes', () => {
   assert.equal(reachAll.items.length, 0);
 });
 
+test('coverageOverlay draws the measured ramp with the four states distinct (U1)', async () => {
+  const { coverageBucket } = await import('../../ui/strabo-overlays.js');
+  assert.equal(coverageBucket(100), 'cov-90');
+  assert.equal(coverageBucket(75), 'cov-70');
+  assert.equal(coverageBucket(55), 'cov-50');
+  assert.equal(coverageBucket(35), 'cov-30');
+  assert.equal(coverageBucket(5), 'cov-10');
+
+  const overlay = overlayFor('coverage', {
+    measured: {
+      available: true,
+      reportPath: 'coverage/lcov.info',
+      reportAgeMs: 3_600_000,
+      outOfGraph: ['/outside/x.ts'],
+      summary: { filesMeasured: 3 },
+      files: [
+        { file: 'a.ts', inGraph: true, lineCoverage: 95, linesHit: 9, linesFound: 10, stale: false },
+        { file: 'b.ts', inGraph: true, lineCoverage: 0, linesHit: 0, linesFound: 4, stale: false },
+        { file: 'c.ts', inGraph: true, lineCoverage: 40, linesHit: 4, linesFound: 10, stale: true },
+      ],
+    },
+    nodes: ['a.ts', 'b.ts', 'c.ts', 'd.ts'],
+  });
+  assert.equal(overlay.classes.get('a.ts'), 'cov-90');
+  assert.equal(overlay.classes.get('b.ts'), 'cov-zero');
+  assert.equal(overlay.classes.get('c.ts'), 'cov-stale');
+  assert.equal(overlay.classes.get('d.ts'), 'cov-noreport');
+  assert.match(overlay.summary, /coverage\/lcov\.info/);
+  assert.match(overlay.summary, /1 stale/);
+  assert.deepEqual(overlay.outOfGraph, ['/outside/x.ts']);
+  assert.ok(overlay.legend.some((entry) => entry.label === 'measured 0%'));
+  assert.ok(overlay.legend.some((entry) => entry.label === 'reachable only'));
+});
+
+test('coverageOverlay falls back to reachability as a pattern when no report exists (U1)', () => {
+  const overlay = overlayFor('coverage', {
+    measured: { available: false, reason: 'no-report-found', refresh: { command: 'npm run test:coverage' } },
+    reachable: { reached: ['a.ts'], testFiles: ['t.ts'] },
+    nodes: ['a.ts', 'b.ts'],
+  });
+  assert.equal(overlay.classes.get('a.ts'), 'cov-reachable');
+  assert.equal(overlay.classes.has('b.ts'), false);
+  assert.match(overlay.summary, /reachable only/);
+  assert.match(overlay.summary, /npm run test:coverage/);
+});
+
 test('overlayFor returns an empty overlay for an unknown kind', () => {
   const overlay = overlayFor('nonsense', {});
   assert.equal(overlay.classes.size, 0);

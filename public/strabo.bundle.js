@@ -1420,7 +1420,8 @@ var OVERLAY_TITLES = {
   smells: "Smells",
   "hidden-coupling": "Hidden coupling (co-change, no import path)",
   "declared-rules": "Declared rules",
-  data: "Data"
+  data: "Data",
+  coverage: "Coverage"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -1433,9 +1434,10 @@ var OVERLAY_ENDPOINTS = {
   smells: "/analysis/smells",
   "hidden-coupling": "/analysis/co-change",
   "declared-rules": "/analysis/rules",
-  data: "/analysis/data/overlay"
+  data: "/analysis/data/overlay",
+  coverage: "/analysis/coverage"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage"];
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -1530,6 +1532,8 @@ function overlayFor(kind, data) {
       return declaredRulesOverlay(data);
     case "data":
       return dataOverlay(data);
+    case "coverage":
+      return coverageOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
@@ -1572,6 +1576,116 @@ function dataOverlay(data) {
     }),
     meta: { files: files.length, writers, readers, products: products.length }
   };
+}
+function coverageOverlay(data) {
+  const measured = data?.measured ?? null;
+  const reachable = data?.reachable ?? null;
+  const legend = COVERAGE_LEGEND;
+  if (measured?.available === true) {
+    const classes2 = /* @__PURE__ */ new Map();
+    const inGraph = (measured.files ?? []).filter((file) => file.inGraph !== false);
+    const named = new Set(inGraph.map((file) => file.file));
+    let measuredZero = 0;
+    let stale = 0;
+    let noLineCounts = 0;
+    const rows = [];
+    for (const file of inGraph) {
+      const value = typeof file.lineCoverage === "number" ? file.lineCoverage : null;
+      if (file.stale === true) {
+        classes2.set(file.file, "cov-stale");
+        stale += 1;
+      } else if (value === null) {
+        classes2.set(file.file, "cov-noreport");
+        noLineCounts += 1;
+      } else if (value <= 0) {
+        classes2.set(file.file, "cov-zero");
+        measuredZero += 1;
+      } else {
+        classes2.set(file.file, coverageBucket(value));
+      }
+      rows.push({
+        id: file.file,
+        value,
+        stale: file.stale === true,
+        linesHit: file.linesHit ?? null,
+        linesFound: file.linesFound ?? null
+      });
+    }
+    let notInReport = 0;
+    for (const id of data?.nodes ?? []) {
+      if (!named.has(id)) {
+        classes2.set(id, "cov-noreport");
+        notInReport += 1;
+      }
+    }
+    const outOfGraph = measured.outOfGraph ?? [];
+    const worst = rows.filter((row) => row.value !== null).sort((a, b2) => a.value - b2.value || a.id.localeCompare(b2.id)).slice(0, 200).map((row) => ({
+      id: row.id,
+      label: row.id,
+      detail: `${row.value}% \xB7 ${row.linesHit ?? "?"}/${row.linesFound ?? "?"} line(s)${row.stale ? " \xB7 stale" : ""}`
+    }));
+    const age = coverageReportAge(measured.reportAgeMs);
+    return {
+      classes: classes2,
+      legend,
+      summary: `${inGraph.length} measured${measuredZero > 0 ? ` \xB7 ${measuredZero} at 0%` : ""}${stale > 0 ? ` \xB7 ${stale} stale` : ""} \xB7 ${notInReport} not in report \xB7 report ${measured.reportPath ?? "unknown"}${age}`,
+      meta: {
+        basis: "measured",
+        filesMeasured: inGraph.length,
+        measuredZero,
+        stale,
+        notInReport,
+        noLineCounts,
+        outOfGraph: outOfGraph.length,
+        reportPath: measured.reportPath ?? null,
+        reportAgeMs: measured.reportAgeMs ?? null
+      },
+      items: worst,
+      outOfGraph,
+      ...noLineCounts > 0 ? { note: `${noLineCounts} named file(s) record no line counts.` } : {}
+    };
+  }
+  const reached = reachable?.reached ?? [];
+  const testFiles = reachable?.testFiles ?? [];
+  const classes = /* @__PURE__ */ new Map();
+  for (const id of reached) {
+    classes.set(id, "cov-reachable");
+  }
+  const reason = measured?.reason ?? "no-report-found";
+  const refresh = measured?.refresh;
+  const command = refresh?.command ? ` \xB7 ${refresh.command}` : "";
+  return {
+    classes,
+    legend,
+    summary: testFiles.length === 0 ? `no report (${reason}) \xB7 no test files identified` : `no report (${reason}) \xB7 reachable only: ${reached.length} reached \xB7 ${testFiles.length} test file(s)${command}`,
+    meta: { basis: "reachable", reached: reached.length, testFiles: testFiles.length },
+    items: [],
+    emptyNote: "No coverage report was found, so files are drawn by whether a test reaches them; a report gives real percentages."
+  };
+}
+var COVERAGE_LEGEND = [
+  { cls: "cov-90", label: "measured 90%+" },
+  { cls: "cov-70", label: "measured 70-89%" },
+  { cls: "cov-50", label: "measured 50-69%" },
+  { cls: "cov-30", label: "measured 30-49%" },
+  { cls: "cov-10", label: "measured 1-29%" },
+  { cls: "cov-zero", label: "measured 0%" },
+  { cls: "cov-noreport", label: "not in report" },
+  { cls: "cov-reachable", label: "reachable only" },
+  { cls: "cov-stale", label: "stale figure" }
+];
+function coverageBucket(value) {
+  if (value >= 90) return "cov-90";
+  if (value >= 70) return "cov-70";
+  if (value >= 50) return "cov-50";
+  if (value >= 30) return "cov-30";
+  return "cov-10";
+}
+function coverageReportAge(ageMs) {
+  if (typeof ageMs !== "number" || !Number.isFinite(ageMs)) {
+    return "";
+  }
+  return ` (${coverageAge(ageMs)} old)`;
 }
 function declaredRulesOverlay(report) {
   if (!report || report.available === false) {
@@ -2579,6 +2693,20 @@ function stylesheet() {
     { selector: "node.tier-skip", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
     // Smells are a signal, so they ride the reserved status scale; the panel names the rule.
     { selector: "node.ov-smell", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
+    // The coverage overlay (Phase 34 U1): a sequential measured ramp on the accent hue (the
+    // Phase 13 budget keeps hue for status and tiers, so the ramp is opacity, not new colours).
+    // The four states differ by shape as well as tone: a measured bucket is a solid accent
+    // fill, a measured 0% a heavy ring, `not in report` a dashed ring, `reachable only` a
+    // dotted ring, and a stale figure a grey dotted ring, never presented as current.
+    { selector: "node.cov-90", style: { "background-color": theme.edgeAccent, "background-opacity": 0.85, "border-color": theme.edgeAccent, "border-width": 1.5 } },
+    { selector: "node.cov-70", style: { "background-color": theme.edgeAccent, "background-opacity": 0.66, "border-color": theme.edgeAccent, "border-width": 1.5 } },
+    { selector: "node.cov-50", style: { "background-color": theme.edgeAccent, "background-opacity": 0.5, "border-color": theme.edgeAccent, "border-width": 1.5 } },
+    { selector: "node.cov-30", style: { "background-color": theme.edgeAccent, "background-opacity": 0.34, "border-color": theme.edgeAccent, "border-width": 1.5 } },
+    { selector: "node.cov-10", style: { "background-color": theme.edgeAccent, "background-opacity": 0.2, "border-color": theme.edgeAccent, "border-width": 1.5 } },
+    { selector: "node.cov-zero", style: { "background-color": theme.edgeAccent, "background-opacity": 0.1, "border-color": theme.edgeAccent, "border-width": 3, "border-style": "solid" } },
+    { selector: "node.cov-noreport", style: { "background-opacity": 0, "border-color": theme.affected, "border-width": 2.5, "border-style": "dashed" } },
+    { selector: "node.cov-reachable", style: { "background-opacity": 0, "border-color": theme.cycle, "border-width": 2.5, "border-style": "dotted" } },
+    { selector: "node.cov-stale", style: { "background-color": theme.unreached, "background-opacity": 0.45, "border-color": theme.unreached, "border-width": 2, "border-style": "dotted" } },
     // Hidden coupling is a co-change pair with no import path: the status serious ring marks
     // the endpoints, and the distinct edge below carries the relationship (K3).
     { selector: "node.ov-hidden-coupling", style: { "border-width": 3, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
@@ -2976,7 +3104,32 @@ function createUnitCardLayer(container, cy, onOpen) {
 }
 
 // ui/strabo-graph-classes.js
-var OVERLAY_CLASSES = ["ov-changed", "ov-affected", "ov-cycle", "ov-unreached", "ov-hotspot", "ov-wide-interface", "ov-pass-through", "ov-sole-owner", "ov-cross-repo", "ov-smell", "ov-hidden-coupling", "ov-declared-rule", "ov-data", "ov-product"];
+var OVERLAY_CLASSES = [
+  "ov-changed",
+  "ov-affected",
+  "ov-cycle",
+  "ov-unreached",
+  "ov-hotspot",
+  "ov-wide-interface",
+  "ov-pass-through",
+  "ov-sole-owner",
+  "ov-cross-repo",
+  "ov-smell",
+  "ov-hidden-coupling",
+  "ov-declared-rule",
+  "ov-data",
+  "ov-product",
+  // Coverage overlay (Phase 34 U1): a measured ramp plus the always-distinct states.
+  "cov-90",
+  "cov-70",
+  "cov-50",
+  "cov-30",
+  "cov-10",
+  "cov-zero",
+  "cov-noreport",
+  "cov-reachable",
+  "cov-stale"
+];
 var RESET_CLASSES = [
   ...OVERLAY_CLASSES,
   ...TIER_ORDER.map((tier) => `tier-${tier}`),
@@ -5547,6 +5700,53 @@ function renderCoverageReport(container, report, handlers = {}) {
   if (Array.isArray(report.files)) {
     container.append(coverageFiles(report.files, handlers));
   }
+  if (report.risk !== void 0) {
+    container.append(coverageRisk(report.risk));
+  }
+}
+function coverageRisk(risk) {
+  const section2 = element2("section", "coverage-risk");
+  section2.dataset.role = "coverage-risk";
+  section2.append(element2("h4", null, "Risky and untested"));
+  if (!risk || risk.available === false) {
+    section2.append(note("Risky and untested functions are unavailable."));
+    return section2;
+  }
+  const rows = risk.rows ?? [];
+  const used = [
+    risk.inputs?.complexity ? "complexity" : null,
+    risk.inputs?.churn ? "churn" : null,
+    risk.inputs?.coverage ? "uncovered share" : null
+  ].filter(Boolean);
+  section2.append(
+    note(
+      rows.length === 0 ? "No function has a recorded complexity, churn, or uncovered share to rank." : `${rows.length} function(s) ranked by ${used.join(" \xD7 ") || "a single input"}` + (risk.unranked > 0 ? ` \xB7 ${risk.unranked} unranked` : "")
+    )
+  );
+  if (rows.length === 0) {
+    return section2;
+  }
+  const list2 = element2("ul", "coverage-risk-list");
+  for (const row of rows.slice(0, 50)) {
+    const item = element2("li", "coverage-risk-row");
+    item.dataset.role = "coverage-risk-row";
+    item.dataset.file = row.file;
+    item.append(element2("span", "coverage-risk-name", `${row.file}:${row.line} ${row.name}`));
+    const inputs = [];
+    if (row.complexity !== null) {
+      inputs.push(`complexity ${row.complexity}`);
+    }
+    if (row.churn !== null) {
+      inputs.push(`churn ${row.churn}`);
+    }
+    if (row.uncoveredShare !== null) {
+      inputs.push(`uncovered ${Math.round(row.uncoveredShare * 100)}%`);
+    }
+    item.append(element2("span", "coverage-risk-inputs", inputs.join(" \xB7 ")));
+    list2.append(item);
+  }
+  section2.append(list2);
+  return section2;
 }
 function provenanceLine(provenance) {
   const line = element2("p", "evidence coverage-provenance", coverageProvenanceText(provenance));
@@ -5754,8 +5954,19 @@ function renderCoverageFile(container, report, handlers = {}) {
   }
   fact("Untested", entry.untested ? `yes \u2014 under the ${report.threshold ?? 50}% / reached cut-off` : "no");
   container.append(facts);
+  const covering = entry.coveringTests ?? [];
+  if (covering.length > 0) {
+    container.append(
+      fileLinkList("Covering tests (measured)", covering, handlers, "No test was attributed a covered line.")
+    );
+  }
   container.append(
-    fileLinkList("Tests that reach it", entry.tests ?? [], handlers, "No test reaches this file.")
+    fileLinkList(
+      covering.length > 0 ? "Reached by (reachability)" : "Tests that reach it (reachability)",
+      entry.tests ?? [],
+      handlers,
+      "No test reaches this file."
+    )
   );
   container.append(
     fileLinkList("Importers", entry.importers ?? [], handlers, "No file imports this one.")
@@ -9561,6 +9772,25 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     if (overlay2.meta.unreached !== void 0) parts.push(`${overlay2.meta.unreached} unreached`);
     counts.textContent = parts.join(" \xB7 ");
     container.append(counts);
+  }
+  if (Array.isArray(overlay2.legend) && overlay2.legend.length > 0) {
+    const legend = document.createElement("ul");
+    legend.className = "overlay-legend";
+    legend.dataset.role = "overlay-legend";
+    for (const entry of overlay2.legend) {
+      const item = document.createElement("li");
+      item.className = "overlay-legend-item";
+      item.dataset.swatch = entry.cls;
+      item.textContent = entry.label;
+      legend.append(item);
+    }
+    container.append(legend);
+  }
+  if (typeof overlay2.note === "string" && overlay2.note) {
+    const note4 = document.createElement("p");
+    note4.className = "overlay-note";
+    note4.textContent = overlay2.note;
+    container.append(note4);
   }
   if ((!overlay2.items || overlay2.items.length === 0) && overlay2.emptyNote) {
     const note4 = document.createElement("p");
@@ -13986,7 +14216,16 @@ function createCoverage(app2) {
       if (token !== panelToken) {
         return;
       }
-      panelReport = report;
+      let risk;
+      try {
+        risk = await app2.request(`/analysis/coverage/risky${coverageQuery()}`);
+      } catch {
+        risk = void 0;
+      }
+      if (token !== panelToken) {
+        return;
+      }
+      panelReport = risk === void 0 ? report : { ...report, risk };
     } catch (error) {
       if (token !== panelToken) {
         return;

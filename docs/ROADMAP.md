@@ -44,7 +44,7 @@ record is reported as `unavailable`, never invented.
 | 31 | Architecture drift over time | Landed (O1-O4: module, route, report, Timeline chart, published static drift artifact) |
 | 32 | Screen-scoped chrome | Done (C1-C8: graph controls only on Graph, one header row, View and Scope popovers, terminal actions in the tab strip, panel rail, no duplicate entries, toolbar top-centre) |
 | 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
-| 34 | Code coverage that tells | In progress (U0, U2 done: dogfood report and one coverage source everywhere, incl. tier matrix and both passports; U1, U3-U7 planned: coverage map mode, honest reachability, changed-line coverage, risk from coverage, covering tests, agent and gate surface) |
+| 34 | Code coverage that tells | Done (U0-U7: dogfood report, one coverage source everywhere, a measured Coverage overlay with reachability fallback, honest reachability depth, changed-line coverage in review, risk from coverage, covering tests, and the agent/gate surface) |
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
@@ -2140,14 +2140,17 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   (`node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info`,
   alongside the default reporter) and add `coverage/` to `.gitignore`. Strabo on itself then has
   a measured report to show. This is also the acceptance fixture for the slices below.
-- **U1 - Coverage colour mode on the map.** A **Coverage** overlay replaces the binary Test reach
-  overlay. When a report exists, files are drawn on a measured line-coverage scale (a
-  sequential ramp within the Phase 13 budget). Where there is no report, the overlay falls back to
-  reachability as a distinct pattern, not a colour on the same scale. Four states are always
-  distinct and are named in the legend: `measured n%`, `measured 0%`, `not in report`, and
-  `reachable only`. A stale report (V3) greys its figures and says so. The overlay summary shows
-  the report path and age, the number of files measured, and the files the report names that are
-  not in the graph.
+- **U1 - Coverage colour mode on the map.** *Done.* A **Coverage** overlay (`coverageOverlay`,
+  `ui/strabo-overlays.js`) replaces the binary Test reach reading. When a report exists, files are
+  drawn on a five-step measured ramp on the accent hue (`coverageBucket` → `cov-90`…`cov-10`,
+  opacity within the Phase 13 budget), and the states differ by shape as well as tone: `measured
+  0%` a heavy ring, `not in report` a dashed ring, `reachable only` a dotted ring, and a stale
+  figure a grey dotted ring. The overlay names them in its panel legend (`COVERAGE_LEGEND`). With
+  no report it falls back to reachability as a distinct pattern and names the repository's
+  coverage command. The summary shows the report path and age, the files measured, and the
+  report-named files out of the graph (`outOfGraph`). Served by `GET /analysis/coverage` (now
+  returning `nodes`) and `GET /graph?structure=…`'s sibling overlay picker; coverage in
+  `test/unit/browser-core.test.ts`.
 - **U2 - One coverage source everywhere.** Add a `fileCoverage(graph, measured)` helper that
   returns `{ basis, value, linesHit, linesFound, stale }` for each file. The passport, unit cards,
   the tier matrix cells and per-tier stats (L11), the impact and change passports, the repository
@@ -2180,13 +2183,21 @@ basis (`measured` or `reachable`) and the report's age; and a file the report do
   "report predates the change" when the report mtime is older than the change base commit. Integrated
   into `FileImpactPassport` (`src/analysis/impact-passport.ts`) and `ChangePassport`
   (`src/analysis/change-passport.ts`). Coverage in `test/unit/changed-coverage.test.ts`.
-- **U5 - Risk from coverage.** A **risky and untested** list ranks functions by complexity
-  (Phase 14) × churn (Phase 17 Q5) × uncovered share, and shows each input beside the rank, never
-  a composite score alone. It feeds the hotspots overlay and the passport.
-- **U6 - Which tests cover this.** Coverage.py dynamic contexts, JaCoCo sessions, and
-  per-test `TN:` blocks in LCOV record which test executed which lines. When a report carries
-  them, the Functions tab and the impact passport name the covering tests. Without them, the
-  answer is the U3 reachability list, labelled as such.
+- **U5 - Risk from coverage.** *Done.* `computeRiskyUntested` (`src/analysis/coverage-risk.ts`)
+  ranks functions by complexity (Phase 14 decision points) × churn (Phase 17 Q5 commits) ×
+  uncovered share, and returns every input beside the rank, so the score is never bare; a
+  function with no input at all is counted `unranked` rather than ranked. Served by
+  `GET /analysis/coverage/risky` (churn read from Git for the hotspots only, bounded) and drawn
+  by the Coverage panel's **Risky and untested** section, which names each input and any that was
+  not recorded. Coverage in `test/unit/{coverage-risk,coverage-ui}.test.ts`.
+- **U6 - Which tests cover this.** *Done.* LCOV now merges the per-test `TN:` blocks for a file
+  and attributes covered lines to the test that recorded them (`coveringTests`,
+  `coveredLinesByTest`); coverage.py JSON contexts are read the same way (new `coverage-py`
+  format, `parseCoveragePy`); JaCoCo `<sessioninfo>` names are recorded as sessions. The file's
+  coverage section names the **Covering tests (measured)** when the report carries them, and the
+  U3 reachability list stands beside it labelled `reachability`. Without per-test data the
+  reachability list is the only answer, and says so. Coverage in
+  `test/unit/{measured-coverage,coverage-ui}.test.ts`.
 - **U7 - Agent and gate surface (done).**
   - MCP `get_coverage` (per file or function, with basis and age) and `get_uncovered_changes`.
   - `strabo check --fail-on=uncovered-change[:<percent>]` and `--fail-on=coverage-stale`.

@@ -185,6 +185,63 @@ export function renderCoverageReport(container, report, handlers = {}) {
   if (Array.isArray(report.files)) {
     container.append(coverageFiles(report.files, handlers));
   }
+
+  if (report.risk !== undefined) {
+    container.append(coverageRisk(report.risk));
+  }
+}
+
+/**
+ * The risky-and-untested list (Phase 34 U5): each function with complexity, churn, and
+ * uncovered share shown beside it, so the rank is never a bare score. An input that was not
+ * recorded is named as missing rather than shown as zero.
+ */
+function coverageRisk(risk) {
+  const section = element('section', 'coverage-risk');
+  section.dataset.role = 'coverage-risk';
+  section.append(element('h4', null, 'Risky and untested'));
+  if (!risk || risk.available === false) {
+    section.append(note('Risky and untested functions are unavailable.'));
+    return section;
+  }
+  const rows = risk.rows ?? [];
+  const used = [
+    risk.inputs?.complexity ? 'complexity' : null,
+    risk.inputs?.churn ? 'churn' : null,
+    risk.inputs?.coverage ? 'uncovered share' : null,
+  ].filter(Boolean);
+  section.append(
+    note(
+      rows.length === 0
+        ? 'No function has a recorded complexity, churn, or uncovered share to rank.'
+        : `${rows.length} function(s) ranked by ${used.join(' × ') || 'a single input'}` +
+            (risk.unranked > 0 ? ` · ${risk.unranked} unranked` : ''),
+    ),
+  );
+  if (rows.length === 0) {
+    return section;
+  }
+  const list = element('ul', 'coverage-risk-list');
+  for (const row of rows.slice(0, 50)) {
+    const item = element('li', 'coverage-risk-row');
+    item.dataset.role = 'coverage-risk-row';
+    item.dataset.file = row.file;
+    item.append(element('span', 'coverage-risk-name', `${row.file}:${row.line} ${row.name}`));
+    const inputs = [];
+    if (row.complexity !== null) {
+      inputs.push(`complexity ${row.complexity}`);
+    }
+    if (row.churn !== null) {
+      inputs.push(`churn ${row.churn}`);
+    }
+    if (row.uncoveredShare !== null) {
+      inputs.push(`uncovered ${Math.round(row.uncoveredShare * 100)}%`);
+    }
+    item.append(element('span', 'coverage-risk-inputs', inputs.join(' · ')));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
 }
 
 function provenanceLine(provenance) {
@@ -419,8 +476,21 @@ export function renderCoverageFile(container, report, handlers = {}) {
   fact('Untested', entry.untested ? `yes — under the ${report.threshold ?? 50}% / reached cut-off` : 'no');
   container.append(facts);
 
+  // The report's own per-test attribution (U6) when it records one; otherwise the reachability
+  // list stands, labelled as reachability so the two answers are never conflated.
+  const covering = entry.coveringTests ?? [];
+  if (covering.length > 0) {
+    container.append(
+      fileLinkList('Covering tests (measured)', covering, handlers, 'No test was attributed a covered line.'),
+    );
+  }
   container.append(
-    fileLinkList('Tests that reach it', entry.tests ?? [], handlers, 'No test reaches this file.'),
+    fileLinkList(
+      covering.length > 0 ? 'Reached by (reachability)' : 'Tests that reach it (reachability)',
+      entry.tests ?? [],
+      handlers,
+      'No test reaches this file.',
+    ),
   );
   container.append(
     fileLinkList('Importers', entry.importers ?? [], handlers, 'No file imports this one.'),

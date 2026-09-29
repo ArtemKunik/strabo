@@ -16,6 +16,7 @@ import {
   mapReportPath,
   measuredFileFigure,
   parseCobertura,
+  parseCoveragePy,
   parseJacoco,
   parseLcov,
   scanRepository,
@@ -58,6 +59,66 @@ test('parseLcov reads per-file lines and per-function execution counts', () => {
   assert.equal(entry.functions[0]?.hits, 0);
   // LCOV records execution, not a function line span, so per-function line coverage is null.
   assert.equal(entry.functions[0]?.lineCoverage, null);
+});
+
+test('parseLcov attributes covered lines to the tests that recorded them (U6)', () => {
+  const report = parseLcov(
+    [
+      // The same file recorded once per test: the blocks merge and the tests are named.
+      'TN:test_orders',
+      'SF:src/orders.ts',
+      'DA:1,3',
+      'DA:2,0',
+      'end_of_record',
+      'TN:test_audit',
+      'SF:src/orders.ts',
+      'DA:1,0',
+      'DA:2,5',
+      'end_of_record',
+    ].join('\n'),
+  );
+  const entry = fileOf(report, 'src/orders.ts');
+  assert.equal(entry.linesFound, 2);
+  assert.equal(entry.linesHit, 2);
+  assert.deepEqual(entry.coveringTests, ['test_audit', 'test_orders']);
+  assert.deepEqual(entry.coveredLinesByTest, { test_audit: [2], test_orders: [1] });
+  assert.deepEqual(report.sessions, ['test_audit', 'test_orders']);
+});
+
+test('parseLcov leaves coveringTests absent when the tracefile names no test (U6)', () => {
+  const report = parseLcov(['SF:src/plain.ts', 'DA:1,1', 'end_of_record'].join('\n'));
+  assert.equal(fileOf(report, 'src/plain.ts').coveringTests, undefined);
+  assert.equal(report.sessions, undefined);
+});
+
+test('parseCoveragePy reads files, lines, and per-context covering tests (U6)', () => {
+  const report = parseCoveragePy(
+    JSON.stringify({
+      meta: { version: '7.0' },
+      files: {
+        'src/orders.py': {
+          executed_lines: [1, 3],
+          missing_lines: [2, 4],
+          summary: { num_statements: 4 },
+          functions: {
+            'orders.list': { executed_lines: [1], missing_lines: [2] },
+          },
+          contexts: {
+            'test_orders': { executed_lines: [1, 3] },
+            'test_audit': { executed_lines: [] },
+          },
+        },
+      },
+    }),
+  );
+  assert.ok(report);
+  assert.equal(report.format, 'coverage-py');
+  const entry = fileOf(report, 'src/orders.py');
+  assert.equal(entry.linesFound, 4);
+  assert.equal(entry.linesHit, 2);
+  assert.deepEqual(entry.coveringTests, ['test_orders']);
+  assert.equal(entry.functions[0]?.name, 'list');
+  assert.deepEqual(report.sessions, ['test_orders']);
 });
 
 test('parseCobertura reads classes, class lines, and method lines without double-counting', () => {

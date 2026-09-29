@@ -54,6 +54,29 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     container.append(counts);
   }
 
+  // The overlay's own legend (Phase 34 U1): the states it draws, named. The map carries the
+  // shapes; naming them here is what stops a reader guessing what a ring means.
+  if (Array.isArray(overlay.legend) && overlay.legend.length > 0) {
+    const legend = document.createElement('ul');
+    legend.className = 'overlay-legend';
+    legend.dataset.role = 'overlay-legend';
+    for (const entry of overlay.legend) {
+      const item = document.createElement('li');
+      item.className = 'overlay-legend-item';
+      item.dataset.swatch = entry.cls;
+      item.textContent = entry.label;
+      legend.append(item);
+    }
+    container.append(legend);
+  }
+
+  if (typeof overlay.note === 'string' && overlay.note) {
+    const note = document.createElement('p');
+    note.className = 'overlay-note';
+    note.textContent = overlay.note;
+    container.append(note);
+  }
+
   if ((!overlay.items || overlay.items.length === 0) && overlay.emptyNote) {
     const note = document.createElement('p');
     note.className = 'overlay-empty';

@@ -235,3 +235,17 @@
   word-break: break-all;
 }
 
+
+/* The coverage overlay legend (Phase 34 U1): the states the lens draws, named. */
+.overlay-legend {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.overlay-legend-item {
+  color: var(--ink-2);
+}

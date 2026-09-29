@@ -329,6 +329,114 @@ test('the file section names the basis, the lines, and the tests and importers a
   assert.deepEqual(selected, ['test/a.test.ts']);
 });
 
+test('the file section names the covering tests, then the reachability fallback (U6)', () => {
+  const target = document.createElement('div');
+  renderCoverageFile(
+    target,
+    {
+      scope: 'file',
+      subject: 'src/a.ts',
+      threshold: 50,
+      totals: PROJECT_MEASURED.totals,
+      provenance: PROVENANCE_MEASURED,
+      file: {
+        file: 'src/a.ts',
+        basis: 'measured',
+        value: 80,
+        linesHit: 8,
+        linesFound: 10,
+        reached: true,
+        notInReport: false,
+        stale: false,
+        untested: false,
+        tests: ['test/reach.test.ts'],
+        importers: [],
+        coveringTests: ['test_orders'],
+      },
+    },
+    {},
+  );
+  const titles = [...target.querySelectorAll('.coverage-link-list h4')].map((heading) => heading.textContent);
+  assert.ok(titles.some((title) => /Covering tests \(measured\)/.test(title)));
+  assert.ok(titles.some((title) => /Reached by \(reachability\)/.test(title)));
+  assert.match(target.textContent, /test_orders/);
+});
+
+test('without per-test data the file section labels the reachability list as such (U6)', () => {
+  const target = document.createElement('div');
+  renderCoverageFile(
+    target,
+    {
+      scope: 'file',
+      subject: 'src/a.ts',
+      threshold: 50,
+      totals: PROJECT_MEASURED.totals,
+      provenance: PROVENANCE_MEASURED,
+      file: {
+        file: 'src/a.ts',
+        basis: 'measured',
+        value: 80,
+        linesHit: 8,
+        linesFound: 10,
+        reached: true,
+        notInReport: false,
+        stale: false,
+        untested: false,
+        tests: ['test/reach.test.ts'],
+        importers: [],
+      },
+    },
+    {},
+  );
+  const titles = [...target.querySelectorAll('.coverage-link-list h4')].map((heading) => heading.textContent);
+  assert.ok(titles.some((title) => /Tests that reach it \(reachability\)/.test(title)));
+  assert.ok(!titles.some((title) => /Covering tests/.test(title)));
+});
+
+test('a project report renders the risky-and-untested list with its inputs (U5)', () => {
+  const target = document.createElement('div');
+  renderCoverageReport(
+    target,
+    {
+      ...PROJECT_MEASURED,
+      risk: {
+        available: true,
+        inputs: { complexity: true, churn: true, coverage: true },
+        unranked: 2,
+        rows: [
+          {
+            file: 'src/parse.ts',
+            name: 'parseRow',
+            line: 5,
+            complexity: 20,
+            churn: 12,
+            uncoveredShare: 1,
+            inputs: ['complexity', 'churn', 'uncovered'],
+            rankScore: 240,
+            untested: true,
+          },
+        ],
+      },
+    },
+    {},
+  );
+  const section = target.querySelector('[data-role="coverage-risk"]');
+  assert.ok(section);
+  assert.match(section.textContent ?? '', /Risky and untested/);
+  assert.match(section.textContent ?? '', /ranked by complexity × churn × uncovered share/);
+  assert.match(section.textContent ?? '', /2 unranked/);
+  const row = section.querySelector('[data-role="coverage-risk-row"]');
+  assert.equal(row?.getAttribute('data-file'), 'src/parse.ts');
+  assert.match(row?.textContent ?? '', /src\/parse\.ts:5 parseRow/);
+  assert.match(row?.textContent ?? '', /complexity 20 · churn 12 · uncovered 100%/);
+});
+
+test('a project report with no risky list renders no risk section (U5)', () => {
+  const target = document.createElement('div');
+  renderCoverageReport(target, PROJECT_MEASURED, {});
+  assert.equal(target.querySelector('[data-role="coverage-risk"]'), null);
+});
+
 test('the pure labels never turn an unrecorded or reachable figure into 0%', () => {
   assert.equal(coverageEntryLabel({ basis: 'measured', value: 0 }), '0%');
   assert.equal(coverageEntryLabel({ basis: 'measured', value: null }), 'unavailable');
