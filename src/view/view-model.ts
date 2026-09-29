@@ -764,6 +764,7 @@ export function buildStructureViewModel(
     structure: true,
     structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
+    structureEndpoints: report.endpoints,
     structureIntent: report.intent,
     directoryLabels: { stack: 'Architecture Stack', shelf: 'Support Tiers' },
   };
@@ -912,6 +913,7 @@ export function buildStructureGridViewModel(
       crossUnitEdges: grid.summary.crossUnitEdges,
     },
     structureSpines: report.spines,
+    structureEndpoints: report.endpoints,
     structureIntent: report.intent,
   };
 }
@@ -1054,6 +1056,7 @@ export function buildStructureCellViewModel(
     structureCell: cellId,
     structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
+    structureEndpoints: report.endpoints,
     structureIntent: report.intent,
   };
 }

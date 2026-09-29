@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import { toPosix } from '../boundary/repository-root.ts';
 import { excludedDirectory } from '../scan/exclusions.ts';
 import type {
+  ApiSchemaRef,
   ContractDefinition,
   ContractDeviation,
   ContractDrift,
@@ -144,6 +145,33 @@ function parseJsonSchema(
       fields: fieldsFromSchema(document),
     },
   ];
+}
+
+/**
+ * Resolve a schema node an OpenAPI operation points at to its name and fields.
+ *
+ * The node is either a `$ref` to `components.schemas` — looked up in the same document, so the
+ * shared contract's real fields are read rather than just its name — or an inline schema. A
+ * node that is neither is `null`, never an empty contract.
+ */
+export function resolveSchemaRef(
+  document: Record<string, unknown>,
+  schema: unknown,
+): ApiSchemaRef | null {
+  if (!isRecord(schema)) {
+    return null;
+  }
+  if (typeof schema.$ref === 'string') {
+    const name = refName(schema.$ref);
+    const components = isRecord(document.components) ? document.components : {};
+    const schemas = isRecord(components.schemas) ? components.schemas : {};
+    const target = schemas[name];
+    return {
+      schema: name,
+      fields: isRecord(target) ? fieldsFromSchema(target) : [],
+    };
+  }
+  return { schema: null, fields: fieldsFromSchema(schema) };
 }
 
 function fieldsFromSchema(schema: Record<string, unknown>): ContractField[] {

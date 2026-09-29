@@ -44,6 +44,20 @@ export interface ServiceCall {
   path: string | null;
 }
 
+/**
+ * A schema an OpenAPI operation declares for its request body or a response.
+ *
+ * `schema` names the `components.schemas` entry when the operation `$ref`s one, so a reader can
+ * jump to the shared contract; it is null for an inline schema, which is kept with its fields
+ * rather than dropped.
+ */
+export interface ApiSchemaRef {
+  /** The `components.schemas` name, or null when the schema is inline. */
+  schema: string | null;
+  /** The schema's fields, normalised like a data contract's. */
+  fields: ContractField[];
+}
+
 /** An HTTP endpoint a repository declares in an OpenAPI document. */
 export interface ServiceEndpoint {
   /** Repository name. */
@@ -56,6 +70,12 @@ export interface ServiceEndpoint {
   path: string;
   /** Lowercased host with port from the first server, else null. */
   host: string | null;
+  /** OpenAPI `operationId`, when the operation names one. */
+  operationId?: string | null;
+  /** The request body's JSON schema, when the operation declares one. */
+  request?: ApiSchemaRef | null;
+  /** The first recorded 2xx JSON response schema, when the operation declares one. */
+  response?: ApiSchemaRef | null;
 }
 
 /** A recorded call from one repository to an endpoint another repository declares. */

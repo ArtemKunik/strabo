@@ -79,6 +79,21 @@ imports, depends-on (all), plus Imports and Used by with source evidence and an
 `Open in Workspace` action. Dependencies, Dependents, Members, Functions, and Impact are
 separate tabs so a large file does not push its member list off screen.
 
+The **API contract** of a declared OpenAPI operation — its method and path, the `operationId`,
+and the request and response schemas with each field's type and required-ness — is read from
+the same document the tier lens classifies. It appears in the Module Passport for the API tier:
+selecting the **API** band, or a file in the API tier, lists the operations the repository
+declares, and the Structure lens's **End-to-End Spine** carries the same contract on its
+ENDPOINT hop (`contract: in <Schema> (N) · out <Schema> (M)`). A `$ref` resolves to its
+`components.schemas` entry, so the schema is named and its real fields are shown; an inline
+schema is kept as `inline`; an operation that declares no request or response says so rather
+than drawing an empty shape.
+
+The spine's TABLE hop lists the recorded tables downstream of the handler — the matched table
+first — with each table's file and line, instead of stopping at one table. The lineage
+(`TierSpine.lineage`) is the set of tables the handler reaches through recorded imports and
+table references, so it never claims runtime data flow or a dataset/product it cannot see.
+
 The **Functions** tab is a sortable table with one row per function and a summary line
 (function count, total and max complexity, max nesting, signal count). Columns cover name,
 visibility or entry badge, lines, span, complexity, nesting, loops, calls (count), callers
@@ -155,6 +170,7 @@ Files mode because the analyses are per file.
 | Ownership | `/analysis/ownership` | Recorded authors per file joined to dependency reach; a single-author module with dependents is a bus-factor signal |
 | Architecture health | `/analysis/architecture-health` | Heuristic axes (cohesion, low coupling, low fan-out, low complexity, coverage), each with the values it came from |
 | Function hotspots | `/analysis/functions` | Functions whose recorded metrics cross a fixed threshold (nested loops, deep nesting, high complexity, long body, many parameters, recursion), ranked worst-first |
+| Data contracts | `/analysis/contracts/overlay` | Contract definitions (`ov-contract-def`), drifting implementations (`ov-cycle`), and ungoverned boundary endpoints (`ov-unreached`/`ov-affected`); the panel lists definitions, governed boundaries, deviations, and ungoverned candidates |
 
 ## Repository passport
 

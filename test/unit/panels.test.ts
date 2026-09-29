@@ -1038,6 +1038,127 @@ test('renderInspector includes a Changes with section', () => {
   assert.match(target.querySelector('[data-role="changes-with"]').textContent, /Changes with/);
 });
 
+test('renderInspector shows the API contract of a declared endpoint', () => {
+  const target = container();
+  renderInspector(
+    target,
+    {
+      nodes: [{ id: 'orders/openapi.yaml', label: 'openapi.yaml', kind: 'api', transitiveDependents: 0, transitiveDependencies: 0 }],
+      edges: [],
+      structure: true,
+      structureEndpoints: [
+        {
+          file: 'orders/openapi.yaml',
+          tier: 'api',
+          unit: 'orders',
+          method: 'POST',
+          path: '/orders',
+          operationId: 'createOrder',
+          request: {
+            schema: 'OrderInput',
+            fields: [
+              { name: 'status', type: 'string', required: true },
+              { name: 'note', type: 'string', required: false },
+            ],
+          },
+          response: {
+            schema: 'Order',
+            fields: [{ name: 'id', type: 'string', required: true }],
+          },
+        },
+      ],
+    },
+    'orders/openapi.yaml',
+    {},
+  );
+
+  const section = target.querySelector('[data-role="api-contracts"]');
+  assert.ok(section);
+  assert.match(section.textContent, /API contract/);
+  assert.match(section.textContent, /POST/);
+  assert.match(section.textContent, /\/orders/);
+  assert.match(section.textContent, /createOrder/);
+  assert.match(section.textContent, /Request: OrderInput/);
+  assert.match(section.textContent, /Response: Order/);
+  assert.match(section.textContent, /status/);
+  assert.match(section.textContent, /optional/);
+});
+
+test('renderInspector has no API contract section without a declared endpoint', () => {
+  const target = container();
+  renderInspector(
+    target,
+    {
+      nodes: [{ id: 'a.ts', label: 'a.ts', kind: 'module', transitiveDependents: 0, transitiveDependencies: 0 }],
+      edges: [],
+      structure: true,
+      structureEndpoints: [],
+    },
+    'a.ts',
+    {},
+  );
+
+  assert.equal(target.querySelector('[data-role="api-contracts"]'), null);
+});
+
+test('the spine view names the endpoint contract and the downstream table lineage', () => {
+  const target = container();
+  const spine = {
+    id: 'web/src/ui/home.ts:4->GET /orders->orders',
+    call: {
+      file: 'web/src/ui/home.ts',
+      tier: 'frontend',
+      unit: 'web',
+      line: 4,
+      method: 'GET',
+      target: 'https://api.acme.test/orders',
+      host: 'api.acme.test',
+      path: '/orders',
+    },
+    endpoint: {
+      file: 'orders/openapi.yaml',
+      tier: 'api',
+      unit: 'orders',
+      method: 'GET',
+      path: '/orders',
+      operationId: 'listOrders',
+      response: { schema: 'OrderList', fields: [{ name: 'total', type: 'integer', required: false }] },
+    },
+    handler: { file: 'orders/src/domain/orders.ts', tier: 'domain', unit: 'orders', label: 'orders.ts' },
+    table: { table: 'orders', file: 'orders/src/data/orders.ts', tier: 'data', unit: 'orders', line: 2, evidence: 'string-literal SQL' },
+    hops: [
+      { tier: 'frontend', role: 'call', file: 'web/src/ui/home.ts', unit: 'web', label: 'GET /orders', detail: 'web/src/ui/home.ts:4', line: 4 },
+      { tier: 'api', role: 'endpoint', file: 'orders/openapi.yaml', unit: 'orders', label: 'GET /orders', detail: 'orders/openapi.yaml' },
+      { tier: 'domain', role: 'handler', file: 'orders/src/domain/orders.ts', unit: 'orders', label: 'orders.ts', detail: 'orders/src/domain/orders.ts' },
+      { tier: 'data', role: 'table', file: 'orders/src/data/orders.ts', unit: 'orders', label: 'orders', detail: 'table "orders" · string-literal SQL', line: 2 },
+    ],
+    lineage: [
+      { table: 'orders', file: 'orders/src/data/orders.ts', unit: 'orders', line: 2, evidence: 'string-literal SQL', matched: true },
+      { table: 'audit', file: 'orders/src/data/audit.ts', unit: 'orders', line: 3, evidence: 'string-literal SQL', matched: false },
+    ],
+  };
+  renderInspector(
+    target,
+    {
+      nodes: [{ id: 'api', label: 'API', kind: 'tier', tier: 'api', transitiveDependents: 0, transitiveDependencies: 0 }],
+      edges: [],
+      structure: true,
+      structureSpines: [spine],
+      structureEndpoints: [],
+    },
+    'api',
+    { activeSpine: spine },
+  );
+
+  const view = target.querySelector('[data-role="spine-view"]');
+  assert.ok(view);
+  assert.match(view.textContent, /contract: in — · out OrderList \(1\)/);
+  const lineage = view.querySelector('[data-role="spine-lineage"]');
+  assert.ok(lineage);
+  assert.match(lineage.textContent, /orders/);
+  assert.match(lineage.textContent, /audit/);
+});
+
 test('renderMemberMap offers Back to the module passport', () => {  const target = container();
   let backs = 0;
   renderMemberMap(

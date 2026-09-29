@@ -28,6 +28,7 @@ import {
   type TierShelfEntry,
   type TierSpine,
   type TierSpineHop,
+  type TierTableLineage,
   type TierTrace,
   type TierUnitReport,
 } from './types.ts';
@@ -507,6 +508,9 @@ export function buildTierReport(
         unit: assignment.get(endpoint.source) ?? '.',
         method: endpoint.method,
         path: endpoint.path,
+        ...(endpoint.operationId ? { operationId: endpoint.operationId } : {}),
+        ...(endpoint.request ? { request: endpoint.request } : {}),
+        ...(endpoint.response ? { response: endpoint.response } : {}),
       };
     })
     .sort(
@@ -676,6 +680,25 @@ function buildSpines(
       }
     }
 
+    // Lineage: every recorded table the handler (or the call's own reach) can touch, so the
+    // TABLE hop names the rest of the data it reaches instead of stopping at one table. The
+    // matched table is kept even when it was chosen from the unit fallback, and is marked so
+    // the drawing can lead with it.
+    const lineage = collectTableLineage(searchPool, tableByFile);
+    if (matchedTable && !lineage.some((entry) => sameTable(entry, matchedTable))) {
+      lineage.push(tableLineageOf(matchedTable, false));
+    }
+    for (const entry of lineage) {
+      entry.matched = matchedTable !== null && sameTable(entry, matchedTable);
+    }
+    lineage.sort(
+      (a, b) =>
+        Number(b.matched) - Number(a.matched) ||
+        a.table.localeCompare(b.table) ||
+        a.file.localeCompare(b.file) ||
+        a.line - b.line,
+    );
+
     const hops: TierSpineHop[] = [];
 
     // Hop 1: Call site
@@ -743,6 +766,42 @@ function buildSpines(
       handler,
       table: matchedTable,
       hops,
+      lineage,
     };
   });
+}
+
+/** Every recorded table referenced by the files on the spine's downstream pool, deduped. */
+function collectTableLineage(
+  files: readonly string[],
+  tableByFile: Map<string, TableTraceEntry[]>,
+): TierTableLineage[] {
+  const seen = new Set<string>();
+  const lineage: TierTableLineage[] = [];
+  for (const file of files) {
+    for (const entry of tableByFile.get(file) ?? []) {
+      const key = `${entry.table}\u0000${entry.file}\u0000${entry.line}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      lineage.push(tableLineageOf(entry, false));
+    }
+  }
+  return lineage;
+}
+
+function tableLineageOf(entry: TableTraceEntry, matched: boolean): TierTableLineage {
+  return {
+    table: entry.table,
+    file: entry.file,
+    unit: entry.unit,
+    line: entry.line,
+    evidence: entry.evidence,
+    matched,
+  };
+}
+
+function sameTable(a: { table: string; file: string; line: number }, b: { table: string; file: string; line: number }): boolean {
+  return a.table === b.table && a.file === b.file && a.line === b.line;
 }

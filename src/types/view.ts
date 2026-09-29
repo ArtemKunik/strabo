@@ -1,4 +1,4 @@
-import type { TierIntentReport, TierSpine } from '../analysis/tiers/types.ts';
+import type { TierEndpointSite, TierIntentReport, TierSpine } from '../analysis/tiers/types.ts';
 import type { Diagnostic, Exclusion, GraphEdge, GraphNode } from './graph.ts';
 import type { RepositoryDescriptor, ScanCacheMetadata } from './scan.ts';
 
@@ -217,6 +217,8 @@ export interface ViewModel {
   structureCell?: string;
   /** The end-to-end spines connecting call → endpoint → handler → table (Phase 35 Y6). */
   structureSpines?: TierSpine[];
+  /** The declared endpoints in this structure, with their request/response contracts. */
+  structureEndpoints?: TierEndpointSite[];
   /** Intended vs observed architecture facts (Phase 35 Y7). */
   structureIntent?: TierIntentReport;
 }

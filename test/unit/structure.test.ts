@@ -301,6 +301,18 @@ test('the tier report carries end-to-end spines connecting call → endpoint →
   assert.equal(spine.endpoint.method, 'GET');
   assert.equal(spine.endpoint.path, '/orders');
 
+  // API contract: the operation id and its response schema, read from the same document.
+  assert.equal(spine.endpoint.operationId, 'listOrders');
+  assert.equal(spine.endpoint.request, undefined);
+  assert.equal(spine.endpoint.response?.schema, 'OrderList');
+  assert.deepEqual(
+    spine.endpoint.response?.fields.map((field) => [field.name, field.type, field.required]),
+    [
+      ['orders', 'array<Order>', false],
+      ['total', 'integer', false],
+    ],
+  );
+
   // Domain handler in orders/src/domain/orders.ts (domain)
   assert.ok(spine.handler);
   assert.equal(spine.handler.tier, 'domain');
@@ -311,6 +323,12 @@ test('the tier report carries end-to-end spines connecting call → endpoint →
   assert.equal(spine.table.table, 'orders');
   assert.equal(spine.table.file, 'orders/src/data/orders.ts');
   assert.equal(spine.table.tier, 'data');
+
+  // Lineage: the recorded tables downstream of the handler, matched table first.
+  assert.ok(spine.lineage.length >= 1);
+  assert.equal(spine.lineage[0]?.table, 'orders');
+  assert.equal(spine.lineage[0]?.matched, true);
+  assert.equal(spine.lineage[0]?.file, 'orders/src/data/orders.ts');
 
   // 4 hops along the spine
   assert.equal(spine.hops.length, 4);
@@ -331,6 +349,17 @@ test('the tier report carries end-to-end spines connecting call → endpoint →
     { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
   );
   assert.ok(bandsModel.structureSpines && bandsModel.structureSpines.length >= 1);
+  assert.ok(bandsModel.structureEndpoints && bandsModel.structureEndpoints.length >= 1);
+  const declared = bandsModel.structureEndpoints?.find((entry) => entry.method === 'POST');
+  assert.equal(declared?.path, '/orders');
+  assert.equal(declared?.request?.schema, 'OrderInput');
+  assert.deepEqual(
+    declared?.request?.fields.map((field) => [field.name, field.type, field.required]),
+    [
+      ['note', 'string', false],
+      ['status', 'string', true],
+    ],
+  );
 
   const gridModel = buildStructureGridViewModel(
     report,

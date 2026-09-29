@@ -146,6 +146,7 @@ export function renderInspector(container, model, id, handlers = {}) {
   // function tabs. They show behavioral spines (Phase 35 Y6) connecting call sites to tables.
   if (model.structure && (node?.kind === 'tier' || node?.kind === 'shelf' || node?.kind === 'axis')) {
     appendStructureSpines(container, model, id, node, handlers);
+    appendApiContracts(container, model, id, node);
     return;
   }
 
@@ -254,6 +255,10 @@ export function renderInspector(container, model, id, handlers = {}) {
   }
   selectTab(0);
   container.append(tabs, panels);
+
+  // A file that declares an HTTP endpoint shows its request/response contract beside the
+  // recorded dependencies, read from the same OpenAPI documents the tier lens classifies.
+  appendApiContracts(container, model, id, node);
 
   // K4: the "Changes with" section lists the files this one changes together with, from
   // recorded commits. It is filled on demand by the server's co-change report, and says so
@@ -438,6 +443,121 @@ function appendOutsideLinks(container, model, id, node, handlers) {
 }
 
 /**
+ * Render the API contract section for a selected file or structure band.
+ *
+ * A file that declares an OpenAPI operation shows that operation's request and response
+ * schema; a band shows the operations its documents declare. Every field keeps the format
+ * the parser recorded, and a missing schema says so rather than drawing an empty contract.
+ */
+function appendApiContracts(container, model, id, node) {
+  const endpoints = model.structureEndpoints ?? [];
+  if (endpoints.length === 0) {
+    return;
+  }
+  const byFile = endpoints.filter((entry) => entry.file === id);
+  const byTier = node?.tier ? endpoints.filter((entry) => entry.tier === node.tier) : [];
+  const list = byFile.length > 0 ? byFile : byTier;
+  if (list.length === 0) {
+    return;
+  }
+
+  const section = document.createElement('section');
+  section.className = 'api-contracts-section';
+  section.dataset.role = 'api-contracts';
+
+  const heading = document.createElement('h3');
+  heading.textContent = 'API contract';
+  section.append(heading);
+
+  const intro = document.createElement('p');
+  intro.className = 'passport-why';
+  intro.textContent = 'Request and response shapes declared by the OpenAPI operation, with its source.';
+  section.append(intro);
+
+  for (const endpoint of list) {
+    section.append(apiContractCard(endpoint));
+  }
+
+  container.append(section);
+}
+
+/** One declared operation: method, path, its source, and both schema sides. */
+function apiContractCard(endpoint) {
+  const card = document.createElement('div');
+  card.className = 'api-contract';
+  card.dataset.role = 'api-contract';
+
+  const header = document.createElement('div');
+  header.className = 'api-contract-header';
+  const method = document.createElement('span');
+  method.className = 'kind-chip kind-api';
+  method.textContent = endpoint.method;
+  header.append(method);
+  const route = document.createElement('strong');
+  route.className = 'api-contract-path';
+  route.textContent = endpoint.path;
+  header.append(route);
+  if (endpoint.operationId) {
+    const operationId = document.createElement('span');
+    operationId.className = 'evidence';
+    operationId.textContent = endpoint.operationId;
+    header.append(operationId);
+  }
+  card.append(header);
+
+  const source = document.createElement('span');
+  source.className = 'evidence api-contract-source';
+  source.textContent = endpoint.file;
+  card.append(source);
+
+  card.append(apiSchemaBlock('Request', endpoint.request));
+  card.append(apiSchemaBlock('Response', endpoint.response));
+  return card;
+}
+
+/** One side of an operation's contract: the schema name and its fields. */
+function apiSchemaBlock(label, ref) {
+  const block = document.createElement('div');
+  block.className = `api-contract-schema api-contract-${label.toLowerCase()}`;
+
+  const title = document.createElement('div');
+  title.className = 'api-contract-schema-title';
+  title.textContent = ref?.schema ? `${label}: ${ref.schema}` : label;
+  block.append(title);
+
+  const fields = ref?.fields ?? [];
+  if (fields.length === 0) {
+    const none = document.createElement('span');
+    none.className = 'unavailable';
+    none.textContent = ref ? 'No fields recorded' : `No ${label.toLowerCase()} schema declared`;
+    block.append(none);
+    return block;
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'api-contract-fields';
+  for (const field of fields) {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'api-contract-field-name';
+    name.textContent = field.name;
+    const type = document.createElement('span');
+    type.className = 'api-contract-field-type';
+    type.textContent = field.type;
+    item.append(name, type);
+    if (!field.required) {
+      const optional = document.createElement('span');
+      optional.className = 'api-contract-field-optional';
+      optional.textContent = 'optional';
+      item.append(optional);
+    }
+    list.append(item);
+  }
+  block.append(list);
+  return block;
+}
+
+/**
  * Render the Behavioral Spines section for a Structure tier, cell, or shelf (Phase 35 Y6).
  *
  * Each recorded outbound call or route traces end-to-end:
@@ -601,9 +721,52 @@ function renderSpineView(container, spine, handlers = {}) {
       hopCard.append(stub);
     }
 
+    // The endpoint hop names the request/response contract it declares, and the table hop
+    // lists the downstream tables recorded on the handler's path instead of one table.
+    if (role === 'endpoint' && spine.endpoint) {
+      const contract = document.createElement('span');
+      contract.className = 'spine-hop-contract';
+      contract.dataset.role = 'spine-contract';
+      contract.textContent = spineContractSummary(spine.endpoint);
+      hopCard.append(contract);
+    }
+    if (role === 'table') {
+      const lineage = spine.lineage ?? [];
+      if (lineage.length > 0) {
+        hopCard.append(spineLineageList(lineage));
+      }
+    }
+
     hopsContainer.append(hopCard);
   }
 
   view.append(hopsContainer);
   container.prepend(view);
+}
+
+/** `in <Schema> (N) · out <Schema> (M)`, naming what each side declares. */
+function spineContractSummary(endpoint) {
+  const side = (label, ref) =>
+    `${label} ${ref ? `${ref.schema ?? 'inline'} (${ref.fields.length})` : '—'}`;
+  return `contract: ${side('in', endpoint.request)} · ${side('out', endpoint.response)}`;
+}
+
+/** The recorded tables downstream of the handler, matched table first. */
+function spineLineageList(lineage) {
+  const list = document.createElement('ul');
+  list.className = 'spine-lineage';
+  list.dataset.role = 'spine-lineage';
+  for (const entry of lineage) {
+    const item = document.createElement('li');
+    item.className = entry.matched ? 'spine-lineage-item matched' : 'spine-lineage-item';
+    const table = document.createElement('span');
+    table.className = 'spine-lineage-table';
+    table.textContent = entry.table;
+    const evidence = document.createElement('span');
+    evidence.className = 'evidence';
+    evidence.textContent = `${entry.file}:${entry.line}`;
+    item.append(table, evidence);
+    list.append(item);
+  }
+  return list;
 }

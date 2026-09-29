@@ -2311,6 +2311,18 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   The inspector renders behavioral spines for tier bands and cells with 4-hop cards (`[data-role="spine-view"]`)
   and dangling stubs for missing hops. Tested in `test/unit/structure.test.ts` and the acceptance
   scenario `@spine` in `structure.feature`.
+  - **API contract.** An OpenAPI operation's `operationId`, request body, and first 2xx JSON
+    response schema are read by `extractServiceEndpoints` (`request` / `response`, each a schema
+    name plus normalised fields) and carried on `TierEndpointSite`. The Module Passport renders
+    them as an **API contract** section (`[data-role="api-contracts"]`) for a file or band that
+    declares operations (`ViewModel.structureEndpoints`), and the spine's ENDPOINT hop names the
+    contract (`[data-role="spine-contract"]`). A `$ref` resolves to its `components.schemas`
+    fields; an inline schema is labelled `inline`; a declared body with no schema is the only
+    empty case, and it says so.
+  - **Lineage on the TABLE hop.** `TierSpine.lineage` (`TierTableLineage[]`) is the recorded
+    tables the handler reaches through graph edges and table references, matched table first.
+    The TABLE hop lists them (`[data-role="spine-lineage"]`) instead of one table. It is the
+    handler's recorded table reach, never runtime flow or a dataset/product the scan cannot see.
 - **Y7 - Intended vs observed.** *Done.* `strabo.rules.yml` (`src/analysis/rules.ts`) states the
   architecture an operator intends. `buildTierIntent` evaluates declared rules against classified files and `tierFlow`:
   declared flows with 0 observed imports become ghost edges (`ghost: true`, dashed), unrepresented tiers become ghost bands,

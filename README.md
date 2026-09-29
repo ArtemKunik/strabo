@@ -25,9 +25,9 @@ import. Select a module to open its passport.*
 Implemented and running: scanner, resolvers, graph cache, HTTP API, and the browser app,
 including review overlays, the Change impact passport, the Module Passport, the Member map,
 the Repository passport, Git review, branch review and actions, workspace analysis,
-dependency risk, and the opt-in narrator. Design internals
-and the deliberately parked surface live in [docs/DESIGN.md](docs/DESIGN.md); the phased
-plan and what is still pending live in [docs/ROADMAP.md](docs/ROADMAP.md).
+dependency risk, and the opt-in narrator. Design internals and the deliberately parked
+surface live in [docs/DESIGN.md](docs/DESIGN.md); the phased plan and what is still
+pending live in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Install and run
 
@@ -79,8 +79,9 @@ in [docs/USAGE.md](docs/USAGE.md).
 - **Hidden connections and declared architecture** — environment variables, HTTP routes
   declared and called, and feature flags as edges, plus `strabo.rules` intent that
   `strabo check --fail-on` enforces.
+  See [docs/CLI.md](docs/CLI.md#change-report-scope-fence-and-public-api).
 - **Architecture drift** — one structural measure per cached revision, drawn as a timeline.
-  See [docs/ROADMAP.md](docs/ROADMAP.md).
+  See [docs/CLI.md](docs/CLI.md#repository-report).
 - **Source viewer** — read one file or a unified diff inline, at HEAD or a past revision.
   See [docs/FEATURES.md](docs/FEATURES.md#source-viewer).
 - **Change impact passport** — a bounded risk score, complexity move, coherence, blast
@@ -94,6 +95,8 @@ in [docs/USAGE.md](docs/USAGE.md).
 - **Dependency risk** — inventory and file mapping always; advisories and licenses through
   the opt-in OSV.dev / deps.dev lookup.
   See [docs/FEATURES.md](docs/FEATURES.md#dependency-risk).
+- **Terminal** — multi-session shells inside the app that can drive the map, with opt-in
+  session persistence. See [docs/FEATURES.md](docs/FEATURES.md#terminal-multi-session).
 - **Delegate to an agent** — hand a node, edge, commit, or review to `opencode` or `claude`
   in an interactive TUI, seeded with the recorded evidence.
   See [docs/FEATURES.md](docs/FEATURES.md#delegate-to-an-agent).
@@ -115,20 +118,20 @@ records with their source evidence, and the panels one step from there.
 flowchart TD
     boundary["Repository boundary — resolveRepositoryRoot + scanCeiling"]
     scanner["Scanner — JS/TS and polyglot resolvers"]
-    graph["Graph contract — nodes · edges · diagnostics · excluded"]
+    contract["Graph contract — nodes · edges · diagnostics · excluded"]
     cache[("Graph cache — memory + disk artifact")]
     analysis["Analysis & layout — impact · cycles · blocks · depth · ownership · passports"]
     api["HTTP API — /api/strabo"]
     ui["Browser app — Cytoscape map · floating panels"]
     headless["Headless — export · check · report · MCP"]
 
-    boundary --> scanner --> graph
-    graph --> cache
-    graph --> analysis
+    boundary --> scanner --> contract
+    contract --> cache
+    contract --> analysis
     cache --> api
     analysis --> api
     api --> ui
-    graph --> headless
+    contract --> headless
 ```
 
 Every surface reads the same recorded graph: the map, the headless reports, and the MCP
@@ -137,10 +140,13 @@ tools. Anything the scan cannot resolve stays a diagnostic, never an invented ed
 ## Headless use
 
 The same scan backs a CLI and an agent tool surface: `strabo export`, `strabo check`,
-`strabo report`, `strabo coverage`, and `strabo mcp`. See [docs/CLI.md](docs/CLI.md); the MCP tools and their
-read-only boundary are in [docs/MCP.md](docs/MCP.md).
+`strabo report`, `strabo coverage`, and `strabo mcp`. See [docs/CLI.md](docs/CLI.md); the
+MCP tools and their read-only boundary are in [docs/MCP.md](docs/MCP.md).
 
 ## Docs
+
+Shipped behaviour and design are documented apart, so a designed surface is never described
+as if it resolves.
 
 | Document | Covers |
 | -------- | ------ |
@@ -165,13 +171,6 @@ npm run test:pack     # release readiness: pack, install in a clean consumer, ru
 The unit suite runs entirely in Node, and the DOM panels are covered through jsdom
 (`test/unit/panels.test.ts`). Browser acceptance lives in `test/acceptance/`; see
 [test/acceptance/README.md](test/acceptance/README.md).
-
-## Internals and design
-
-The repository boundary, architecture, graph contract, parser resolution rules, source
-layout, entry-point detection, non-goals, and the deliberately parked surface are
-documented in [docs/DESIGN.md](docs/DESIGN.md), kept apart from shipped behaviour so a
-designed surface is never documented as if it resolves.
 
 ## License
 

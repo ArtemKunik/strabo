@@ -1,4 +1,5 @@
 import type { FileCoverageAggregate } from '../file-coverage.ts';
+import type { ApiSchemaRef } from '../../types/workspace.ts';
 import type {
   TierIntentGhostBand,
   TierIntentGhostEdge,
@@ -306,6 +307,12 @@ export interface TierEndpointSite {
   unit: string;
   method: string;
   path: string;
+  /** OpenAPI `operationId`, when the operation names one (API contract view). */
+  operationId?: string | null;
+  /** Request body schema, when the operation declares one (API contract view). */
+  request?: ApiSchemaRef | null;
+  /** First recorded 2xx response schema, when the operation declares one (API contract view). */
+  response?: ApiSchemaRef | null;
 }
 
 /** The top half of the end-to-end trace: a call site and the endpoint it reaches here. */
@@ -326,6 +333,22 @@ export interface TierSpineHop {
 }
 
 /**
+ * One recorded table downstream of a spine's handler, with its evidence.
+ *
+ * The lineage is the set of tables the handler reaches through recorded imports and table
+ * references, not a claim about runtime data flow. `matched` is the one the call's path token
+ * picked for the spine's TABLE hop; the rest are the other recorded tables on the same path.
+ */
+export interface TierTableLineage {
+  table: string;
+  file: string;
+  unit: string;
+  line: number;
+  evidence: string;
+  matched: boolean;
+}
+
+/**
  * An end-to-end behavioral spine through the role tiers (Phase 35 Y6):
  * `call site (frontend) → endpoint (api) → handler (domain) → table (data)`
  *
@@ -343,6 +366,8 @@ export interface TierSpine {
   } | null;
   table: TableTraceEntry | null;
   hops: TierSpineHop[];
+  /** Recorded tables downstream of the handler, matched first (Phase 35 lineage). */
+  lineage: TierTableLineage[];
 }
 
 export interface TierReport {

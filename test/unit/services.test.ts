@@ -87,6 +87,118 @@ test('extractServiceEndpoints reads Swagger 2 host/basePath and leaves a templat
   assert.equal(health?.path, '/health');
 });
 
+test('extractServiceEndpoints reads an operation request/response contract', () => {
+  const root = tempDir();
+  write(
+    root,
+    'openapi.json',
+    JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'Orders', version: '1' },
+      paths: {
+        '/orders': {
+          get: {
+            operationId: 'listOrders',
+            responses: {
+              '200': {
+                description: 'ok',
+                content: {
+                  'application/json': { schema: { $ref: '#/components/schemas/OrderList' } },
+                },
+              },
+            },
+          },
+          post: {
+            operationId: 'createOrder',
+            requestBody: {
+              content: {
+                'application/json': { schema: { $ref: '#/components/schemas/OrderInput' } },
+              },
+            },
+            responses: {
+              '201': {
+                description: 'created',
+                content: { 'application/json': { schema: { $ref: '#/components/schemas/Order' } } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Order: {
+            type: 'object',
+            required: ['id'],
+            properties: { id: { type: 'string' }, status: { type: 'string' } },
+          },
+          OrderList: {
+            type: 'object',
+            properties: { total: { type: 'integer' } },
+          },
+          OrderInput: {
+            type: 'object',
+            properties: { note: { type: 'string' } },
+          },
+        },
+      },
+    }),
+  );
+
+  const endpoints = extractServiceEndpoints(root, 'orders-api');
+  const get = endpoints.find((entry) => entry.method === 'GET');
+  const post = endpoints.find((entry) => entry.method === 'POST');
+
+  assert.equal(get?.operationId, 'listOrders');
+  assert.equal(get?.request, undefined);
+  assert.deepEqual([get?.response?.schema, get?.response?.fields], [
+    'OrderList',
+    [{ name: 'total', type: 'integer', required: false }],
+  ]);
+
+  assert.equal(post?.operationId, 'createOrder');
+  assert.deepEqual([post?.request?.schema, post?.request?.fields], [
+    'OrderInput',
+    [{ name: 'note', type: 'string', required: false }],
+  ]);
+  assert.deepEqual(
+    post?.response?.fields.map((field) => [field.name, field.required]),
+    [
+      ['id', true],
+      ['status', false],
+    ],
+  );
+});
+
+test('extractServiceEndpoints keeps an inline schema and skips a body with none', () => {
+  const root = tempDir();
+  write(
+    root,
+    'openapi.json',
+    JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 'T', version: '1' },
+      paths: {
+        '/inline': {
+          post: {
+            requestBody: {
+              content: { 'application/json': { schema: { type: 'object', properties: { x: { type: 'number' } } } } },
+            },
+            responses: { '204': { description: 'no content' } },
+          },
+        },
+      },
+    }),
+  );
+
+  const endpoint = extractServiceEndpoints(root, 't').find((entry) => entry.path === '/inline');
+  assert.equal(endpoint?.operationId, undefined);
+  assert.deepEqual([endpoint?.request?.schema, endpoint?.request?.fields], [
+    null,
+    [{ name: 'x', type: 'number', required: false }],
+  ]);
+  assert.equal(endpoint?.response, undefined);
+});
+
 test('extractServiceCalls records verb calls and fetch with their method and location', () => {
   const root = tempDir();
   write(

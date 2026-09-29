@@ -4,7 +4,7 @@ import { parse as parseYaml } from 'yaml';
 
 import { collectSourceFiles, isSourceExtension } from '../scan/scan.ts';
 import type { ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
-import { findContractFiles } from './contracts.ts';
+import { findContractFiles, resolveSchemaRef } from './contracts.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -81,16 +81,57 @@ function parseOpenApiEndpoints(
       if (!(method in item)) {
         continue;
       }
+      const operation = isRecord(item[method]) ? item[method] : {};
+      const operationId = readOperationId(operation);
+      const request = resolveSchemaRef(document, mediaSchema(operation.requestBody));
+      const response = resolveSchemaRef(document, mediaSchema(firstSuccessResponse(operation.responses)));
       endpoints.push({
         repository,
         source: file,
         method: method.toUpperCase(),
         path: joinPaths(server?.path ?? '', operationPath),
         host: server?.host ?? null,
+        ...(operationId ? { operationId } : {}),
+        ...(request ? { request } : {}),
+        ...(response ? { response } : {}),
       });
     }
   }
   return endpoints;
+}
+
+/** The `operationId` an operation names, or null when it is absent or blank. */
+function readOperationId(operation: Record<string, unknown>): string | null {
+  return typeof operation.operationId === 'string' && operation.operationId.trim() !== ''
+    ? operation.operationId.trim()
+    : null;
+}
+
+/**
+ * The JSON schema of an operation's request body or response, when declared.
+ *
+ * `application/json` is preferred, and any other media type is a fallback so a `text/json` or
+ * vendor type is still read. A body with no schema is `undefined`, never an empty contract.
+ */
+function mediaSchema(container: unknown): unknown {
+  if (!isRecord(container)) {
+    return undefined;
+  }
+  const content = isRecord(container.content) ? container.content : {};
+  const media =
+    content['application/json'] ?? Object.values(content).find((entry) => isRecord(entry));
+  return isRecord(media) ? media.schema : undefined;
+}
+
+/** The first 2xx response, which is the success shape an API contract promises. */
+function firstSuccessResponse(responses: unknown): unknown {
+  if (!isRecord(responses)) {
+    return undefined;
+  }
+  const success = Object.keys(responses)
+    .filter((status) => /^2\d\d$/.test(status))
+    .sort()[0];
+  return success === undefined ? undefined : responses[success];
 }
 
 /** The first server URL (OpenAPI 3) or `host` + `basePath` (Swagger 2), if any. */
