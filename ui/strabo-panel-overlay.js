@@ -307,6 +307,31 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
     container.append(source);
   }
 
+  // Phase 36 K3: the governing contract behind this edge, when the contracts lens
+  // recorded one. Name, format, schema fields, access role, and conformance results;
+  // an uncontracted crossing says so instead of showing an empty contract.
+  if (evidence.contract) {
+    appendFact(facts, 'Contract', `${evidence.contract} (${evidence.contractFormat ?? 'contract'})`);
+  }
+  if (Array.isArray(evidence.contractFields) && evidence.contractFields.length > 0) {
+    appendFact(facts, 'Schema fields', evidence.contractFields.map((field) => field.name ?? field).join(', '));
+  }
+  if (Array.isArray(evidence.contractAccess) && evidence.contractAccess.length > 0) {
+    appendFact(facts, 'Access', [...new Set(evidence.contractAccess)].join(', '));
+  }
+  if (Array.isArray(evidence.contractConformance) && evidence.contractConformance.length > 0) {
+    appendFact(
+      facts,
+      'Conformance',
+      evidence.contractConformance.map((finding) => `${finding.kind} on ${finding.field}`).join('; '),
+    );
+  } else if (evidence.contract) {
+    appendFact(facts, 'Conformance', 'conforming: no recorded deviation');
+  }
+  if (evidence.uncontracted === true) {
+    appendFact(facts, 'Contract', 'uncontracted: crosses units with no agreed contract');
+  }
+
   if (handlers.onTrace) {
     const trace = document.createElement('button');
     trace.type = 'button';

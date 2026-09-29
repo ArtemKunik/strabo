@@ -179,3 +179,75 @@ export function contractRows(report) {
     twins: twins.get(contract.id) ?? [],
   }));
 }
+
+/**
+ * The contract boundary rows (Phase 36 K2/K7): definitions with their declared-vs-DTO
+ * origin, governed boundaries with badges, drifting contracts with field deviations,
+ * ungoverned candidates, and orphaned contracts. Every row is a recorded fact.
+ */
+export function contractBoundaryRows(boundary) {
+  const deviationsByContract = new Map();
+  for (const finding of boundary?.conformanceDeviations ?? boundary?.conformance ?? []) {
+    const list = deviationsByContract.get(finding.contract) ?? [];
+    list.push({ field: finding.field, kind: finding.kind, detail: finding.detail });
+    deviationsByContract.set(finding.contract, list);
+  }
+  return {
+    definitions: (boundary?.definitions ?? []).map((definition) => ({
+      id: definition.id,
+      format: definition.format,
+      origin: definition.origin ?? 'dto',
+      repository: definition.repository,
+      source: definition.source,
+      fields: (definition.fields ?? []).length,
+    })),
+    governed: (boundary?.governedEdges ?? []).map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      contract: edge.contract,
+      format: edge.contractFormat,
+      kind: edge.kind,
+      conformance: edge.conformance,
+      badge: edge.badge,
+    })),
+    drifting: [...deviationsByContract.entries()].map(([contract, deviations]) => ({ contract, deviations })),
+    ungoverned: (boundary?.uncontractedBoundaries ?? []).map((edge) => ({
+      source: edge.source,
+      target: edge.target,
+      kind: edge.kind,
+      reason: edge.reason,
+      badge: edge.badge,
+    })),
+    orphaned: (boundary?.orphanedContracts ?? []).map((entry) => ({ id: entry.id, format: entry.format, source: entry.source })),
+    unverified: boundary?.unverifiedEdges ?? [],
+  };
+}
+
+/**
+ * The canvas badge for one boundary edge (Phase 36 K3): `📜 Name (format)` for a
+ * governed dependency, `⚡ Topic (event)` for a message/event contract, and
+ * `⚠️ uncontracted` for a cross-unit edge with no agreed contract. The badge is read
+ * off the recorded edge, never composed from a guess.
+ */
+export function contractEdgeBadge(edge) {
+  if (!edge || typeof edge !== 'object') {
+    return null;
+  }
+  if (typeof edge.badge === 'string' && edge.badge !== '') {
+    return edge.badge;
+  }
+  if (edge.contract) {
+    if (edge.kind === 'event') {
+      return `⚡ ${edge.contract} (event)`;
+    }
+    return `📜 ${edge.contract} (${edge.contractFormat ?? edge.format ?? 'contract'})`;
+  }
+  return '⚠️ uncontracted';
+}
+
+/** One line per contract impact: severity and the named consumers (Phase 36 K4). */
+export function contractImpactSummary(impact) {
+  const changes = (impact?.changes ?? []).length;
+  const consumers = (impact?.consumers ?? []).length;
+  return `${impact?.contract ?? 'contract'} · ${impact?.severity ?? 'unknown'} · ${changes} field change(s) · ${consumers} consumer(s)`;
+}

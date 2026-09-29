@@ -23,6 +23,7 @@ export const OVERLAY_TITLES = {
   'declared-rules': 'Declared rules',
   data: 'Data',
   coverage: 'Coverage',
+  contracts: 'Data contracts',
 };
 
 /** The analysis endpoint each overlay reads. */
@@ -39,10 +40,11 @@ export const OVERLAY_ENDPOINTS = {
   'declared-rules': '/analysis/rules',
   data: '/analysis/data/overlay',
   coverage: '/analysis/coverage',
+  contracts: '/analysis/contracts/overlay',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage'];
+export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage', 'contracts'];
 
 /**
  * Map a review analysis result onto node classes and a panel summary.
@@ -180,6 +182,8 @@ export function overlayFor(kind, data) {
       return declaredRulesOverlay(data);
     case 'data':
       return dataOverlay(data);
+    case 'contracts':
+      return contractsOverlay(data);
     case 'coverage':
       return coverageOverlay(data);
     default:
@@ -235,6 +239,39 @@ export function dataOverlay(data) {
         return `${entry.file} · ${parts.join(' · ')}`;
       }),
     meta: { files: files.length, writers, readers, products: products.length },
+  };
+}
+
+/**
+ * The Data contracts overlay (Phase 36 K2): contract definitions, governed boundaries,
+ * drifting contracts, and ungoverned boundary candidates.
+ *
+ * The server already mapped every file to its budget class (`ov-contract-def` for a
+ * definition, `ov-cycle`/`ov-declared-rule` for a drifting implementation,
+ * `ov-unreached`/`ov-affected` for an ungoverned endpoint), so this only annotates those
+ * nodes and lists the recorded reason. An unknown class is dropped rather than drawn.
+ */
+export function contractsOverlay(data) {
+  const allowed = new Set(['ov-contract-def', 'ov-cycle', 'ov-declared-rule', 'ov-unreached', 'ov-affected']);
+  const files = Array.isArray(data?.files) ? data.files : [];
+  const classes = new Map();
+  for (const entry of files) {
+    const kept = (Array.isArray(entry.classes) ? entry.classes : []).filter((cls) => allowed.has(cls));
+    if (kept.length > 0) {
+      classes.set(entry.file, kept[0]);
+    }
+  }
+  const summary = data?.summary ?? {};
+  const definitions = summary.definitions ?? files.filter((entry) => (entry.classes ?? []).includes('ov-contract-def')).length;
+  const drifting = summary.drifting ?? 0;
+  const ungoverned = summary.ungoverned ?? 0;
+  return {
+    classes,
+    summary: `${definitions} contract(s) · ${drifting} drifting edge(s) · ${ungoverned} ungoverned`,
+    items: files
+      .slice(0, 200)
+      .map((entry) => `${entry.file} · ${entry.reason ?? (entry.classes ?? []).join(', ')}`),
+    meta: { files: files.length, definitions, drifting, ungoverned },
   };
 }
 

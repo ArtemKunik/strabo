@@ -24,6 +24,39 @@ import { focus } from './strabo-viewport.js';
 export function createSelectionController(app) {
   const { store, state, view, elements } = app;
 
+  /**
+   * The governing contract behind one edge pair (Phase 36 K3), or null when the lens
+   * recorded none. A failed load is null too, so the recorded evidence stands alone.
+   */
+  async function fetchContractEdge(source, target) {
+    try {
+      const params = new URLSearchParams({ source, target });
+      const response = await fetch(`${API_PATH}/analysis/contracts/edge?${params.toString()}`);
+      if (!response.ok) {
+        return null;
+      }
+      const body = await response.json();
+      const governed = Array.isArray(body?.governed) ? body.governed : [];
+      const uncontracted = Array.isArray(body?.uncontracted) ? body.uncontracted : [];
+      const hit = governed[0];
+      if (hit) {
+        return {
+          contract: hit.contract,
+          contractFormat: hit.contractFormat,
+          contractFields: hit.fields ?? [],
+          contractAccess: hit.access ?? [],
+          contractConformance: hit.conformanceFindings ?? [],
+        };
+      }
+      if (uncontracted.length > 0) {
+        return { uncontracted: true };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Module Passport selections, oldest first, so Back can step down to one. */
   let passportHistory = [];
 
@@ -256,7 +289,7 @@ export function createSelectionController(app) {
     }
     app.selectedEdgeId = edgeId;
     const evidence = edgeEvidenceFor(app.current, edgeId);
-    renderEdgeEvidence(elements.edgePanel, evidence, {
+    const handlers = {
       onSelect: (id) => selectNode(id),
       onTrace: (from, to) => tracePath(from, to),
       ...(evidence && isFileNode(evidence.source)
@@ -268,7 +301,21 @@ export function createSelectionController(app) {
         renderEdgeEvidence(elements.edgePanel, null);
         app.windows.refreshDock();
       },
-    });
+    };
+    renderEdgeEvidence(elements.edgePanel, evidence, handlers);
+    // Phase 36 K3: attach the governing contract behind this edge, when the contracts
+    // lens recorded one. The recorded import/call evidence above stands on its own; the
+    // contract arrives as an augmentation and never replaces it.
+    if (evidence && app.selectedEdgeId === edgeId) {
+      void fetchContractEdge(evidence.source, evidence.target)
+        .then((contract) => {
+          if (!contract || app.selectedEdgeId !== edgeId) {
+            return;
+          }
+          renderEdgeEvidence(elements.edgePanel, { ...evidence, ...contract }, handlers);
+        })
+        .catch(() => {});
+    }
     if (evidence) {
       elements.hover.textContent = `${evidence.source} → ${evidence.target} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
     }

@@ -157,6 +157,10 @@ export function stylesheet() {
     // ring, so the product producers read apart from the plain data touch.
     { selector: 'node.ov-data', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
     { selector: 'node.ov-product', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    // The Data contracts overlay (Phase 36 K2): a contract definition takes a solid neutral
+    // accent ring. Drifting implementations reuse the serious status double ring and
+    // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
+    { selector: 'node.ov-contract-def', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
     { selector: 'node.node-ghost', style: { 'border-style': 'dashed', opacity: 0.6 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },

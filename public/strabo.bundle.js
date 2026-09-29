@@ -1485,7 +1485,8 @@ var OVERLAY_TITLES = {
   "hidden-coupling": "Hidden coupling (co-change, no import path)",
   "declared-rules": "Declared rules",
   data: "Data",
-  coverage: "Coverage"
+  coverage: "Coverage",
+  contracts: "Data contracts"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -1499,9 +1500,10 @@ var OVERLAY_ENDPOINTS = {
   "hidden-coupling": "/analysis/co-change",
   "declared-rules": "/analysis/rules",
   data: "/analysis/data/overlay",
-  coverage: "/analysis/coverage"
+  coverage: "/analysis/coverage",
+  contracts: "/analysis/contracts/overlay"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage", "contracts"];
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -1596,6 +1598,8 @@ function overlayFor(kind, data) {
       return declaredRulesOverlay(data);
     case "data":
       return dataOverlay(data);
+    case "contracts":
+      return contractsOverlay(data);
     case "coverage":
       return coverageOverlay(data);
     default:
@@ -1639,6 +1643,27 @@ function dataOverlay(data) {
       return `${entry.file} \xB7 ${parts.join(" \xB7 ")}`;
     }),
     meta: { files: files.length, writers, readers, products: products.length }
+  };
+}
+function contractsOverlay(data) {
+  const allowed = /* @__PURE__ */ new Set(["ov-contract-def", "ov-cycle", "ov-declared-rule", "ov-unreached", "ov-affected"]);
+  const files = Array.isArray(data?.files) ? data.files : [];
+  const classes = /* @__PURE__ */ new Map();
+  for (const entry of files) {
+    const kept = (Array.isArray(entry.classes) ? entry.classes : []).filter((cls) => allowed.has(cls));
+    if (kept.length > 0) {
+      classes.set(entry.file, kept[0]);
+    }
+  }
+  const summary = data?.summary ?? {};
+  const definitions = summary.definitions ?? files.filter((entry) => (entry.classes ?? []).includes("ov-contract-def")).length;
+  const drifting = summary.drifting ?? 0;
+  const ungoverned = summary.ungoverned ?? 0;
+  return {
+    classes,
+    summary: `${definitions} contract(s) \xB7 ${drifting} drifting edge(s) \xB7 ${ungoverned} ungoverned`,
+    items: files.slice(0, 200).map((entry) => `${entry.file} \xB7 ${entry.reason ?? (entry.classes ?? []).join(", ")}`),
+    meta: { files: files.length, definitions, drifting, ungoverned }
   };
 }
 function coverageOverlay(data) {
@@ -2825,6 +2850,10 @@ function stylesheet() {
     // ring, so the product producers read apart from the plain data touch.
     { selector: "node.ov-data", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.edgeAccent, "background-opacity": 1 } },
     { selector: "node.ov-product", style: { "border-width": 4, "border-style": "double", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    // The Data contracts overlay (Phase 36 K2): a contract definition takes a solid neutral
+    // accent ring. Drifting implementations reuse the serious status double ring and
+    // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
+    { selector: "node.ov-contract-def", style: { "border-width": 3, "border-style": "solid", "border-color": theme.edgeAccent, "background-opacity": 1 } },
     { selector: "node.node-ghost", style: { "border-style": "dashed", opacity: 0.6 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
@@ -3264,6 +3293,7 @@ var OVERLAY_CLASSES = [
   "ov-declared-rule",
   "ov-data",
   "ov-product",
+  "ov-contract-def",
   // Coverage overlay (Phase 34 U1): a measured ramp plus the always-distinct states.
   "cov-90",
   "cov-70",
@@ -4886,6 +4916,7 @@ function renderInspector(container, model, id, handlers = {}) {
   }
   if (model.structure && (node?.kind === "tier" || node?.kind === "shelf" || node?.kind === "axis")) {
     appendStructureSpines(container, model, id, node, handlers);
+    appendApiContracts(container, model, id, node);
     return;
   }
   const tabs = document.createElement("div");
@@ -4984,6 +5015,7 @@ function renderInspector(container, model, id, handlers = {}) {
   }
   selectTab(0);
   container.append(tabs, panels);
+  appendApiContracts(container, model, id, node);
   const changesWith = document.createElement("section");
   changesWith.dataset.role = "changes-with";
   const changesWithTitle = document.createElement("h3");
@@ -5129,6 +5161,98 @@ function appendOutsideLinks(container, model, id, node, handlers) {
     container.append(block);
   }
 }
+function appendApiContracts(container, model, id, node) {
+  const endpoints = model.structureEndpoints ?? [];
+  if (endpoints.length === 0) {
+    return;
+  }
+  const byFile = endpoints.filter((entry) => entry.file === id);
+  const byTier = node?.tier ? endpoints.filter((entry) => entry.tier === node.tier) : [];
+  const list2 = byFile.length > 0 ? byFile : byTier;
+  if (list2.length === 0) {
+    return;
+  }
+  const section2 = document.createElement("section");
+  section2.className = "api-contracts-section";
+  section2.dataset.role = "api-contracts";
+  const heading3 = document.createElement("h3");
+  heading3.textContent = "API contract";
+  section2.append(heading3);
+  const intro = document.createElement("p");
+  intro.className = "passport-why";
+  intro.textContent = "Request and response shapes declared by the OpenAPI operation, with its source.";
+  section2.append(intro);
+  for (const endpoint of list2) {
+    section2.append(apiContractCard(endpoint));
+  }
+  container.append(section2);
+}
+function apiContractCard(endpoint) {
+  const card = document.createElement("div");
+  card.className = "api-contract";
+  card.dataset.role = "api-contract";
+  const header = document.createElement("div");
+  header.className = "api-contract-header";
+  const method = document.createElement("span");
+  method.className = "kind-chip kind-api";
+  method.textContent = endpoint.method;
+  header.append(method);
+  const route = document.createElement("strong");
+  route.className = "api-contract-path";
+  route.textContent = endpoint.path;
+  header.append(route);
+  if (endpoint.operationId) {
+    const operationId = document.createElement("span");
+    operationId.className = "evidence";
+    operationId.textContent = endpoint.operationId;
+    header.append(operationId);
+  }
+  card.append(header);
+  const source = document.createElement("span");
+  source.className = "evidence api-contract-source";
+  source.textContent = endpoint.file;
+  card.append(source);
+  card.append(apiSchemaBlock("Request", endpoint.request));
+  card.append(apiSchemaBlock("Response", endpoint.response));
+  return card;
+}
+function apiSchemaBlock(label, ref) {
+  const block = document.createElement("div");
+  block.className = `api-contract-schema api-contract-${label.toLowerCase()}`;
+  const title = document.createElement("div");
+  title.className = "api-contract-schema-title";
+  title.textContent = ref?.schema ? `${label}: ${ref.schema}` : label;
+  block.append(title);
+  const fields = ref?.fields ?? [];
+  if (fields.length === 0) {
+    const none = document.createElement("span");
+    none.className = "unavailable";
+    none.textContent = ref ? "No fields recorded" : `No ${label.toLowerCase()} schema declared`;
+    block.append(none);
+    return block;
+  }
+  const list2 = document.createElement("ul");
+  list2.className = "api-contract-fields";
+  for (const field2 of fields) {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "api-contract-field-name";
+    name.textContent = field2.name;
+    const type = document.createElement("span");
+    type.className = "api-contract-field-type";
+    type.textContent = field2.type;
+    item.append(name, type);
+    if (!field2.required) {
+      const optional = document.createElement("span");
+      optional.className = "api-contract-field-optional";
+      optional.textContent = "optional";
+      item.append(optional);
+    }
+    list2.append(item);
+  }
+  block.append(list2);
+  return block;
+}
 function appendStructureSpines(container, model, id, node, handlers) {
   const tier = node?.tier ?? id;
   const unit = node?.unit;
@@ -5254,10 +5378,45 @@ function renderSpineView(container, spine, handlers = {}) {
       stub.textContent = `(no matching ${role} detected)`;
       hopCard.append(stub);
     }
+    if (role === "endpoint" && spine.endpoint) {
+      const contract = document.createElement("span");
+      contract.className = "spine-hop-contract";
+      contract.dataset.role = "spine-contract";
+      contract.textContent = spineContractSummary(spine.endpoint);
+      hopCard.append(contract);
+    }
+    if (role === "table") {
+      const lineage = spine.lineage ?? [];
+      if (lineage.length > 0) {
+        hopCard.append(spineLineageList(lineage));
+      }
+    }
     hopsContainer.append(hopCard);
   }
   view2.append(hopsContainer);
   container.prepend(view2);
+}
+function spineContractSummary(endpoint) {
+  const side = (label, ref) => `${label} ${ref ? `${ref.schema ?? "inline"} (${ref.fields.length})` : "\u2014"}`;
+  return `contract: ${side("in", endpoint.request)} \xB7 ${side("out", endpoint.response)}`;
+}
+function spineLineageList(lineage) {
+  const list2 = document.createElement("ul");
+  list2.className = "spine-lineage";
+  list2.dataset.role = "spine-lineage";
+  for (const entry of lineage) {
+    const item = document.createElement("li");
+    item.className = entry.matched ? "spine-lineage-item matched" : "spine-lineage-item";
+    const table = document.createElement("span");
+    table.className = "spine-lineage-table";
+    table.textContent = entry.table;
+    const evidence = document.createElement("span");
+    evidence.className = "evidence";
+    evidence.textContent = `${entry.file}:${entry.line}`;
+    item.append(table, evidence);
+    list2.append(item);
+  }
+  return list2;
 }
 
 // ui/strabo-panel-functions.js
@@ -9416,6 +9575,30 @@ function renderRisk(container, report, handlers = {}) {
 }
 
 // ui/strabo-panel-review.js
+function renderContractImpact(container, impacts) {
+  const section2 = document.createElement("div");
+  section2.dataset.role = "contract-impact";
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Contract Impact";
+  section2.append(heading3);
+  const list2 = Array.isArray(impacts) ? impacts : [];
+  if (list2.length === 0) {
+    const note4 = document.createElement("p");
+    note4.className = "unavailable";
+    note4.textContent = "No edited file defines a recorded contract.";
+    section2.append(note4);
+  } else {
+    const items = document.createElement("ul");
+    for (const impact of list2.slice(0, 50)) {
+      const item = document.createElement("li");
+      const consumers = (impact.consumers ?? []).join(", ") || "no recorded consumer";
+      item.textContent = `${impact.contract} \xB7 ${impact.severity} \xB7 ${(impact.changes ?? []).length} field change(s) \xB7 consumers: ${consumers}`;
+      items.append(item);
+    }
+    section2.append(items);
+  }
+  container.append(section2);
+}
 function renderReviewLoading(container, handlers = {}) {
   container.replaceChildren();
   const title = document.createElement("h3");
@@ -10134,6 +10317,27 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
     source.textContent = "View source";
     source.addEventListener("click", () => handlers.onViewSource(evidence.source, evidence.line ?? null));
     container.append(source);
+  }
+  if (evidence.contract) {
+    appendFact(facts, "Contract", `${evidence.contract} (${evidence.contractFormat ?? "contract"})`);
+  }
+  if (Array.isArray(evidence.contractFields) && evidence.contractFields.length > 0) {
+    appendFact(facts, "Schema fields", evidence.contractFields.map((field2) => field2.name ?? field2).join(", "));
+  }
+  if (Array.isArray(evidence.contractAccess) && evidence.contractAccess.length > 0) {
+    appendFact(facts, "Access", [...new Set(evidence.contractAccess)].join(", "));
+  }
+  if (Array.isArray(evidence.contractConformance) && evidence.contractConformance.length > 0) {
+    appendFact(
+      facts,
+      "Conformance",
+      evidence.contractConformance.map((finding) => `${finding.kind} on ${finding.field}`).join("; ")
+    );
+  } else if (evidence.contract) {
+    appendFact(facts, "Conformance", "conforming: no recorded deviation");
+  }
+  if (evidence.uncontracted === true) {
+    appendFact(facts, "Contract", "uncontracted: crosses units with no agreed contract");
   }
   if (handlers.onTrace) {
     const trace = document.createElement("button");
@@ -12794,12 +12998,38 @@ function createGitController(app2) {
     view2.overlay(overlay2.classes);
     elements2.reviewPanel.hidden = false;
     renderReview(elements2.reviewPanel, data, reviewHandlers(data, navigation));
+    void augmentWithContractImpact(elements2.reviewPanel, data, ticket);
     if (store2.get().ui.screen === "review") {
       renderReview(elements2.reviewScreenBody, data, reviewHandlers(data, navigation, () => app2.setScreen("graph")));
+      void augmentWithContractImpact(elements2.reviewScreenBody, data, ticket);
     }
     const label = branchName ?? (commit ? commit.shortHash : "working tree");
     const where = !query && worktree ? ` in ${worktreeName(worktree)}` : "";
     elements2.status.textContent = `Review ${label}${where}: ${overlay2.summary}`;
+  }
+  async function augmentWithContractImpact(container, data, ticket) {
+    const files = (data?.files ?? []).map((file) => file.path).filter((path) => typeof path === "string");
+    if (files.length === 0 || ticket !== reviewTicket) {
+      return;
+    }
+    let impacts = null;
+    try {
+      const response = await fetch(`${API_PATH}/analysis/contracts/impact`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ files })
+      });
+      if (!response.ok) {
+        return;
+      }
+      impacts = (await response.json())?.impacts ?? null;
+    } catch {
+      return;
+    }
+    if (ticket !== reviewTicket || !container.isConnected) {
+      return;
+    }
+    renderContractImpact(container, impacts);
   }
   async function reviewBack() {
     const previous = reviewHistory.pop();
@@ -27452,6 +27682,34 @@ function createDelegation(app2) {
 // ui/strabo-selection-controller.js
 function createSelectionController(app2) {
   const { store: store2, state: state2, view: view2, elements: elements2 } = app2;
+  async function fetchContractEdge(source, target) {
+    try {
+      const params = new URLSearchParams({ source, target });
+      const response = await fetch(`${API_PATH}/analysis/contracts/edge?${params.toString()}`);
+      if (!response.ok) {
+        return null;
+      }
+      const body = await response.json();
+      const governed = Array.isArray(body?.governed) ? body.governed : [];
+      const uncontracted = Array.isArray(body?.uncontracted) ? body.uncontracted : [];
+      const hit = governed[0];
+      if (hit) {
+        return {
+          contract: hit.contract,
+          contractFormat: hit.contractFormat,
+          contractFields: hit.fields ?? [],
+          contractAccess: hit.access ?? [],
+          contractConformance: hit.conformanceFindings ?? []
+        };
+      }
+      if (uncontracted.length > 0) {
+        return { uncontracted: true };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
   let passportHistory = [];
   let passportGoingBack = false;
   function selectNode(id) {
@@ -27647,7 +27905,7 @@ function createSelectionController(app2) {
     }
     app2.selectedEdgeId = edgeId;
     const evidence = edgeEvidenceFor(app2.current, edgeId);
-    renderEdgeEvidence(elements2.edgePanel, evidence, {
+    const handlers = {
       onSelect: (id) => selectNode(id),
       onTrace: (from, to) => tracePath(from, to),
       ...evidence && isFileNode(evidence.source) ? { onViewSource: (file, line) => app2.source.viewSource(file, { line }) } : {},
@@ -27657,7 +27915,17 @@ function createSelectionController(app2) {
         renderEdgeEvidence(elements2.edgePanel, null);
         app2.windows.refreshDock();
       }
-    });
+    };
+    renderEdgeEvidence(elements2.edgePanel, evidence, handlers);
+    if (evidence && app2.selectedEdgeId === edgeId) {
+      void fetchContractEdge(evidence.source, evidence.target).then((contract) => {
+        if (!contract || app2.selectedEdgeId !== edgeId) {
+          return;
+        }
+        renderEdgeEvidence(elements2.edgePanel, { ...evidence, ...contract }, handlers);
+      }).catch(() => {
+      });
+    }
     if (evidence) {
       elements2.hover.textContent = `${evidence.source} \u2192 ${evidence.target} \xB7 ${evidence.kind} \xB7 L${evidence.line ?? "?"} ${evidence.specifier ?? ""}`;
     }
