@@ -1494,9 +1494,9 @@ Several items already landed in part; each entry names what remains.
 
 - **T1 - Re-exports keep dependency paths.** *Done.* Relationship kinds are explicit —
   `import`, `re-export`, `module-declaration` (Rust `mod`), and `executable-module` (Python)
-  (`src/types.ts:37,93`, `src/analysis/analysis.ts:16`) — and a barrel `index.ts` re-export is
-  recorded as a `re-export`, not a bare `declare` (`src/scan/scan-js.ts:60`,
-  `src/scan/languages/rust.ts:428`, `src/scan/languages/python.ts:382`). Impact and blast
+  (`src/types/enums.ts:15`, `src/analysis/analysis.ts:40`) — and a barrel `index.ts` re-export
+  is recorded as a `re-export`, not a bare `declare` (`src/scan/scan-js.ts:58`,
+  `src/scan/languages/rust.ts:470`, `src/scan/languages/python.ts:379`). Impact and blast
   radius traverse re-exports (`buildAdjacency` `includeReExports`); direct fan-in/fan-out still
   exclude a barrel, and the passport says which (`countsIncludeReExports`).
   Acceptance: A → index.ts ⇢ B lists A at distance 2 (`test/unit/re-export-impact.test.ts`).
@@ -1521,15 +1521,20 @@ Several items already landed in part; each entry names what remains.
   (`src/analysis/change-passport.ts`, `src/analysis/signals.ts` `CHANGE_RISK_THRESHOLDS`). One
   zero factor no longer erases significant risk.
 - **T5 - Generated output out of every view.** *Done.* Generated directories and markers and
-  lockfiles are classified and dropped from change views (`src/scan/exclusions.ts:63`,
-  `src/analysis/review.ts`), and each dropped path is named in the review's `excluded` list.
+  lockfiles are classified and dropped from change views (`src/scan/exclusions.ts:52,97`, then
+  `classifyViewExclusion` at `:108`; `src/analysis/review.ts`), and each dropped path is named
+  in the review's `excluded` list.
   Acceptance: a commit that only rebuilds `public/app.bundle.js` yields an empty review with
   the exclusion named, as does a lockfile-only commit (`test/unit/review.test.ts`).
 - **T6 - Freshness on every figure.** *Done.* `graphProvenance` — fingerprint, scan time, and
   staleness against the working tree — is attached to the repository passport, impact passport,
-  change passport, and review at the route layer (`src/api/routes/analysis.ts`, reusing
-  `computeFreshness`), carried by the CLI report (`src/cli/report.ts`), and drawn on each
-  passport and the edge-evidence overlay (`ui/strabo-panel-*.js`).
+  change passport, and review at the route layer (`src/api/routes/analysis-structure.ts:107`,
+  `src/api/routes/analysis-review.ts:134,196,242`, reusing `computeFreshness`), carried by the
+  CLI report (`src/cli/report.ts`), and drawn on each passport and the edge-evidence overlay
+  (`ui/strabo-panel-*.js`). The change-passport line was missing: `cohesion.provenance` is now
+  populated at both review response sites (working-tree/commit and branch), so the panel's
+  `change-passport-provenance` line renders from the API; `test/unit/server.test.ts` asserts it
+  and that it agrees with the sibling impact-passport roll-up.
 
 ## Phase 23 - Revision-aware change review
 

@@ -379,3 +379,24 @@ test('the co-change endpoint honours a lower coupling threshold', async () => {
   assert.equal(report.thresholds.minCommits, 1);
   assert.equal(report.thresholds.minRatio, 0.1);
 });
+
+// T6: the change passport's own freshness line is drawn from `cohesion.provenance`, so the
+// review route must populate it, not only the sibling `impactPassport` roll-up.
+test('the review route attaches graph provenance to the change passport', async () => {
+  const host = express();
+  host.use('/api/strabo', createStraboRouter(config));
+  const base = await listen(host);
+  const repository = `?repository=${encodeURIComponent(path.join(fixtures, 'change-repo'))}`;
+
+  const review = (await (await fetch(`${base}/api/strabo/analysis/review${repository}`)).json()) as {
+    cohesion?: { provenance?: { fingerprint: string; scannedAt: string; stale: boolean } };
+    impactPassport?: { provenance?: { fingerprint: string } };
+  };
+  assert.ok(review.cohesion, 'the working-tree review carries a change passport');
+  assert.ok(review.cohesion.provenance, 'the change passport names the graph it was computed from');
+  assert.equal(typeof review.cohesion.provenance.fingerprint, 'string');
+  assert.ok(review.cohesion.provenance.fingerprint.length > 0);
+  assert.equal(typeof review.cohesion.provenance.scannedAt, 'string');
+  // The sibling roll-up already carried it; the two must agree.
+  assert.equal(review.cohesion.provenance.fingerprint, review.impactPassport?.provenance?.fingerprint);
+});

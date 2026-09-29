@@ -131,7 +131,7 @@ export function createReviewRouter(context: AnalysisContext): Router {
         const provenance = await graphProvenance(repository.root, cached);
         response.json({
           ...review,
-          ...(cohesion ? { cohesion } : {}),
+          ...(cohesion ? { cohesion: { ...cohesion, provenance } } : {}),
           metrics,
           provenance,
           ...(cohesion
@@ -193,7 +193,7 @@ export function createReviewRouter(context: AnalysisContext): Router {
       response.json({
         ...review,
         ...(worktree ? { worktree: { path: worktree.path, branch: worktree.branch } } : {}),
-        cohesion,
+        cohesion: { ...cohesion, provenance },
         metrics,
         impactPassport,
         provenance,
