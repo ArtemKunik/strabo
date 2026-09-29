@@ -35,6 +35,31 @@ import { button, matches, svgElement, unavailableNote, wiring } from './strabo-p
 import { appendNarratorBlock } from './strabo-panel-narrative.js';
 
 
+/** `extends Base, Mixin · implements Drawable` for a type's recorded supertypes. */
+function describeSuperTypes(superTypes) {
+  const extendsNames = superTypes.filter((entry) => entry.relation === 'extends').map((entry) => entry.name);
+  const implementsNames = superTypes
+    .filter((entry) => entry.relation === 'implements')
+    .map((entry) => entry.name);
+  const parts = [];
+  if (extendsNames.length > 0) parts.push(`extends ${extendsNames.join(', ')}`);
+  if (implementsNames.length > 0) parts.push(`implements ${implementsNames.join(', ')}`);
+  return parts.join(' · ');
+}
+
+/** The supertype line for a type, or null when it records none. */
+function buildSuperTypeLine(type) {
+  const superTypes = type.superTypes ?? [];
+  if (superTypes.length === 0) {
+    return null;
+  }
+  const line = document.createElement('p');
+  line.className = 'member-supertypes';
+  line.textContent = describeSuperTypes(superTypes);
+  return line;
+}
+
+
 /**
  * Render the Member map: members grouped by type, then the data-flow panels.
  *
@@ -101,6 +126,11 @@ function renderMemberType(type) {
   title.className = 'member-type-name';
   title.textContent = type.name;
   section.append(title);
+
+  const superTypeLine = buildSuperTypeLine(type);
+  if (superTypeLine) {
+    section.append(superTypeLine);
+  }
 
   if (type.fields.length > 0) {
     const heading = document.createElement('h5');
@@ -549,6 +579,11 @@ function buildTypeSection(type, view, clusters, handlers) {
   count.textContent = `${type.fields.length + type.methods.length} members`;
   heading.append(count);
   section.append(heading);
+
+  const superTypeLine = buildSuperTypeLine(type);
+  if (superTypeLine) {
+    section.append(superTypeLine);
+  }
 
   const legend = document.createElement('div');
   legend.className = 'member-clusters';

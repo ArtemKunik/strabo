@@ -9,10 +9,11 @@ export type NodeKind = 'module' | 'test' | 'entry' | 'unit' | 'shelf' | 'tier' |
  * `re-export` forwards the target's names (`export … from`, Rust `pub use`).
  * `module-declaration` declares a child module (Rust `mod x;`).
  * `executable-module` runs the target when the source is imported (a Python package `__init__`).
+ * `inheritance` is a `extends`/`implements` relation to a type the target file declares.
  *
  * Absent means `import`, so a graph recorded before this field existed still reads.
  */
-export type EdgeRelationship = 'import' | 're-export' | 'module-declaration' | 'executable-module';
+export type EdgeRelationship = 'import' | 're-export' | 'module-declaration' | 'executable-module' | 'inheritance';
 
 /** The kind of relationship an edge represents. */
 export type EdgeKind =
@@ -21,6 +22,7 @@ export type EdgeKind =
   | 'dynamic-import'
   | 're-export'
   | 'call'
+  | 'inheritance'
   | 'package'
   | 'namespace'
   | 'table'

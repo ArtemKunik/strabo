@@ -2875,6 +2875,9 @@ function stylesheet() {
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { "line-style": "dashed" } },
+    // An inheritance edge is a type relation (`extends`/`implements`), not a module import:
+    // a short dash in the accent hue reads it apart from a plain import and a call.
+    { selector: 'edge[kind = "inheritance"]', style: { "line-style": "dashed", "line-dash-pattern": [3, 3], "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
     {
       selector: "edge",
@@ -7374,6 +7377,24 @@ function setAttribute(dom, name, value) {
 }
 
 // ui/strabo-panel-members.js
+function describeSuperTypes(superTypes) {
+  const extendsNames = superTypes.filter((entry) => entry.relation === "extends").map((entry) => entry.name);
+  const implementsNames = superTypes.filter((entry) => entry.relation === "implements").map((entry) => entry.name);
+  const parts = [];
+  if (extendsNames.length > 0) parts.push(`extends ${extendsNames.join(", ")}`);
+  if (implementsNames.length > 0) parts.push(`implements ${implementsNames.join(", ")}`);
+  return parts.join(" \xB7 ");
+}
+function buildSuperTypeLine(type) {
+  const superTypes = type.superTypes ?? [];
+  if (superTypes.length === 0) {
+    return null;
+  }
+  const line = document.createElement("p");
+  line.className = "member-supertypes";
+  line.textContent = describeSuperTypes(superTypes);
+  return line;
+}
 function renderMembers(container, result) {
   container.replaceChildren();
   const symbols = result?.symbols ?? [];
@@ -7424,6 +7445,10 @@ function renderMemberType(type) {
   title.className = "member-type-name";
   title.textContent = type.name;
   section2.append(title);
+  const superTypeLine = buildSuperTypeLine(type);
+  if (superTypeLine) {
+    section2.append(superTypeLine);
+  }
   if (type.fields.length > 0) {
     const heading3 = document.createElement("h5");
     heading3.textContent = `Fields (${type.fields.length})`;
@@ -7799,6 +7824,10 @@ function buildTypeSection(type, view2, clusters, handlers) {
   count.textContent = `${type.fields.length + type.methods.length} members`;
   heading3.append(count);
   section2.append(heading3);
+  const superTypeLine = buildSuperTypeLine(type);
+  if (superTypeLine) {
+    section2.append(superTypeLine);
+  }
   const legend = document.createElement("div");
   legend.className = "member-clusters";
   legend.dataset.role = "clusters";

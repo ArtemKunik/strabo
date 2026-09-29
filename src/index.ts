@@ -43,6 +43,8 @@ export type {
   FunctionMetrics,
   MemberAccess,
   ReExport,
+  SuperType,
+  SuperTypeRelation,
   SymbolExtraction,
 } from './scan/languages/symbols.ts';
 export { collectFunctionMetrics } from './scan/languages/function-metrics.ts';

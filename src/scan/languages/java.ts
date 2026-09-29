@@ -11,10 +11,13 @@ import {
   type CallRules,
   type CodeSymbol,
   type MemberAccess,
+  type SuperType,
+  type SuperTypeRules,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
   collectFunctionCalls,
   collectMemberAccesses,
+  collectSuperTypes,
   sortSymbols,
 } from './symbols.ts';
 
@@ -56,6 +59,8 @@ export interface JavaFileFacts {
   /** Method names the file declares, so a call can be proven against this file. */
   methods: string[];
   calls: JavaCall[];
+  /** Supertypes the file's types extend or implement, deduplicated across the file. */
+  supertypes?: SuperType[];
 }
 
 export interface JavaExtraction {
@@ -84,6 +89,7 @@ export async function extractJavaFacts(file: string, content: string): Promise<J
       typeReferences: [],
       methods: [],
       calls: [],
+      supertypes: [],
     };
 
     const tree = parser.parse(content);
@@ -107,6 +113,7 @@ export async function extractJavaFacts(file: string, content: string): Promise<J
         typeReferences: [],
         methods: [],
         calls: [],
+        supertypes: [],
       };
 
       for (const node of tree.rootNode.namedChildren) {
@@ -129,6 +136,7 @@ export async function extractJavaFacts(file: string, content: string): Promise<J
       facts.typeReferences = dedupeReferences(references);
       collectMethods(tree.rootNode, facts.methods);
       collectCalls(tree.rootNode, facts.calls);
+      facts.supertypes = collectFileSupertypes(tree.rootNode);
 
       if (tree.rootNode.hasError) {
         diagnostics.push({
@@ -274,6 +282,79 @@ function collectCalls(node: Node, out: JavaCall[]): void {
   for (const child of node.namedChildren) {
     collectCalls(child, out);
   }
+}
+
+/**
+ * The supertype clauses of a Java type declaration.
+ *
+ * A class, enum, or record carries a `superclass` field (the `extends` type) and an
+ * `interfaces` field (`super_interfaces` -> `type_list`); an interface carries an
+ * `extends_interfaces` child with its own `type_list`. A type with no supertype returns none.
+ */
+const JAVA_SUPER_TYPES: SuperTypeRules = {
+  clauses: (declaration) => {
+    const out: Array<{ node: Node; relation: 'extends' | 'implements' }> = [];
+    if (declaration.type === 'interface_declaration') {
+      for (const clause of declaration.namedChildren) {
+        if (clause.type === 'extends_interfaces') {
+          for (const type of typeListTypes(clause)) {
+            out.push({ node: type, relation: 'extends' });
+          }
+        }
+      }
+      return out;
+    }
+    const superclass = declaration.childForFieldName('superclass');
+    const extended = superclass?.namedChildren[0];
+    if (extended) {
+      out.push({ node: extended, relation: 'extends' });
+    }
+    const interfaces = declaration.childForFieldName('interfaces');
+    if (interfaces) {
+      for (const type of typeListTypes(interfaces)) {
+        out.push({ node: type, relation: 'implements' });
+      }
+    }
+    return out;
+  },
+};
+
+/** The type nodes of a `super_interfaces`/`extends_interfaces` clause, through its `type_list`. */
+function typeListTypes(clause: Node): Node[] {
+  const list = clause.namedChildren.find((child) => child.type === 'type_list') ?? clause;
+  return list.namedChildren.filter(
+    (child) =>
+      child.type === 'type_identifier' ||
+      child.type === 'generic_type' ||
+      child.type === 'scoped_type_identifier',
+  );
+}
+
+/**
+ * Every supertype the file's type declarations name, across nested types.
+ *
+ * A file is one graph node, so the declaring type does not matter for the edge; entries are
+ * de-duplicated by relation and name so two nested classes extending the same base are one.
+ */
+function collectFileSupertypes(root: Node): SuperType[] {
+  const out: SuperType[] = [];
+  const seen = new Set<string>();
+  const walk = (node: Node): void => {
+    if (TYPE_DECLARATIONS.has(node.type)) {
+      for (const supertype of collectSuperTypes(node, JAVA_SUPER_TYPES)) {
+        const key = `${supertype.relation}\u0000${supertype.name}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(supertype);
+        }
+      }
+    }
+    for (const child of node.namedChildren) {
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
 }
 
 interface JavaIndex {
@@ -441,8 +522,83 @@ export function resolveJava(facts: JavaFileFacts[]): JavaResolution {
     }
   }
 
+  appendInheritanceEdges(facts, index, edges);
   appendCallEdges(facts, index, edges);
   return { edges, diagnostics };
+}
+
+/**
+ * Join a type's declared supertype to the file that declares it (X-class inheritance edges).
+ *
+ * The supertype name resolves through a non-static, non-wildcard import of that simple name,
+ * a wildcard import's package, or a same-package type declared by exactly one file — the same
+ * rules imports use. A name that does not resolve inside the repository is left unclaimed
+ * rather than guessed, so an external base class (`extends Thread`) draws no edge.
+ */
+function appendInheritanceEdges(
+  facts: readonly JavaFileFacts[],
+  index: JavaIndex,
+  edges: GraphEdge[],
+): void {
+  const seen = new Set<string>();
+  for (const fact of facts) {
+    for (const supertype of fact.supertypes ?? []) {
+      const target = resolveSuperType(supertype.name, fact, index);
+      if (!target || target === fact.file) {
+        continue;
+      }
+      const key = `${fact.file}\u0000${target}\u0000${supertype.relation}\u0000${supertype.name}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: fact.file,
+        target,
+        kind: 'inheritance',
+        role: 'use',
+        relationship: 'inheritance',
+        evidence: {
+          line: supertype.line,
+          specifier: `${supertype.relation} ${supertype.name}`,
+          resolution: 'exact',
+        },
+      });
+    }
+  }
+}
+
+/** Resolve a supertype's simple name to the file that declares it, or undefined. */
+function resolveSuperType(
+  name: string,
+  fact: JavaFileFacts,
+  index: JavaIndex,
+): string | undefined {
+  for (const entry of fact.imports) {
+    if (entry.static || entry.wildcard || simpleName(entry.name) !== name) {
+      continue;
+    }
+    const target = index.qualifiedTypes.get(entry.name);
+    if (target) {
+      return target;
+    }
+  }
+  for (const entry of fact.imports) {
+    if (entry.static || !entry.wildcard) {
+      continue;
+    }
+    const target = index.qualifiedTypes.get(`${entry.name}.${name}`);
+    if (target) {
+      return target;
+    }
+  }
+  if (fact.package) {
+    const samePackage = index.simpleTypesByPackage.get(fact.package)?.get(name);
+    if (samePackage && samePackage.size === 1) {
+      return [...samePackage][0];
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -548,12 +704,14 @@ export async function extractJavaSymbols(
       if (TYPE_DECLARATIONS.has(node.type)) {
         const name = node.childForFieldName('name')?.text;
         if (name) {
+          const superTypes = collectSuperTypes(node, JAVA_SUPER_TYPES);
           symbols.push({
             name,
             kind: 'type',
             visibility: javaVisibility(node),
             owner,
             line: node.startPosition.row + 1,
+            ...(superTypes.length > 0 ? { superTypes } : {}),
           });
           owner = owner ? `${owner}.${name}` : name;
         }

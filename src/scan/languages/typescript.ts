@@ -11,10 +11,12 @@ import {
   type CodeSymbol,
   type MemberAccess,
   type ReExport,
+  type SuperTypeRules,
   type SymbolExtraction,
   collectDeclaredIdentifiers,
   collectFunctionCalls,
   collectMemberAccesses,
+  collectSuperTypes,
   sortSymbols,
 } from './symbols.ts';
 
@@ -174,12 +176,14 @@ export async function extractTypeScriptSymbols(
       if (TYPE_DECLARATIONS.has(node.type) || node.type === 'class') {
         const name = node.childForFieldName('name')?.text;
         if (name) {
+          const superTypes = collectSuperTypes(node, TYPESCRIPT_SUPER_TYPES);
           pushSymbol({
             name,
             kind: 'type',
             visibility: visibilityOf(node),
             owner,
             line: node.startPosition.row + 1,
+            ...(superTypes.length > 0 ? { superTypes } : {}),
           });
         }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
@@ -424,6 +428,46 @@ function collectReExports(node: Node, reExports: ReExport[]): void {
   const alias = namespace?.namedChildren.find((child) => child.type === 'identifier')?.text;
   reExports.push({ name: alias ?? '*', from, typeOnly: statementTypeOnly, line });
 }
+
+/**
+ * The supertype clauses of a TypeScript class or interface.
+ *
+ * A class carries a `class_heritage` child holding `extends_clause` (field `value`) and
+ * `implements_clause` (a list of types); an interface carries an `extends_type_clause` with
+ * `type` children. Enums and type aliases declare no supertypes and contribute none.
+ */
+export const TYPESCRIPT_SUPER_TYPES: SuperTypeRules = {
+  clauses: (declaration) => {
+    const out: Array<{ node: Node; relation: 'extends' | 'implements' }> = [];
+    if (declaration.type === 'interface_declaration') {
+      for (const clause of declaration.namedChildren) {
+        if (clause.type === 'extends_type_clause') {
+          for (const type of clause.namedChildren) {
+            out.push({ node: type, relation: 'extends' });
+          }
+        }
+      }
+      return out;
+    }
+    const heritage = declaration.namedChildren.find((child) => child.type === 'class_heritage');
+    if (!heritage) {
+      return out;
+    }
+    for (const clause of heritage.namedChildren) {
+      if (clause.type === 'extends_clause') {
+        const value = clause.childForFieldName('value');
+        if (value) {
+          out.push({ node: value, relation: 'extends' });
+        }
+      } else if (clause.type === 'implements_clause') {
+        for (const type of clause.namedChildren) {
+          out.push({ node: type, relation: 'implements' });
+        }
+      }
+    }
+    return out;
+  },
+};
 
 const TYPESCRIPT_FUNCTION_RULES: FunctionRules = {
   controlFlowTypes: new Set([

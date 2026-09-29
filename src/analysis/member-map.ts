@@ -1,4 +1,4 @@
-import type { CodeSymbol, MemberAccess, ReExport } from '../scan/languages/symbols.ts';
+import type { CodeSymbol, MemberAccess, ReExport, SuperType } from '../scan/languages/symbols.ts';
 
 /**
  * The Member map for one file: declared members grouped by type, the names the file
@@ -40,6 +40,8 @@ export interface MemberMapType {
   name: string;
   visibility: string;
   line: number;
+  /** The supertypes the type extends or implements, as declared; empty when it names none. */
+  superTypes?: SuperType[];
   fields: MemberMapField[];
   methods: MemberMapMethod[];
 }
@@ -155,6 +157,7 @@ function buildType(
     name: owner,
     visibility: declared?.visibility ?? 'not recorded',
     line: declared?.line ?? (symbols.find((symbol) => symbol.owner === owner)?.line ?? 1),
+    superTypes: declared?.superTypes ?? [],
     fields,
     methods: methods.map((method) => {
       const forMethod = ownAccesses.filter((access) => access.method === method.name);

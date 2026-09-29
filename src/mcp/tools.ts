@@ -267,10 +267,11 @@ const EDGE_KIND_RANK: Record<string, number> = {
   package: 4,
   namespace: 5,
   call: 6,
-  table: 7,
-  program: 8,
-  copybook: 9,
-  propath: 10,
+  inheritance: 7,
+  table: 8,
+  program: 9,
+  copybook: 10,
+  propath: 11,
 };
 
 function compareEdges(a: GraphEdge, b: GraphEdge): number {

@@ -182,6 +182,9 @@ export function stylesheet() {
     // A call is a runtime relationship, distinct from a module-tree import; dashed so the
     // reading survives even if both kinds are ever drawn together.
     { selector: 'edge[kind = "call"]', style: { 'line-style': 'dashed' } },
+    // An inheritance edge is a type relation (`extends`/`implements`), not a module import:
+    // a short dash in the accent hue reads it apart from a plain import and a call.
+    { selector: 'edge[kind = "inheritance"]', style: { 'line-style': 'dashed', 'line-dash-pattern': [3, 3], 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
     {
       selector: 'edge',

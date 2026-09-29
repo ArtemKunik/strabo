@@ -37,6 +37,41 @@ export interface CodeSymbol {
   entry?: import('./entry.ts').FunctionEntryMark;
   /** Body measurements for a function or method; absent for data members and signatures. */
   metrics?: FunctionMetrics;
+  /**
+   * The supertypes a type declaration names (`extends Base implements Drawable`), in
+   * declaration order. Absent for a declaration that names none and for non-type members.
+   */
+  superTypes?: SuperType[];
+}
+
+/** How a declared type relates to a supertype it names. */
+export type SuperTypeRelation = 'extends' | 'implements';
+
+/**
+ * A supertype a type declaration names, language-neutral.
+ *
+ * The name is the simple name as authored, stripped of generic arguments and namespace
+ * qualifiers, so it matches the import or same-package binding that resolves it to a file.
+ */
+export interface SuperType {
+  name: string;
+  relation: SuperTypeRelation;
+  line: number;
+}
+
+/**
+ * Language-specific node rules used to read the supertypes a type declaration names.
+ *
+ * Mirrors {@link AccessRules} and {@link CallRules}: the language maps its own grammar
+ * fields and clauses onto a list of supertype entries, and the shared walker cleans the
+ * names and drops duplicates so no extractor repeats that logic.
+ */
+export interface SuperTypeRules {
+  /**
+   * The supertype clauses of a type-declaration node, each with the relation it expresses.
+   * A language that declares no supertypes (SQL, a module function) returns an empty list.
+   */
+  clauses: (declaration: Node) => Array<{ node: Node; relation: SuperTypeRelation }>;
 }
 
 /**
@@ -251,6 +286,58 @@ export function collectMemberAccesses(
   });
 
   return accesses;
+}
+
+/**
+ * Collect the supertypes a type declaration names, cleaned and de-duplicated.
+ *
+ * The relation and a name as authored are kept; generic arguments and qualifiers are
+ * dropped so `Map<T, string>` reads as `Map` and `ns.Base` as `Base`. A duplicate
+ * `extends`/`implements` entry is recorded once. Order is declaration order.
+ */
+export function collectSuperTypes(declaration: Node, rules: SuperTypeRules): SuperType[] {
+  const out: SuperType[] = [];
+  const seen = new Set<string>();
+  for (const { node, relation } of rules.clauses(declaration)) {
+    const name = superTypeName(node);
+    if (!name || seen.has(`${relation}\u0000${name}`)) {
+      continue;
+    }
+    seen.add(`${relation}\u0000${name}`);
+    out.push({ name, relation, line: node.startPosition.row + 1 });
+  }
+  return out;
+}
+
+/** The simple name a supertype node names, without generic arguments or qualifiers. */
+function superTypeName(node: Node): string | null {
+  switch (node.type) {
+    case 'identifier':
+    case 'type_identifier':
+    case 'property_identifier':
+      return node.text;
+    case 'generic_type': {
+      const name = node.childForFieldName('name') ?? node.namedChildren[0];
+      return name ? superTypeName(name) : null;
+    }
+    case 'nested_type_identifier':
+    case 'scoped_type_identifier':
+    case 'member_expression': {
+      const name =
+        node.childForFieldName('name') ??
+        node.childForFieldName('property') ??
+        node.namedChildren[node.namedChildren.length - 1];
+      return name ? superTypeName(name) : null;
+    }
+    default: {
+      const name = node.childForFieldName('name');
+      if (name) {
+        return superTypeName(name);
+      }
+      const first = node.namedChildren.find((child) => /identifier/.test(child.type));
+      return first ? first.text : null;
+    }
+  }
 }
 
 /**

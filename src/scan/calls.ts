@@ -4,8 +4,8 @@ import type { Diagnostic, GraphEdge } from '../types.ts';
 import { loadAliasTables, resolveAliased, type AliasTables } from '../resolve/aliases.ts';
 import { resolveRelative, type ResolvedReference } from '../resolve/index.ts';
 import { withParser } from './languages/parser-runtime.ts';
-import { grammarFor } from './languages/typescript.ts';
-import { walkNodes } from './languages/symbols.ts';
+import { grammarFor, TYPESCRIPT_SUPER_TYPES } from './languages/typescript.ts';
+import { collectSuperTypes, walkNodes, type SuperType } from './languages/symbols.ts';
 import { serializeParserWork } from './scan-polyglot.ts';
 
 export interface CallGraphResult {
@@ -78,7 +78,10 @@ async function extractAndResolve(
     return { edges: [], diagnostics: [] };
   }
 
-  return { edges: resolveCalls(facts, fileSet, tables), diagnostics: [] };
+  return {
+    edges: [...resolveCalls(facts, fileSet, tables), ...resolveInheritance(facts, fileSet, tables)],
+    diagnostics: [],
+  };
 }
 
 interface ImportBinding {
@@ -101,48 +104,76 @@ interface CallSite {
 
 interface FileFacts {
   imports: Map<string, ImportBinding>;
+  /** Type-only imports (`import type`, `import { type X }`), for inheritance resolution. */
+  typeImports: Map<string, ImportBinding>;
   /** Exported names that name a function and can therefore be a call target. */
   callableExports: Set<string>;
+  /** Exported names that name a class, interface, enum, or type alias. */
+  typeExports: Set<string>;
+  /** True when the file has a default-exported type (`export default class …`). */
+  defaultType: boolean;
+  /** Supertypes the file's classes and interfaces name, de-duplicated across the file. */
+  supertypes: SuperType[];
   calls: CallSite[];
 }
 
 function collectFacts(root: Node): FileFacts {
   const imports = new Map<string, ImportBinding>();
+  const typeImports = new Map<string, ImportBinding>();
   const callableExports = new Set<string>();
+  const typeExports = new Set<string>();
+  const supertypes: SuperType[] = [];
   const calls: CallSite[] = [];
+  let defaultType = false;
 
   for (const statement of root.namedChildren) {
     if (statement.type === 'import_statement') {
-      collectImports(statement, imports);
+      collectImports(statement, imports, typeImports);
     } else if (statement.type === 'export_statement') {
       collectExports(statement, callableExports);
+      const markedDefault = collectTypeExports(statement, typeExports);
+      defaultType ||= markedDefault;
     }
   }
 
   walkNodes(root, (node) => {
-    if (node.type !== 'call_expression') {
+    if (node.type === 'call_expression') {
+      const site = callSiteOf(node);
+      if (site) {
+        calls.push(site);
+      }
       return;
     }
-    const site = callSiteOf(node);
-    if (site) {
-      calls.push(site);
+    if (TYPESCRIPT_TYPE_DECLARATIONS.has(node.type) || node.type === 'class') {
+      supertypes.push(...collectSuperTypes(node, TYPESCRIPT_SUPER_TYPES));
     }
   });
 
-  return { imports, callableExports, calls };
+  return { imports, typeImports, callableExports, typeExports, defaultType, supertypes, calls };
 }
+
+/** Type-declaration node types that can carry a supertype clause. */
+const TYPESCRIPT_TYPE_DECLARATIONS = new Set([
+  'class_declaration',
+  'abstract_class_declaration',
+  'interface_declaration',
+]);
 
 /**
  * Record the local bindings an import statement introduces.
  *
- * `import type` and `import { type X }` are erased at runtime and cannot be called, so they
- * are skipped. `import { a as b }` binds `b` to the exported name `a`; a default import binds
- * the `default` export; `import * as ns` binds a namespace.
+ * `import type` and `import { type X }` are erased at runtime, so a call to them cannot
+ * happen and they stay out of `imports`; they are recorded in `typeImports` instead, because
+ * a type-only binding still proves an `extends`/`implements` target. `import { a as b }` binds
+ * `b` to the exported name `a`; a default import binds `default`; `import * as ns` binds a
+ * namespace.
  */
-function collectImports(statement: Node, imports: Map<string, ImportBinding>): void {
-  if (hasToken(statement, 'type')) {
-    return;
-  }
+function collectImports(
+  statement: Node,
+  imports: Map<string, ImportBinding>,
+  typeImports: Map<string, ImportBinding>,
+): void {
+  const statementTypeOnly = hasToken(statement, 'type');
   const source = stringLiteral(statement.childForFieldName('source'));
   if (source === null) {
     return;
@@ -151,15 +182,19 @@ function collectImports(statement: Node, imports: Map<string, ImportBinding>): v
   if (!clause) {
     return;
   }
+  const bind = (local: string, binding: ImportBinding, specifierTypeOnly = false): void => {
+    const target = statementTypeOnly || specifierTypeOnly ? typeImports : imports;
+    target.set(local, binding);
+  };
   for (const child of clause.namedChildren) {
     if (child.type === 'identifier') {
-      imports.set(child.text, { source, imported: 'default', kind: 'default' });
+      bind(child.text, { source, imported: 'default', kind: 'default' });
       continue;
     }
     if (child.type === 'namespace_import') {
       const name = child.namedChildren.find((node) => node.type === 'identifier');
       if (name) {
-        imports.set(name.text, { source, imported: '*', kind: 'namespace' });
+        bind(name.text, { source, imported: '*', kind: 'namespace' });
       }
       continue;
     }
@@ -167,13 +202,13 @@ function collectImports(statement: Node, imports: Map<string, ImportBinding>): v
       continue;
     }
     for (const specifier of child.namedChildren) {
-      if (specifier.type !== 'import_specifier' || hasToken(specifier, 'type')) {
+      if (specifier.type !== 'import_specifier') {
         continue;
       }
       const imported = specifier.childForFieldName('name')?.text;
       const local = specifier.childForFieldName('alias')?.text ?? imported;
       if (imported && local) {
-        imports.set(local, { source, imported, kind: 'named' });
+        bind(local, { source, imported, kind: 'named' }, hasToken(specifier, 'type'));
       }
     }
   }
@@ -249,6 +284,67 @@ function declaredFunctionNames(declaration: Node): string[] {
   return names;
 }
 
+/**
+ * Record the names this file exports that name a type (class, interface, enum, or alias).
+ *
+ * Only a local declaration or an `export { … }` clause counts: a re-export (`export … from`)
+ * forwards a name declared elsewhere, so the inheritance pass must resolve through the
+ * forwarder's own import rather than claim the original file here. Returns true when the
+ * statement is a default export of a type, so a default import can match it.
+ */
+function collectTypeExports(statement: Node, typeExports: Set<string>): boolean {
+  if (statement.childForFieldName('source')) {
+    return false;
+  }
+  if (hasToken(statement, 'default')) {
+    const declaration = statement.childForFieldName('declaration');
+    const name = declaration?.childForFieldName('name')?.text;
+    if (name) {
+      typeExports.add(name);
+    }
+    return true;
+  }
+  const declaration = statement.childForFieldName('declaration');
+  if (declaration) {
+    for (const name of declaredTypeNames(declaration)) {
+      typeExports.add(name);
+    }
+    return false;
+  }
+  const clause = statement.namedChildren.find((child) => child.type === 'export_clause');
+  if (!clause) {
+    return false;
+  }
+  for (const specifier of clause.namedChildren) {
+    if (specifier.type !== 'export_specifier') {
+      continue;
+    }
+    const exported =
+      specifier.childForFieldName('alias')?.text ?? specifier.childForFieldName('name')?.text;
+    if (exported) {
+      typeExports.add(exported);
+    }
+  }
+  return false;
+}
+
+const TYPE_DECLARATION_NODES = new Set([
+  'class_declaration',
+  'abstract_class_declaration',
+  'interface_declaration',
+  'enum_declaration',
+  'type_alias_declaration',
+]);
+
+/** Names a type declaration introduces, which an `export` of it makes importable. */
+function declaredTypeNames(declaration: Node): string[] {
+  if (!TYPE_DECLARATION_NODES.has(declaration.type)) {
+    return [];
+  }
+  const name = declaration.childForFieldName('name')?.text;
+  return name ? [name] : [];
+}
+
 /** The callee of a call the syntax proves: a bare name or `identifier.property`. */
 function callSiteOf(node: Node): CallSite | null {
   const fn = node.childForFieldName('function');
@@ -318,6 +414,66 @@ function resolveCalls(
         evidence: {
           line: call.line,
           specifier: call.specifier,
+          resolution: resolved.evidence.resolution,
+        },
+      });
+    }
+  }
+
+  return edges;
+}
+
+/**
+ * Record cross-file `extends`/`implements` edges for JS/TS.
+ *
+ * A class or interface names a supertype by simple name; the edge is drawn only when that
+ * name is an import (value or type-only) whose specifier resolves inside the repository and
+ * whose target file actually exports a type of that name. A default import matches a
+ * default-exported type. A supertype declared in the same file, a qualified name, and a name
+ * that does not resolve are left unclaimed rather than guessed.
+ */
+function resolveInheritance(
+  facts: Map<string, FileFacts>,
+  fileSet: ReadonlySet<string>,
+  tables: AliasTables | null,
+): GraphEdge[] {
+  const edges: GraphEdge[] = [];
+  const seen = new Set<string>();
+
+  for (const [file, fact] of facts) {
+    for (const supertype of fact.supertypes) {
+      const binding = fact.imports.get(supertype.name) ?? fact.typeImports.get(supertype.name);
+      if (!binding) {
+        continue;
+      }
+      const resolved = resolveSource(binding.source, supertype.line, file, fileSet, tables);
+      if (!resolved || resolved.target === file) {
+        continue;
+      }
+      const target = facts.get(resolved.target);
+      if (!target) {
+        continue;
+      }
+      const exportedName = binding.kind === 'default' ? 'default' : binding.imported;
+      const declared =
+        exportedName === 'default' ? target.defaultType : target.typeExports.has(exportedName);
+      if (!declared) {
+        continue;
+      }
+      const key = `${file}\u0000${resolved.target}\u0000${supertype.relation}\u0000${supertype.name}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      edges.push({
+        source: file,
+        target: resolved.target,
+        kind: 'inheritance',
+        role: 'use',
+        relationship: 'inheritance',
+        evidence: {
+          line: supertype.line,
+          specifier: `${supertype.relation} ${supertype.name}`,
           resolution: resolved.evidence.resolution,
         },
       });
