@@ -4267,6 +4267,118 @@ table.change-metrics td:first-child .link {
   font-size: 11px;
 }
 
+/* API contract view: the request/response shape an OpenAPI operation declares. */
+.api-contracts-section {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.api-contract {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.api-contract-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.api-contract-path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-1);
+}
+
+.api-contract-source {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.api-contract-schema {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.api-contract-schema-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--ink-2);
+}
+
+.api-contract-fields {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.api-contract-fields li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.api-contract-field-name {
+  color: var(--ink-1);
+}
+
+.api-contract-field-type {
+  color: var(--ink-3);
+}
+
+.api-contract-field-optional {
+  font-size: 10px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.spine-hop-contract {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.spine-lineage {
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.spine-lineage-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.spine-lineage-item.matched .spine-lineage-table {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------- Bottom meta */
 .bottom-meta {
   /* The status line and index badge live here; on a narrow row the status truncates. */
