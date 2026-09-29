@@ -463,10 +463,12 @@ test('buildGraphQuery sends structure=1 in structure mode (Y3)', () => {
 
 test('the reading legend names bands and shelves in structure mode (Y3)', () => {
   assert.deepEqual(readingLegend({ structure: true }), [
-    'band = tier',
+    'card = tier',
     'size = files',
-    'edge = recorded import',
-    'wrong-way = red or dashed',
+    'edge = recorded imports',
+    'dashed red = upward',
+    'arc = skip-layer',
+    'faded = types only',
     'shelf = support tiers',
   ]);
 });

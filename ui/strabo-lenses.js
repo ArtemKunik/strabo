@@ -223,7 +223,10 @@ export function applyTierDirections(cy, directions) {
       node.removeClass('tier-upward');
       node.removeClass('tier-skip');
     }
+    // A Structure edge carries its own wrong-way class from the model (its `tierKind`); only
+    // the file-level marks this lens put on are cleared, or a re-apply would strip them.
     for (const edge of cy.edges()) {
+      if (edge.data('tierKind')) continue;
       edge.removeClass('edge-tier-upward');
       edge.removeClass('edge-tier-skip');
     }

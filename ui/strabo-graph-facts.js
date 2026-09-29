@@ -245,6 +245,8 @@ export function edgeEvidenceFor(model, edgeId) {
     violation: edge.violation === true,
     ruleId: edge.ruleId ?? null,
     crossUnit: typeof edge.crossUnit === 'number' ? edge.crossUnit : null,
+    typeOnlyCount: typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : null,
+    tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
     provenance: graphProvenanceFromModel(model),
   };
 }

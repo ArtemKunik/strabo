@@ -324,9 +324,24 @@ export function createSelectionController(app) {
         .catch(() => {});
     }
     if (evidence) {
-      elements.hover.textContent = `${evidence.source} → ${evidence.target} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
+      elements.hover.textContent = edgeSummary(evidence);
     }
     app.windows.refreshDock();
+  }
+
+  /**
+   * The one-line toolbar readout for a selected edge. A Structure edge is a roll-up of many
+   * imports, so it states the count and direction; a file edge names its line and specifier.
+   */
+  function edgeSummary(evidence) {
+    const route = `${evidence.source} → ${evidence.target}`;
+    if (evidence.tierImports) {
+      const kind = evidence.tierKind && evidence.tierKind !== 'down' ? `${evidence.tierKind} ` : '';
+      const count = evidence.weight ?? evidence.tierImports.length;
+      const types = evidence.typeOnlyCount ? ` (${evidence.typeOnlyCount} type-only)` : '';
+      return `${route} · ${count} ${kind}${count === 1 ? 'import' : 'imports'}${types}`;
+    }
+    return `${route} · ${evidence.kind} · L${evidence.line ?? '?'} ${evidence.specifier ?? ''}`;
   }
 
   function onSelect(id) {

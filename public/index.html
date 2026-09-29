@@ -109,6 +109,15 @@
                 <option value="horizontal">Left to right</option>
               </select>
             </label>
+            <label id="field-structure-since" class="view-field control-structure-since" hidden>
+              <span class="view-field-label">Compare with</span>
+              <select id="structure-since">
+                <option value="" selected>Nothing</option>
+                <option value="HEAD">Last commit (uncommitted work)</option>
+                <option value="HEAD~5">5 commits ago</option>
+                <option value="HEAD~20">20 commits ago</option>
+              </select>
+            </label>
             <label class="view-field control-tier">
               <span class="view-field-label">Color by tier</span>
               <select id="tier">

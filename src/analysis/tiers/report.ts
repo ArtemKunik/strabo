@@ -20,6 +20,7 @@ import {
   type TierEndpointSite,
   type TierFlow,
   type TierFlowEdge,
+  type TierFlowImport,
   type TierGrid,
   type TierGridCell,
   type TierGridEdge,
@@ -35,6 +36,9 @@ import {
 
 /** Bound on files read for classification, so a huge repository cannot stall the request. */
 export const MAX_TIER_FILES = 2000;
+
+/** Imports kept per tier-flow edge as evidence; the weight still counts every one. */
+export const TIER_FLOW_SAMPLE_LIMIT = 50;
 
 function emptyTierCounts(): Record<Tier, number> {
   return {
@@ -61,6 +65,7 @@ export function buildTierReport(
       target: string;
       kind?: string;
       evidence?: { line: number; specifier: string };
+      typeOnly?: boolean;
     }>;
   },
   measured: MeasuredCoverageSummary | null = null,
@@ -245,6 +250,8 @@ export function buildTierReport(
       kind: TierFlowEdge['kind'];
       weight: number;
       crossUnit: number;
+      typeOnly: number;
+      imports: TierFlowImport[];
       units: Set<string>;
     }
   >();
@@ -289,9 +296,23 @@ export function buildTierReport(
       kind,
       weight: 0,
       crossUnit: 0,
+      typeOnly: 0,
+      imports: [] as TierFlowImport[],
       units: new Set<string>(),
     };
     entry.weight += 1;
+    if (edge.typeOnly === true) {
+      entry.typeOnly += 1;
+    }
+    if (entry.imports.length < TIER_FLOW_SAMPLE_LIMIT) {
+      entry.imports.push({
+        source: edge.source,
+        target: edge.target,
+        line: edge.evidence?.line ?? 0,
+        specifier: edge.evidence?.specifier ?? '',
+        ...(edge.typeOnly === true ? { typeOnly: true } : {}),
+      });
+    }
     entry.units.add(unit);
     if (unit !== targetUnit) {
       entry.crossUnit += 1;
@@ -308,6 +329,10 @@ export function buildTierReport(
         kind: entry.kind,
         weight: entry.weight,
         crossUnit: entry.crossUnit,
+        typeOnly: entry.typeOnly,
+        imports: entry.imports.sort(
+          (a, b) => a.source.localeCompare(b.source) || a.line - b.line || a.target.localeCompare(b.target),
+        ),
         units: [...entry.units].sort(),
       }))
       .sort(

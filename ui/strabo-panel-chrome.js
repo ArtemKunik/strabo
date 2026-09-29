@@ -94,7 +94,22 @@ const LEGEND_SWATCHES = {
   'edge = recorded import': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
   'wrong-way = red or dashed': 'linear-gradient(135deg,var(--graph-edge),var(--accent))',
   'shelf = support tiers': 'linear-gradient(135deg,var(--wash),var(--node-fill))',
+  'card = tier': 'linear-gradient(135deg,var(--node-fill),var(--accent))',
+  'edge = recorded imports': 'linear-gradient(0deg,transparent 40%,var(--graph-edge) 40% 60%,transparent 60%)',
+  'dashed red = upward':
+    'repeating-linear-gradient(90deg,var(--graph-cycle) 0 4px,transparent 4px 7px) center / 100% 3px no-repeat',
+  'arc = skip-layer': 'radial-gradient(circle at 50% 110%,transparent 55%,var(--graph-affected) 56% 68%,transparent 69%)',
+  'faded = types only': 'linear-gradient(0deg,transparent 40%,var(--graph-cycle) 40% 60%,transparent 60%)',
 };
+
+/** A legend row's swatch; a row whose text carries a value (a revision) matches by prefix. */
+function legendSwatch(text) {
+  if (LEGEND_SWATCHES[text]) return LEGEND_SWATCHES[text];
+  if (text.startsWith('dotted = gone since')) {
+    return 'repeating-linear-gradient(90deg,var(--graph-edge) 0 2px,transparent 2px 5px) center / 100% 2px no-repeat';
+  }
+  return 'var(--accent)';
+}
 
 
 export function renderLegend(container, model, options = {}) {
@@ -107,7 +122,8 @@ export function renderLegend(container, model, options = {}) {
     item.className = 'legend-item';
     const swatch = document.createElement('span');
     swatch.className = 'legend-swatch';
-    swatch.style.background = LEGEND_SWATCHES[text] ?? 'var(--accent)';
+    swatch.style.background = legendSwatch(text);
+    if (text === 'faded = types only') swatch.style.opacity = '0.45';
     if (text.startsWith('diamond')) {
       swatch.style.transform = 'rotate(45deg)';
       swatch.style.borderRadius = '2px';
@@ -118,7 +134,9 @@ export function renderLegend(container, model, options = {}) {
   }
   container.append(guide);
 
-  const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
+  // A Structure view's shapes say nothing the rows above do not (every card is a tier), so
+  // the per-kind shape rows are left to the file and System maps.
+  const kinds = model.structure ? [] : [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement('span');
     item.className = 'legend-item';

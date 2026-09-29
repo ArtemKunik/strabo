@@ -6,6 +6,7 @@ import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
+import { assignDeclaredTier } from '../../analysis/tiers/declared.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
 import { computeOwnership, getFileAuthorHistory } from '../../analysis/ownership.ts';
@@ -17,7 +18,7 @@ import { parseDeniedLicenses } from '../../risk/licenses.ts';
 import { getCachedGraph } from '../../cache/graph-cache.ts';
 import { analyzeRepository } from '../../workspace/analyze.ts';
 import { readWorkspaceConfig } from '../../workspace/config.ts';
-import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
+import { isSameOriginRequest, parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 import { graphProvenance, type AnalysisContext } from './analysis-context.ts';
 
 /** The repository overview, structure, and history endpoints. */
@@ -205,6 +206,31 @@ export function createStructureRouter(context: AnalysisContext): Router {
       // the labelled reach fallback; the report is read once here, never inside the analysis.
       const measured = await measuredCoverage(repository, cached.report.graph);
       response.json(buildTierReport(repository.root, repository.name, cached.report.graph, measured));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * Declare a file or glob as a tier in `strabo.groups.yml` (body `{ tier, glob }`), the
+   * one-click fix for an unclassified file. It writes into the repository, so it is accepted
+   * only from the Strabo page; the next tier report reads the new declaration.
+   */
+  router.post('/analysis/tiers/assign', (request, response) => {
+    try {
+      if (!isSameOriginRequest(request)) {
+        response.status(403).json({ error: 'tier assignments are accepted only from the Strabo page.' });
+        return;
+      }
+      const repository = resolve(request);
+      const tier = typeof request.body?.tier === 'string' ? request.body.tier : '';
+      const glob = typeof request.body?.glob === 'string' ? request.body.glob : '';
+      const result = assignDeclaredTier(repository.root, tier, glob);
+      if (!result.ok) {
+        response.status(400).json({ error: result.error });
+        return;
+      }
+      response.json(result);
     } catch (error) {
       sendError(response, error);
     }

@@ -57,6 +57,12 @@ export interface GraphEdge {
    * backward compatibility; this names what the edge actually is. Absent means `import`.
    */
   relationship?: EdgeRelationship;
+  /**
+   * True for a TypeScript import or re-export that brings in types only (`import type`, or
+   * every named binding marked `type`). It is erased at compile time, so it couples the two
+   * files' shapes but not their runtime. Absent means a value import, or not recorded.
+   */
+  typeOnly?: boolean;
 }
 
 /** A fact Strabo could not turn into an edge. Diagnostics are evidence, not errors. */

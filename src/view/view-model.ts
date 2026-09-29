@@ -624,6 +624,65 @@ const STRUCTURE_LABELS: Record<string, string> = {
 
 export interface StructureViewOptions {
   direction?: 'vertical' | 'horizontal';
+  /** A tier report at an earlier revision, to read card and edge deltas against. */
+  baseline?:
+    | { available: true; ref: string; revision: string; report: TierReport }
+    | { available: false; ref: string; detail: string };
+}
+
+/** The tier-flow edge key a baseline comparison matches on. */
+function flowKey(edge: { source: string; target: string; kind?: string }): string {
+  return `${edge.source}\u0000${edge.target}\u0000${edge.kind ?? ''}`;
+}
+
+/**
+ * Read the stack against a baseline: each card's file delta, each edge's import delta, and
+ * the edges that existed then and are gone now (drawn as faint ghosts so a fix is visible).
+ * Only recorded facts on both sides are compared; a missing side is zero, never guessed.
+ */
+function applyStructureBaseline(
+  nodes: ViewNode[],
+  edges: ViewEdge[],
+  report: TierReport,
+  baseline: TierReport,
+): { upwardDelta: number; skipDelta: number } {
+  const baseFiles = new Map<string, number>();
+  for (const entry of [...baseline.matrix.perTier, ...baseline.shelf]) {
+    baseFiles.set(entry.tier, entry.files);
+  }
+  for (const node of nodes) {
+    if (node.ghost) continue;
+    node.filesDelta = (node.files ?? 0) - (baseFiles.get(node.id) ?? 0);
+  }
+  const baseEdges = new Map(baseline.tierFlow.edges.map((edge) => [flowKey(edge), edge]));
+  const present = new Set(nodes.map((node) => node.id));
+  for (const edge of edges) {
+    if (edge.ghost) continue;
+    const key = flowKey({ source: edge.source, target: edge.target, kind: edge.tierKind });
+    edge.weightDelta = (edge.weight ?? 0) - (baseEdges.get(key)?.weight ?? 0);
+    baseEdges.delete(key);
+  }
+  for (const gone of baseEdges.values()) {
+    if (!present.has(gone.source) || !present.has(gone.target)) continue;
+    edges.push({
+      source: gone.source,
+      target: gone.target,
+      kind: 'import',
+      evidence: { line: 0, specifier: `${gone.weight} import(s) at the baseline, none now`, resolution: 'exact' },
+      semanticSource: gone.source,
+      semanticTarget: gone.target,
+      weight: 0,
+      tierKind: gone.kind,
+      baselineOnly: true,
+      weightDelta: -gone.weight,
+    });
+  }
+  const wrongWay = (flow: TierReport['tierFlow'], kind: 'upward' | 'skip-layer'): number =>
+    flow.edges.filter((edge) => edge.kind === kind).reduce((sum, edge) => sum + edge.weight, 0);
+  return {
+    upwardDelta: wrongWay(report.tierFlow, 'upward') - wrongWay(baseline.tierFlow, 'upward'),
+    skipDelta: wrongWay(report.tierFlow, 'skip-layer') - wrongWay(baseline.tierFlow, 'skip-layer'),
+  };
 }
 
 /**
@@ -749,6 +808,8 @@ export function buildStructureViewModel(
     intended: edge.intended,
     violation: edge.violation,
     ruleId: edge.ruleId,
+    typeOnlyCount: edge.typeOnly ?? 0,
+    tierImports: edge.imports ?? [],
   }));
 
   // Ghost edges: declared intended flows with 0 recorded imports (Y7)
@@ -772,6 +833,15 @@ export function buildStructureViewModel(
     });
   }
 
+  const baseline = options.baseline;
+  let structureBaseline: ViewModel['structureBaseline'];
+  if (baseline?.available) {
+    const deltas = applyStructureBaseline(nodes, edges, report, baseline.report);
+    structureBaseline = { available: true, ref: baseline.ref, revision: baseline.revision, ...deltas };
+  } else if (baseline) {
+    structureBaseline = { available: false, ref: baseline.ref, detail: baseline.detail };
+  }
+
   return {
     repository,
     nodes,
@@ -784,12 +854,43 @@ export function buildStructureViewModel(
     cache,
     structure: true,
     structureDirection: isHorizontal ? 'horizontal' : 'vertical',
+    ...(structureBaseline ? { structureBaseline } : {}),
     structureSummary: structureSummaryOf(report),
     structureSpines: report.spines,
     structureEndpoints: report.endpoints,
     structureIntent: report.intent,
-    directoryLabels: { stack: 'Architecture Stack', shelf: 'Support Tiers' },
+    directoryLabels: { stack: stackHeading(report, structureBaseline), shelf: 'Support Tiers' },
   };
+}
+
+/**
+ * The stack plate's heading with a one-glance verdict: how layered the repository reads, how
+ * many imports run upward, what a comparison changed, and the same-tier share. Same threshold
+ * as the tier panel's named limit. Details run most to least telling, since a narrow plate
+ * sheds them from the end (`fitLabel`).
+ */
+function stackHeading(report: TierReport, baseline?: ViewModel['structureBaseline']): string {
+  const { total, intraRatio, edges } = report.tierFlow;
+  if (total === 0) {
+    return 'Architecture Stack';
+  }
+  const percent = Math.round(intraRatio * 100);
+  const details = [intraRatio >= 0.5 ? 'weakly layered' : 'layered'];
+  const upward = edges.filter((edge) => edge.kind === 'upward').reduce((sum, edge) => sum + edge.weight, 0);
+  if (upward > 0) {
+    details.push(`${upward} upward`);
+  }
+  if (baseline?.available) {
+    const delta = baseline.upwardDelta + baseline.skipDelta;
+    details.push(delta === 0 ? `no wrong-way change since ${baseline.ref}` : `${signed(delta)} wrong-way since ${baseline.ref}`);
+  }
+  details.push(intraRatio >= 0.5 ? `${percent}% same-tier` : `${100 - percent}% cross-tier`);
+  return `Architecture Stack — ${details.join(' · ')}`;
+}
+
+/** `+3` / `−2` / `0`: a delta with its sign always written. */
+function signed(value: number): string {
+  return value > 0 ? `+${value}` : value < 0 ? `−${Math.abs(value)}` : '0';
 }
 
 /**
@@ -806,7 +907,8 @@ export function buildStructureGridViewModel(
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
 ): ViewModel {
-  const CELL = 170;
+  // Wide enough that a cell's in-card label and the edge labels between rows both fit.
+  const CELL = 210;
   const grid = report.grid;
   const unitIndex = new Map(grid.units.map((unit, index) => [unit.id, index]));
   const tierIndex = new Map(grid.tiers.map((tier, index) => [tier, index]));

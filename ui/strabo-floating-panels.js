@@ -108,7 +108,8 @@ export function createFloatingPanels(app) {
         glyph: '◐',
         pinned: 5,
         width: 360,
-        titleFrom: (panel) => (panel.querySelector('h3')?.textContent ?? '').split(' · ')[0].trim(),
+        // The heading's own text only: its dismiss button's `×` is not part of the title.
+        titleFrom: (panel) => (panel.querySelector('h3')?.firstChild?.textContent ?? '').split(' · ')[0].trim(),
         // The panel carries whichever lens is active: an analysis overlay, or the tier lens
         // when "Color by tier" is on with no overlay. It stays disabled only with both off.
         canOpen: () => state.overlay !== 'none' || state.tier !== 'off',

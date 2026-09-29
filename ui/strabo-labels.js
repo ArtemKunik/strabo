@@ -118,8 +118,11 @@ export function applyLabelBudget(cy, force = false) {
   }
   cy.scratch('_straboLabelDetail', detailed);
   cy.scratch('_straboLabelBudgetZoom', zoom);
+  // A grid's axis headers name its rows and columns, so they keep their labels like the cards.
   const isStructureNode = (node) =>
-    node.data('kind') === 'tier' || (node.data('kind') === 'shelf' && Boolean(node.data('tier')));
+    node.data('kind') === 'tier' ||
+    node.data('kind') === 'axis' ||
+    (node.data('kind') === 'shelf' && Boolean(node.data('tier')));
   const wanted = cy
     .nodes()
     // A unit or shelf draws no canvas label and a filtered-out node is not drawn at all:

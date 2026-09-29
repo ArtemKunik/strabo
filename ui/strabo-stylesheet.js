@@ -8,6 +8,7 @@
 
 import { SHAPES, TIER_ORDER } from './strabo-core.js';
 import { graphTheme } from './strabo-theme.js';
+import { tierIconUri } from './strabo-tier-icons.js';
 import { HUB_LABEL_DEVICE_PX, labelFontSize } from './strabo-labels.js';
 
 export function stylesheet() {
@@ -86,6 +87,60 @@ export function stylesheet() {
     { selector: 'node.kind-axis', style: { 'background-opacity': 0, 'border-opacity': 0, 'font-weight': 700, width: 10, height: 10 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
+    // A Structure tier card is a tinted panel, not a solid slab: a faint wash of the tier
+    // hue with its glyph centred, and the name and counts on a plate beneath the card, so a
+    // small card never has text spilling over its edges. A grid axis header is not a card.
+    ...TIER_ORDER.map((tier) => {
+      const color = tier === 'unclassified' ? theme.tierUnclassified : theme.tier[tier];
+      return {
+        selector: `node.structure-node.tier-${tier}[kind != "axis"]`,
+        style: {
+          'background-color': color,
+          'background-opacity': 0.14,
+          'background-image': tierIconUri(tier, color),
+          'background-fit': 'none',
+          'background-clip': 'none',
+          'background-width': '42%',
+          'background-height': '42%',
+          'background-image-opacity': 0.95,
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'text-margin-y': (ele) => 6 / Math.max(0.0001, ele.cy().zoom()),
+          'text-max-width': (ele) => 180 / Math.max(0.0001, ele.cy().zoom()),
+          'text-background-color': theme.nodeFill,
+          'text-background-opacity': 0.85,
+          'text-background-padding': (ele) => 3 / Math.max(0.0001, ele.cy().zoom()),
+          'text-background-shape': 'round-rectangle',
+          'line-height': 1.3,
+          // The label sits on its own plate, so the outline the map's floating labels need only smears it.
+          'text-outline-width': 0,
+        },
+      };
+    }),
+    // Down a vertical stack a band's label sits to its right, leaving the gaps along the
+    // stack to the edge labels.
+    // A grid cell sits in a tight unit × tier lattice with no room beneath it, so its label
+    // stays inside the card over a faint glyph, as a watermark rather than an icon.
+    {
+      selector: 'node.structure-grid-cell',
+      style: {
+        'text-valign': 'center',
+        'text-margin-y': 0,
+        'background-image-opacity': 0.22,
+        'background-width': '64%',
+        'background-height': '64%',
+      },
+    },
+    {
+      selector: 'node.structure-label-side',
+      style: {
+        'text-valign': 'center',
+        'text-halign': 'right',
+        'text-justification': 'left',
+        'text-margin-x': (ele) => 8 / Math.max(0.0001, ele.cy().zoom()),
+        'text-margin-y': 0,
+      },
+    },
     // The large-file lens swaps the size encoding to lines of code and hides files under
     // the threshold. `loc-sized` outranks the base `node` width/height mapping; the mark
     // is a heavier neutral ring (weight, not hue), so it never collides with a status.
@@ -99,13 +154,8 @@ export function stylesheet() {
       style: {
         'border-width': 2,
         'border-style': 'dashed',
-        'border-color': theme.nodeLine,
         'text-opacity': 1,
         'text-wrap': 'wrap',
-        'text-max-width': 110,
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'text-margin-y': 0,
         'font-weight': 600,
         'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
       },
@@ -161,6 +211,9 @@ export function stylesheet() {
     // accent ring. Drifting implementations reuse the serious status double ring and
     // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
     { selector: 'node.ov-contract-def', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    // Selection and the status rings above force a solid fill, which would bury a tier
+    // card's glyph (drawn in the same hue); the card keeps its wash and shows them as rings.
+    { selector: 'node.structure-node', style: { 'background-opacity': 0.14 } },
     { selector: 'node.node-ghost', style: { 'border-style': 'dashed', opacity: 0.6 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
@@ -212,12 +265,12 @@ export function stylesheet() {
       selector: 'edge[label]',
       style: {
         label: 'data(label)',
-        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 9),
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
         'font-weight': 600,
         color: theme.ink,
         'text-background-color': theme.nodeFill,
-        'text-background-opacity': 0.9,
-        'text-background-padding': 3,
+        'text-background-opacity': 1,
+        'text-background-padding': (ele) => 3 / Math.max(0.0001, ele.cy().zoom()),
         'text-background-shape': 'round-rectangle',
         'text-border-color': theme.nodeLine,
         'text-border-width': 1,
@@ -225,14 +278,34 @@ export function stylesheet() {
         'text-rotation': 'autorotate',
       },
     },
+    // A Structure stack edge bows off the spine by its `bend`: the halves of an A⇄B pair
+    // split into two arcs, and a skip-layer edge arcs around the bands it jumps. The stack
+    // holds a dozen edges at most, so the curve costs nothing here.
+    {
+      selector: 'edge.edge-structure-stack',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': (ele) => ele.data('bend') ?? 0,
+        'control-point-weights': 0.5,
+        // Level text reads crisply; text turned along a steep arc blurs at small sizes.
+        'text-rotation': 'none',
+        'text-margin-y': (ele) => (ele.data('labelShift') ?? 0) / Math.max(0.0001, ele.cy().zoom()),
+        // A wider arc passes over the tighter ones' labels; drawing tighter arcs on top keeps
+        // every label whole.
+        'z-index': (ele) => Math.max(1, 9 - Math.round(Math.abs(ele.data('bend') ?? 0) / 80)),
+      },
+    },
     {
       selector: 'edge.edge-tier-upward',
       style: {
         width: 3.25,
+        'line-style': 'dashed',
+        'line-dash-pattern': [8, 5],
         'line-color': theme.cycle,
         'target-arrow-color': theme.cycle,
-        color: theme.cycle,
         'text-border-color': theme.cycle,
+        'text-border-width': 1.5,
+        'text-border-opacity': 1,
         opacity: 1,
       },
     },
@@ -243,13 +316,21 @@ export function stylesheet() {
         'line-style': 'dashed',
         'line-color': theme.affected,
         'target-arrow-color': theme.affected,
-        color: theme.affected,
         'text-border-color': theme.affected,
+        'text-border-width': 1.5,
+        'text-border-opacity': 1,
         opacity: 1,
       },
     },
+    // A wrong-way edge made only of type imports is erased at compile time: it keeps its
+    // hue so it still reads as wrong-way, but fades and thins, so real violations lead.
+    { selector: 'edge.edge-type-only', style: { opacity: 0.45, width: 1.75, 'line-dash-pattern': [3, 5] } },
+    // A comparison: an edge the baseline had and the change removed is a faint dotted trace;
+    // a wrong-way edge that grew gets a heavier, glowing plate, so the regression is found first.
+    { selector: 'edge.edge-baseline-only', style: { width: 1.5, 'line-style': 'dotted', opacity: 0.5, 'target-arrow-shape': 'none' } },
+    { selector: 'edge.edge-wrong-way-grew', style: { width: 4, 'text-border-width': 2.5, 'underlay-color': theme.cycle, 'underlay-opacity': 0.18, 'underlay-padding': 4 } },
     { selector: 'edge.edge-ghost', style: { width: 1.75, 'line-style': 'dashed', opacity: 0.45, 'line-color': theme.edge, 'target-arrow-color': theme.edge } },
-    { selector: 'edge.edge-violation', style: { width: 3, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, opacity: 1 } },
+    { selector: 'edge.edge-violation', style: { width: 3, 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, 'text-border-color': theme.cycle, 'text-border-width': 1.5, 'text-border-opacity': 1, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: 'edge.edge-structure-cross-unit', style: { width: 3, 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent, opacity: 1 } },

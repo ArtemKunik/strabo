@@ -71,6 +71,7 @@ export function scanJsTsEdges(
             evidence: resolved.evidence,
             role,
             relationship,
+            ...(match.typeOnly ? { typeOnly: true } : {}),
           });
           continue;
         }
@@ -84,6 +85,7 @@ export function scanJsTsEdges(
             evidence: claim.resolved.evidence,
             role,
             relationship,
+            ...(match.typeOnly ? { typeOnly: true } : {}),
           });
           continue;
         }
@@ -151,6 +153,29 @@ interface Reference {
   specifier: string;
   line: number;
   kind: GraphEdge['kind'];
+  /** True when the statement brings in types only: it vanishes at compile time. */
+  typeOnly?: boolean;
+}
+
+/**
+ * Whether an `import`/`export … from` statement carries types only: `import type …`, or a
+ * brace list whose every name is marked `type` with no default or namespace binding beside it.
+ */
+export function isTypeOnlyStatement(statement: string): boolean {
+  const head = statement.replace(/^\s+/, '');
+  if (/^(?:import|export)\s+type\b/.test(head)) {
+    return true;
+  }
+  const clause = /^(?:import|export)\s+([\s\S]*?)\bfrom\s*['"]/.exec(head)?.[1]?.trim();
+  if (!clause || !/^\{[\s\S]*\}$/.test(clause)) {
+    return false;
+  }
+  const names = clause
+    .slice(1, -1)
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  return names.length > 0 && names.every((name) => /^type\s/.test(name));
 }
 
 function collectReferences(content: string): Reference[] {
@@ -175,7 +200,8 @@ function collectReferences(content: string): Reference[] {
       if (literal[keywordIndex] === 1) {
         continue;
       }
-      references.push({ specifier, line: lineOf(content, keywordIndex), kind });
+      const typeOnly = (kind === 'import' || kind === 're-export') && isTypeOnlyStatement(match[0]);
+      references.push({ specifier, line: lineOf(content, keywordIndex), kind, ...(typeOnly ? { typeOnly } : {}) });
     }
   };
 

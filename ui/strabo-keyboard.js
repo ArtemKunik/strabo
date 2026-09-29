@@ -4,7 +4,7 @@
  */
 
 import { showToast } from './strabo-delegate.js';
-import { focus } from './strabo-viewport.js';
+import { fit, focus } from './strabo-viewport.js';
 
 export function bindKeyboardShortcuts(app) {
   const { store, state, view, elements } = app;
@@ -108,6 +108,8 @@ export function bindKeyboardShortcuts(app) {
     if (inField || !elements.memberView.hidden || !onGraph) return;
     const key = event.key.toLowerCase();
     if (key === 'f' && app.selected) focus(view.cy, app.selected);
+    // With nothing selected, F (or 0) fits the whole map into the canvas the panels leave free.
+    else if ((key === 'f' || key === '0') && !event.metaKey && !event.ctrlKey) fit(view.cy);
     else if (key === 'i') elements.tbImpact.click();
     else if (key === 'o' && state.mode === 'system' && state.systemUnit) elements.tbOutside.click();
     else if (key === 'u' && state.mode === 'system' && state.systemUnit) app.units.closeUnit();

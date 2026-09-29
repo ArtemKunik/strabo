@@ -17,6 +17,7 @@ import { createIslandLayer } from './strabo-island-layer.js';
 import { applyViewportPerf, createCytoscape } from './strabo-cytoscape.js';
 import { createUnitCardLayer } from './strabo-unit-card-layer.js';
 import { applyGraphDiff } from './strabo-graph-sync.js';
+import { packStructureStack } from './strabo-structure-layout.js';
 import { buildCoChangeElements, buildHiddenCouplingElements } from './strabo-core.js';
 import { createEdgeFocus } from './strabo-edge-focus.js';
 import { createEdgeHighlight } from './strabo-edge-highlight.js';
@@ -105,7 +106,8 @@ export function createView(container) {
     if (!baseModel) {
       return;
     }
-    islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
+    // The Structure stack is re-packed by card size first, so the plates frame what is drawn.
+    islandModel = applyIslandOffsets(packStructureStack(baseModel), offsetsByDirectory);
     // Co-change edges are drawn only when the coupling lens is on, so the default map pays
     // for nothing. They end at nodes already in the model; a stale report for another
     // repository finds no node and contributes no edge.

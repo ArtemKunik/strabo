@@ -114,12 +114,17 @@ export function readingLegend(model, locLens = false) {
     );
   }
   if (model?.structure) {
+    // The stack's edge styles each get a row: a wrong-way kind is told by line, not only hue.
+    const baseline = model.structureBaseline?.available ? model.structureBaseline : null;
     return withStructureLimits(
       [
-        'band = tier',
+        'card = tier',
         'size = files',
-        'edge = recorded import',
-        'wrong-way = red or dashed',
+        'edge = recorded imports',
+        'dashed red = upward',
+        'arc = skip-layer',
+        'faded = types only',
+        ...(baseline ? [`dotted = gone since ${baseline.ref}`] : []),
         'shelf = support tiers',
       ],
       model,
@@ -148,7 +153,8 @@ function withStructureLimits(lines, model) {
 /** The shortcut sheet shown on `?`: gestures, not encodings. */
 export function shortcutSheet() {
   return [
-    { keys: 'F', action: 'Center the selection' },
+    { keys: 'F', action: 'Center the selection, or fit the map when nothing is selected' },
+    { keys: '0', action: 'Fit the map around the open panels' },
     { keys: 'I', action: 'Show change impact' },
     { keys: 'O', action: 'Show the selected file’s links to other units' },
     { keys: 'P', action: 'Trace a path between two nodes' },
@@ -231,12 +237,19 @@ export function graphSummary(model) {
   let summary = `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
   if (model?.structure) {
     const upward = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation).length;
-    const skip = (model?.edges ?? []).filter((e) => e.tierKind === 'skip').length;
+    const skip = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer').length;
     if (upward > 0 || skip > 0) {
       const parts = [];
       if (upward > 0) parts.push(`${upward} upward`);
       if (skip > 0) parts.push(`${skip} skip`);
       summary += ` (${parts.join(', ')})`;
+    }
+    // A comparison that could not be read says so, rather than showing a map with no deltas.
+    const baseline = model.structureBaseline;
+    if (baseline?.available) {
+      summary += ` · compared with ${baseline.ref} (${String(baseline.revision).slice(0, 7)})`;
+    } else if (baseline) {
+      summary += ` · cannot compare with ${baseline.ref}: ${baseline.detail}`;
     }
   }
   return summary;

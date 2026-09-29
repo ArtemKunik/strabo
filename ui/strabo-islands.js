@@ -12,10 +12,48 @@
  * projects them with the viewport's own pan and zoom.
  */
 
+import { structureLabelLines } from './strabo-graph-elements.js';
+import { isStructureStack, sideLabelled, structureEdgeBends, structureStackRank } from './strabo-structure-layout.js';
 import { nodeDiameter } from './strabo-graph-sizing.js';
 
 /** Gap between the outermost node edge and the plate, in model units. */
 export const ISLAND_PADDING = 26;
+
+/** Room around a bowed edge's apex for its label plate: level text, so wide and short. */
+const ARC_LABEL_PAD_X = 75;
+const ARC_LABEL_PAD_Y = 16;
+/** Half a Structure card label's widest run, and a side label's gap plus run, in model units. */
+const STRUCTURE_LABEL_HALF_WIDTH = 90;
+const STRUCTURE_SIDE_LABEL_WIDTH = 248;
+
+/**
+ * Grow the stack plate to hold its bowed edges: a skip-layer arc leaves the row of cards,
+ * and without this it would run across the plate's frame and title. A quadratic arc's apex
+ * sits half its control distance off the chord, on the right of travel for a positive one.
+ */
+function growForStackArcs(model, positions, labelLines, group) {
+  if (!group) return;
+  const bends = structureEdgeBends(model, structureStackRank(model), labelLines ?? new Map());
+  (model.edges ?? []).forEach((edge, index) => {
+    const bend = bends[index];
+    const from = positions.get(edge.source);
+    const to = positions.get(edge.target);
+    if (!bend || !from || !to) return;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const x = (from.x + to.x) / 2 + (-dy / length) * (bend / 2);
+    const y = (from.y + to.y) / 2 + (dx / length) * (bend / 2);
+    group.minX = Math.min(group.minX, x - ARC_LABEL_PAD_X);
+    group.maxX = Math.max(group.maxX, x + ARC_LABEL_PAD_X);
+    group.minY = Math.min(group.minY, y - ARC_LABEL_PAD_Y);
+    group.maxY = Math.max(group.maxY, y + ARC_LABEL_PAD_Y);
+  });
+}
+
+/** Model units a Structure card's label takes below it: per line, plus its gap and plate. */
+const STRUCTURE_LABEL_LINE = 15;
+const STRUCTURE_LABEL_GAP = 14;
 
 /** The repository root is stored as `.` by the scanner; on the map it reads as `/`. */
 export function islandLabel(directory) {
@@ -55,6 +93,7 @@ export function islandBounds(model, options = {}) {
   // recorded path when it does not.
   const labels = options.labels ?? model?.directoryLabels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
+  const labelLines = model.structure ? structureLabelLines(model) : null;
   const groups = new Map();
 
   for (const node of model.nodes ?? []) {
@@ -77,11 +116,22 @@ export function islandBounds(model, options = {}) {
       maxY: -Infinity,
     };
     group.count += 1;
-    group.minX = Math.min(group.minX, position.x - radius);
+    // A Structure card writes its name and counts beneath it, wider than a small card, and
+    // the plate reaches round that label, or the text would hang out of its frame. A
+    // vertical stack's bands carry their label to the right instead (see `sideLabelled`).
+    const lines = labelLines?.get(node.id) ?? 0;
+    const side = lines > 0 && sideLabelled(model, node);
+    const below = lines > 0 && !side ? lines * STRUCTURE_LABEL_LINE + STRUCTURE_LABEL_GAP : 0;
+    const halfWidth = lines > 0 && !side ? Math.max(radius, STRUCTURE_LABEL_HALF_WIDTH) : radius;
+    group.minX = Math.min(group.minX, position.x - halfWidth);
     group.minY = Math.min(group.minY, position.y - radius);
-    group.maxX = Math.max(group.maxX, position.x + radius);
-    group.maxY = Math.max(group.maxY, position.y + radius);
+    group.maxX = Math.max(group.maxX, position.x + (side ? radius + STRUCTURE_SIDE_LABEL_WIDTH : halfWidth));
+    group.maxY = Math.max(group.maxY, position.y + radius + below);
     groups.set(directory, group);
+  }
+
+  if (isStructureStack(model)) {
+    growForStackArcs(model, positions, labelLines, groups.get('stack'));
   }
 
   return [...groups.values()]
@@ -385,6 +435,19 @@ export function fitLabel(label, widthPx) {
   }
   if (label.length <= budget) {
     return label;
+  }
+  // A `Name — detail · detail` title (the Structure stack's verdict) sheds its details from
+  // the end, then the whole verdict, before the name itself is ever cut.
+  const dash = label.indexOf(' — ');
+  if (dash > 0) {
+    const name = label.slice(0, dash);
+    const details = label.slice(dash + 3).split(' · ');
+    while (details.length > 0) {
+      const candidate = `${name} — ${details.join(' · ')}`;
+      if (candidate.length <= budget) return candidate;
+      details.pop();
+    }
+    return name.length <= budget ? name : `…${name.slice(-(budget - 1))}`;
   }
   return `…${label.slice(-(budget - 1))}`;
 }

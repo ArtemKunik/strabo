@@ -6,6 +6,14 @@
  */
 
 import { edgeStrokeWidth, locDiameter, nodeDiameter } from './strabo-graph-sizing.js';
+import {
+  isStructureStack,
+  sideLabelled,
+  structureEdgeBends,
+  structureLabelShifts,
+  structureGridRank,
+  structureStackRank,
+} from './strabo-structure-layout.js';
 
 export const SHAPES = {
   module: 'round-rectangle',
@@ -57,16 +65,45 @@ function qualifiedName(id) {
 }
 
 /** Edge label for Structure mode to display weights and violation badges on canvas. */
+// Plain text, no emoji: a canvas draws colour emoji small and blurry, and differently per
+// OS. The edge's own colour and dash (see the stylesheet) carry the warning.
+/** `+3` / `−2`: a comparison delta with its sign always written. */
+function signed(value) {
+  return value > 0 ? `+${value}` : `−${Math.abs(value)}`;
+}
+
 function structureEdgeLabel(edge) {
+  const delta = typeof edge.weightDelta === 'number' ? edge.weightDelta : 0;
+  // An edge only the baseline had: the fix a change made, so it says what went away.
+  if (edge.baselineOnly) {
+    const kind = edge.tierKind === 'down' ? 'import' : edge.tierKind;
+    return `${signed(delta)} ${kind} · gone`;
+  }
+  const label = structureEdgeText(edge);
+  return delta !== 0 && label ? `${label} (${signed(delta)})` : label;
+}
+
+function structureEdgeText(edge) {
   const weight = typeof edge.weight === 'number' && edge.weight > 0 ? edge.weight : null;
+  const typeOnly = typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : 0;
+  const base = structureEdgeBase(edge, weight);
+  // A wrong-way read made of type-only imports is the likely false positive the tier panel
+  // warns about; say how much of it is types so the real violations stand out.
+  if (base && weight && typeOnly > 0 && (edge.tierKind === 'upward' || edge.tierKind === 'skip-layer')) {
+    return typeOnly >= weight ? `${base} · types only` : `${base} · ${typeOnly} type-only`;
+  }
+  return base;
+}
+
+function structureEdgeBase(edge, weight) {
   if (edge.tierKind === 'upward') {
-    return weight ? `⚠️ ${weight} upward` : '⚠️ upward';
+    return weight ? `${weight} upward` : 'upward';
   }
   if (edge.tierKind === 'skip-layer') {
-    return weight ? `↷ ${weight} skip` : '↷ skip';
+    return weight ? `${weight} skip-layer` : 'skip-layer';
   }
   if (edge.violation) {
-    return weight ? `⚠️ ${weight} violation` : '⚠️ violation';
+    return weight ? `${weight} rule ${weight === 1 ? 'violation' : 'violations'}` : 'rule violation';
   }
   if (edge.ghost) {
     return 'intent (0)';
@@ -77,11 +114,79 @@ function structureEdgeLabel(edge) {
   return '';
 }
 
+/** `43.6k` for a line count of 43,609; small counts stay as they are. */
+function compactCount(value) {
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value);
+}
+
+/**
+ * Wrong-way value imports leaving each tier: the upward and skip-layer edges it starts,
+ * minus the type-only imports among them, which couple shapes but not runtime.
+ */
+function wrongWayBySource(model) {
+  const counts = new Map();
+  for (const edge of model.edges ?? []) {
+    if (edge.tierKind !== 'upward' && edge.tierKind !== 'skip-layer') continue;
+    const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
+    if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
+  }
+  return counts;
+}
+
+/**
+ * A Structure card's canvas label: its name; its files, share of the repository, and lines;
+ * then, on a big enough card, the folder most of its files live in and the wrong-way imports
+ * it starts. Null when the node carries no count to state.
+ */
+function structureCardLabel(node, wrongWay, compact = false) {
+  const count = typeof node.files === 'number' ? node.files : typeof node.size === 'number' ? node.size : null;
+  if (count === null) {
+    return null;
+  }
+  const share = typeof node.fileShare === 'number' && node.fileShare > 0 ? ` (${Math.max(1, Math.round(node.fileShare * 100))}%)` : '';
+  const loc = typeof node.lines === 'number' && node.lines > 0 ? ` · ${compactCount(node.lines)} loc` : '';
+  const delta = typeof node.filesDelta === 'number' && node.filesDelta !== 0 ? ` ${signed(node.filesDelta)}` : '';
+  const lines = [node.label ?? node.id, `${count} ${count === 1 ? 'file' : 'files'}${delta}${share}${loc}`];
+  const roomy = !compact && node.kind === 'tier' && nodeDiameter(node) >= 90;
+  const folder = typeof node.why === 'string' && !node.ghost ? node.why.split(', ')[0] : '';
+  if (roomy && folder) {
+    lines.push(folder);
+  }
+  if (wrongWay > 0) {
+    lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? 'import' : 'imports'} out`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * How many lines each Structure card's label runs to, keyed by node id, so the plates can
+ * reach down far enough to frame it (see `islandBounds`).
+ */
+export function structureLabelLines(model) {
+  const wrongWay = wrongWayBySource(model);
+  const lines = new Map();
+  for (const node of model.nodes ?? []) {
+    if (node.kind !== 'tier' && node.kind !== 'shelf') continue;
+    const label = structureCardLabel(node, wrongWay.get(node.id) ?? 0, model.structureLevel === 'grid');
+    if (label) lines.set(node.id, label.split('\n').length);
+  }
+  return lines;
+}
+
 /** Join API nodes to metrics and positions. */
 export function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
+  // The stack and the grid both bow their edges off the column (see `structureEdgeBends`).
+  const stackRank = isStructureStack(model)
+    ? structureStackRank(model)
+    : model.structureLevel === 'grid'
+      ? structureGridRank(model)
+      : null;
+  const bends = stackRank ? structureEdgeBends(model, stackRank, structureLabelLines(model)) : null;
+  const labelShifts = stackRank ? structureLabelShifts(model, stackRank) : null;
   const hubs = new Set(model.hubs ?? []);
   const ambiguous = ambiguousFileIds(model);
+  const wrongWay = model.structure ? wrongWayBySource(model) : new Map();
   const nodes = (model.nodes ?? []).map((node) => {
     let label =
       node.label ??
@@ -89,16 +194,7 @@ export function buildElements(model) {
       (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split('/').pop());
 
     if (model.structure && (node.kind === 'tier' || node.kind === 'shelf')) {
-      const title = node.label ?? node.id;
-      const count = typeof node.files === 'number' ? node.files : (typeof node.size === 'number' ? node.size : null);
-      if (count !== null) {
-        const fileStr = `${count} ${count === 1 ? 'file' : 'files'}`;
-        const lineStr =
-          typeof node.lines === 'number' && node.lines > 0
-            ? ` · ${node.lines >= 1000 ? `${(node.lines / 1000).toFixed(1)}k` : node.lines} loc`
-            : '';
-        label = `${title}\n${fileStr}${lineStr}`;
-      }
+      label = structureCardLabel(node, wrongWay.get(node.id) ?? 0, model.structureLevel === 'grid') ?? label;
     }
 
     return {
@@ -109,6 +205,8 @@ export function buildElements(model) {
         model.structure ? 'structure-node' : '',
         model.structure && node.kind === 'tier' ? 'structure-tier' : '',
         model.structure && node.kind === 'shelf' ? 'structure-shelf' : '',
+        sideLabelled(model, node) ? 'structure-label-side' : '',
+        model.structureLevel === 'grid' && (node.kind === 'tier' || node.kind === 'shelf') ? 'structure-grid-cell' : '',
         model.structure && node.tier ? `tier-${node.tier}` : '',
       ]
         .filter(Boolean)
@@ -151,6 +249,12 @@ export function buildElements(model) {
       edge.crossUnitEdge === true ? 'edge-structure-cross-unit' : '',
       edge.ghost === true ? 'edge-ghost' : '',
       edge.violation === true ? 'edge-violation' : '',
+      bends ? 'edge-structure-stack' : '',
+      edge.baselineOnly === true ? 'edge-baseline-only' : '',
+      model.structure && !edge.baselineOnly && edge.tierKind && edge.tierKind !== 'down' && (edge.weightDelta ?? 0) > 0
+        ? 'edge-wrong-way-grew'
+        : '',
+      model.structure && (edge.weight ?? 0) > 0 && (edge.typeOnlyCount ?? 0) >= edge.weight ? 'edge-type-only' : '',
     ]
       .filter(Boolean)
       .join(' '),
@@ -167,6 +271,9 @@ export function buildElements(model) {
       violation: edge.violation === true,
       ruleId: edge.ruleId,
       label: model.structure ? structureEdgeLabel(edge) : undefined,
+      // How far a Structure stack edge bows off the spine (see `structureEdgeBends`).
+      bend: bends ? bends[index] : 0,
+      labelShift: labelShifts ? labelShifts[index] : 0,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),

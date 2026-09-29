@@ -143,6 +143,137 @@ function nodeDiameter(node) {
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 
+// ui/strabo-structure-layout.js
+var STACK_GAP = 150;
+var SHELF_GAP = 120;
+var PAIR_BEND = 46;
+var PAIR_LABEL_SHIFT = 11;
+var ARC_CLEARANCE = 28;
+var SKIP_NEST = 64;
+var LABEL_LINE = 15;
+var LABEL_GAP = 14;
+var LABEL_SIDE_GAP = 8;
+var LABEL_WIDTH = 240;
+var ARC_LABEL_ROOM = 16;
+var ARC_LABEL_HALF_WIDTH = 75;
+var SHELF_CLEARANCE = 110;
+function sideLabelled(model, node) {
+  return isStructureStack(model) && model.structureDirection !== "horizontal" && node.kind === "tier";
+}
+function structureLabelShifts(model, rank) {
+  const edges = model.edges ?? [];
+  const pairs = new Set(edges.map((edge) => `${edge.source}\0${edge.target}`));
+  return edges.map((edge) => {
+    const from = rank.get(edge.source);
+    const to = rank.get(edge.target);
+    if (from === void 0 || to === void 0 || Math.abs(from - to) !== 1) return 0;
+    if (!pairs.has(`${edge.target}\0${edge.source}`)) return 0;
+    return from < to ? -PAIR_LABEL_SHIFT : PAIR_LABEL_SHIFT;
+  });
+}
+function isStructureStack(model) {
+  return model?.structure === true && typeof model.structureDirection === "string";
+}
+function pack(row, axis, gap, positions) {
+  const sorted = [...row].sort((a, b2) => positions.get(a.id)[axis] - positions.get(b2.id)[axis]);
+  let cursor = null;
+  let previousRadius = 0;
+  for (const node of sorted) {
+    const position = positions.get(node.id);
+    const radius = nodeDiameter(node) / 2;
+    cursor = cursor === null ? position[axis] : cursor + previousRadius + gap + radius;
+    positions.set(node.id, { ...position, [axis]: cursor });
+    previousRadius = radius;
+  }
+}
+function packStructureStack(model) {
+  if (!isStructureStack(model)) {
+    return model;
+  }
+  const positions = new Map((model.positions ?? []).map((p) => [p.id, { ...p }]));
+  const axis = model.structureDirection === "horizontal" ? "x" : "y";
+  const placed = (model.nodes ?? []).filter((node) => positions.has(node.id));
+  const bands = placed.filter((node) => node.kind === "tier");
+  const shelf = placed.filter((node) => node.kind === "shelf");
+  pack(bands, axis, STACK_GAP, positions);
+  pack(shelf, axis, SHELF_GAP, positions);
+  const packed = { ...model, positions: [...positions.values()] };
+  if (bands.length === 0 || shelf.length === 0) {
+    return packed;
+  }
+  const cross = axis === "x" ? "y" : "x";
+  let stackEdge = -Infinity;
+  for (const node of bands) {
+    const radius = nodeDiameter(node) / 2;
+    const reach = cross === "y" ? radius + LABEL_LINE * 4 + LABEL_GAP : radius + LABEL_SIDE_GAP + LABEL_WIDTH;
+    stackEdge = Math.max(stackEdge, positions.get(node.id)[cross] + reach);
+  }
+  const bends = structureEdgeBends(packed, structureStackRank(packed));
+  (model.edges ?? []).forEach((edge, index) => {
+    const from = positions.get(edge.source);
+    const to = positions.get(edge.target);
+    if (!bends[index] || !from || !to) return;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const apex = { x: (from.x + to.x) / 2 + -dy / length * (bends[index] / 2), y: (from.y + to.y) / 2 + dx / length * (bends[index] / 2) };
+    stackEdge = Math.max(stackEdge, apex[cross] + (cross === "x" ? ARC_LABEL_HALF_WIDTH : ARC_LABEL_ROOM));
+  });
+  const shelfReach = Math.max(...shelf.map((node) => nodeDiameter(node) / 2));
+  const shelfAt = stackEdge + SHELF_CLEARANCE + shelfReach;
+  for (const node of shelf) {
+    positions.set(node.id, { ...positions.get(node.id), [cross]: shelfAt });
+  }
+  return { ...model, positions: [...positions.values()] };
+}
+function structureGridRank(model) {
+  const positions = new Map((model.positions ?? []).map((p) => [p.id, p]));
+  const cells = (model.nodes ?? []).filter((node) => node.kind === "tier" && positions.has(node.id));
+  const rows = [...new Set(cells.map((node) => positions.get(node.id).y))].sort((a, b2) => a - b2);
+  return new Map(cells.map((node) => [node.id, rows.indexOf(positions.get(node.id).y)]));
+}
+function structureStackRank(model) {
+  const axis = model.structureDirection === "horizontal" ? "x" : "y";
+  const positions = new Map((model.positions ?? []).map((p) => [p.id, p]));
+  const bands = (model.nodes ?? []).filter((node) => node.kind === "tier" && positions.has(node.id));
+  bands.sort((a, b2) => positions.get(a.id)[axis] - positions.get(b2.id)[axis]);
+  return new Map(bands.map((node, index) => [node.id, index]));
+}
+function structureEdgeBends(model, rank, labelLines = /* @__PURE__ */ new Map()) {
+  const edges = model.edges ?? [];
+  const pairs = new Set(edges.map((edge) => `${edge.source}\0${edge.target}`));
+  const horizontal = model.structureDirection === "horizontal";
+  const byRank = [];
+  for (const node of model.nodes ?? []) {
+    const index = rank.get(node.id);
+    if (index !== void 0) (byRank[index] ?? (byRank[index] = [])).push(node);
+  }
+  const labelBlock = (node) => (labelLines.get(node.id) ?? 2) * LABEL_LINE + LABEL_GAP;
+  return edges.map((edge) => {
+    const from = rank.get(edge.source);
+    const to = rank.get(edge.target);
+    if (from === void 0 || to === void 0) return 0;
+    const span = Math.abs(from - to);
+    if (span <= 1) {
+      return pairs.has(`${edge.target}\0${edge.source}`) ? PAIR_BEND : 0;
+    }
+    const downward = from < to;
+    const labelSide = horizontal && !downward;
+    let clearance = 0;
+    for (let index = Math.min(from, to) + 1; index < Math.max(from, to); index += 1) {
+      for (const node of byRank[index] ?? []) {
+        const radius = nodeDiameter(node) / 2;
+        const labelRoom = horizontal ? labelSide ? labelBlock(node) : 0 : ARC_LABEL_HALF_WIDTH;
+        clearance = Math.max(clearance, radius + labelRoom);
+      }
+    }
+    const distance = 2 * (clearance + ARC_CLEARANCE) + SKIP_NEST * (span - 2);
+    if (horizontal) return -distance;
+    const left = model.structureLevel !== "grid";
+    return downward === left ? distance : -distance;
+  });
+}
+
 // ui/strabo-graph-elements.js
 var SHAPES = {
   module: "round-rectangle",
@@ -182,16 +313,36 @@ function ambiguousFileIds(model) {
 function qualifiedName(id) {
   return id.split("/").slice(-2).join("/");
 }
+function signed(value) {
+  return value > 0 ? `+${value}` : `\u2212${Math.abs(value)}`;
+}
 function structureEdgeLabel(edge) {
+  const delta = typeof edge.weightDelta === "number" ? edge.weightDelta : 0;
+  if (edge.baselineOnly) {
+    const kind = edge.tierKind === "down" ? "import" : edge.tierKind;
+    return `${signed(delta)} ${kind} \xB7 gone`;
+  }
+  const label = structureEdgeText(edge);
+  return delta !== 0 && label ? `${label} (${signed(delta)})` : label;
+}
+function structureEdgeText(edge) {
   const weight = typeof edge.weight === "number" && edge.weight > 0 ? edge.weight : null;
+  const typeOnly = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
+  const base = structureEdgeBase(edge, weight);
+  if (base && weight && typeOnly > 0 && (edge.tierKind === "upward" || edge.tierKind === "skip-layer")) {
+    return typeOnly >= weight ? `${base} \xB7 types only` : `${base} \xB7 ${typeOnly} type-only`;
+  }
+  return base;
+}
+function structureEdgeBase(edge, weight) {
   if (edge.tierKind === "upward") {
-    return weight ? `\u26A0\uFE0F ${weight} upward` : "\u26A0\uFE0F upward";
+    return weight ? `${weight} upward` : "upward";
   }
   if (edge.tierKind === "skip-layer") {
-    return weight ? `\u21B7 ${weight} skip` : "\u21B7 skip";
+    return weight ? `${weight} skip-layer` : "skip-layer";
   }
   if (edge.violation) {
-    return weight ? `\u26A0\uFE0F ${weight} violation` : "\u26A0\uFE0F violation";
+    return weight ? `${weight} rule ${weight === 1 ? "violation" : "violations"}` : "rule violation";
   }
   if (edge.ghost) {
     return "intent (0)";
@@ -201,21 +352,59 @@ function structureEdgeLabel(edge) {
   }
   return "";
 }
+function compactCount(value) {
+  return value >= 1e3 ? `${(value / 1e3).toFixed(1)}k` : String(value);
+}
+function wrongWayBySource(model) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const edge of model.edges ?? []) {
+    if (edge.tierKind !== "upward" && edge.tierKind !== "skip-layer") continue;
+    const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
+    if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
+  }
+  return counts;
+}
+function structureCardLabel(node, wrongWay, compact = false) {
+  const count = typeof node.files === "number" ? node.files : typeof node.size === "number" ? node.size : null;
+  if (count === null) {
+    return null;
+  }
+  const share = typeof node.fileShare === "number" && node.fileShare > 0 ? ` (${Math.max(1, Math.round(node.fileShare * 100))}%)` : "";
+  const loc = typeof node.lines === "number" && node.lines > 0 ? ` \xB7 ${compactCount(node.lines)} loc` : "";
+  const delta = typeof node.filesDelta === "number" && node.filesDelta !== 0 ? ` ${signed(node.filesDelta)}` : "";
+  const lines = [node.label ?? node.id, `${count} ${count === 1 ? "file" : "files"}${delta}${share}${loc}`];
+  const roomy = !compact && node.kind === "tier" && nodeDiameter(node) >= 90;
+  const folder = typeof node.why === "string" && !node.ghost ? node.why.split(", ")[0] : "";
+  if (roomy && folder) {
+    lines.push(folder);
+  }
+  if (wrongWay > 0) {
+    lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? "import" : "imports"} out`);
+  }
+  return lines.join("\n");
+}
+function structureLabelLines(model) {
+  const wrongWay = wrongWayBySource(model);
+  const lines = /* @__PURE__ */ new Map();
+  for (const node of model.nodes ?? []) {
+    if (node.kind !== "tier" && node.kind !== "shelf") continue;
+    const label = structureCardLabel(node, wrongWay.get(node.id) ?? 0, model.structureLevel === "grid");
+    if (label) lines.set(node.id, label.split("\n").length);
+  }
+  return lines;
+}
 function buildElements(model) {
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
+  const stackRank = isStructureStack(model) ? structureStackRank(model) : model.structureLevel === "grid" ? structureGridRank(model) : null;
+  const bends = stackRank ? structureEdgeBends(model, stackRank, structureLabelLines(model)) : null;
+  const labelShifts = stackRank ? structureLabelShifts(model, stackRank) : null;
   const hubs = new Set(model.hubs ?? []);
   const ambiguous = ambiguousFileIds(model);
+  const wrongWay = model.structure ? wrongWayBySource(model) : /* @__PURE__ */ new Map();
   const nodes = (model.nodes ?? []).map((node) => {
     let label = node.label ?? model.directoryLabels?.[node.id] ?? (ambiguous.has(node.id) ? qualifiedName(node.id) : node.id.split("/").pop());
     if (model.structure && (node.kind === "tier" || node.kind === "shelf")) {
-      const title = node.label ?? node.id;
-      const count = typeof node.files === "number" ? node.files : typeof node.size === "number" ? node.size : null;
-      if (count !== null) {
-        const fileStr = `${count} ${count === 1 ? "file" : "files"}`;
-        const lineStr = typeof node.lines === "number" && node.lines > 0 ? ` \xB7 ${node.lines >= 1e3 ? `${(node.lines / 1e3).toFixed(1)}k` : node.lines} loc` : "";
-        label = `${title}
-${fileStr}${lineStr}`;
-      }
+      label = structureCardLabel(node, wrongWay.get(node.id) ?? 0, model.structureLevel === "grid") ?? label;
     }
     return {
       group: "nodes",
@@ -225,6 +414,8 @@ ${fileStr}${lineStr}`;
         model.structure ? "structure-node" : "",
         model.structure && node.kind === "tier" ? "structure-tier" : "",
         model.structure && node.kind === "shelf" ? "structure-shelf" : "",
+        sideLabelled(model, node) ? "structure-label-side" : "",
+        model.structureLevel === "grid" && (node.kind === "tier" || node.kind === "shelf") ? "structure-grid-cell" : "",
         model.structure && node.tier ? `tier-${node.tier}` : ""
       ].filter(Boolean).join(" "),
       data: {
@@ -259,7 +450,11 @@ ${fileStr}${lineStr}`;
       edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
       edge.crossUnitEdge === true ? "edge-structure-cross-unit" : "",
       edge.ghost === true ? "edge-ghost" : "",
-      edge.violation === true ? "edge-violation" : ""
+      edge.violation === true ? "edge-violation" : "",
+      bends ? "edge-structure-stack" : "",
+      edge.baselineOnly === true ? "edge-baseline-only" : "",
+      model.structure && !edge.baselineOnly && edge.tierKind && edge.tierKind !== "down" && (edge.weightDelta ?? 0) > 0 ? "edge-wrong-way-grew" : "",
+      model.structure && (edge.weight ?? 0) > 0 && (edge.typeOnlyCount ?? 0) >= edge.weight ? "edge-type-only" : ""
     ].filter(Boolean).join(" "),
     data: {
       id: `e${index}`,
@@ -274,6 +469,9 @@ ${fileStr}${lineStr}`;
       violation: edge.violation === true,
       ruleId: edge.ruleId,
       label: model.structure ? structureEdgeLabel(edge) : void 0,
+      // How far a Structure stack edge bows off the spine (see `structureEdgeBends`).
+      bend: bends ? bends[index] : 0,
+      labelShift: labelShifts ? labelShifts[index] : 0,
       // A System-view unit edge rolls up a file count; the stroke widens with it.
       weight: edge.weight ?? 1,
       edgeWidth: edgeStrokeWidth(edge.weight),
@@ -632,6 +830,8 @@ function edgeEvidenceFor(model, edgeId) {
     violation: edge.violation === true,
     ruleId: edge.ruleId ?? null,
     crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
+    typeOnlyCount: typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : null,
+    tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
     provenance: graphProvenanceFromModel(model)
   };
 }
@@ -700,6 +900,9 @@ function buildGraphQuery(state2, options = {}) {
     params.set("structure", "1");
     if (state2.structureDirection === "horizontal") {
       params.set("direction", "horizontal");
+    }
+    if (state2.structureSince && !state2.structureCell && !state2.structureGrid) {
+      params.set("since", state2.structureSince);
     }
     if (state2.structureCell) {
       params.set("level", "cell");
@@ -830,12 +1033,16 @@ function readingLegend(model, locLens = false) {
     );
   }
   if (model?.structure) {
+    const baseline = model.structureBaseline?.available ? model.structureBaseline : null;
     return withStructureLimits(
       [
-        "band = tier",
+        "card = tier",
         "size = files",
-        "edge = recorded import",
-        "wrong-way = red or dashed",
+        "edge = recorded imports",
+        "dashed red = upward",
+        "arc = skip-layer",
+        "faded = types only",
+        ...baseline ? [`dotted = gone since ${baseline.ref}`] : [],
         "shelf = support tiers"
       ],
       model
@@ -857,7 +1064,8 @@ function withStructureLimits(lines, model) {
 }
 function shortcutSheet() {
   return [
-    { keys: "F", action: "Center the selection" },
+    { keys: "F", action: "Center the selection, or fit the map when nothing is selected" },
+    { keys: "0", action: "Fit the map around the open panels" },
     { keys: "I", action: "Show change impact" },
     { keys: "O", action: "Show the selected file\u2019s links to other units" },
     { keys: "P", action: "Trace a path between two nodes" },
@@ -910,12 +1118,18 @@ function graphSummary(model) {
   let summary = `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
   if (model?.structure) {
     const upward = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation).length;
-    const skip = (model?.edges ?? []).filter((e) => e.tierKind === "skip").length;
+    const skip = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer").length;
     if (upward > 0 || skip > 0) {
       const parts = [];
       if (upward > 0) parts.push(`${upward} upward`);
       if (skip > 0) parts.push(`${skip} skip`);
       summary += ` (${parts.join(", ")})`;
+    }
+    const baseline = model.structureBaseline;
+    if (baseline?.available) {
+      summary += ` \xB7 compared with ${baseline.ref} (${String(baseline.revision).slice(0, 7)})`;
+    } else if (baseline) {
+      summary += ` \xB7 cannot compare with ${baseline.ref}: ${baseline.detail}`;
     }
   }
   return summary;
@@ -923,6 +1137,31 @@ function graphSummary(model) {
 
 // ui/strabo-islands.js
 var ISLAND_PADDING = 26;
+var ARC_LABEL_PAD_X = 75;
+var ARC_LABEL_PAD_Y = 16;
+var STRUCTURE_LABEL_HALF_WIDTH = 90;
+var STRUCTURE_SIDE_LABEL_WIDTH = 248;
+function growForStackArcs(model, positions, labelLines, group) {
+  if (!group) return;
+  const bends = structureEdgeBends(model, structureStackRank(model), labelLines ?? /* @__PURE__ */ new Map());
+  (model.edges ?? []).forEach((edge, index) => {
+    const bend = bends[index];
+    const from = positions.get(edge.source);
+    const to = positions.get(edge.target);
+    if (!bend || !from || !to) return;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const x = (from.x + to.x) / 2 + -dy / length * (bend / 2);
+    const y = (from.y + to.y) / 2 + dx / length * (bend / 2);
+    group.minX = Math.min(group.minX, x - ARC_LABEL_PAD_X);
+    group.maxX = Math.max(group.maxX, x + ARC_LABEL_PAD_X);
+    group.minY = Math.min(group.minY, y - ARC_LABEL_PAD_Y);
+    group.maxY = Math.max(group.maxY, y + ARC_LABEL_PAD_Y);
+  });
+}
+var STRUCTURE_LABEL_LINE = 15;
+var STRUCTURE_LABEL_GAP = 14;
 function islandLabel(directory) {
   return directory === "." ? "/" : directory;
 }
@@ -937,6 +1176,7 @@ function islandBounds(model, options = {}) {
   const visible = options.visible ?? null;
   const labels = options.labels ?? model?.directoryLabels ?? null;
   const positions = new Map((model.positions ?? []).map((position) => [position.id, position]));
+  const labelLines = model.structure ? structureLabelLines(model) : null;
   const groups = /* @__PURE__ */ new Map();
   for (const node of model.nodes ?? []) {
     if (visible && !visible.has(node.id)) {
@@ -957,11 +1197,18 @@ function islandBounds(model, options = {}) {
       maxY: -Infinity
     };
     group.count += 1;
-    group.minX = Math.min(group.minX, position.x - radius);
+    const lines = labelLines?.get(node.id) ?? 0;
+    const side = lines > 0 && sideLabelled(model, node);
+    const below = lines > 0 && !side ? lines * STRUCTURE_LABEL_LINE + STRUCTURE_LABEL_GAP : 0;
+    const halfWidth = lines > 0 && !side ? Math.max(radius, STRUCTURE_LABEL_HALF_WIDTH) : radius;
+    group.minX = Math.min(group.minX, position.x - halfWidth);
     group.minY = Math.min(group.minY, position.y - radius);
-    group.maxX = Math.max(group.maxX, position.x + radius);
-    group.maxY = Math.max(group.maxY, position.y + radius);
+    group.maxX = Math.max(group.maxX, position.x + (side ? radius + STRUCTURE_SIDE_LABEL_WIDTH : halfWidth));
+    group.maxY = Math.max(group.maxY, position.y + radius + below);
     groups.set(directory, group);
+  }
+  if (isStructureStack(model)) {
+    growForStackArcs(model, positions, labelLines, groups.get("stack"));
   }
   return [...groups.values()].map((group) => ({
     directory: group.directory,
@@ -1153,6 +1400,17 @@ function fitLabel(label, widthPx) {
   }
   if (label.length <= budget) {
     return label;
+  }
+  const dash = label.indexOf(" \u2014 ");
+  if (dash > 0) {
+    const name = label.slice(0, dash);
+    const details = label.slice(dash + 3).split(" \xB7 ");
+    while (details.length > 0) {
+      const candidate = `${name} \u2014 ${details.join(" \xB7 ")}`;
+      if (candidate.length <= budget) return candidate;
+      details.pop();
+    }
+    return name.length <= budget ? name : `\u2026${name.slice(-(budget - 1))}`;
   }
   return `\u2026${label.slice(-(budget - 1))}`;
 }
@@ -2586,6 +2844,33 @@ function graphTheme() {
   };
 }
 
+// ui/strabo-tier-icons.js
+var TIER_GLYPHS = {
+  // monitor
+  frontend: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  // plug
+  api: '<path d="M12 22v-5M9 8V2M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/>',
+  // box: the core model
+  domain: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5M12 22V12"/>',
+  // database
+  data: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/>',
+  // arrow-left-right: traffic with the outside world
+  integration: '<path d="M8 3 4 7l4 4M4 7h16M16 21l4-4-4-4M20 17H4"/>',
+  // server
+  infra: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  // wrench
+  build: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  // flask-conical
+  tests: '<path d="M10 2v7.527a2 2 0 0 1-.211.896L4.72 20.55a1 1 0 0 0 .9 1.45h12.76a1 1 0 0 0 .9-1.45l-5.069-10.127A2 2 0 0 1 14 9.527V2M8.5 2h7M7 16h10"/>',
+  // circle-help
+  unclassified: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/>'
+};
+function tierIconUri(tier, color) {
+  const glyph = TIER_GLYPHS[tier] ?? TIER_GLYPHS.unclassified;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${glyph}</svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 // ui/strabo-labels.js
 var LABEL_DEVICE_PX = 10;
 var HUB_LABEL_DEVICE_PX = 11;
@@ -2642,7 +2927,7 @@ function applyLabelBudget(cy, force = false) {
   }
   cy.scratch("_straboLabelDetail", detailed);
   cy.scratch("_straboLabelBudgetZoom", zoom);
-  const isStructureNode = (node) => node.data("kind") === "tier" || node.data("kind") === "shelf" && Boolean(node.data("tier"));
+  const isStructureNode = (node) => node.data("kind") === "tier" || node.data("kind") === "axis" || node.data("kind") === "shelf" && Boolean(node.data("tier"));
   const wanted = cy.nodes().filter((node) => node.visible() && (isStructureNode(node) || node.data("kind") !== "unit" && node.data("kind") !== "shelf")).filter((node) => isStructureNode(node) || labelsForceAll || detailed || node.data("hub") || node.selected()).toArray();
   const structureNodes = wanted.filter(isStructureNode);
   const regularNodes = wanted.filter((node) => !isStructureNode(node));
@@ -2784,6 +3069,60 @@ function stylesheet() {
     { selector: "node.kind-axis", style: { "background-opacity": 0, "border-opacity": 0, "font-weight": 700, width: 10, height: 10 } },
     // The tier lens colours the fill; the neutral node fill is the default when it is off.
     ...tierRules,
+    // A Structure tier card is a tinted panel, not a solid slab: a faint wash of the tier
+    // hue with its glyph centred, and the name and counts on a plate beneath the card, so a
+    // small card never has text spilling over its edges. A grid axis header is not a card.
+    ...TIER_ORDER.map((tier) => {
+      const color = tier === "unclassified" ? theme.tierUnclassified : theme.tier[tier];
+      return {
+        selector: `node.structure-node.tier-${tier}[kind != "axis"]`,
+        style: {
+          "background-color": color,
+          "background-opacity": 0.14,
+          "background-image": tierIconUri(tier, color),
+          "background-fit": "none",
+          "background-clip": "none",
+          "background-width": "42%",
+          "background-height": "42%",
+          "background-image-opacity": 0.95,
+          "text-valign": "bottom",
+          "text-halign": "center",
+          "text-margin-y": (ele) => 6 / Math.max(1e-4, ele.cy().zoom()),
+          "text-max-width": (ele) => 180 / Math.max(1e-4, ele.cy().zoom()),
+          "text-background-color": theme.nodeFill,
+          "text-background-opacity": 0.85,
+          "text-background-padding": (ele) => 3 / Math.max(1e-4, ele.cy().zoom()),
+          "text-background-shape": "round-rectangle",
+          "line-height": 1.3,
+          // The label sits on its own plate, so the outline the map's floating labels need only smears it.
+          "text-outline-width": 0
+        }
+      };
+    }),
+    // Down a vertical stack a band's label sits to its right, leaving the gaps along the
+    // stack to the edge labels.
+    // A grid cell sits in a tight unit × tier lattice with no room beneath it, so its label
+    // stays inside the card over a faint glyph, as a watermark rather than an icon.
+    {
+      selector: "node.structure-grid-cell",
+      style: {
+        "text-valign": "center",
+        "text-margin-y": 0,
+        "background-image-opacity": 0.22,
+        "background-width": "64%",
+        "background-height": "64%"
+      }
+    },
+    {
+      selector: "node.structure-label-side",
+      style: {
+        "text-valign": "center",
+        "text-halign": "right",
+        "text-justification": "left",
+        "text-margin-x": (ele) => 8 / Math.max(1e-4, ele.cy().zoom()),
+        "text-margin-y": 0
+      }
+    },
     // The large-file lens swaps the size encoding to lines of code and hides files under
     // the threshold. `loc-sized` outranks the base `node` width/height mapping; the mark
     // is a heavier neutral ring (weight, not hue), so it never collides with a status.
@@ -2797,13 +3136,8 @@ function stylesheet() {
       style: {
         "border-width": 2,
         "border-style": "dashed",
-        "border-color": theme.nodeLine,
         "text-opacity": 1,
         "text-wrap": "wrap",
-        "text-max-width": 110,
-        "text-valign": "center",
-        "text-halign": "center",
-        "text-margin-y": 0,
         "font-weight": 600,
         "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
       }
@@ -2859,6 +3193,9 @@ function stylesheet() {
     // accent ring. Drifting implementations reuse the serious status double ring and
     // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
     { selector: "node.ov-contract-def", style: { "border-width": 3, "border-style": "solid", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    // Selection and the status rings above force a solid fill, which would bury a tier
+    // card's glyph (drawn in the same hue); the card keeps its wash and shows them as rings.
+    { selector: "node.structure-node", style: { "background-opacity": 0.14 } },
     { selector: "node.node-ghost", style: { "border-style": "dashed", opacity: 0.6 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
@@ -2910,12 +3247,12 @@ function stylesheet() {
       selector: "edge[label]",
       style: {
         label: "data(label)",
-        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 9),
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10),
         "font-weight": 600,
         color: theme.ink,
         "text-background-color": theme.nodeFill,
-        "text-background-opacity": 0.9,
-        "text-background-padding": 3,
+        "text-background-opacity": 1,
+        "text-background-padding": (ele) => 3 / Math.max(1e-4, ele.cy().zoom()),
         "text-background-shape": "round-rectangle",
         "text-border-color": theme.nodeLine,
         "text-border-width": 1,
@@ -2923,14 +3260,34 @@ function stylesheet() {
         "text-rotation": "autorotate"
       }
     },
+    // A Structure stack edge bows off the spine by its `bend`: the halves of an A⇄B pair
+    // split into two arcs, and a skip-layer edge arcs around the bands it jumps. The stack
+    // holds a dozen edges at most, so the curve costs nothing here.
+    {
+      selector: "edge.edge-structure-stack",
+      style: {
+        "curve-style": "unbundled-bezier",
+        "control-point-distances": (ele) => ele.data("bend") ?? 0,
+        "control-point-weights": 0.5,
+        // Level text reads crisply; text turned along a steep arc blurs at small sizes.
+        "text-rotation": "none",
+        "text-margin-y": (ele) => (ele.data("labelShift") ?? 0) / Math.max(1e-4, ele.cy().zoom()),
+        // A wider arc passes over the tighter ones' labels; drawing tighter arcs on top keeps
+        // every label whole.
+        "z-index": (ele) => Math.max(1, 9 - Math.round(Math.abs(ele.data("bend") ?? 0) / 80))
+      }
+    },
     {
       selector: "edge.edge-tier-upward",
       style: {
         width: 3.25,
+        "line-style": "dashed",
+        "line-dash-pattern": [8, 5],
         "line-color": theme.cycle,
         "target-arrow-color": theme.cycle,
-        color: theme.cycle,
         "text-border-color": theme.cycle,
+        "text-border-width": 1.5,
+        "text-border-opacity": 1,
         opacity: 1
       }
     },
@@ -2941,13 +3298,21 @@ function stylesheet() {
         "line-style": "dashed",
         "line-color": theme.affected,
         "target-arrow-color": theme.affected,
-        color: theme.affected,
         "text-border-color": theme.affected,
+        "text-border-width": 1.5,
+        "text-border-opacity": 1,
         opacity: 1
       }
     },
+    // A wrong-way edge made only of type imports is erased at compile time: it keeps its
+    // hue so it still reads as wrong-way, but fades and thins, so real violations lead.
+    { selector: "edge.edge-type-only", style: { opacity: 0.45, width: 1.75, "line-dash-pattern": [3, 5] } },
+    // A comparison: an edge the baseline had and the change removed is a faint dotted trace;
+    // a wrong-way edge that grew gets a heavier, glowing plate, so the regression is found first.
+    { selector: "edge.edge-baseline-only", style: { width: 1.5, "line-style": "dotted", opacity: 0.5, "target-arrow-shape": "none" } },
+    { selector: "edge.edge-wrong-way-grew", style: { width: 4, "text-border-width": 2.5, "underlay-color": theme.cycle, "underlay-opacity": 0.18, "underlay-padding": 4 } },
     { selector: "edge.edge-ghost", style: { width: 1.75, "line-style": "dashed", opacity: 0.45, "line-color": theme.edge, "target-arrow-color": theme.edge } },
-    { selector: "edge.edge-violation", style: { width: 3, "line-color": theme.cycle, "target-arrow-color": theme.cycle, opacity: 1 } },
+    { selector: "edge.edge-violation", style: { width: 3, "line-color": theme.cycle, "target-arrow-color": theme.cycle, "text-border-color": theme.cycle, "text-border-width": 1.5, "text-border-opacity": 1, opacity: 1 } },
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: "edge.edge-structure-cross-unit", style: { width: 3, "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent, opacity: 1 } },
@@ -3675,6 +4040,7 @@ function applyTierDirections(cy, directions) {
       node.removeClass("tier-skip");
     }
     for (const edge of cy.edges()) {
+      if (edge.data("tierKind")) continue;
       edge.removeClass("edge-tier-upward");
       edge.removeClass("edge-tier-skip");
     }
@@ -3788,7 +4154,7 @@ function createView(container) {
     if (!baseModel) {
       return;
     }
-    islandModel = applyIslandOffsets(baseModel, offsetsByDirectory);
+    islandModel = applyIslandOffsets(packStructureStack(baseModel), offsetsByDirectory);
     if (coChangeOn && coChangeReport) {
       islandModel = {
         ...islandModel,
@@ -10301,6 +10667,47 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     list2.refresh();
   }
 }
+function renderTierImports(imports, weight, handlers) {
+  const section2 = document.createElement("div");
+  section2.className = "tier-imports";
+  section2.dataset.role = "tier-imports";
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Imports";
+  section2.append(heading3);
+  const ordered = [...imports].sort((a, b2) => Number(a.typeOnly === true) - Number(b2.typeOnly === true));
+  const list2 = document.createElement("ul");
+  for (const entry of ordered) {
+    const item = document.createElement("li");
+    item.dataset.role = "tier-import";
+    if (entry.typeOnly) item.classList.add("is-type-only");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "tier-import-open";
+    open.title = `${entry.specifier} \u2014 open the source at this import`;
+    open.textContent = `${entry.source}:${entry.line}`;
+    if (handlers.onViewSource) {
+      open.addEventListener("click", () => handlers.onViewSource(entry.source, entry.line));
+    } else {
+      open.disabled = true;
+    }
+    item.append(open, document.createTextNode(` \u2192 ${entry.target}`));
+    if (entry.typeOnly) {
+      const tag = document.createElement("span");
+      tag.className = "tier-import-tag";
+      tag.textContent = "type";
+      item.append(tag);
+    }
+    list2.append(item);
+  }
+  section2.append(list2);
+  if (typeof weight === "number" && weight > imports.length) {
+    const more = document.createElement("p");
+    more.className = "overlay-note";
+    more.textContent = `${weight - imports.length} more not listed.`;
+    section2.append(more);
+  }
+  return section2;
+}
 function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (!evidence) {
     container.hidden = true;
@@ -10313,7 +10720,7 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.dataset.delegateEdge = evidence.id;
   const heading3 = document.createElement("h3");
   heading3.className = "overlay-summary";
-  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip" ? " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
+  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip-layer" ? " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
   heading3.textContent = `Edge${headingDetail}`;
   container.append(heading3);
   const route = document.createElement("p");
@@ -10325,7 +10732,11 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   const facts = document.createElement("dl");
   facts.className = "passport-metrics";
   if (evidence.tierKind) {
-    appendFact(facts, "Flow direction", evidence.tierKind === "upward" ? "Upward (against stack order)" : "Skip-layer");
+    appendFact(
+      facts,
+      "Flow direction",
+      evidence.tierKind === "upward" ? "Upward (against stack order)" : evidence.tierKind === "skip-layer" ? "Skip-layer" : "Down (follows stack order)"
+    );
   }
   if (evidence.ruleId) {
     appendFact(facts, "Rule", evidence.ruleId);
@@ -10333,10 +10744,19 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (typeof evidence.weight === "number") {
     appendFact(facts, "Recorded imports", String(evidence.weight));
   }
-  appendFact(facts, "Specifier", evidence.specifier ?? "not recorded");
-  appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
-  appendFact(facts, "Resolution", evidence.resolutionLabel);
-  container.append(facts);
+  const tierImports = evidence.tierImports;
+  if (tierImports) {
+    if (typeof evidence.typeOnlyCount === "number" && evidence.typeOnlyCount > 0) {
+      appendFact(facts, "Type-only", `${evidence.typeOnlyCount} of ${evidence.weight} (erased at compile time)`);
+    }
+    container.append(facts);
+    container.append(renderTierImports(tierImports, evidence.weight, handlers));
+  } else {
+    appendFact(facts, "Specifier", evidence.specifier ?? "not recorded");
+    appendFact(facts, "Line", evidence.line === null ? "not recorded" : String(evidence.line));
+    appendFact(facts, "Resolution", evidence.resolutionLabel);
+    container.append(facts);
+  }
   const provenance = evidence.provenance ?? handlers.provenance ?? null;
   if (provenance && provenance.fingerprint) {
     const line = document.createElement("p");
@@ -10345,7 +10765,7 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
     line.textContent = evidenceProvenanceText(provenance);
     container.append(line);
   }
-  if (handlers.onViewSource) {
+  if (handlers.onViewSource && !tierImports) {
     const source = document.createElement("button");
     source.type = "button";
     source.className = "source-open";
@@ -10815,8 +11235,20 @@ var LEGEND_SWATCHES = {
   "band = tier": "linear-gradient(135deg,var(--node-fill),var(--accent))",
   "edge = recorded import": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
   "wrong-way = red or dashed": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "shelf = support tiers": "linear-gradient(135deg,var(--wash),var(--node-fill))"
+  "shelf = support tiers": "linear-gradient(135deg,var(--wash),var(--node-fill))",
+  "card = tier": "linear-gradient(135deg,var(--node-fill),var(--accent))",
+  "edge = recorded imports": "linear-gradient(0deg,transparent 40%,var(--graph-edge) 40% 60%,transparent 60%)",
+  "dashed red = upward": "repeating-linear-gradient(90deg,var(--graph-cycle) 0 4px,transparent 4px 7px) center / 100% 3px no-repeat",
+  "arc = skip-layer": "radial-gradient(circle at 50% 110%,transparent 55%,var(--graph-affected) 56% 68%,transparent 69%)",
+  "faded = types only": "linear-gradient(0deg,transparent 40%,var(--graph-cycle) 40% 60%,transparent 60%)"
 };
+function legendSwatch(text) {
+  if (LEGEND_SWATCHES[text]) return LEGEND_SWATCHES[text];
+  if (text.startsWith("dotted = gone since")) {
+    return "repeating-linear-gradient(90deg,var(--graph-edge) 0 2px,transparent 2px 5px) center / 100% 2px no-repeat";
+  }
+  return "var(--accent)";
+}
 function renderLegend(container, model, options = {}) {
   container.replaceChildren();
   const guide = document.createElement("div");
@@ -10826,7 +11258,8 @@ function renderLegend(container, model, options = {}) {
     item.className = "legend-item";
     const swatch = document.createElement("span");
     swatch.className = "legend-swatch";
-    swatch.style.background = LEGEND_SWATCHES[text] ?? "var(--accent)";
+    swatch.style.background = legendSwatch(text);
+    if (text === "faded = types only") swatch.style.opacity = "0.45";
     if (text.startsWith("diamond")) {
       swatch.style.transform = "rotate(45deg)";
       swatch.style.borderRadius = "2px";
@@ -10836,7 +11269,7 @@ function renderLegend(container, model, options = {}) {
     guide.append(item);
   }
   container.append(guide);
-  const kinds = [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
+  const kinds = model.structure ? [] : [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
   for (const kind of kinds) {
     const item = document.createElement("span");
     item.className = "legend-item";
@@ -12274,18 +12707,65 @@ function reducedMotion() {
   return document.documentElement?.dataset?.reduceMotion === "1";
 }
 var TOP_CLEARANCE = 64;
+var EDGE_CLEARANCE = 40;
+var PLATE_MARGIN = 26 + 22;
+var MAX_FIT_ZOOM = 1.6;
+function sideInsets(cy) {
+  const container = cy.container?.();
+  if (!container?.getBoundingClientRect || typeof document === "undefined") {
+    return { left: 0, right: 0 };
+  }
+  const canvas = container.getBoundingClientRect();
+  let left = 0;
+  let right = 0;
+  for (const win of document.querySelectorAll(".float-window:not([hidden])")) {
+    if (win.classList.contains("is-collapsed")) continue;
+    const box = win.getBoundingClientRect();
+    const top = Math.max(box.top, canvas.top);
+    const bottom = Math.min(box.bottom, canvas.bottom);
+    if (box.width === 0 || bottom - top < canvas.height * 0.3 || box.width > canvas.width * 0.5) continue;
+    if (box.left - canvas.left < canvas.width / 3) left = Math.max(left, box.right - canvas.left);
+    else if (canvas.right - box.right < canvas.width / 3) right = Math.max(right, canvas.right - box.left);
+  }
+  return { left: Math.max(0, left), right: Math.max(0, right) };
+}
 function fit(cy) {
-  cy.fit(void 0, 40);
-  const box = cy.elements().renderedBoundingBox();
-  const shift = TOP_CLEARANCE - box.y1;
-  if (!(shift > 0)) {
+  const elements2 = cy.elements(":visible");
+  if (elements2.empty()) {
+    cy.fit(void 0, EDGE_CLEARANCE);
     return;
   }
-  if (box.y2 + shift <= cy.height() - 8) {
-    cy.panBy({ x: 0, y: shift });
-  } else {
-    cy.fit(void 0, TOP_CLEARANCE);
+  const insets = sideInsets(cy);
+  const box = elements2.boundingBox();
+  const x1 = box.x1 - PLATE_MARGIN;
+  const y1 = box.y1 - PLATE_MARGIN;
+  const width = box.x2 - box.x1 + 2 * PLATE_MARGIN;
+  const height = box.y2 - box.y1 + 2 * PLATE_MARGIN;
+  const areaLeft = insets.left + EDGE_CLEARANCE;
+  const areaWidth = Math.max(80, cy.width() - areaLeft - insets.right - EDGE_CLEARANCE);
+  const areaHeight = Math.max(80, cy.height() - TOP_CLEARANCE - EDGE_CLEARANCE);
+  const zoom = Math.max(
+    cy.minZoom(),
+    Math.min(cy.maxZoom(), MAX_FIT_ZOOM, areaWidth / Math.max(1, width), areaHeight / Math.max(1, height))
+  );
+  const pan = {
+    x: areaLeft + (areaWidth - width * zoom) / 2 - x1 * zoom,
+    y: TOP_CLEARANCE + (areaHeight - height * zoom) / 2 - y1 * zoom
+  };
+  cy.viewport({ zoom, pan });
+  cy.scratch("_straboFit", { zoom, x: pan.x, y: pan.y });
+}
+function refitIfUntouched(cy) {
+  const last = cy.scratch("_straboFit");
+  if (!last) {
+    return;
   }
+  const pan = cy.pan();
+  const zoom = cy.zoom();
+  if (Math.abs(zoom - last.zoom) > 1e-3 || Math.abs(pan.x - last.x) > 1 || Math.abs(pan.y - last.y) > 1) {
+    return;
+  }
+  fit(cy);
 }
 function focus(cy, idOrPrefix) {
   const node = cy.getElementById(idOrPrefix);
@@ -12353,6 +12833,8 @@ function queryElements(doc = document) {
     detail: doc.getElementById("detail"),
     structureDirection: doc.getElementById("structure-direction"),
     structureDirectionField: doc.getElementById("field-structure-direction"),
+    structureSince: doc.getElementById("structure-since"),
+    structureSinceField: doc.getElementById("field-structure-since"),
     refresh: doc.getElementById("refresh"),
     filter: doc.getElementById("filter"),
     filterClear: doc.getElementById("filter-clear"),
@@ -12669,6 +13151,7 @@ function createUrlState(app2) {
         "direction",
         state2.mode === "structure" && state2.structureDirection === "horizontal" ? "horizontal" : ""
       );
+      set("since", state2.mode === "structure" ? state2.structureSince ?? "" : "");
       set("node", store2.get().ui.node ?? "");
       set("panel", store2.get().ui.memberOpen ? "member-map" : "");
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -12700,6 +13183,7 @@ function createUrlState(app2) {
     state2.structureTier = mode === "structure" ? params.get("tier") ?? (state2.structureCell ? state2.structureCell.split("|")[1] || null : null) : null;
     const dir = params.get("direction") ?? params.get("orientation");
     state2.structureDirection = dir === "horizontal" || dir === "lr" ? "horizontal" : "vertical";
+    state2.structureSince = mode === "structure" ? params.get("since") || null : null;
     return params;
   }
   async function restoreUrlPanel() {
@@ -15066,13 +15550,104 @@ function headerCell(text) {
   cell.textContent = text;
   return cell;
 }
+function formatCount2(value) {
+  return Number(value).toLocaleString("en-US");
+}
 function numberCell(text, title) {
   const cell = document.createElement("td");
+  cell.className = "num";
   cell.textContent = text;
   if (title) {
     cell.title = title;
   }
   return cell;
+}
+function optionOf(text, value) {
+  const option = document.createElement("option");
+  option.textContent = text;
+  option.value = value;
+  return option;
+}
+var UNCLASSIFIED_LIMIT = 40;
+function renderUnclassified(container, report, onAssign) {
+  const files = (report?.files ?? []).filter((entry) => entry.tier === "unclassified");
+  if (files.length === 0) {
+    return;
+  }
+  const section2 = document.createElement("div");
+  section2.className = "tier-unclassified";
+  section2.dataset.role = "tier-unclassified";
+  const heading3 = document.createElement("h4");
+  heading3.textContent = `Unclassified (${files.length})`;
+  section2.append(heading3);
+  const note4 = document.createElement("p");
+  note4.className = "overlay-note";
+  note4.textContent = "Pick a tier to declare it in strabo.groups.yml; the map re-reads it at once.";
+  section2.append(note4);
+  let scope = "file";
+  const scopes = document.createElement("div");
+  scopes.className = "tier-assign-scope";
+  scopes.setAttribute("role", "group");
+  scopes.setAttribute("aria-label", "What an assignment covers");
+  for (const [value, text] of [
+    ["file", "This file"],
+    ["folder", "Whole folder"]
+  ]) {
+    const button3 = document.createElement("button");
+    button3.type = "button";
+    button3.textContent = text;
+    button3.dataset.scope = value;
+    button3.setAttribute("aria-pressed", String(value === scope));
+    button3.addEventListener("click", () => {
+      scope = value;
+      for (const other of scopes.children) other.setAttribute("aria-pressed", String(other.dataset.scope === scope));
+    });
+    scopes.append(button3);
+  }
+  section2.append(scopes);
+  const list2 = document.createElement("ul");
+  for (const entry of [...files].sort((a, b2) => a.file.localeCompare(b2.file)).slice(0, UNCLASSIFIED_LIMIT)) {
+    const item = document.createElement("li");
+    item.dataset.role = "tier-unclassified-file";
+    const name = document.createElement("span");
+    name.className = "tier-unclassified-path";
+    name.textContent = entry.file;
+    name.title = entry.file;
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", `Assign ${entry.file} to a tier`);
+    select.append(optionOf("Assign to\u2026", ""));
+    for (const tier of TIER_ORDER.filter((candidate) => candidate !== "unclassified")) {
+      select.append(optionOf(TIER_LABELS[tier], tier));
+    }
+    const status = document.createElement("span");
+    status.className = "tier-assign-status";
+    select.addEventListener("change", async () => {
+      const tier = select.value;
+      if (!tier) return;
+      const folder = entry.file.includes("/") ? entry.file.slice(0, entry.file.lastIndexOf("/")) : "";
+      const glob = scope === "folder" && folder ? `${folder}/**` : entry.file;
+      select.disabled = true;
+      status.textContent = "saving\u2026";
+      try {
+        await onAssign(glob, tier);
+        status.textContent = `\u2192 ${TIER_LABELS[tier]} (${glob})`;
+      } catch (error) {
+        status.textContent = error.message;
+        select.disabled = false;
+        select.value = "";
+      }
+    });
+    item.append(name, select, status);
+    list2.append(item);
+  }
+  section2.append(list2);
+  if (files.length > UNCLASSIFIED_LIMIT) {
+    const more = document.createElement("p");
+    more.className = "overlay-note";
+    more.textContent = `${files.length - UNCLASSIFIED_LIMIT} more; assigning a folder covers many at once.`;
+    section2.append(more);
+  }
+  container.append(section2);
 }
 function renderTierPanel(container, report, filter = "all", options = {}) {
   container.replaceChildren();
@@ -15112,15 +15687,22 @@ function renderTierPanel(container, report, filter = "all", options = {}) {
     container.append(empty);
     return;
   }
-  const units = report?.matrix?.units ?? [];
+  const allUnits = report?.matrix?.units ?? [];
+  const units = allUnits.length > 1 ? allUnits : [];
   const table = document.createElement("table");
   table.className = "tier-matrix";
   const head = document.createElement("tr");
   head.append(headerCell("Tier"));
   for (const unit of units) {
-    head.append(headerCell(unit === "." ? "/" : unit));
+    const header = headerCell(unit === "." ? "/" : unit.split("/").pop());
+    header.title = unit === "." ? "repository root" : unit;
+    header.classList.add("tier-unit");
+    head.append(header);
   }
   head.append(headerCell("Files"), headerCell("Lines"));
+  for (const cell of [...head.children].slice(1)) {
+    cell.classList.add("num");
+  }
   table.append(head);
   for (const row of rows) {
     const tr2 = document.createElement("tr");
@@ -15130,20 +15712,29 @@ function renderTierPanel(container, report, filter = "all", options = {}) {
       tr2.classList.add("is-selected");
     }
     const name = document.createElement("th");
-    name.textContent = row.label;
+    const swatch = document.createElement("span");
+    swatch.className = "tier-swatch";
+    swatch.style.background = tierColorVar(row.tier);
+    name.append(swatch, row.label);
     tr2.append(name);
-    for (const cell of row.cells) {
-      tr2.append(numberCell(cell.files === 0 ? "\xB7" : String(cell.files), `${cell.lines} line(s)`));
+    for (const cell of units.length > 0 ? row.cells : []) {
+      tr2.append(numberCell(cell.files === 0 ? "\xB7" : formatCount2(cell.files), `${formatCount2(cell.lines)} line(s)`));
     }
-    tr2.append(numberCell(String(row.files)), numberCell(String(row.lines)));
+    tr2.append(numberCell(formatCount2(row.files)), numberCell(formatCount2(row.lines)));
     table.append(tr2);
   }
-  container.append(table);
+  const scroller = document.createElement("div");
+  scroller.className = "tier-matrix-scroll";
+  scroller.append(table);
+  container.append(scroller);
   const shares = document.createElement("p");
   shares.className = "tier-shares";
   shares.dataset.role = "tier-shares";
   shares.textContent = tierPerTierRows(report).map((entry) => `${entry.label} ${entry.shareLabel}`).join(" \xB7 ");
   container.append(shares);
+  if (options.onAssign) {
+    renderUnclassified(container, report, options.onAssign);
+  }
   const directionNote = document.createElement("p");
   directionNote.className = "overlay-note";
   directionNote.dataset.role = "tier-directions";
@@ -15222,6 +15813,22 @@ function renderTierPanel(container, report, filter = "all", options = {}) {
 function createLensController(app2) {
   const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
   let tierReportCache = { generation: -1, report: null };
+  async function assignTier(glob, tier) {
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const response = await fetch(`${API_PATH}/analysis/tiers/assign${query}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ glob, tier })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+    }
+    tierReportCache = { generation: -1, report: null };
+    showToast(`Declared ${payload.glob} as ${tier} in ${payload.file}${payload.created ? " (new file)" : ""}.`);
+    app2.scan();
+    return payload;
+  }
   async function applyTierLens() {
     if (state2.tier === "off" || !app2.current || app2.current.system || app2.current.prefixLength !== void 0) {
       view2.applyTier(null);
@@ -15256,7 +15863,8 @@ function createLensController(app2) {
     view2.applyTierDirections(tierDirectionClasses(tierReportCache.report));
     if (state2.overlay === "none") {
       renderTierPanel(elements2.overlayPanel, tierReportCache.report, state2.tier, {
-        onClose: closeLensPanel
+        onClose: closeLensPanel,
+        onAssign: assignTier
       });
     }
   }
@@ -28072,9 +28680,19 @@ function createSelectionController(app2) {
       });
     }
     if (evidence) {
-      elements2.hover.textContent = `${evidence.source} \u2192 ${evidence.target} \xB7 ${evidence.kind} \xB7 L${evidence.line ?? "?"} ${evidence.specifier ?? ""}`;
+      elements2.hover.textContent = edgeSummary(evidence);
     }
     app2.windows.refreshDock();
+  }
+  function edgeSummary(evidence) {
+    const route = `${evidence.source} \u2192 ${evidence.target}`;
+    if (evidence.tierImports) {
+      const kind = evidence.tierKind && evidence.tierKind !== "down" ? `${evidence.tierKind} ` : "";
+      const count = evidence.weight ?? evidence.tierImports.length;
+      const types = evidence.typeOnlyCount ? ` (${evidence.typeOnlyCount} type-only)` : "";
+      return `${route} \xB7 ${count} ${kind}${count === 1 ? "import" : "imports"}${types}`;
+    }
+    return `${route} \xB7 ${evidence.kind} \xB7 L${evidence.line ?? "?"} ${evidence.specifier ?? ""}`;
   }
   function onSelect(id) {
     selectNode(id);
@@ -28911,7 +29529,8 @@ function createFloatingPanels(app2) {
         glyph: "\u25D0",
         pinned: 5,
         width: 360,
-        titleFrom: (panel) => (panel.querySelector("h3")?.textContent ?? "").split(" \xB7 ")[0].trim(),
+        // The heading's own text only: its dismiss button's `×` is not part of the title.
+        titleFrom: (panel) => (panel.querySelector("h3")?.firstChild?.textContent ?? "").split(" \xB7 ")[0].trim(),
         // The panel carries whichever lens is active: an analysis overlay, or the tier lens
         // when "Color by tier" is on with no overlay. It stays disabled only with both off.
         canOpen: () => state2.overlay !== "none" || state2.tier !== "off",
@@ -29247,6 +29866,7 @@ function bindKeyboardShortcuts(app2) {
     if (inField || !elements2.memberView.hidden || !onGraph) return;
     const key = event.key.toLowerCase();
     if (key === "f" && app2.selected) focus(view2.cy, app2.selected);
+    else if ((key === "f" || key === "0") && !event.metaKey && !event.ctrlKey) fit(view2.cy);
     else if (key === "i") elements2.tbImpact.click();
     else if (key === "o" && state2.mode === "system" && state2.systemUnit) elements2.tbOutside.click();
     else if (key === "u" && state2.mode === "system" && state2.systemUnit) app2.units.closeUnit();
@@ -29332,6 +29952,8 @@ var store = createStore({
     structureGrid: false,
     /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
     structureDirection: "vertical",
+    // The revision the Structure stack is compared with (`?since=`), or null for none.
+    structureSince: null,
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
     structureCell: null,
     structureUnit: null,
@@ -29659,6 +30281,16 @@ function applyModeChrome() {
   if (elements.structureDirection) {
     elements.structureDirection.value = state.structureDirection ?? "vertical";
   }
+  if (elements.structureSinceField) {
+    elements.structureSinceField.hidden = state.mode !== "structure" || state.structureGrid || Boolean(state.structureCell);
+  }
+  if (elements.structureSince) {
+    const since = state.structureSince ?? "";
+    if (since && ![...elements.structureSince.options].some((option) => option.value === since)) {
+      elements.structureSince.append(new Option(since, since));
+    }
+    elements.structureSince.value = since;
+  }
 }
 elements.detail.addEventListener("change", () => {
   state.mode = elements.detail.value;
@@ -29709,6 +30341,28 @@ if (elements.graphEmptyClear) {
 if (elements.zoomIn) elements.zoomIn.addEventListener("click", () => zoomIn(view.cy));
 if (elements.zoomOut) elements.zoomOut.addEventListener("click", () => zoomOut(view.cy));
 if (elements.zoomFit) elements.zoomFit.addEventListener("click", () => fit(view.cy));
+{
+  let refitTimer = 0;
+  const scheduleRefit = () => {
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(() => refitIfUntouched(view.cy), 250);
+  };
+  const sized = new ResizeObserver(scheduleRefit);
+  const watched = /* @__PURE__ */ new WeakSet();
+  const watchWindows = () => {
+    for (const win of document.querySelectorAll(".float-window")) {
+      if (!watched.has(win)) {
+        watched.add(win);
+        sized.observe(win);
+      }
+    }
+  };
+  watchWindows();
+  new MutationObserver((records) => {
+    if (records.some((record) => record.addedNodes?.length > 0)) watchWindows();
+    if (records.some((record) => record.target.classList?.contains("float-window"))) scheduleRefit();
+  }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "class", "style"] });
+}
 elements.diagnosticsToggle.addEventListener("click", () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
@@ -29742,6 +30396,13 @@ if (elements.tbDirection) {
     state.structureDirection = state.structureDirection === "horizontal" ? "vertical" : "horizontal";
     applyModeChrome();
     app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.structureSince) {
+  elements.structureSince.addEventListener("change", () => {
+    state.structureSince = elements.structureSince.value || null;
+    applyModeChrome();
     scan();
   });
 }

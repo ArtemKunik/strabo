@@ -3839,6 +3839,134 @@ body.screen-off-graph .float-window {
 .overlay-legend-item {
   color: var(--ink-2);
 }
+
+/* The tier lens matrix: names left, counts right-aligned in tabular figures so the columns
+   line up, and each tier keyed to its canvas card by a colour dot. */
+.tier-matrix {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.tier-matrix th,
+.tier-matrix td {
+  padding: 3px 6px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.tier-matrix tr:first-child th {
+  color: var(--ink-3);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+  vertical-align: bottom;
+}
+
+.tier-matrix-scroll {
+  overflow-x: auto;
+}
+
+/* Tier names and unit headers stay on one line; a long unit name ellipsises (full path on hover). */
+.tier-matrix th {
+  white-space: nowrap;
+}
+
+.tier-matrix .tier-unit {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tier-matrix .num {
+  text-align: right;
+}
+
+.tier-matrix tr.is-selected {
+  background: var(--accent-soft);
+}
+
+.tier-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  vertical-align: 0.05em;
+}
+
+/* The imports behind a Structure edge: each row opens the source at the import, and a
+   type-only one is muted and tagged, since it is the likely false positive. */
+.tier-imports ul {
+  max-height: 260px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.tier-imports li {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.tier-imports li.is-type-only {
+  opacity: 0.6;
+}
+
+.tier-import-open {
+  font-family: var(--font-mono, monospace);
+}
+
+.tier-import-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+/* Unclassified files in the tier lens, each with an "Assign to…" menu. */
+.tier-unclassified ul {
+  max-height: 240px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.tier-unclassified li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.tier-unclassified-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.tier-assign-status {
+  grid-column: 1 / -1;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+.tier-assign-status:empty {
+  display: none;
+}
+
+.tier-assign-scope {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.tier-assign-scope button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
 /* Change impact passport: the current-graph risk surface and the deltas a change made. */
 .impact-grid {
   display: grid;

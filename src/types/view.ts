@@ -44,6 +44,8 @@ export interface ViewNode extends GraphNode {
   cell?: string;
   /** In Structure mode (Y7), true when the band is declared in intent but has no files. */
   ghost?: boolean;
+  /** In a Structure comparison, files gained (+) or lost (−) since the baseline. */
+  filesDelta?: number;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -74,6 +76,14 @@ export interface ViewEdge extends GraphEdge {
   violation?: boolean;
   /** The declared rule id behind this intent or violation. */
   ruleId?: string;
+  /** In a Structure comparison, imports gained (+) or lost (−) on this edge since the baseline. */
+  weightDelta?: number;
+  /** In a Structure comparison, true for an edge that existed at the baseline and is gone now. */
+  baselineOnly?: boolean;
+  /** In a Structure view, how many of the rolled-up imports bring in types only. */
+  typeOnlyCount?: number;
+  /** In a Structure view, the rolled-up imports themselves (capped), for the edge panel. */
+  tierImports?: Array<{ source: string; target: string; line: number; specifier: string; typeOnly?: boolean }>;
 }
 
 export interface ViewPosition {
@@ -223,6 +233,13 @@ export interface ViewModel {
   structureEndpoints?: TierEndpointSite[];
   /** Intended vs observed architecture facts (Phase 35 Y7). */
   structureIntent?: TierIntentReport;
+  /**
+   * In the Structure stack, the revision the deltas are read against (`?since=`), or why
+   * it could not be read. Absent when no comparison was asked for.
+   */
+  structureBaseline?:
+    | { available: true; ref: string; revision: string; upwardDelta: number; skipDelta: number }
+    | { available: false; ref: string; detail: string };
 }
 
 /** A path-prefix aggregate used for block-level (directory) navigation. */

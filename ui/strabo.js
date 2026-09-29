@@ -23,7 +23,7 @@ import {
 } from './strabo-panels.js';
 import { buildBrickAssembly } from './strabo-lego.js';
 import { applyAppearance, readSettings, watchSystemPreferences } from './strabo-settings.js';
-import { fit, zoomIn, zoomOut } from './strabo-viewport.js';
+import { fit, refitIfUntouched, zoomIn, zoomOut } from './strabo-viewport.js';
 import { createStore } from './store.js';
 import { queryElements } from './strabo-elements.js';
 import { createViewPrefs } from './strabo-view-prefs.js';
@@ -118,6 +118,8 @@ const store = createStore({
     structureGrid: false,
     /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
     structureDirection: 'vertical',
+    // The revision the Structure stack is compared with (`?since=`), or null for none.
+    structureSince: null,
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
     structureCell: null,
     structureUnit: null,
@@ -519,6 +521,18 @@ function applyModeChrome() {
   if (elements.structureDirection) {
     elements.structureDirection.value = state.structureDirection ?? 'vertical';
   }
+  if (elements.structureSinceField) {
+    elements.structureSinceField.hidden =
+      state.mode !== 'structure' || state.structureGrid || Boolean(state.structureCell);
+  }
+  if (elements.structureSince) {
+    const since = state.structureSince ?? '';
+    // A ref from the URL that the menu does not list gets its own option, so it shows.
+    if (since && ![...elements.structureSince.options].some((option) => option.value === since)) {
+      elements.structureSince.append(new Option(since, since));
+    }
+    elements.structureSince.value = since;
+  }
 }
 
 elements.detail.addEventListener('change', () => {
@@ -572,6 +586,31 @@ if (elements.graphEmptyClear) {
 if (elements.zoomIn) elements.zoomIn.addEventListener('click', () => zoomIn(view.cy));
 if (elements.zoomOut) elements.zoomOut.addEventListener('click', () => zoomOut(view.cy));
 if (elements.zoomFit) elements.zoomFit.addEventListener('click', () => fit(view.cy));
+// A floating window shown, hidden, moved, or resized (a panel filling in its content)
+// changes the free canvas; a map still at its fitted viewport follows, so a panel restored
+// after load never covers the cards. The debounce means a drag refits once, on release.
+{
+  let refitTimer = 0;
+  const scheduleRefit = () => {
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(() => refitIfUntouched(view.cy), 250);
+  };
+  const sized = new ResizeObserver(scheduleRefit);
+  const watched = new WeakSet();
+  const watchWindows = () => {
+    for (const win of document.querySelectorAll('.float-window')) {
+      if (!watched.has(win)) {
+        watched.add(win);
+        sized.observe(win);
+      }
+    }
+  };
+  watchWindows();
+  new MutationObserver((records) => {
+    if (records.some((record) => record.addedNodes?.length > 0)) watchWindows();
+    if (records.some((record) => record.target.classList?.contains('float-window'))) scheduleRefit();
+  }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+}
 elements.diagnosticsToggle.addEventListener('click', () => {
   const hidden = elements.diagnostics.hidden;
   elements.diagnostics.hidden = !hidden;
@@ -606,6 +645,13 @@ if (elements.tbDirection) {
     state.structureDirection = state.structureDirection === 'horizontal' ? 'vertical' : 'horizontal';
     applyModeChrome();
     app.prefs.schedulePrefsSave();
+    scan();
+  });
+}
+if (elements.structureSince) {
+  elements.structureSince.addEventListener('change', () => {
+    state.structureSince = elements.structureSince.value || null;
+    applyModeChrome();
     scan();
   });
 }

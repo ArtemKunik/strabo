@@ -52,6 +52,10 @@ export function buildGraphQuery(state, options = {}) {
     if (state.structureDirection === 'horizontal') {
       params.set('direction', 'horizontal');
     }
+    // The stack's comparison baseline; the grid and a cell drill-down do not read one.
+    if (state.structureSince && !state.structureCell && !state.structureGrid) {
+      params.set('since', state.structureSince);
+    }
     if (state.structureCell) {
       params.set('level', 'cell');
       params.set('cell', state.structureCell);

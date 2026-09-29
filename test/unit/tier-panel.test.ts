@@ -155,3 +155,38 @@ test('renderTierPanel renders dismiss button when given onClose handler', () => 
   assert.equal(closed, true, 'onClose handler was called on dismiss click');
 });
 
+
+test('renderTierPanel lists unclassified files and assigns a file or its whole folder', async () => {
+  const container = document.createElement('div');
+  const report = sampleReport();
+  report.files = [
+    { file: 'misc/odd.ts', tier: 'unclassified', mixed: false, evidence: [], lines: 1, tables: [] },
+    { file: 'src/api/orders.ts', tier: 'api', mixed: false, evidence: [], lines: 5, tables: [] },
+  ];
+  const calls: Array<[string, string]> = [];
+  renderTierPanel(container, report, 'all', {
+    onAssign: async (glob: string, tier: string) => {
+      calls.push([glob, tier]);
+    },
+  });
+  const rows = [...container.querySelectorAll('[data-role="tier-unclassified-file"]')];
+  assert.equal(rows.length, 1);
+  const select = rows[0]!.querySelector('select') as HTMLSelectElement;
+  select.value = 'data';
+  select.dispatchEvent(new window.Event('change'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  (container.querySelector('.tier-assign-scope button[data-scope="folder"]') as HTMLButtonElement).click();
+  select.disabled = false;
+  select.value = 'domain';
+  select.dispatchEvent(new window.Event('change'));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, [
+    ['misc/odd.ts', 'data'],
+    ['misc/**', 'domain'],
+  ]);
+  assert.match(rows[0]!.textContent ?? '', /→ Domain\/service \(misc\/\*\*\)/);
+
+  const without = document.createElement('div');
+  renderTierPanel(without, report, 'all');
+  assert.equal(without.querySelector('[data-role="tier-unclassified"]'), null);
+});

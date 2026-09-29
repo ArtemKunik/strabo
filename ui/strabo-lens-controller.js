@@ -11,6 +11,7 @@ import {
   tierOfFile,
   withUnitHotspots,
 } from './strabo-core.js';
+import { showToast } from './strabo-delegate.js';
 import { tierDirectionClasses } from './strabo-tiers.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
 import { renderOverlayPanel } from './strabo-panels.js';
@@ -27,6 +28,29 @@ export function createLensController(app) {
    * colour an aggregate.
    */
   let tierReportCache = { generation: -1, report: null };
+
+  /**
+   * Declare `glob` as `tier` in the repository's `strabo.groups.yml`, then re-read: the cached
+   * report is dropped and the map re-scanned, so the file moves card on the next render.
+   * Throws with the server's reason when the assignment is refused.
+   */
+  async function assignTier(glob, tier) {
+    const query = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+    const response = await fetch(`${API_PATH}/analysis/tiers/assign${query}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ glob, tier }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error ?? `${response.status} ${response.statusText}`);
+    }
+    tierReportCache = { generation: -1, report: null };
+    // The row that asked disappears once the file is classified, so the toast is the receipt.
+    showToast(`Declared ${payload.glob} as ${tier} in ${payload.file}${payload.created ? ' (new file)' : ''}.`);
+    app.scan();
+    return payload;
+  }
 
   async function applyTierLens() {
     if (state.tier === 'off' || !app.current || app.current.system || app.current.prefixLength !== undefined) {
@@ -66,6 +90,7 @@ export function createLensController(app) {
     if (state.overlay === 'none') {
       renderTierPanel(elements.overlayPanel, tierReportCache.report, state.tier, {
         onClose: closeLensPanel,
+        onAssign: assignTier,
       });
     }
   }

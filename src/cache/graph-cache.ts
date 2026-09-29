@@ -8,7 +8,7 @@ import type { ScanReport } from '../types.ts';
 import { run } from '../process.ts';
 
 /** Bump when the on-disk artifact shape changes. */
-export const CACHE_ARTIFACT_VERSION = 'strabo-cache-5';
+export const CACHE_ARTIFACT_VERSION = 'strabo-cache-6';
 export const MEMORY_TTL_MS = 60_000;
 
 export type ScanFn = (root: string) => Promise<ScanReport>;

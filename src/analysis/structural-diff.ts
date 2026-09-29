@@ -96,7 +96,7 @@ export type StructuralDiffResult =
   | { available: false; reason: StructuralUnavailableReason; detail?: string };
 
 /** Bump when the cached graph/context shape changes. */
-export const REVISION_GRAPH_VERSION = 'revision-graph-1';
+export const REVISION_GRAPH_VERSION = 'revision-graph-2';
 /** Bounded, in-memory base graphs. Building a revision's graph is the expensive part. */
 const BASE_CACHE_LIMIT = 4;
 /** Bounded entries per repository in the persisted store. */
@@ -647,4 +647,33 @@ function classifyGitFailure(error: unknown, ref: string): StructuralDiffResult {
 function firstLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split('\n')[0] ?? message;
+}
+
+/** The graph at a named revision for a baseline comparison, or why it could not be read. */
+export type RevisionBaseline =
+  | { available: true; ref: string; revision: string; graph: Graph }
+  | { available: false; ref: string; detail: string };
+
+/**
+ * Resolve `ref` to a commit and return the graph recorded there, from the same memory/disk
+ * cache the structural diff uses. Never throws: an unknown ref, a missing repository, or a
+ * failed base scan comes back as `available: false` with the reason, not an empty graph.
+ */
+export async function revisionBaseline(root: string, ref: string, repository: string): Promise<RevisionBaseline> {
+  if (!ref.trim() || !isSafeRevision(ref)) {
+    return { available: false, ref, detail: `Unknown revision "${ref}".` };
+  }
+  let revision: string;
+  try {
+    revision = (await git(root, ['rev-parse', '--verify', `${ref}^{commit}`])).trim();
+  } catch (error) {
+    const failure = classifyGitFailure(error, ref);
+    return { available: false, ref, detail: (!failure.available && failure.detail) || firstLine(error) };
+  }
+  try {
+    const { graph } = await revisionGraph(root, revision, repository);
+    return { available: true, ref, revision, graph };
+  } catch (error) {
+    return { available: false, ref, detail: firstLine(error) };
+  }
 }

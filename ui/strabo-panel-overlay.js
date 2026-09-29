@@ -216,6 +216,53 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
 
 
 /**
+ * The imports behind a Structure edge, one row each: `source:line → target`, type-only ones
+ * tagged and listed last, since they are the likely false positives. A row opens the source
+ * at the import. The report keeps a capped sample, so a longer roll-up says how many are unlisted.
+ */
+function renderTierImports(imports, weight, handlers) {
+  const section = document.createElement('div');
+  section.className = 'tier-imports';
+  section.dataset.role = 'tier-imports';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Imports';
+  section.append(heading);
+  const ordered = [...imports].sort((a, b) => Number(a.typeOnly === true) - Number(b.typeOnly === true));
+  const list = document.createElement('ul');
+  for (const entry of ordered) {
+    const item = document.createElement('li');
+    item.dataset.role = 'tier-import';
+    if (entry.typeOnly) item.classList.add('is-type-only');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'tier-import-open';
+    open.title = `${entry.specifier} — open the source at this import`;
+    open.textContent = `${entry.source}:${entry.line}`;
+    if (handlers.onViewSource) {
+      open.addEventListener('click', () => handlers.onViewSource(entry.source, entry.line));
+    } else {
+      open.disabled = true;
+    }
+    item.append(open, document.createTextNode(` → ${entry.target}`));
+    if (entry.typeOnly) {
+      const tag = document.createElement('span');
+      tag.className = 'tier-import-tag';
+      tag.textContent = 'type';
+      item.append(tag);
+    }
+    list.append(item);
+  }
+  section.append(list);
+  if (typeof weight === 'number' && weight > imports.length) {
+    const more = document.createElement('p');
+    more.className = 'overlay-note';
+    more.textContent = `${weight - imports.length} more not listed.`;
+    section.append(more);
+  }
+  return section;
+}
+
+/**
  * Explain one edge: endpoints, relationship kind, and the evidence that produced it.
  * Pass null to hide. Unrecorded fields are shown as unavailable, never guessed.
  */
@@ -235,7 +282,7 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   const headingDetail =
     evidence.tierKind === 'upward'
       ? ' · Upward (Architecture Violation)'
-      : evidence.tierKind === 'skip'
+      : evidence.tierKind === 'skip-layer'
         ? ' · Skip-layer'
         : evidence.violation
           ? ' · Architecture Violation'
@@ -253,7 +300,15 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   const facts = document.createElement('dl');
   facts.className = 'passport-metrics';
   if (evidence.tierKind) {
-    appendFact(facts, 'Flow direction', evidence.tierKind === 'upward' ? 'Upward (against stack order)' : 'Skip-layer');
+    appendFact(
+      facts,
+      'Flow direction',
+      evidence.tierKind === 'upward'
+        ? 'Upward (against stack order)'
+        : evidence.tierKind === 'skip-layer'
+          ? 'Skip-layer'
+          : 'Down (follows stack order)',
+    );
   }
   if (evidence.ruleId) {
     appendFact(facts, 'Rule', evidence.ruleId);
@@ -261,10 +316,20 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (typeof evidence.weight === 'number') {
     appendFact(facts, 'Recorded imports', String(evidence.weight));
   }
-  appendFact(facts, 'Specifier', evidence.specifier ?? 'not recorded');
-  appendFact(facts, 'Line', evidence.line === null ? 'not recorded' : String(evidence.line));
-  appendFact(facts, 'Resolution', evidence.resolutionLabel);
-  container.append(facts);
+  const tierImports = evidence.tierImports;
+  if (tierImports) {
+    // A Structure edge is a roll-up: its evidence is the list of imports below, not one line.
+    if (typeof evidence.typeOnlyCount === 'number' && evidence.typeOnlyCount > 0) {
+      appendFact(facts, 'Type-only', `${evidence.typeOnlyCount} of ${evidence.weight} (erased at compile time)`);
+    }
+    container.append(facts);
+    container.append(renderTierImports(tierImports, evidence.weight, handlers));
+  } else {
+    appendFact(facts, 'Specifier', evidence.specifier ?? 'not recorded');
+    appendFact(facts, 'Line', evidence.line === null ? 'not recorded' : String(evidence.line));
+    appendFact(facts, 'Resolution', evidence.resolutionLabel);
+    container.append(facts);
+  }
 
   // T6: the graph fingerprint and scan time behind the evidence, labelled stale when the
   // served graph is older than the working tree.
@@ -277,7 +342,7 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
     container.append(line);
   }
 
-  if (handlers.onViewSource) {
+  if (handlers.onViewSource && !tierImports) {
     const source = document.createElement('button');
     source.type = 'button';
     source.className = 'source-open';

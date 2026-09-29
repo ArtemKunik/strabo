@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { buildBlockViewModel } from '../../analysis/blocks.ts';
 import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
+import { revisionBaseline } from '../../analysis/structural-diff.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
 import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
@@ -16,6 +17,7 @@ import {
   buildSystemUnitViewModel,
   buildSystemViewModel,
   buildViewModel,
+  type StructureViewOptions,
 } from '../../view/view-model.ts';
 import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 
@@ -98,10 +100,25 @@ export function createGraphRouter(config: StraboConfig): Router {
 
         const direction = asString(request.query.direction) ?? asString(request.query.orientation);
         const isHorizontal = direction === 'horizontal' || direction === 'lr';
+        if (level === 'grid') {
+          response.json(buildStructureGridViewModel(report, descriptor, cache));
+          return;
+        }
+        // `since=<ref>`: read the stack against the graph at that revision, classified with
+        // the same working-tree rules, so the deltas show what the change did to the layering.
+        const since = asString(request.query.since);
+        let baseline: StructureViewOptions['baseline'];
+        if (since) {
+          const base = await revisionBaseline(repository.root, since, repository.name);
+          baseline = base.available
+            ? { ...base, report: buildTierReport(repository.root, repository.name, base.graph) }
+            : base;
+        }
         response.json(
-          level === 'grid'
-            ? buildStructureGridViewModel(report, descriptor, cache)
-            : buildStructureViewModel(report, descriptor, cache, { direction: isHorizontal ? 'horizontal' : 'vertical' }),
+          buildStructureViewModel(report, descriptor, cache, {
+            direction: isHorizontal ? 'horizontal' : 'vertical',
+            baseline,
+          }),
         );
         return;
       }

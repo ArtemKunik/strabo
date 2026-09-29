@@ -157,6 +157,16 @@ export interface TierDirection {
   specifier: string;
 }
 
+/** One recorded import behind a tier-flow edge: the file pair and where it is written. */
+export interface TierFlowImport {
+  source: string;
+  target: string;
+  line: number;
+  specifier: string;
+  /** True when the import brings in types only. */
+  typeOnly?: boolean;
+}
+
 /** One aggregated flow between two role tiers, read from recorded imports (calls excluded). */
 export interface TierFlowEdge {
   source: Tier;
@@ -167,6 +177,10 @@ export interface TierFlowEdge {
   weight: number;
   /** Contributing edges whose two ends sit in different build units. */
   crossUnit: number;
+  /** Contributing edges that import types only (erased at compile time; TypeScript). */
+  typeOnly?: number;
+  /** The contributing imports themselves, capped at `TIER_FLOW_SAMPLE_LIMIT`, file order. */
+  imports?: TierFlowImport[];
   /** The build units the contributing edges start in, for scope. */
   units: string[];
   /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */
