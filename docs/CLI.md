@@ -15,6 +15,9 @@ node bin/strabo.js check --fail-on-cycles --fail-on-layer-violations
 node bin/strabo.js check --write-baseline        # record today's findings
 node bin/strabo.js check --fail-on-new-smells    # then fail only on new ones
 
+# data-contract boundaries: ungoverned crossings and drifting implementations
+node bin/strabo.js check --fail-on=contract-ungoverned-boundary,contract-drift-detected
+
 # the recorded analysis over MCP (stdio), read-only
 node bin/strabo.js mcp
 ```
@@ -65,6 +68,10 @@ The document has six parts:
   There is no model prose: a suggestion with no pain point behind it is never emitted, so the
   section is available with nothing configured and never speculates. (A narrator layer over
   the same facts is a later, opt-in follow-up.)
+- **Contracts & Boundaries** — declared contracts with their declared-vs-DTO origin, the
+  cross-unit boundaries they govern (with conformance), uncontracted crossings, orphaned
+  contracts, and unverified name matches. A governed edge exists only because a recorded
+  import, call, or data use resolved to the contract.
 - **Evidence** — the counts, and a named list of any section the caller did not compute, so a
   missing analysis is visible rather than shown as empty.
 

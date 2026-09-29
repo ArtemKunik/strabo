@@ -806,6 +806,50 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/data/lineage', args, { dataset: requiredArg(args, 'dataset') }),
     },
     {
+      name: 'get_data_contracts',
+      description:
+        'The governed data contracts: each declared contract with its format, fields, declared-vs-DTO origin, the cross-unit boundaries it governs with their conformance status, uncontracted crossings, orphaned contracts, and unverified name matches. Every edge exists only because a recorded import, call, or data use resolved to the contract.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/contracts/graph', args),
+    },
+    {
+      name: 'get_contract_consumers',
+      description:
+        'Downstream files and units for one contract id (or field): the recorded consumers bound through a governed edge, the repositories they belong to, uncontracted bypass pairs, and conformance findings. Pass `contract` for the contract id; `field` narrows the question without changing the recorded consumers.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contract: { type: 'string', description: 'A contract id, e.g. an OpenAPI schema or Protobuf message.' },
+          field: { type: 'string', description: 'An optional field of the contract.' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['contract'],
+        additionalProperties: false,
+      },
+      call: (args) =>
+        get(dispatch, '/analysis/contracts/consumers', args, {
+          contract: requiredArg(args, 'contract'),
+          field: stringArg(args, 'field'),
+        }),
+    },
+    {
+      name: 'check_contract_conformance',
+      description:
+        'Contract conformance across the workspace: every governed edge with its schema fields, access role, and recorded deviations (missing fields, type mismatches, divergent required-ness). A pair with no recorded binding is reported uncontracted, never conforming.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/contracts/edge', args),
+    },
+    {
       name: 'get_dead_code',
       description: 'Files nothing imports, and that are neither entry points nor tests.',
       inputSchema: {

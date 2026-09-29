@@ -71,6 +71,32 @@ test('runCheck warns rather than failing when no rules are enabled', async () =>
   assert.ok(result.warnings.some((warning) => warning.rule === 'check'));
 });
 
+test('parseFailOnRules maps the contract boundary aliases (K6)', () => {
+  assert.deepEqual(parseFailOnRules(['contract-boundary', 'contract-drift']), [
+    'contract-ungoverned-boundary',
+    'contract-drift-detected',
+  ]);
+  assert.deepEqual(parseFailOnRules(['contract-ungoverned-boundary,contract-drift-detected']), [
+    'contract-ungoverned-boundary',
+    'contract-drift-detected',
+  ]);
+});
+
+test('runCheck answers the contract rules from recorded facts (K6)', async () => {
+  const result = await runCheck({
+    workspaceRoot: config.workspaceRoot,
+    scanCeiling: fixtures,
+    rules: ['contract-ungoverned-boundary', 'contract-drift-detected'],
+  });
+  assert.deepEqual(result.rules, ['contract-ungoverned-boundary', 'contract-drift-detected']);
+  for (const finding of result.findings) {
+    assert.ok(
+      finding.rule === 'contract-ungoverned-boundary' || finding.rule === 'contract-drift-detected',
+    );
+    assert.ok(finding.key.length > 0 && finding.node.length > 0 && finding.detail.length > 0);
+  }
+});
+
 test('parseFailOnRules and parseUncoveredChangeThreshold parse coverage gate flags (U7)', () => {
   const rules = parseFailOnRules(['uncovered-change:85', 'coverage-stale', 'cycles']);
   assert.deepEqual(rules, ['cycles', 'uncovered-change', 'coverage-stale']);

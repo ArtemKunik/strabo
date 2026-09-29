@@ -4,6 +4,7 @@ import { detectCoverageEcosystems } from '../analysis/coverage-refresh.ts';
 import { DEFAULT_COVERAGE_REPORT_PATHS, type MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import { computeRepositoryPassport, computeUntested } from '../analysis/passport.ts';
 import type { DataReport, DependencyAdvisory, Graph, RiskReport } from '../types.ts';
+import type { ContractBoundaryReport } from '../analysis/data/contracts-graph.ts';
 import type { SmellRule, SmellsReport } from '../analysis/quality.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
@@ -12,6 +13,7 @@ import {
   DEFAULT_REPORT_LIMITS,
   SEVERITY_ORDER,
   type PainPoint,
+  type RepositoryContractsSection,
   type RepositoryCoverageSection,
   type RepositoryDataSection,
   type RepositoryReportDocument,
@@ -114,6 +116,13 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     unavailable.push('the data layer was not computed');
   }
 
+  let contracts: RepositoryContractsSection | null = null;
+  if (inputs.contracts) {
+    contracts = contractsSection(inputs.contracts);
+  } else {
+    unavailable.push('contract boundaries were not computed');
+  }
+
   let coverage: RepositoryCoverageSection | null = null;
   if (inputs.coverage) {
     coverage = coverageSection(inputs.coverage, inputs.root);
@@ -137,6 +146,7 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     change: inputs.change ?? null,
     drift: inputs.drift ?? null,
     data,
+    contracts,
     coverage,
     structure,
     suggestions: shown.map(suggestionFor),
@@ -215,6 +225,28 @@ function structureSection(
       unit: d.unit,
       line: d.line,
     })),
+  };
+}
+
+/** Trim a computed contract boundary into the report's section, keeping every edge. */
+function contractsSection(boundary: ContractBoundaryReport): RepositoryContractsSection {
+  const drifting = new Set(
+    boundary.governedEdges.filter((edge) => edge.conformance === 'drifting').map((edge) => edge.contract),
+  );
+  return {
+    definitions: boundary.definitions,
+    governedEdges: boundary.governedEdges,
+    uncontractedBoundaries: boundary.uncontractedBoundaries,
+    conformance: boundary.conformanceDeviations,
+    orphaned: boundary.orphanedContracts,
+    unverified: boundary.unverifiedEdges,
+    gaps: {
+      governed: boundary.governedEdges.length,
+      uncontracted: boundary.uncontractedBoundaries.length,
+      drifting: drifting.size,
+      orphaned: boundary.orphanedContracts.length,
+      unverified: boundary.unverifiedEdges.length,
+    },
   };
 }
 

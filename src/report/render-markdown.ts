@@ -1,6 +1,7 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryContractsSection,
   RepositoryCoverageSection,
   RepositoryDataSection,
   RepositoryReportDocument,
@@ -39,6 +40,7 @@ export function renderReportMarkdown(document: RepositoryReportDocument): string
   renderTierStructure(lines, document.structure);
   renderDrift(lines, document.drift);
   renderData(lines, document.data);
+  renderContracts(lines, document.contracts);
   renderSuggestions(lines, document);
   renderEvidence(lines, document);
   return `${lines.join('\n')}\n`;
@@ -342,6 +344,52 @@ function renderData(lines: string[], data: RepositoryDataSection | null): void {
         `\`${tag.dataset}\`${tag.field ? `.${tag.field}` : ''} — ${tag.tag} (${tag.source})`,
     ),
   );
+  lines.push('');
+}
+
+function renderContracts(lines: string[], contracts: RepositoryContractsSection | null): void {
+  lines.push('## Contracts & Boundaries');
+  if (!contracts) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  lines.push(
+    `- ${contracts.definitions.length} contract(s) · ${contracts.gaps.governed} governed edge(s) · ${contracts.gaps.uncontracted} uncontracted · ${contracts.gaps.drifting} drifting · ${contracts.gaps.orphaned} orphaned · ${contracts.gaps.unverified} unverified`,
+  );
+  section(
+    lines,
+    `Contract definitions (${contracts.definitions.length})`,
+    contracts.definitions.map(
+      (definition) => `\`${definition.id}\` — ${definition.format} (${definition.origin}), ${definition.fields.length} field(s) in \`${definition.source}\``,
+    ),
+  );
+  section(
+    lines,
+    `Governed boundaries (${contracts.governedEdges.length})`,
+    contracts.governedEdges.map(
+      (edge) => `\`${edge.source}\` → \`${edge.target}\` — ${edge.badge} · ${edge.conformance}`,
+    ),
+  );
+  section(
+    lines,
+    `Ungoverned boundaries (${contracts.uncontractedBoundaries.length})`,
+    contracts.uncontractedBoundaries.map(
+      (edge) => `\`${edge.source}\` → \`${edge.target}\` — ${edge.badge}: ${edge.reason}`,
+    ),
+  );
+  section(
+    lines,
+    `Orphaned contracts (${contracts.orphaned.length})`,
+    contracts.orphaned.map((entry) => `\`${entry.id}\` — ${entry.format} in \`${entry.source}\``),
+  );
+  if (contracts.unverified.length > 0) {
+    section(
+      lines,
+      `Unverified (${contracts.unverified.length})`,
+      contracts.unverified.map((entry) => `\`${entry.source}\` → \`${entry.target}\` names \`${entry.contract}\`: ${entry.reason}`),
+    );
+  }
   lines.push('');
 }
 

@@ -78,8 +78,13 @@ outside), `get_public_api_diff` (exported symbols added, removed, or re-signed b
 revisions, with their recorded consumers), `get_clones` (functions whose normalised bodies
 hash the same), `get_string_edges` (environment variables, HTTP routes, and feature flags,
 with dynamic keys reported as not resolved), `strabo_rules` (the declared architecture rules
-and the edges that violate them), and `get_drift` (one structural-measure series per recent
-revision, a gap rather than a zero where the cache has no measure).
+and the edges that violate them), `get_drift` (one structural-measure series per recent
+revision, a gap rather than a zero where the cache has no measure), `get_data_contracts`
+(the governed data contracts: definitions with declared-vs-DTO origin, governed boundaries
+with conformance, uncontracted crossings, orphaned contracts, unverified matches),
+`get_contract_consumers` (downstream files and units for one contract id or field), and
+`check_contract_conformance` (schema fields, access roles, and recorded deviations per
+governed edge; uncontracted pairs are reported, never conforming).
 
 File-level tools carry the recorded edge, not only the target path: each edge is the graph's
 own record with `evidence.line` (the 1-based import line) and `evidence.specifier` (the

@@ -1,6 +1,7 @@
 import type {
   PainPoint,
   RepositoryChangeSection,
+  RepositoryContractsSection,
   RepositoryCoverageSection,
   RepositoryDataSection,
   RepositoryReportDocument,
@@ -29,6 +30,7 @@ export function renderReportHtml(document: RepositoryReportDocument): string {
   body.push(structureHtmlSection(document.structure));
   body.push(driftSection(document.drift));
   body.push(dataSection(document.data));
+  body.push(contractsSection(document.contracts));
   body.push(suggestionSection(document));
   body.push(evidenceSection(document));
 
@@ -336,6 +338,52 @@ function dataSection(data: RepositoryDataSection | null): string {
       data.classifications.map(
         (tag) =>
           `<code>${escapeHtml(tag.dataset)}</code>${tag.field ? `.${escapeHtml(tag.field)}` : ''} - ${escapeHtml(tag.tag)} (${escapeHtml(tag.source)})`,
+      ),
+    ),
+  );
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+function contractsSection(contracts: RepositoryContractsSection | null): string {
+  const parts: string[] = ['<section>', '<h2>Contracts &amp; Boundaries</h2>'];
+  if (!contracts) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  parts.push(
+    `<p>${contracts.definitions.length} contract(s) · ${contracts.gaps.governed} governed edge(s) · ${contracts.gaps.uncontracted} uncontracted · ${contracts.gaps.drifting} drifting · ${contracts.gaps.orphaned} orphaned · ${contracts.gaps.unverified} unverified</p>`,
+  );
+  parts.push(
+    sublist(
+      `Contract definitions (${contracts.definitions.length})`,
+      contracts.definitions.map(
+        (definition) => `<code>${escapeHtml(definition.id)}</code> - ${escapeHtml(definition.format)} (${escapeHtml(definition.origin)}), ${definition.fields.length} field(s) in <code>${escapeHtml(definition.source)}</code>`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Governed boundaries (${contracts.governedEdges.length})`,
+      contracts.governedEdges.map(
+        (edge) => `<code>${escapeHtml(edge.source)}</code> → <code>${escapeHtml(edge.target)}</code> - ${escapeHtml(edge.badge)} · ${escapeHtml(edge.conformance)}`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Ungoverned boundaries (${contracts.uncontractedBoundaries.length})`,
+      contracts.uncontractedBoundaries.map(
+        (edge) => `<code>${escapeHtml(edge.source)}</code> → <code>${escapeHtml(edge.target)}</code> - ${escapeHtml(edge.badge)}: ${escapeHtml(edge.reason)}`,
+      ),
+    ),
+  );
+  parts.push(
+    sublist(
+      `Orphaned contracts (${contracts.orphaned.length})`,
+      contracts.orphaned.map(
+        (entry) => `<code>${escapeHtml(entry.id)}</code> - ${escapeHtml(entry.format)} in <code>${escapeHtml(entry.source)}</code>`,
       ),
     ),
   );

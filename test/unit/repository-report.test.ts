@@ -215,6 +215,7 @@ function inputs(overrides: Partial<RepositoryReportInputs> = {}): RepositoryRepo
     ownership: ownership(),
     risk: risk(),
     data: dataReport(),
+    contracts: contractsReport(),
     structure: structureReport(),
     generatedAt: '2026-01-02T00:00:00.000Z',
     ...overrides,
@@ -369,6 +370,67 @@ function dataReport(): RepositoryReportInputs['data'] {
   };
 }
 
+function contractsReport(): RepositoryReportInputs['contracts'] {
+  return {
+    definitions: [
+      {
+        id: 'Users#User',
+        bareId: 'User',
+        qualifiedId: 'api.yaml#/components/schemas/User',
+        format: 'openapi',
+        origin: 'declared',
+        repository: 'demo',
+        source: 'api.yaml',
+        fields: [{ name: 'id', type: 'string', required: true }],
+        fingerprint: 'aaa',
+      },
+    ],
+    governedEdges: [
+      {
+        source: 'a.ts',
+        target: 'b.ts',
+        contract: 'Users#User',
+        contractFormat: 'openapi',
+        kind: 'data',
+        repository: 'demo',
+        dataset: 'db:demo/orders',
+        sourceUnit: '.',
+        targetUnit: '.',
+        conformance: 'conforming',
+        badge: '📜 User (openapi)',
+        evidence: { repository: 'demo', file: 'a.ts', detail: 'shares governed dataset db:demo/users' },
+      },
+    ],
+    uncontractedBoundaries: [
+      {
+        source: 'b.ts',
+        target: 'c.ts',
+        kind: 'data',
+        dataset: 'db:demo/logs',
+        sourceUnit: '.',
+        targetUnit: '.',
+        reason: 'shares dataset db:demo/logs across units with no governing contract',
+        badge: '⚠️ uncontracted',
+        evidence: { repository: 'demo', file: 'b.ts', detail: 'shares db:demo/logs' },
+      },
+    ],
+    conformanceDeviations: [],
+    orphanedContracts: [],
+    unverifiedEdges: [],
+    summary: {
+      contracts: 1,
+      declared: 1,
+      dto: 0,
+      governed: 1,
+      uncontracted: 1,
+      drifting: 0,
+      orphaned: 0,
+      unverified: 0,
+    },
+    unavailable: [],
+  };
+}
+
 test('the data layer is a report section, and absent means named not empty', () => {
   const document = buildRepositoryReport(inputs({ data: dataReport() }));
   const section = document.data;
@@ -386,6 +448,27 @@ test('the data layer is a report section, and absent means named not empty', () 
   assert.equal(absent.data, null);
   assert.ok(absent.evidence.unavailable.includes('the data layer was not computed'));
   assert.match(renderReportMarkdown(absent), /## Data layer\n- not included in this report/);
+});
+
+test('governed contract boundaries are a report section, and absent means named not empty', () => {
+  const document = buildRepositoryReport(inputs({ contracts: contractsReport() }));
+  const section = document.contracts;
+  assert.ok(section);
+  assert.equal(section.definitions[0]?.id, 'Users#User');
+  assert.equal(section.definitions[0]?.origin, 'declared');
+  assert.equal(section.gaps.governed, 1);
+  assert.equal(section.gaps.uncontracted, 1);
+
+  const markdown = renderReportMarkdown(document);
+  assert.match(markdown, /## Contracts & Boundaries/);
+  assert.match(markdown, /`Users#User` — openapi \(declared\)/);
+  assert.match(markdown, /`a\.ts` → `b\.ts` — 📜 User \(openapi\) · conforming/);
+  assert.match(markdown, /`b\.ts` → `c\.ts` — ⚠️ uncontracted/);
+
+  const absent = buildRepositoryReport(inputs({ contracts: undefined }));
+  assert.equal(absent.contracts, null);
+  assert.ok(absent.evidence.unavailable.includes('contract boundaries were not computed'));
+  assert.match(renderReportMarkdown(absent), /## Contracts & Boundaries\n- not included in this report/);
 });
 
 test('suggestionFor maps a cycle to an evidence-bound action', () => {

@@ -8,6 +8,12 @@ import type { OwnershipContext } from '../analysis/ownership.ts';
 import type { SmellsReport } from '../analysis/quality.ts';
 import type { Tier, TierFlow, TierShelfEntry, TierReport } from '../analysis/tiers/types.ts';
 import type { CoverageCommandSuggestion } from '../analysis/coverage-refresh.ts';
+import type {
+  ContractBoundaryDefinition,
+  ContractBoundaryReport,
+  GovernedEdge,
+  UncontractedBoundary,
+} from '../analysis/data/contracts-graph.ts';
 import type { DataReport, Graph, RiskReport } from '../types.ts';
 
 /**
@@ -37,6 +43,8 @@ export interface RepositoryReportDocument {
   drift: DriftReport | null;
   /** The data layer, contract, and product facts (Phase 33 J10); null when not computed. */
   data: RepositoryDataSection | null;
+  /** Governed contract boundaries (Phase 36 K6); null when not computed. */
+  contracts: RepositoryContractsSection | null;
   /** Code coverage from measured report or reachability fallback (Phase 34 U7); null when not computed. */
   coverage: RepositoryCoverageSection | null;
   /** Logical structure across role tiers (Phase 35 Y8); null when not computed. */
@@ -64,6 +72,29 @@ export interface RepositoryDataSection {
     noSingleWriter: number;
     contractlessPort: number;
     unconformant: number;
+  };
+}
+
+/**
+ * The governed-boundaries part of the repository report: declared contracts joined to the
+ * cross-unit dependencies they govern, the uncontracted crossings, and the honesty lists
+ * (orphaned contracts, unverified name matches). Present only when the caller computed
+ * the contract boundary.
+ */
+export interface RepositoryContractsSection {
+  definitions: ContractBoundaryDefinition[];
+  governedEdges: GovernedEdge[];
+  uncontractedBoundaries: UncontractedBoundary[];
+  conformance: DataReport['conformance'];
+  orphaned: ContractBoundaryDefinition[];
+  unverified: Array<{ source: string; target: string; contract: string; reason: string }>;
+  /** Coverage of the boundary lens, stated so an empty section is never read as "no contracts". */
+  gaps: {
+    governed: number;
+    uncontracted: number;
+    drifting: number;
+    orphaned: number;
+    unverified: number;
   };
 }
 
@@ -235,6 +266,8 @@ export interface RepositoryReportInputs {
   coverage?: MeasuredCoverageSummary | RepositoryCoverageSection | null;
   /** The computed data layer (Phase 33 J10); absent means the section was not computed. */
   data?: DataReport;
+  /** The computed contract boundary (Phase 36 K1); absent means the section was not computed. */
+  contracts?: ContractBoundaryReport;
   /** Precomputed logical structure / tier report (Phase 35 Y8); absent means not computed. */
   structure?: TierReport | RepositoryStructureSection;
   generatedAt?: string;

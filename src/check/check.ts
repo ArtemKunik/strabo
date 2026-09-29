@@ -1,4 +1,5 @@
 import { computeCycles } from '../analysis/cycles.ts';
+import { buildContractBoundary, type ContractBoundaryReport } from '../analysis/data/contracts-graph.ts';
 import { computeArchitectureHealth } from '../analysis/health.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../analysis/quality.ts';
 import { checkDeclaredRules, readDeclaredRules } from '../analysis/rules.ts';
@@ -8,6 +9,7 @@ import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../cache/graph-cache.ts';
 import { revisionFromFingerprint } from '../status.ts';
 import type { Graph, StraboConfig } from '../types.ts';
+import type { WorkspaceReport } from '../types.ts';
 import { analyzeWorkspace } from '../workspace/analyze.ts';
 import { resolveWorkspaceRepositories } from '../workspace/config.ts';
 import { BASELINE_VERSION, type CheckBaseline } from './baseline.ts';
@@ -27,6 +29,8 @@ export type CheckRule =
   | 'data-contract-breaking'
   | 'data-no-single-writer'
   | 'data-unconformant'
+  | 'contract-ungoverned-boundary'
+  | 'contract-drift-detected'
   | 'uncovered-change'
   | 'coverage-stale';
 
@@ -38,6 +42,8 @@ export const CHECK_RULES: readonly CheckRule[] = [
   'data-contract-breaking',
   'data-no-single-writer',
   'data-unconformant',
+  'contract-ungoverned-boundary',
+  'contract-drift-detected',
   'uncovered-change',
   'coverage-stale',
 ];
@@ -67,6 +73,11 @@ export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
   'data-no-single-writer': 'data-no-single-writer',
   'data-conformance': 'data-unconformant',
   'data-unconformant': 'data-unconformant',
+  'contract-boundary': 'contract-ungoverned-boundary',
+  'contract-ungoverned': 'contract-ungoverned-boundary',
+  'contract-ungoverned-boundary': 'contract-ungoverned-boundary',
+  'contract-drift': 'contract-drift-detected',
+  'contract-drift-detected': 'contract-drift-detected',
   'uncovered-change': 'uncovered-change',
   'uncovered-changes': 'uncovered-change',
   'coverage-stale': 'coverage-stale',
@@ -249,7 +260,7 @@ export async function collectFindings(
 }
 
 /** The check rules that read the workspace data layer (Phase 33 J10) rather than one graph. */
-const DATA_RULES: ReadonlySet<string> = new Set(['data-contract-breaking', 'data-no-single-writer', 'data-unconformant']);
+const DATA_RULES: ReadonlySet<string> = new Set(['data-contract-breaking', 'data-no-single-writer', 'data-unconformant', 'contract-ungoverned-boundary', 'contract-drift-detected']);
 
 /**
  * Findings from the recorded data layer: a dataset shared with no single writer, a dataset
@@ -301,7 +312,75 @@ export async function collectDataFindings(options: CheckOptions): Promise<CheckF
     });
   }
 
+  for (const boundary of await collectContractBoundaries(workspace, options)) {
+    for (const edge of boundary.uncontractedBoundaries) {
+      findings.push({
+        rule: 'contract-ungoverned-boundary',
+        key: `contract-boundary:${edge.source}->${edge.target}:${edge.kind}`,
+        node: `${edge.source} -> ${edge.target}`,
+        detail: edge.reason,
+        inputs: { kind: edge.kind },
+      });
+    }
+    for (const edge of boundary.governedEdges) {
+      if (edge.conformance !== 'drifting') {
+        continue;
+      }
+      const deviations = boundary.conformanceDeviations
+        .filter((finding) => finding.contract === edge.contract)
+        .map((finding) => `${finding.kind}:${finding.field}`)
+        .sort();
+      findings.push({
+        rule: 'contract-drift-detected',
+        key: `contract-drift:${edge.contract}:${edge.source}->${edge.target}`,
+        node: `${edge.source} -> ${edge.target}`,
+        detail: `${edge.contract} drifts at this boundary (${deviations.join(', ') || 'recorded deviation'})`,
+        inputs: { contract: edge.contract, kind: edge.kind },
+      });
+    }
+  }
+
   return findings;
+}
+
+/**
+ * The contract boundary for the workspace behind a data-findings run (Phase 36 K6).
+ *
+ * Graphs come from the shared graph cache, so an unchanged repository is never
+ * rescanned; a repository with no cached graph contributes no import/call edges while
+ * its data edges still bind boundaries.
+ */
+async function collectContractBoundaries(
+  workspace: WorkspaceReport,
+  options: CheckOptions,
+): Promise<ContractBoundaryReport[]> {
+  const scanCeiling = options.scanCeiling ?? options.workspaceRoot;
+  const config: StraboConfig = {
+    workspaceRoot: options.workspaceRoot,
+    scanCeiling,
+    ...(options.configPath ? { configPath: options.configPath } : {}),
+  };
+  const { repositories } = resolveWorkspaceRepositories(config);
+  const graphs: Array<{ name: string; root: string; graph: Graph }> = [];
+  for (const repository of repositories) {
+    try {
+      const cached = await getCachedGraph(repository.root);
+      graphs.push({ name: repository.name, root: repository.root, graph: cached.report.graph });
+    } catch {
+      graphs.push({ name: repository.name, root: repository.root, graph: emptyGraph() });
+    }
+  }
+  return [
+    buildContractBoundary({
+      repositories: graphs,
+      data: workspace.data,
+    }),
+  ];
+}
+
+/** No graph edges: data and event bindings alone still draw honest boundaries. */
+function emptyGraph(): Graph {
+  return { nodes: [], edges: [], diagnostics: [], excluded: [] };
 }
 
 export async function runCheck(options: CheckOptions): Promise<CheckResult> {

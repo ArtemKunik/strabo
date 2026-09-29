@@ -13,6 +13,7 @@ import { computeRiskReport, type RiskOptions } from '../risk/report.ts';
 import { symbolExtractorFor } from '../scan/languages/registry.ts';
 import type { DataReport, Graph } from '../types.ts';
 import { analyzeRepository } from '../workspace/analyze.ts';
+import { buildContractBoundary } from '../analysis/data/contracts-graph.ts';
 import { buildTierReport } from '../analysis/tiers/report.ts';
 import type { TierReport } from '../analysis/tiers/types.ts';
 import {
@@ -112,6 +113,15 @@ export async function collectRepositoryReport(
             : {}),
         }));
 
+  // Governed contract boundaries join the recorded graph to the data layer, so the
+  // report and the canvas read the same aggregate.
+  const contracts = data
+    ? buildContractBoundary({
+      repositories: [{ name: options.repository, root, graph }],
+      data,
+    })
+    : undefined;
+
   return buildRepositoryReport({
     repository: options.repository,
     root,
@@ -125,6 +135,7 @@ export async function collectRepositoryReport(
     ...(change ? { change } : {}),
     ...(drift ? { drift } : {}),
     ...(data ? { data } : {}),
+    ...(contracts ? { contracts } : {}),
     coverage,
     ...(structure ? { structure } : {}),
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
