@@ -22,6 +22,7 @@ import { findGitIgnoredFiles } from '../src/scan/gitignore.ts';
 import { scanJsTsEdges } from '../src/scan/scan-js.ts';
 import { isPolyglotSource, scanPolyglotEdges } from '../src/scan/scan-polyglot.ts';
 import { collectSourceFiles, isSourceExtension } from '../src/scan/scan.ts';
+import { clearParseCache, parseCacheStats, PARSE_CACHE_VERSION } from '../src/scan/parse-cache.ts';
 import { buildSystemViewModel } from '../src/view/view-model.ts';
 
 /**
@@ -198,12 +199,16 @@ export async function runBenchmark(repoArg, outArg, corpusArg) {
   const outputPath = typeof outArg === 'string' && outArg.trim() !== '' ? path.resolve(outArg) : null;
   const corpus = readCorpusManifest(corpusArg);
 
-  // Empty every cache the measured paths read before the cold pass.
+  // Empty every cache the measured paths read before the cold pass, including the per-file
+  // parse cache (P5), so the cold stage pass re-parses everything.
   clearMemoryCache(root);
   clearDiskCache(root);
   clearHistoryCache();
+  clearParseCache();
 
   const scan = await measureScanStages(root);
+  // After the cold stage pass the parse cache is warm; a second pass shows the P5 gain.
+  const parseCacheAfterCold = parseCacheStats();
 
   const historyCold = await timed(() => collectHistory(root, scan.files));
   const historyWarm = await timed(() => collectHistory(root, scan.files));
@@ -303,6 +308,12 @@ export async function runBenchmark(repoArg, outArg, corpusArg) {
       windowDays: historyCold.value.windowDays,
       commitsScanned: historyCold.value.commitsScanned,
     },
+    parseCache: {
+      version: PARSE_CACHE_VERSION,
+      entries: parseCacheAfterCold.size,
+      hits: parseCacheAfterCold.hits,
+      misses: parseCacheAfterCold.misses,
+    },
     stages,
     firstPaint,
     notes: [
@@ -382,6 +393,12 @@ export function formatBenchmark(result) {
     `History: ${result.history.available ? `${result.history.commitsScanned} commits` : 'unavailable'}, ` +
       `${result.history.windowDays}-day window`,
   );
+  if (result.parseCache) {
+    lines.push(
+      `Parse cache: v${result.parseCache.version}, ${result.parseCache.entries} entr${result.parseCache.entries === 1 ? 'y' : 'ies'} ` +
+        `(${result.parseCache.hits} hit / ${result.parseCache.misses} miss on the cold pass)`,
+    );
+  }
   lines.push('');
   lines.push('approx yes = that number is the enclosing call, which also performs the other sub-steps.');
 

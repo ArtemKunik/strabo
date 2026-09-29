@@ -214,6 +214,13 @@ export type {
   UncoveredFunctionChange,
   ChangedCoverageTotals,
 } from './analysis/changed-coverage.ts';
+export {
+  PARSE_CACHE_VERSION,
+  clearParseCache,
+  parseCacheKey,
+  parseCacheStats,
+  withParseCache,
+} from './scan/parse-cache.ts';
 export { computeRiskyUntested, riskyUntestedCaption } from './analysis/coverage-risk.ts';
 export type {
   RiskyUntestedInput,

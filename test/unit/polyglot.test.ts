@@ -269,3 +269,28 @@ test('Java edges are deterministic across scans', async () => {
   const second = await scanRepository(fixture);
   assert.deepEqual([...pairs(first.graph.edges)].sort(), [...pairs(second.graph.edges)].sort());
 });
+
+test('a second polyglot scan reads the extraction from the content-hash cache (P5)', async () => {
+  const { clearParseCache, parseCacheStats } = await import('../../src/scan/parse-cache.ts');
+  const { scanPolyglotEdges } = await import('../../src/scan/scan-polyglot.ts');
+  clearParseCache();
+
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-parse-cache-'));
+  try {
+    const source = ['import os', 'class Thing:', '    value = 1', ''].join('\n');
+    fs.writeFileSync(path.join(directory, 'thing.py'), source);
+    const content = new Map([['thing.py', source]]);
+
+    await scanPolyglotEdges(['thing.py'], content);
+    const afterFirst = parseCacheStats();
+    assert.equal(afterFirst.misses, 1, 'the first scan parses the file');
+    assert.equal(afterFirst.hits, 0);
+
+    await scanPolyglotEdges(['thing.py'], content);
+    const afterSecond = parseCacheStats();
+    assert.equal(afterSecond.misses, 1, 'the unchanged file is not re-parsed');
+    assert.equal(afterSecond.hits, 1, 'the second scan reads the cache');
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});

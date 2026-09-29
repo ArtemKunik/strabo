@@ -5,6 +5,7 @@ import { type CppFileFacts, extractCppFacts, resolveCpp } from './cpp.ts';
 import { type CSharpFileFacts, extractCSharpFacts, resolveCSharp } from './csharp.ts';
 import { type JavaFileFacts, extractJavaFacts, resolveJava } from './java.ts';
 import { type KotlinFileFacts, extractKotlinFacts, resolveKotlin } from './kotlin.ts';
+import { parseCacheKey, withParseCache } from '../parse-cache.ts';
 import { GrammarUnavailableError } from './parser-runtime.ts';
 import { type PythonFileFacts, extractPythonFacts, resolvePython } from './python.ts';
 import { type RustFileFacts, extractRustFacts, resolveRust } from './rust.ts';
@@ -83,7 +84,13 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
           continue;
         }
         try {
-          const extraction = await extract(file, content);
+          // The extraction is pure over one file's content, so it is cached by content hash
+          // (P5): an unchanged file is not re-parsed on the next scan. A failure is not
+          // cached, so a transient grammar load failure is retried rather than remembered.
+          const extraction = await withParseCache(
+            parseCacheKey(language, content),
+            () => extract(file, content),
+          );
           facts.push(extraction.facts);
           diagnostics.push(...extraction.diagnostics);
         } catch (error) {
