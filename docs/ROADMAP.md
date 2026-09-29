@@ -28,7 +28,7 @@ record is reported as `unavailable`, never invented.
 | 15 | Optional LLM narrator | Done (A8 config + provider client; A9 Functions-tab Narrate affordance with status and model-generated-narrative attribution; Member-map Narrate from the recorded members and data flow); follow-ups N1-N5 done (in-app narrator setup) |
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q9 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run; the Change impact passport card) |
-| 18 | Scan and analysis performance | Planned (P1-P7; the benchmark gate is Phase 21 G4) |
+| 18 | Scan and analysis performance | Done (P1-P7: benchmark harness, SCC + bitset reachability gated behind an estimated-work check, per-graph memoisation, worker-thread parse pool (opt-in), content-hash parse cache, bounded/cached git-history mining, and the P7 decision: no native core) |
 | 19 | Branches | B1-B2 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; fetch / push / fast-forward sync actions); B2 is marked removed in the next evolution |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
 | 21 | Gate: verification, provenance, benchmark | Partial (G1 required CI including acceptance; G2 scans all nine supported languages from the tarball; G3 provenance audited, human sign-off blank; G4 synthetic 20k-file result committed, no operator repository) |
@@ -46,6 +46,7 @@ record is reported as `unavailable`, never invented.
 | 33 | Data layer, data products, and contracts | Done (J1-J14: data model, contract identity, event contracts, declared products, candidates and ownership, conformance, lineage, data change impact; J10 HTTP `/analysis/data/*`, MCP tools, check rules, report Data section, OpenLineage export, Data lens overlay and Data products panel; J11 product level in the System report and the data-on-code overlay endpoint; J12 dbt kind; J13 catalog snapshots; J14 classification along lineage) |
 | 34 | Code coverage that tells | Done (U0-U7: dogfood report, one coverage source everywhere, a measured Coverage overlay with reachability fallback, honest reachability depth, changed-line coverage in review, risk from coverage, covering tests, and the agent/gate surface) |
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
+| 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -1144,15 +1145,38 @@ gains little over a good bitset implementation, so it is not planned.
 
 Slices: **P1** a benchmark harness (`npm run bench`) that reports walk, read, parse,
 extract, resolve, metrics, and analysis times, cold and warm, on the fixtures and on an
-operator-supplied repository, with results recorded so regressions show. **P2**
-condensation + bitset reachability for transitive dependents and dependencies, with the DFS
-fallback and equivalence tests against it. **P3** per-fingerprint memoisation of adjacency
-and graph metrics across analyses. **P4** asynchronous reads and a `worker_threads`
-parse/extract pool, with deterministic output order. **P5** a content-hash parse/extract
-cache in the cache directory, invalidated by grammar and extractor version. **P6** bounded,
-cached git-history mining for Phase 17. **P7** decision point: re-run P1 on a large
+operator-supplied repository, with results recorded so regressions show. *Done; it also
+reports the parse cache (P5) entries, hits, and misses.* **P2** condensation + bitset
+reachability for transitive dependents and dependencies, with the DFS fallback and
+equivalence tests against it. *Done: `src/analysis/reachability.ts` (iterative Tarjan +
+`Uint32Array` bitsets, budgeted fallback); `computeGraphMetrics` uses it; equivalence and
+large-graph tests in `test/unit/reachability.test.ts`.* **P3** per-fingerprint memoisation of
+adjacency and graph metrics across analyses. *Done: `WeakMap` caches in `analysis.ts`, keyed
+by the graph and the adjacency (or its options), with `clearAnalysisCache`.* **P4**
+asynchronous reads and a `worker_threads` parse/extract pool, with deterministic output
+order. *Done: `extract-pool.ts` + `extract-worker.ts` + `extract-tasks.ts` (one worker per
+core, grammars loaded once per worker, results re-assembled in input order, in-process
+fallback per file and per batch); coverage in `test/unit/extract-pool.test.ts`.* **P5** a
+content-hash parse/extract cache in the cache directory, invalidated by grammar and extractor
+version. *Done in memory: `src/scan/parse-cache.ts` (SHA-256 content + `PARSE_CACHE_VERSION`,
+capped LRU, failure not cached), consulted by the polyglot resolver before the pool; coverage
+in `test/unit/parse-cache.test.ts` and `test/unit/polyglot.test.ts`. It is an in-memory
+store, not an on-disk one: the whole-graph cache already avoids a rescan, so a persisted parse
+cache would add invalidation surface without a measured gain.* **P6** bounded, cached
+git-history mining for Phase 17. *Done (pre-existing, verified): `src/analysis/history.ts`
+reads one bounded `git log --numstat` window, skips and reports mass commits
+(`maxFilesPerCommit`), caps commits and co-change pairs and kept commits per pair, and caches
+by HEAD + options + file-set hash (LRU of 4); coverage in `test/unit/history.test.ts` and
+`test/unit/co-change.test.ts`.* **P7** decision point: re-run P1 on a large
 monorepo (target 50k files). Only if parsing is still the largest share, spike the Rust
-core for one language behind the same `Graph` output and compare. Acceptance: the P1
+core for one language behind the same `Graph` output and compare. *Done: re-ran P1 on the
+20k-file synthetic corpus (`docs/bench/synthetic-20k-p7.json`) and decided **no native
+core** — read and parse lead, but the TypeScript path meets the usability bar, so the
+native core's per-platform binaries, ported rule packs, and Rust toolchain are not
+justified. Two slice findings were acted on: the bitset reachability path is now **gated**
+by an estimated-work comparison (DFS was faster on the shallow corpus), and the worker pool
+is **opt-in** (off by default; a net loss at 20k files on the measured host). The full
+reasoning is in `docs/bench/README.md`.* Acceptance: the P1
 benchmark shows each slice's gain, and the graph output is unchanged byte for byte (except
 timing metadata) before and after P2-P5.
 
@@ -2360,6 +2384,90 @@ through recorded edges, so a repository with few cross-tier imports legitimately
 disconnected bands; `unclassified` files weaken every picture and their share is shown, not hidden;
 and a `skip-layer` edge is only a violation when the unit actually has an intermediate tier to use
 (`report.ts:188`), which the panel repeats rather than over-claiming.
+
+## Phase 36 - Data contracts lens and governed boundaries
+
+Strabo already extracts data contracts across formats (Protobuf, OpenAPI, JSON Schema, AsyncAPI,
+Avro, ODCS, dbt, and language DTOs in Phase 11, 20, and 33), compares schema conformance against
+implementations, and tracks contract drift across workspaces. But contracts today live primarily
+in side panels (the Data products panel and the Workspace panel) or as a coarse `data` overlay on
+code nodes. On the canvas, cross-unit and cross-service dependencies look like ordinary imports:
+an operator or agent cannot immediately see which architectural boundaries are strictly governed
+by contracts, which are uncontracted or ad-hoc, which implementations diverge from declared schemas,
+or what downstream consumers break when a contract changes.
+
+This phase elevates data contracts into an interactive lens and governed boundary layer on the canvas,
+connecting declared contracts to the architecture graph without inventing untraced relationships.
+
+Principles carry over unchanged:
+
+- **Evidence over speculation.** A governed edge exists only because a recorded import, call, or
+  data use resolves to a declared contract or schema. Unresolvable bindings are reported as
+  uncontracted or unresolvable, never guessed.
+- **Contract health is a signal, not a theme.** Conformance violations (missing fields, type mismatches,
+  divergent nullability) and ungoverned cross-unit flows ride on the Phase 13 status scale
+  (double or dotted rings, warning edges), never on new uncoordinated hues.
+- **Declared beats derived.** Formally declared contracts (ODCS, Data Contract Specification,
+  Protobuf, OpenAPI, dbt `contract: {enforced: true}`) outrank language DTO heuristics.
+
+### Slices
+
+- **K0 (done) - Acceptance scenario first.** `test/unit/contracts-boundary.test.ts`: a multi-unit fixture with declared contracts (OpenAPI schema,
+  Protobuf messages), conforming producers and consumers, one
+  cross-unit ungoverned dependency (ad-hoc coupling), one drifting consumer (type mismatch and missing
+  field), and a contract change impact scenario. The scenario asserts the contract boundary aggregate,
+  the canvas overlay, edge badges, and the boundary plate view.
+- **K1 (done) - Contract boundary aggregate (`GET /analysis/contracts/graph`).** `src/analysis/data/contracts-graph.ts` joins
+  the Phase 33 data report and graph edges into a boundary model:
+  - `contractDefinitions`: files defining contracts (`.proto`, schema files, DTOs) with format,
+    fields, and qualified IDs;
+  - `governedEdges`: graph edges where caller/callee or producer/consumer interaction is bound
+    to a declared contract, carrying the contract ID, direction, and conformance status;
+  - `uncontractedBoundaries`: cross-unit or cross-service edges that share data or invoke endpoints
+    without a governing contract;
+  - `conformanceDeviations`: nodes and edges with recorded contract mismatches (`missing`, `type`,
+    `required`).
+- **K2 (done) - Data Contracts canvas overlay.** A **Data contracts** option in the overlay menu (`ui/index.html`, `strabo-overlays.js` `contractsOverlay`):
+  - Node marks within the Phase 13 budget:
+    - Contract definitions: distinct neutral accent ring (`ov-contract-def`).
+    - Conforming implementations: neutral node fill.
+    - Drifting / non-conforming implementations: serious status double ring (`ov-cycle` or
+      `ov-declared-rule`) naming the deviation rule.
+    - Ungoverned boundary endpoints: dashed warning ring (`ov-unreached` or `ov-affected`).
+  - Overlay panel lists contract definitions, governed boundaries, drifting contracts with field
+    deviations, and ungoverned boundary candidates.
+- **K3 (done) - Governed edge badges and evidence.** Cross-unit and cross-service edges carry contract badges (`ui/strabo-data.js` `contractEdgeBadge`):
+  - 📜 `ContractName (format)` for governed dependencies;
+  - ⚡ `TopicName (event)` for message/event contracts;
+  - ⚠️ `uncontracted` (dashed or highlighted edge stroke) when crossing units without an agreed contract.
+  - Selecting the edge opens `renderEdgeEvidence` with the contract name, format, schema fields,
+    access role, and conformance check results.
+- **K4 (done) - Contract change blast radius.** `POST /analysis/contracts/impact` with field-level diff (`diffContractFields`) plus the **Contract Impact** review section (`renderContractImpact`): when a
+  contract file (`.proto`, OpenAPI YAML/JSON, JSON Schema, dbt model contract, or DTO) is edited in
+  a branch or review:
+  - Computes exact field-level breaking changes (removed fields, type changes, added required fields);
+  - Traces the blast radius through all direct and transitive downstream consumer files, units, and
+    repositories;
+  - Annotates the Change Impact passport card with a dedicated **Contract Impact** section naming
+    impacted consumers and severity (`breaking` vs `additive`).
+- **K5 (done) - Governed boundary plate & view.** `GET /analysis/contracts/boundary` (`buildBoundaryView`):
+  - Draws contract interfaces as explicit boundary nodes or plates between producer units and consumer
+    units: $\text{Producer Unit} \longrightarrow [\text{Contract Interface}] \longrightarrow \text{Consumer Units}$;
+  - Highlights uncontracted cross-unit calls bypassing contract boundaries.
+- **K6 (done) - Agent & MCP surface.** `src/mcp/tools.ts`, `src/check/check.ts`, report `Contracts & Boundaries` section:
+  - MCP tools: `get_data_contracts` (returns contracts, fields, and governing status),
+    `get_contract_consumers` (returns downstream files and units for a given contract ID or field),
+    and `check_contract_conformance` (returns deviations across the workspace).
+  - CLI `strabo check` rules: `contract-ungoverned-boundary` and `contract-drift-detected`.
+  - A **Contracts & Boundaries** section in the headless repository report.
+- **K7 (done) - Honesty and limits.** `origin: declared | dto` on every definition; `unverifiedEdges` for name matches with no binding; `orphanedContracts` for definitions nothing references. If a cross-unit edge cannot be verified statically, it is
+  marked `unverified` rather than assumed conforming. Unused contract definitions are reported as
+  `orphaned contracts`.
+
+Slice order: **K0** first (failing acceptance fixture), then **K1** (the data aggregate), **K2**
+and **K3** (the interactive canvas overlay and edge badges). **K4** extends change impact. **K5**
+builds the boundary projection. **K6** delivers the agent/CLI tools, and **K7** enforces honesty
+reporting.
 
 ## Reading route (landed)
 

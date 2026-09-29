@@ -88,6 +88,43 @@ Caveats, stated in the result's `notes` as well:
 - Timing is host-specific. Every run tells you where time went on *this* machine; the
   committed numbers are one such run, not a target.
 
+## Phase 18 P7 decision (2026-09-29)
+
+`synthetic-20k-p7.json` is a re-run after the Phase 18 performance slices (P2 SCC + bitset
+reachability, P3 memoisation, P5 parse cache, P4 worker pool). The decision the slice asks
+for is whether parsing is still the largest share (and so whether a native Rust core is
+worth spiking). Measured on the 20k-file corpus, host-specific:
+
+| Stage | Cold ms |
+| ----- | ------: |
+| walk | 235 |
+| read | 1789 |
+| parse | 1827 |
+| extract | 196 |
+| resolve | 1685 |
+| metrics | 253 |
+| analysis (passport) | 58 |
+
+Read and parse dominate. **Decision: no native core.** Parsing is the largest share, but it
+is not so dominant, and the TypeScript path meets the gate's usability bar (cold ~4.5s, warm
+graph ~160ms from memory, passport first paint ~40ms, System first paint ~400ms). A native
+core's costs (prebuilt binaries per platform, porting every rule pack, a Rust toolchain for
+contributors) are not justified by the measured share.
+
+Two honest findings from the slices, both acted on rather than papered over:
+
+- **The bitset reachability path is gated, not always-on.** On this corpus the DFS baseline
+  beat the bitsets (125ms vs 451ms): the corpus is shallow and mostly acyclic, so each DFS
+  visits few nodes, while the bitsets pay for `components² / 32` words. `computeGraphMetrics`
+  now samples the average reach and uses bitsets only when the estimated DFS work is the
+  larger of the two, so a shallow repository keeps the DFS and a dense or cyclic one gets the
+  bitsets. Equivalence to the DFS is asserted in `test/unit/reachability.test.ts`.
+- **The worker pool is opt-in (off by default).** On this host the pool was a net loss at 20k
+  files (parse ~2.6-3.0s with it, ~1.4s without): each worker re-initialises the WASM
+  tree-sitter runtime, and startup exceeded the parallel gain. It is enabled only with
+  `STRABO_PARSE_WORKERS=1`, never silently; `STRABO_NO_PARSE_WORKERS=1` forces it off. It
+  remains available for hosts where worker startup is cheaper.
+
 ## JSON shape
 
 `schemaVersion` is `2`. A result is self-describing; the fields are:

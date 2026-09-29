@@ -13,8 +13,21 @@
  * DFS in the unit tests.
  */
 
-/** Whether the bitset path is worth taking: below this many components, DFS is cheap enough. */
-const BITSET_MIN_COMPONENTS = 256;
+/**
+ * The work the DFS baseline would do, relative to the bitset path, above which bitsets win.
+ *
+ * DFS costs about `N × avgReachable`; bitsets cost about `components × components / 32` (each
+ * component's set is a `components`-bit vector, and every component builds one). A shallow,
+ * mostly-acyclic repository has a small `avgReachable` and a DFS is far cheaper — the Phase 18
+ * P7 measurement on a 20k-file synthetic corpus found DFS 125ms against bitsets 451ms, a
+ * regression. Bitsets pay only when reachable sets are wide relative to the component count,
+ * so the estimate below gates them: an edge-dense graph (a cycle-heavy or fan-out-heavy
+ * repository) crosses it, a tree does not.
+ */
+const BITSET_WORK_RATIO = 0.25;
+
+/** Below this many nodes the DFS is always cheap enough; never allocate bitsets for it. */
+const BITSET_MIN_NODES = 2000;
 
 /**
  * The memory budget for one direction's bitsets, in bytes. Two directions are held at once,
@@ -58,8 +71,23 @@ export function componentReachability(
   // The bitset allocation is words-per-row × rows × 4 bytes; bail to the DFS when too big.
   const words = Math.ceil(componentCount / 32);
   const bytes = componentCount * words * 4;
-  if ((!options.force && componentCount < BITSET_MIN_COMPONENTS) || bytes > BITSET_MEMORY_BUDGET_BYTES) {
+  if (bytes > BITSET_MEMORY_BUDGET_BYTES) {
     return null;
+  }
+  if (!options.force) {
+    if (nodes.length < BITSET_MIN_NODES) {
+      return null;
+    }
+    // Estimate both costs. Bitsets build one `componentCount`-bit set per component:
+    // `componentCount × words` machine words. The DFS walks one reachable set per node, so its
+    // cost is the summed reachable-set size, estimated by sampling a bounded number of nodes.
+    // Bitsets win only when the DFS estimate is the larger of the two.
+    const bitsetWork = componentCount * words;
+    const sampledReach = averageReachSample(nodes, condensed);
+    const dfsWork = sampledReach * nodes.length;
+    if (dfsWork < bitsetWork / BITSET_WORK_RATIO) {
+      return null;
+    }
   }
 
   // `reach[c]` is the set of components reachable from c, including c itself. Components are
@@ -107,6 +135,51 @@ export function componentReachability(
     counts.set(node, nodesReached - 1);
   }
   return counts;
+}
+
+/** How many nodes one component reaches, counting every member of each reachable component. */
+function reachableNodeCount(component: number, condensed: CondensedGraph): number {
+  const seen = new Set<number>();
+  const stack = [component];
+  while (stack.length > 0) {
+    const next = stack.pop()!;
+    if (seen.has(next)) {
+      continue;
+    }
+    seen.add(next);
+    for (const target of condensed.forward[next]!) {
+      if (!seen.has(target)) {
+        stack.push(target);
+      }
+    }
+  }
+  let total = 0;
+  for (const reached of seen) {
+    total += condensed.members[reached]?.length ?? 0;
+  }
+  return total;
+}
+
+/**
+ * The average node-reach over a bounded sample of nodes, for the bitset-vs-DFS gate.
+ *
+ * Sampling up to 64 evenly-spaced nodes keeps the estimate cheap on a large graph while still
+ * distinguishing a shallow tree (tiny reach) from a dense or cyclic graph (wide reach).
+ */
+function averageReachSample(nodes: readonly string[], condensed: CondensedGraph): number {
+  const sample = Math.min(nodes.length, 64);
+  const step = Math.max(1, Math.floor(nodes.length / sample));
+  let total = 0;
+  let counted = 0;
+  for (let index = 0; index < nodes.length; index += step) {
+    const component = condensed.componentOf.get(nodes[index]!);
+    if (component === undefined) {
+      continue;
+    }
+    total += reachableNodeCount(component, condensed);
+    counted += 1;
+  }
+  return counted > 0 ? total / counted : 0;
 }
 
 /** Popcount of a 32-bit word. */

@@ -420,6 +420,7 @@ export type {
   PainPoint,
   PainPointKind,
   RepositoryChangeSection,
+  RepositoryContractsSection,
   RepositoryCoverageSection,
   RepositoryDataSection,
   RepositoryReportDocument,
@@ -456,6 +457,29 @@ export { extractDataUses, extractDataUsesFromSource } from './workspace/data-usa
 export type { RawDataUse } from './workspace/data-usage.ts';
 export { computeSchemaUsage, computeSchemaDrift } from './workspace/schema-usage.ts';
 export { buildDataReport } from './analysis/data/report.ts';
+export {
+  buildContractBoundary,
+  buildContractOverlay,
+  buildBoundaryView,
+  computeContractImpact,
+  diffContractFields,
+  contractChangeSeverity,
+} from './analysis/data/contracts-graph.ts';
+export type {
+  ContractBoundaryDefinition,
+  ContractBoundaryInput,
+  ContractBoundaryReport,
+  ContractBoundaryPlate,
+  ContractBoundaryView,
+  ContractOverlay,
+  ContractOverlayFile,
+  ContractImpact,
+  ContractImpactInput,
+  ContractFieldChange,
+  ContractChangeSeverity,
+  GovernedEdge,
+  UncontractedBoundary,
+} from './analysis/data/contracts-graph.ts';
 export { buildProductLevel, buildDataOverlay, emptyProductLevel } from './analysis/data/product-level.ts';
 export type {
   DataOverlay,

@@ -53,11 +53,26 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const WORKER_URL = path.join(here, `extract-worker${path.extname(fileURLToPath(import.meta.url))}`);
 void path;
 
-/** Whether worker threads are usable at all in this runtime. */
+/**
+ * Whether the pool should be used.
+ *
+ * Opt-in, off by default. The Phase 18 P7 measurement on a 20k-file corpus found the pool a
+ * **net loss** at that scale: each worker re-initialises the WASM tree-sitter runtime, and on
+ * the measured machine grammar startup exceeded the parallel parse gain (parse 2.6-3.0s with
+ * the pool versus 1.4s without). The pool is kept because it is correct and helps on hosts
+ * where worker startup is cheaper and cores are otherwise idle, but it is enabled only when
+ * `STRABO_PARSE_WORKERS=1` is set, never silently. `STRABO_NO_PARSE_WORKERS=1` still forces
+ * the in-process path.
+ */
 export function workersAvailable(): boolean {
+  if (process.env.STRABO_NO_PARSE_WORKERS === '1') {
+    return false;
+  }
+  if (process.env.STRABO_PARSE_WORKERS !== '1') {
+    return false;
+  }
   try {
-    // A worker with an empty body verifies `Worker` is constructible and permitted.
-    return typeof Worker === 'function' && process.env.STRABO_NO_PARSE_WORKERS !== '1';
+    return typeof Worker === 'function';
   } catch {
     return false;
   }
