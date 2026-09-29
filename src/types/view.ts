@@ -44,6 +44,8 @@ export interface ViewNode extends GraphNode {
   cell?: string;
   /** In Structure mode (Y7), true when the band is declared in intent but has no files. */
   ghost?: boolean;
+  /** In a Structure view, recorded imports that stay inside this tier (or grid cell). */
+  internalImports?: number;
   /** In a Structure comparison, files gained (+) or lost (−) since the baseline. */
   filesDelta?: number;
 }

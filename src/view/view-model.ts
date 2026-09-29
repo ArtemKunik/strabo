@@ -701,6 +701,7 @@ export function buildStructureViewModel(
   options: StructureViewOptions = {},
 ): ViewModel {
   const perTier = new Map(report.matrix.perTier.map((entry) => [entry.tier, entry]));
+  const intraByTier = new Map(report.tierFlow.intraByTier.map((entry) => [entry.tier, entry.weight]));
   const isHorizontal = options.direction === 'horizontal';
   const BAND_Y = 170;
   const BAND_X = 260;
@@ -749,6 +750,7 @@ export function buildStructureViewModel(
       tier,
       mixed: fact?.mixed ?? 0,
       why: topDirs.length > 0 ? topDirs.join(', ') : undefined,
+      internalImports: intraByTier.get(tier) ?? 0,
     };
   };
 
@@ -950,6 +952,11 @@ export function buildStructureGridViewModel(
     });
     positions.push({ id, x: -CELL, y: index * CELL });
   });
+  // An import that stays inside one cell is not a relationship between cells: drawn, it is a
+  // self-loop sitting on the card. The count rides on the cell instead.
+  const internal = new Map(
+    grid.edges.filter((edge) => edge.source === edge.target).map((edge) => [edge.source, edge.weight]),
+  );
   for (const cell of grid.cells) {
     nodes.push({
       id: cell.id,
@@ -968,6 +975,7 @@ export function buildStructureGridViewModel(
       unit: cell.unit,
       unitName: cell.unitName,
       cell: cell.id,
+      internalImports: internal.get(cell.id) ?? 0,
     });
     positions.push({
       id: cell.id,
@@ -997,7 +1005,7 @@ export function buildStructureGridViewModel(
     positions.push({ id, x: shelfX, y: index * CELL });
   });
 
-  const edges: ViewEdge[] = grid.edges.map((edge) => ({
+  const edges: ViewEdge[] = grid.edges.filter((edge) => edge.source !== edge.target).map((edge) => ({
     source: edge.source,
     target: edge.target,
     kind: 'import',

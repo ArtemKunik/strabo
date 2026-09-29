@@ -103,28 +103,38 @@ export function createGitController(app) {
       return;
     }
     // Per-commit change metrics and the architecture-drift series arrive after the list:
-    // uncached commits are measured on the server, so the timeline is usable first. The two
-    // are fetched and drawn independently, so the chart never waits on the slower metrics.
+    // uncached commits are measured on the server, so the timeline is usable first. Drift
+    // runs first and metrics after it: the two passes both rebuild revision graphs and would
+    // otherwise contend on the server's single thread, which delayed the chart by minutes.
+    // Serializing brings the chart in far sooner and lets metrics reuse the graphs drift cached.
     const loaded = { metrics: null, drift: null };
     const redraw = () => {
       if (!elements.timelinePanel.hidden) {
         draw(loaded.metrics, loaded.drift, false);
       }
     };
+    const loadMetrics = () =>
+      request(`/analysis/change-metrics/history${query}`)
+        .then((history) => {
+          loaded.metrics = history?.available
+            ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
+            : null;
+        })
+        .catch(() => {
+          loaded.metrics = null;
+        })
+        .finally(redraw);
     request(`/analysis/drift${driftQuery}`)
       .then((drift) => {
         loaded.drift = drift ?? null;
-        redraw();
       })
-      .catch(() => redraw());
-    request(`/analysis/change-metrics/history${query}`)
-      .then((history) => {
-        loaded.metrics = history?.available
-          ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
-          : null;
-        redraw();
+      .catch(() => {
+        loaded.drift = null;
       })
-      .catch(() => redraw());
+      .finally(() => {
+        redraw();
+        loadMetrics();
+      });
   }
 
   /**
@@ -782,8 +792,9 @@ export function createGitController(app) {
     // The commit list is the whole point of the screen, so it renders as soon as `git log`
     // answers. The per-commit metrics and the drift series are cached server-side but can
     // still take seconds to build from a cold revision cache, so they fill in afterward
-    // rather than holding the list hostage. They are drawn independently: the chart appears
-    // when the drift arrives instead of waiting on the slower metrics pass.
+    // rather than holding the list hostage. Drift runs first and metrics after it: both
+    // passes rebuild the same revision graphs and would otherwise contend on the server's
+    // single thread, which held the chart back for minutes on a cold cache.
     draw(null, null, true);
     if (result?.available === false) {
       return;
@@ -794,20 +805,28 @@ export function createGitController(app) {
         draw(loaded.metrics, loaded.drift, false);
       }
     };
+    const loadMetrics = () =>
+      request(`/analysis/change-metrics/history${query}`)
+        .then((history) => {
+          loaded.metrics = history?.available
+            ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
+            : null;
+        })
+        .catch(() => {
+          loaded.metrics = null;
+        })
+        .finally(redraw);
     request(`/analysis/drift${driftQuery}`)
       .then((drift) => {
         loaded.drift = drift ?? null;
-        redraw();
       })
-      .catch(() => redraw());
-    request(`/analysis/change-metrics/history${query}`)
-      .then((history) => {
-        loaded.metrics = history?.available
-          ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals]))
-          : null;
-        redraw();
+      .catch(() => {
+        loaded.drift = null;
       })
-      .catch(() => redraw());
+      .finally(() => {
+        redraw();
+        loadMetrics();
+      });
   }
 
   /** Select a commit in the History list and open its full review in the pane beside it. */

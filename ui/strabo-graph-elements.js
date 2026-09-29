@@ -152,6 +152,10 @@ function structureCardLabel(node, wrongWay, compact = false) {
   if (roomy && folder) {
     lines.push(folder);
   }
+  // Same-tier imports are never drawn as edges (they would loop on the card), so say them.
+  if (typeof node.internalImports === 'number' && node.internalImports > 0) {
+    lines.push(`${node.internalImports} ${node.internalImports === 1 ? 'import' : 'imports'} within`);
+  }
   if (wrongWay > 0) {
     lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? 'import' : 'imports'} out`);
   }

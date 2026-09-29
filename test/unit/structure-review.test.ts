@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import { scanRepository } from '../../src/index.ts';
 import { isTypeOnlyStatement } from '../../src/scan/scan-js.ts';
-import { buildStructureViewModel } from '../../src/view/view-model.ts';
+import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
 import { buildElements } from '../../ui/strabo-graph-elements.js';
 import { fitLabel } from '../../ui/strabo-islands.js';
 
@@ -96,4 +96,15 @@ test('fitLabel sheds a stack verdict from the end before cutting the name', () =
   const narrow = fitLabel(title, 300);
   assert.ok(narrow.startsWith('Architecture Stack'), narrow);
   assert.ok(!narrow.includes('same-tier'), narrow);
+});
+
+test('the Structure grid folds same-cell imports into the cell instead of drawing self-loops', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  const model = buildStructureGridViewModel(report, descriptor, cache);
+  assert.ok(model.edges.every((edge) => edge.source !== edge.target));
+  const internal = new Map(report.grid.edges.filter((e) => e.source === e.target).map((e) => [e.source, e.weight]));
+  for (const node of model.nodes.filter((n) => n.kind === 'tier')) {
+    assert.equal(node.internalImports, internal.get(node.id) ?? 0);
+  }
 });

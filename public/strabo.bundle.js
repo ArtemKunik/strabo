@@ -378,6 +378,9 @@ function structureCardLabel(node, wrongWay, compact = false) {
   if (roomy && folder) {
     lines.push(folder);
   }
+  if (typeof node.internalImports === "number" && node.internalImports > 0) {
+    lines.push(`${node.internalImports} ${node.internalImports === 1 ? "import" : "imports"} within`);
+  }
   if (wrongWay > 0) {
     lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? "import" : "imports"} out`);
   }
@@ -13834,14 +13837,19 @@ function createGitController(app2) {
         draw(loaded.metrics, loaded.drift, false);
       }
     };
+    const loadMetrics = () => request2(`/analysis/change-metrics/history${query}`).then((history) => {
+      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
+    }).catch(() => {
+      loaded.metrics = null;
+    }).finally(redraw);
     request2(`/analysis/drift${driftQuery}`).then((drift) => {
       loaded.drift = drift ?? null;
+    }).catch(() => {
+      loaded.drift = null;
+    }).finally(() => {
       redraw();
-    }).catch(() => redraw());
-    request2(`/analysis/change-metrics/history${query}`).then((history) => {
-      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
-      redraw();
-    }).catch(() => redraw());
+      loadMetrics();
+    });
   }
   async function toggleBranches() {
     if (!elements2.branchesPanel.hidden) {
@@ -14342,14 +14350,19 @@ function createGitController(app2) {
         draw(loaded.metrics, loaded.drift, false);
       }
     };
+    const loadMetrics = () => request2(`/analysis/change-metrics/history${query}`).then((history) => {
+      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
+    }).catch(() => {
+      loaded.metrics = null;
+    }).finally(redraw);
     request2(`/analysis/drift${driftQuery}`).then((drift) => {
       loaded.drift = drift ?? null;
+    }).catch(() => {
+      loaded.drift = null;
+    }).finally(() => {
       redraw();
-    }).catch(() => redraw());
-    request2(`/analysis/change-metrics/history${query}`).then((history) => {
-      loaded.metrics = history?.available ? new Map(history.commits.map((entry) => [entry.commit.hash, entry.totals])) : null;
-      redraw();
-    }).catch(() => redraw());
+      loadMetrics();
+    });
   }
   async function selectHistoryCommit(commit) {
     selectedCommitHash = commit.hash;
