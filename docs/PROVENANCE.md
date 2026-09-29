@@ -7,14 +7,16 @@ not a legal opinion: the sign-off at the bottom is intentionally blank.
 - Repository license: MIT (`LICENSE`, `package.json` `"license": "MIT"`, `"private": true`).
 - Package contents: `package.json` `files` limits the tarball to `bin`, `dist`, `public`,
   `parsers`, and `README.md`. Dev dependencies are not shipped.
-- Audit scope: direct `dependencies`, `devDependencies`, `peerDependencies`, the vendored
-  grammar `.wasm` files under `parsers/vendor/`, and tracked binary assets.
+- Audit scope: direct `dependencies`, `devDependencies`, `optionalDependencies`,
+  `peerDependencies`, the vendored grammar `.wasm` files under `parsers/vendor/`, and tracked
+  binary assets.
 - How it was produced: read each package's `package.json` `license` field and `LICENSE`
   file under `node_modules/`; ran `npm view <pkg> license repository.url version` for the
-  vendored grammars and the optional peer; read the PDF's `/Info` dictionary. Versions for
-  the installed runtime and dev dependencies are the resolved versions in
-  `package-lock.json`; `pg` and the upstream grammar packages are not pinned by this
-  repository, so their versions are the registry versions at audit time.
+  vendored grammars and the optional peer; read the PDF's `/Info` dictionary; and inspected
+  `scripts/build-ui.mjs` and the built `public/strabo.bundle.js` to see which runtime code
+  is redistributed. Versions for the installed runtime and dev dependencies are the resolved
+  versions in `package-lock.json`; `pg`, `node-pty`, and the upstream grammar packages are
+  not pinned by this repository, so their versions are the registry versions at audit time.
 
 ## Runtime dependencies
 
@@ -22,14 +24,24 @@ Installed by consumers; imported by `dist/` and by the served UI.
 
 | Package | Version | License | Origin | Evidence |
 | ------- | ------- | ------- | ------ | -------- |
+| @xterm/addon-fit | 0.11.0 | MIT | https://github.com/xtermjs/xterm.js | `node_modules/@xterm/addon-fit/package.json`, `LICENSE`; the terminal screen's fit addon |
+| @xterm/xterm | 6.0.0 | MIT | https://github.com/xtermjs/xterm.js | `node_modules/@xterm/xterm/package.json`, `LICENSE`; the terminal screen, bundled into `public/strabo.bundle.js` and its stylesheet copied to `public/xterm.css` by `scripts/build-ui.mjs:47-50` |
 | cytoscape | 3.34.3 | MIT | https://github.com/cytoscape/cytoscape.js | `node_modules/cytoscape/package.json`, `LICENSE`; served to the browser from `node_modules/cytoscape/dist` by `src/server.ts:41` |
 | express | 5.2.1 | MIT | https://github.com/expressjs/express | `node_modules/express/package.json`, `LICENSE` |
 | web-tree-sitter | 0.27.0 | MIT | https://github.com/tree-sitter/tree-sitter | `node_modules/web-tree-sitter/package.json`, `LICENSE` |
+| ws | 8.21.3 | MIT | https://github.com/websockets/ws | `node_modules/ws/package.json`, `LICENSE`; the terminal WebSocket transport |
 | yaml | 2.9.1 | ISC | https://github.com/eemeli/yaml | `node_modules/yaml/package.json`, `LICENSE` |
+| node-pty (optional) | 1.1.0 | MIT | https://github.com/microsoft/node-pty | `node_modules/node-pty/package.json`, `LICENSE`; an `optionalDependencies` entry for the terminal's pseudo-terminal; loaded only when the terminal is opened, and its native prebuild may fail to install without removing the package |
 | pg (optional peer) | 8.23.0 | MIT | https://github.com/brianc/node-postgres | `npm view pg license`; not installed by default, not in the tarball, loaded only when a workspace selects Postgres |
 
 Cytoscape is not bundled into `public/strabo.bundle.js`; the server serves its minified
-`dist` from `node_modules` (`scripts/build-ui.mjs` header, `src/server.ts:41`).
+`dist` from `node_modules` (`scripts/build-ui.mjs` header, `src/server.ts:41`). By contrast
+`@xterm/xterm` and `@xterm/addon-fit` **are** bundled into `public/strabo.bundle.js`,
+because the terminal imports them as ES modules; the bundle therefore redistributes their
+MIT code, and `public/xterm.css` is a copied slice of `@xterm/xterm`'s MIT stylesheet.
+Both are MIT, so the redistribution is MIT-compatible. `node-pty` is a native optional
+dependency, never bundled and never served to the browser; it is loaded only in the server
+process when a terminal session starts.
 
 ## Dev dependencies
 
@@ -40,6 +52,7 @@ Used to build and test; excluded from the published tarball.
 | @cucumber/cucumber | 11.3.0 | MIT | https://github.com/cucumber/cucumber-js | `node_modules/@cucumber/cucumber/package.json` |
 | @types/express | 5.0.6 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/express/package.json` |
 | @types/node | 22.20.3 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/node/package.json` |
+| @types/ws | 8.18.1 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped | `node_modules/@types/ws/package.json` |
 | esbuild | 0.28.2 | MIT | https://github.com/evanw/esbuild | `node_modules/esbuild/package.json`, `LICENSE.md` |
 | jsdom | 30.1.0 | MIT | https://github.com/jsdom/jsdom | `node_modules/jsdom/package.json`, `LICENSE.txt` |
 | playwright | 1.63.0 | Apache-2.0 | https://github.com/microsoft/playwright | `node_modules/playwright/package.json`, `LICENSE` |
@@ -98,22 +111,32 @@ sign-off below.
 | Artifact | Origin | License | Evidence |
 | -------- | ------ | ------- | -------- |
 | `public/index.html`, `public/styles.css` | First-party source in `ui/` and `ui/styles/` | MIT (repository) | Copied, and the stylesheet parts concatenated, by `scripts/build-ui.mjs` |
-| `public/strabo.bundle.js`, `.map` | esbuild output of first-party `ui/` modules only; cytoscape is not bundled | MIT (repository) | `scripts/build-ui.mjs` `BUNDLED_MODULES`; tracked in git (`git ls-files public`) |
+| `public/strabo.bundle.js`, `.map` | esbuild output of first-party `ui/` modules plus the MIT runtime code of `@xterm/xterm` 6.0.0 and `@xterm/addon-fit` 0.11.0, which the terminal imports; cytoscape is not bundled | MIT (repository + upstream MIT) | `scripts/build-ui.mjs` bundles the `ui/strabo.js` entry; the bundle contains the xterm.js `Copyright (c) 2014-2024 The xterm.js authors` notice; tracked in git (`git ls-files public`) |
+| `public/xterm.css` | Copied by `scripts/build-ui.mjs` from `node_modules/@xterm/xterm/css/xterm.css` | MIT (upstream) | `scripts/build-ui.mjs:47-50`; `public/index.html:11` links it |
 | `bin/strabo.js`, `dist/**` | First-party source in `src/` | MIT (repository) | `tsc` output; `dist/` is gitignored build output |
 | `parsers/vendor/**` | Prebuilt grammar `.wasm` from `tree-sitter-wasm` | MIT (upstream, see above) | Generated, gitignored (`parsers/vendor/`) |
 | `README.md`, `LICENSE` | First-party | MIT (repository) | Repository root |
 | `Strabo_Standalone_App_Concept.pdf` | Concept source by Artem Kunyk, 11 pages, generated with ReportLab | Copyright Artem Kunyk | PDF `/Info` (`/Author (Artem Kunyk)`, `/Title (Strabo - Standalone App Concept)`, `/CreationDate (D:20260918074706+02'00')`); gitignored by `.gitignore:38` ("intentionally not committed"), so it is not in the repository contents that ship |
 
-The only tracked binary asset is `public/strabo.bundle.js.map`, a first-party build
-artifact. No third-party font, image, or minified library is committed.
+The only tracked `.map` binary asset is `public/strabo.bundle.js.map`, a first-party build
+artifact. No third-party font or image is committed. The committed `public/strabo.bundle.js`
+is unminified and embeds the MIT code of `@xterm/xterm` and `@xterm/addon-fit` (see above);
+no separate minified third-party library is committed — cytoscape is served from
+`node_modules` at runtime and is not in the repository.
 
 ## MIT publication question
 
 - Strabo itself is MIT (`LICENSE`, `package.json`).
 - Every runtime dependency is MIT or ISC: permissive and MIT-compatible.
+- `public/strabo.bundle.js` redistributes the MIT code of `@xterm/xterm` and
+  `@xterm/addon-fit`; `public/xterm.css` redistributes `@xterm/xterm`'s MIT stylesheet.
+  MIT code may be redistributed, and the bundle preserves the upstream xterm.js copyright
+  notice.
 - Apache-2.0 appears only in dev dependencies (Playwright, TypeScript); they are not in
   the published package, so no `NOTICE` file is redistributed.
 - The vendored grammar `.wasm` files are MIT per their upstream packages.
+- `node-pty` is an optional (MIT) native dependency, installed by the consumer and loaded
+  only in the server process; it is not bundled or shipped in the tarball.
 - The concept PDF is authored by the repository owner and is gitignored; it is not part of
   the committed repository and therefore not part of a source publication.
 
@@ -135,6 +158,8 @@ confirms it. These fields are deliberately blank:
 Checklist to confirm:
 
 - [ ] Every runtime dependency's license is compatible with MIT redistribution.
+- [ ] The bundled `@xterm/xterm` and `@xterm/addon-fit` code and the copied `xterm.css`
+      may be redistributed in `public/` under MIT (the bundle retains the upstream notice).
 - [ ] The vendored grammar binaries' upstream licenses are confirmed for the exact pinned
       commits (not only the upstream package's current declared license).
 - [ ] The status of `Strabo_Standalone_App_Concept.pdf` is decided (keep gitignored, or

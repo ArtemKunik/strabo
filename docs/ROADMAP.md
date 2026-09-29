@@ -1465,10 +1465,14 @@ Finish the release-readiness work that already exists instead of starting a new 
   JavaScript (lexical scanner) and Java, Kotlin, Rust, C#, Python, C++, and SQL (grammar
   resolvers) — asserting both the node and the resolved internal edge per language, and that all
   nine shipped grammar `.wasm` assets are present.
-- **G3 - Provenance.** *Partial.* `docs/PROVENANCE.md` audits the runtime dependencies, dev
-  dependencies, vendored grammar `.wasm` files, and binary assets, and states the MIT question.
-  Its "Pending human sign-off" table is intentionally blank; a person must confirm before the
-  repository is published.
+- **G3 - Provenance.** *Partial.* `docs/PROVENANCE.md` audits the runtime dependencies
+  (including the terminal's `@xterm/xterm`, `@xterm/addon-fit`, `ws`, and optional
+  `node-pty`), dev dependencies, vendored grammar `.wasm` files, and binary assets, and
+  states the MIT question. The audit also records what the built `public/` redistributes:
+  `strabo.bundle.js` embeds the MIT `@xterm/xterm` and `@xterm/addon-fit` code and
+  `xterm.css` is a copy of xterm's MIT stylesheet, while cytoscape is served from
+  `node_modules` and is not committed. Its "Pending human sign-off" table is intentionally
+  blank; a person must confirm before the repository is published.
 - **G4 - Benchmark (Phase 18 P1).** *Done for a synthetic corpus.* `scripts/bench.mjs`
   (`npm run bench`) reports walk, read, parse, extract, resolve, metrics, and analysis cold, with
   history also warm, and first paint of the passport and System view, cold and warm; `--out` (or
