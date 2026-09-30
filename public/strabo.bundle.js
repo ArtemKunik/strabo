@@ -838,6 +838,53 @@ function edgeEvidenceFor(model, edgeId) {
     provenance: graphProvenanceFromModel(model)
   };
 }
+function wrongWayFlowsFor(model, id) {
+  if (!model?.structure) {
+    return null;
+  }
+  const nodes = model.nodes ?? [];
+  const node = nodes.find((candidate) => candidate.id === id);
+  if (!node || node.kind !== "tier" && node.kind !== "shelf") {
+    return null;
+  }
+  const labelOf2 = (nodeId) => nodes.find((candidate) => candidate.id === nodeId)?.label ?? nodeId;
+  const groups = [];
+  (model.edges ?? []).forEach((edge, index) => {
+    if (edge.source !== id || edge.ghost === true) {
+      return;
+    }
+    if (edge.tierKind !== "upward" && edge.tierKind !== "skip-layer") {
+      return;
+    }
+    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
+    const weight = typeof edge.weight === "number" ? edge.weight : imports.length;
+    if (weight <= 0) {
+      return;
+    }
+    const typeOnlyCount = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
+    groups.push({
+      id: `e${index}`,
+      kind: edge.tierKind,
+      target: edge.target,
+      targetLabel: labelOf2(edge.target),
+      weight,
+      typeOnlyCount,
+      valueCount: Math.max(0, weight - typeOnlyCount),
+      imports
+    });
+  });
+  if (groups.length === 0) {
+    return null;
+  }
+  return {
+    id,
+    label: node.label ?? id,
+    valueCount: groups.reduce((sum, group) => sum + group.valueCount, 0),
+    typeOnlyCount: groups.reduce((sum, group) => sum + group.typeOnlyCount, 0),
+    flows: groups.flatMap((group) => group.imports),
+    groups
+  };
+}
 function graphProvenanceFromModel(model) {
   const cache = model?.cache;
   if (!cache || !cache.fingerprint) {
@@ -28117,7 +28164,19 @@ function createDelegation(app2) {
   function nodeDelegateTarget(id) {
     const passport = app2.current ? passportFor(app2.current, id) : null;
     const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+    const wrongWay = app2.current ? wrongWayFlowsFor(app2.current, id) : null;
     const evidence = [];
+    if (wrongWay) {
+      evidence.push(
+        `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ""}`
+      );
+      for (const group of wrongWay.groups) {
+        evidence.push(`${group.kind} \u2192 ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ""}`);
+        for (const entry of group.imports.slice(0, 20)) {
+          evidence.push(`${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
+        }
+      }
+    }
     if (passport) {
       for (const metric of passport.metrics) {
         evidence.push(`${metric.label}: ${metric.value}`);
@@ -28128,10 +28187,18 @@ function createDelegation(app2) {
       for (const entry of passport.usedBy.slice(0, 8)) {
         evidence.push(`imported by ${entry.id} (L${entry.line ?? "?"} ${entry.specifier ?? ""})`.replace(" )", ")"));
       }
-    } else {
+    } else if (!wrongWay) {
       evidence.push("Node is not in the current graph (it may be filtered out).");
     }
-    return { kind: "node", id, label: node?.label ?? id, evidence };
+    const target = { kind: "node", id, label: node?.label ?? id, evidence };
+    if (wrongWay) {
+      const count = wrongWay.valueCount;
+      target.summary = count > 0 ? `${count} wrong-way ${count === 1 ? "import" : "imports"} out` : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? "import" : "imports"} out`;
+      target.flowGroups = wrongWay.groups;
+      target.flows = wrongWay.flows;
+      target.flowCount = count;
+    }
+    return target;
   }
   function groupDelegateTarget() {
     const items = app2.groupSelection.map((id) => nodeDelegateTarget(id));
@@ -28367,6 +28434,9 @@ function createDelegation(app2) {
     if (!Array.isArray(target?.flows) || target.flows.length === 0) {
       return [];
     }
+    if (Array.isArray(target.flowGroups)) {
+      return [];
+    }
     const base = (file) => file.split("/").pop();
     const ordered = [...target.flows].sort((a, b2) => Number(a.typeOnly === true) - Number(b2.typeOnly === true));
     return [
@@ -28384,6 +28454,38 @@ function createDelegation(app2) {
       { separator: true }
     ];
   }
+  function wrongWayMenuItems(target) {
+    if (!Array.isArray(target?.flowGroups) || target.flowGroups.length === 0) {
+      return [];
+    }
+    const base = (file) => file.split("/").pop();
+    const items = [{ label: target.summary ?? `${target.flowGroups.length} wrong-way edges` }];
+    for (const group of target.flowGroups) {
+      items.push({
+        label: `${group.kind} \u2192 ${group.targetLabel} (${group.valueCount})`,
+        title: `${group.weight} recorded import(s) from this tier to ${group.targetLabel}${group.typeOnlyCount ? `, ${group.typeOnlyCount} type-only` : ""}`
+      });
+      const ordered = [...group.imports].sort(
+        (a, b2) => Number(a.typeOnly === true) - Number(b2.typeOnly === true)
+      );
+      for (const entry of ordered.slice(0, MENU_FLOW_LIMIT)) {
+        items.push({
+          label: `  ${base(entry.source)}:${entry.line} \u2192 ${base(entry.target)}`,
+          hint: entry.typeOnly ? "type" : "",
+          title: `${entry.source}:${entry.line} \u2192 ${entry.target} (${entry.specifier}) \u2014 open the source at this import`,
+          action: () => app2.source.viewSource(entry.source, { line: entry.line })
+        });
+      }
+      if (group.imports.length > MENU_FLOW_LIMIT) {
+        items.push({
+          label: `  \u2630 Show all ${group.weight} on this edge`,
+          action: () => app2.selection.selectEdge(group.id)
+        });
+      }
+    }
+    items.push({ separator: true });
+    return items;
+  }
   function openDelegateMenu(target, x, y) {
     if (!target) {
       return;
@@ -28396,6 +28498,7 @@ function createDelegation(app2) {
       y,
       title: menuTitle,
       items: [
+        ...wrongWayMenuItems(target),
         ...flowMenuItems(target),
         ...app2.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
@@ -28410,7 +28513,7 @@ function createDelegation(app2) {
           }
         },
         ...Array.isArray(target.flows) ? [{
-          label: "\u29C9 Copy imports",
+          label: Array.isArray(target.flowGroups) ? "\u29C9 Copy wrong-way imports" : "\u29C9 Copy imports",
           action: async () => {
             await copyText(
               target.flows.map((entry) => `${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`).join("\n")

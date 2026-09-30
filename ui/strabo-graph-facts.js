@@ -252,6 +252,64 @@ export function edgeEvidenceFor(model, edgeId) {
 }
 
 /**
+ * The wrong-way imports a Structure card starts, each wrong-way edge with the recorded
+ * imports behind it.
+ *
+ * The canvas card states a count ("N wrong-way imports out"); this turns the same
+ * upward/skip-layer edges into something a surface can list and act on. Returns null for a
+ * node that is not a Structure roll-up card or starts no wrong-way read, so a caller stays
+ * silent rather than inventing an entry. A ghost (intent with 0 observed imports) is not a
+ * read and is left out, matching the card's own count.
+ */
+export function wrongWayFlowsFor(model, id) {
+  if (!model?.structure) {
+    return null;
+  }
+  const nodes = model.nodes ?? [];
+  const node = nodes.find((candidate) => candidate.id === id);
+  if (!node || (node.kind !== 'tier' && node.kind !== 'shelf')) {
+    return null;
+  }
+  const labelOf = (nodeId) => nodes.find((candidate) => candidate.id === nodeId)?.label ?? nodeId;
+  const groups = [];
+  (model.edges ?? []).forEach((edge, index) => {
+    if (edge.source !== id || edge.ghost === true) {
+      return;
+    }
+    if (edge.tierKind !== 'upward' && edge.tierKind !== 'skip-layer') {
+      return;
+    }
+    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
+    const weight = typeof edge.weight === 'number' ? edge.weight : imports.length;
+    if (weight <= 0) {
+      return;
+    }
+    const typeOnlyCount = typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : 0;
+    groups.push({
+      id: `e${index}`,
+      kind: edge.tierKind,
+      target: edge.target,
+      targetLabel: labelOf(edge.target),
+      weight,
+      typeOnlyCount,
+      valueCount: Math.max(0, weight - typeOnlyCount),
+      imports,
+    });
+  });
+  if (groups.length === 0) {
+    return null;
+  }
+  return {
+    id,
+    label: node.label ?? id,
+    valueCount: groups.reduce((sum, group) => sum + group.valueCount, 0),
+    typeOnlyCount: groups.reduce((sum, group) => sum + group.typeOnlyCount, 0),
+    flows: groups.flatMap((group) => group.imports),
+    groups,
+  };
+}
+
+/**
  * The fingerprint and scan time behind a served graph, read from the model's cache metadata.
  *
  * The graph route carries `cache.fingerprint`, `cache.generatedAt`, and `cache.stale`; an

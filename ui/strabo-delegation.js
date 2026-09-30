@@ -4,7 +4,7 @@
  * session on them or copies the prompt. Targets carry recorded evidence only.
  */
 
-import { buildAgentPrompt, edgeEvidenceFor, graphSummary, passportFor } from './strabo-core.js';
+import { buildAgentPrompt, edgeEvidenceFor, graphSummary, passportFor, wrongWayFlowsFor } from './strabo-core.js';
 import {
   closeContextMenu,
   copyText,
@@ -18,11 +18,27 @@ import { writeIslandLayout } from './strabo-island-layout.js';
 export function createDelegation(app) {
   const { state, view, elements } = app;
 
-  /** Recorded facts for a node, from the passport the scan computed. */
+  /**
+   * Recorded facts for a node, from the passport the scan computed. A Structure roll-up card
+   * additionally carries the wrong-way reads it starts — the same count its canvas label
+   * states — so the menu can list and act on the imports the card only summarizes.
+   */
   function nodeDelegateTarget(id) {
     const passport = app.current ? passportFor(app.current, id) : null;
     const node = app.current?.nodes.find((candidate) => candidate.id === id);
+    const wrongWay = app.current ? wrongWayFlowsFor(app.current, id) : null;
     const evidence = [];
+    if (wrongWay) {
+      evidence.push(
+        `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ''}`,
+      );
+      for (const group of wrongWay.groups) {
+        evidence.push(`${group.kind} → ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ''}`);
+        for (const entry of group.imports.slice(0, 20)) {
+          evidence.push(`${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`);
+        }
+      }
+    }
     if (passport) {
       for (const metric of passport.metrics) {
         evidence.push(`${metric.label}: ${metric.value}`);
@@ -33,10 +49,20 @@ export function createDelegation(app) {
       for (const entry of passport.usedBy.slice(0, 8)) {
         evidence.push(`imported by ${entry.id} (L${entry.line ?? '?'} ${entry.specifier ?? ''})`.replace(' )', ')'));
       }
-    } else {
+    } else if (!wrongWay) {
       evidence.push('Node is not in the current graph (it may be filtered out).');
     }
-    return { kind: 'node', id, label: node?.label ?? id, evidence };
+    const target = { kind: 'node', id, label: node?.label ?? id, evidence };
+    if (wrongWay) {
+      const count = wrongWay.valueCount;
+      target.summary = count > 0
+        ? `${count} wrong-way ${count === 1 ? 'import' : 'imports'} out`
+        : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? 'import' : 'imports'} out`;
+      target.flowGroups = wrongWay.groups;
+      target.flows = wrongWay.flows;
+      target.flowCount = count;
+    }
+    return target;
   }
 
   /** Combine every selected node's passport into one delegation target. */
@@ -337,6 +363,11 @@ export function createDelegation(app) {
     if (!Array.isArray(target?.flows) || target.flows.length === 0) {
       return [];
     }
+    // A Structure card rolls up several wrong-way edges: `wrongWayMenuItems` lists them
+    // grouped by target tier, so the flat single-edge list would only repeat it.
+    if (Array.isArray(target.flowGroups)) {
+      return [];
+    }
     const base = (file) => file.split('/').pop();
     const ordered = [...target.flows].sort((a, b) => Number(a.typeOnly === true) - Number(b.typeOnly === true));
     return [
@@ -355,6 +386,44 @@ export function createDelegation(app) {
     ];
   }
 
+  /**
+   * The wrong-way reads a Structure card starts, as menu entries: the card's count, then each
+   * wrong-way edge (its target tier and kind) with its imports, value imports first, each
+   * opening the source at the import, and a per-edge "Show all" that opens the edge panel.
+   */
+  function wrongWayMenuItems(target) {
+    if (!Array.isArray(target?.flowGroups) || target.flowGroups.length === 0) {
+      return [];
+    }
+    const base = (file) => file.split('/').pop();
+    const items = [{ label: target.summary ?? `${target.flowGroups.length} wrong-way edges` }];
+    for (const group of target.flowGroups) {
+      items.push({
+        label: `${group.kind} → ${group.targetLabel} (${group.valueCount})`,
+        title: `${group.weight} recorded import(s) from this tier to ${group.targetLabel}${group.typeOnlyCount ? `, ${group.typeOnlyCount} type-only` : ''}`,
+      });
+      const ordered = [...group.imports].sort(
+        (a, b) => Number(a.typeOnly === true) - Number(b.typeOnly === true),
+      );
+      for (const entry of ordered.slice(0, MENU_FLOW_LIMIT)) {
+        items.push({
+          label: `  ${base(entry.source)}:${entry.line} → ${base(entry.target)}`,
+          hint: entry.typeOnly ? 'type' : '',
+          title: `${entry.source}:${entry.line} → ${entry.target} (${entry.specifier}) — open the source at this import`,
+          action: () => app.source.viewSource(entry.source, { line: entry.line }),
+        });
+      }
+      if (group.imports.length > MENU_FLOW_LIMIT) {
+        items.push({
+          label: `  ☰ Show all ${group.weight} on this edge`,
+          action: () => app.selection.selectEdge(group.id),
+        });
+      }
+    }
+    items.push({ separator: true });
+    return items;
+  }
+
   /** Right-click menu for one delegated item: launch, or copy the prompt. */
   function openDelegateMenu(target, x, y) {
     if (!target) {
@@ -368,6 +437,7 @@ export function createDelegation(app) {
       y,
       title: menuTitle,
       items: [
+        ...wrongWayMenuItems(target),
         ...flowMenuItems(target),
         ...app.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
@@ -383,7 +453,7 @@ export function createDelegation(app) {
         },
         ...(Array.isArray(target.flows)
           ? [{
-            label: '⧉ Copy imports',
+            label: Array.isArray(target.flowGroups) ? '⧉ Copy wrong-way imports' : '⧉ Copy imports',
             action: async () => {
               await copyText(
                 target.flows.map((entry) => `${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`).join('\n'),

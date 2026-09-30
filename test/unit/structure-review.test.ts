@@ -7,6 +7,7 @@ import { scanRepository } from '../../src/index.ts';
 import { isTypeOnlyStatement } from '../../src/scan/scan-js.ts';
 import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
 import { buildElements } from '../../ui/strabo-graph-elements.js';
+import { wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
 import { fitLabel } from '../../ui/strabo-islands.js';
 
 const root = path.resolve('test/fixtures/structure-repo');
@@ -121,4 +122,37 @@ test('a Structure grid edge lists the imports behind it, like a stack edge', asy
     upward?.tierImports?.map((entry) => `${entry.source}:${entry.line} → ${entry.target}`),
     ['orders/src/data/audit.ts:1 → orders/src/domain/orders.ts'],
   );
+});
+
+test('a Structure card names the wrong-way imports it starts, grouped by edge', async () => {
+  const { graph } = await scanRepository(root);
+  const model = buildStructureViewModel(buildTierReport(root, 'structure-repo', graph), descriptor, cache);
+  const flows = wrongWayFlowsFor(model, 'data');
+  assert.ok(flows, 'the data tier starts an upward read');
+  assert.equal(flows.valueCount, 1);
+  assert.equal(flows.typeOnlyCount, 0);
+  assert.equal(flows.groups.length, 1);
+  assert.equal(flows.groups[0].kind, 'upward');
+  assert.equal(flows.groups[0].targetLabel, 'Domain/service');
+  assert.deepEqual(
+    flows.groups[0].imports.map((entry) => `${entry.source}:${entry.line} → ${entry.target}`),
+    ['orders/src/data/audit.ts:1 → orders/src/domain/orders.ts'],
+  );
+  // A tier that starts no wrong-way read, and a file id that is not a card, stay silent.
+  assert.equal(wrongWayFlowsFor(model, 'frontend'), null);
+  assert.equal(wrongWayFlowsFor(model, 'orders/src/data/audit.ts'), null);
+});
+
+test('a type-only wrong-way read is counted out of the card value total', async () => {
+  const { graph } = await scanRepository(root);
+  const typed = {
+    ...graph,
+    edges: graph.edges.map((edge) =>
+      edge.source === 'orders/src/data/audit.ts' && edge.kind === 'import' ? { ...edge, typeOnly: true } : edge,
+    ),
+  };
+  const model = buildStructureViewModel(buildTierReport(root, 'structure-repo', typed), descriptor, cache);
+  const flows = wrongWayFlowsFor(model, 'data');
+  assert.equal(flows?.valueCount, 0);
+  assert.equal(flows?.typeOnlyCount, 1);
 });
