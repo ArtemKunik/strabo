@@ -6,7 +6,7 @@ import { checkDeclaredRules, readDeclaredRules } from '../analysis/rules.ts';
 import { computeStringEdges } from '../analysis/string-edges.ts';
 import { buildTierReport } from '../analysis/tiers.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
-import { getCachedGraph } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { revisionFromFingerprint } from '../status.ts';
 import type { Graph, StraboConfig } from '../types.ts';
 import type { WorkspaceReport } from '../types.ts';

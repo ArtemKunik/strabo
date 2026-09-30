@@ -1,7 +1,8 @@
 import { Router } from 'express';
 
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
+import { CACHE_ARTIFACT_VERSION } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { exportGraph, type GraphExportFormat } from '../../export/graph-export.ts';
 import { selectViewModel } from '../../export/select-view.ts';
 import { renderViewModelSvg } from '../../export/svg.ts';

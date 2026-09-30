@@ -13,7 +13,7 @@ import {
   type StructuralDiffResult,
 } from '../analysis/structural-diff.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
-import { getCachedGraph } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { collectFindings, parseFailOnRules, type CheckRule } from '../check/check.ts';
 import { readEnv } from '../config.ts';
 import { collectRepositoryReport } from '../report/collect.ts';

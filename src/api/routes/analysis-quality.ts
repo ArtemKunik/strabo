@@ -19,7 +19,7 @@ import { refreshCoverage } from '../../analysis/coverage-refresh.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../../analysis/quality.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
 import { assertReadable } from '../../boundary/repository-root.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
 import { isSameOriginRequest, parsePositiveInt, sendError } from '../http.ts';

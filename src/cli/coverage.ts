@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
-import { getCachedGraph } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { readEnv } from '../config.ts';
 import {
   computeMeasuredCoverage,

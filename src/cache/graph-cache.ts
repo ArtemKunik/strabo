@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { scanRepository } from '../scan/scan.ts';
 import type { ScanReport } from '../types.ts';
 import { run } from '../process.ts';
 
@@ -26,7 +25,10 @@ export interface CacheOptions {
   refresh?: boolean;
   /** Injectable clock; defaults to `Date.now`. */
   now?: () => number;
-  /** Injectable scanner; defaults to {@link scanRepository}. */
+  /**
+   * Injectable scanner. The cache never picks one itself: the data tier does not reach up
+   * into the scanner, so `getCachedGraph` in `src/scan/graph.ts` supplies the default.
+   */
   scan?: ScanFn;
 }
 
@@ -91,12 +93,13 @@ export async function fingerprint(root: string): Promise<string | null> {
  * fingerprint all match. A matching artifact past the memory TTL is returned while a
  * background scan refreshes it.
  */
-export async function getCachedGraph(
+export async function readThroughGraphCache(
   root: string,
+  defaultScan: ScanFn,
   options: CacheOptions = {},
 ): Promise<CachedGraph> {
   const now = options.now ?? Date.now;
-  const scan = options.scan ?? scanRepository;
+  const scan = options.scan ?? defaultScan;
   const current = await fingerprint(root);
 
   if (options.refresh) {

@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { cacheRoot, getCachedGraph } from '../cache/graph-cache.ts';
+import { cacheRoot } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { scanJsTsCalls } from '../scan/calls.ts';
 import { detectEntryPoints } from '../scan/entry-points.ts';
 import { classifyExclusion, excludedDirectory, looksMinified } from '../scan/exclusions.ts';

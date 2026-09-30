@@ -7,7 +7,7 @@ import {
   computeContractImpact,
   type ContractBoundaryReport,
 } from '../../analysis/data/contracts-graph.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { openWorkspaceCache, type WorkspaceCache } from '../../cache/workspace-cache.ts';
 import type { DataReport, Graph, StraboConfig } from '../../types.ts';
 import { analyzeWorkspace } from '../../workspace/analyze.ts';

@@ -6,7 +6,7 @@ import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import {
   createNarratorClient,
   extractNarrative,

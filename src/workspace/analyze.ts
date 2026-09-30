@@ -1,5 +1,5 @@
 import type { ResolvedRepository } from '../boundary/repository-root.ts';
-import { getCachedGraph } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { openWorkspaceCache, type WorkspaceCache } from '../cache/workspace-cache.ts';
 import { describeRepository } from '../repository.ts';
 import type {

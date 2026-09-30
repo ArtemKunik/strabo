@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { getLineage } from '../../integrations/lineage-pack.ts';
 import type { Graph, StraboConfig } from '../../types.ts';
 import { sendError } from '../http.ts';

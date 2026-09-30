@@ -13,10 +13,10 @@ import {
   clearDiskCache,
   clearMemoryCache,
   fingerprint,
-  getCachedGraph,
 } from '../src/cache/graph-cache.ts';
 import { describeRepository } from '../src/repository.ts';
 import { scanJsTsCalls } from '../src/scan/calls.ts';
+import { getCachedGraph } from '../src/scan/graph.ts';
 import { looksMinified } from '../src/scan/exclusions.ts';
 import { findGitIgnoredFiles } from '../src/scan/gitignore.ts';
 import { scanJsTsEdges } from '../src/scan/scan-js.ts';

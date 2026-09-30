@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 
 import { collectDrift } from '../analysis/drift.ts';
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
-import { getCachedGraph } from '../cache/graph-cache.ts';
+import { getCachedGraph } from '../scan/graph.ts';
 import { describeRepository } from '../repository.ts';
 import { renderDriftArtifact } from './drift-artifact.ts';
 import { exportGraph } from './graph-export.ts';

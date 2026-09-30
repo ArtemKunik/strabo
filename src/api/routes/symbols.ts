@@ -7,7 +7,7 @@ import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
 import { computeMeasuredCoverage, measuredFileFigure } from '../../analysis/measured-coverage.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { StraboConfig } from '../../types.ts';
 import { sendError } from '../http.ts';

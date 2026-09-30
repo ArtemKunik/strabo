@@ -655,8 +655,8 @@ export {
   buildStructureGridViewModel,
 } from './view/view-model.ts';
 
+export { getCachedGraph } from './scan/graph.ts';
 export {
-  getCachedGraph,
   fingerprint,
   clearMemoryCache,
   clearDiskCache,

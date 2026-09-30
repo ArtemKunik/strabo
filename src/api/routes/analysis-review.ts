@@ -18,7 +18,7 @@ import { computeScopeFence } from '../../analysis/scope-fence.ts';
 import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { listWorktrees, resolveWorktree, type WorktreeSummary } from '../../analysis/worktrees.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { revisionFromFingerprint } from '../../status.ts';
 import { parsePositiveInt, sendError } from '../http.ts';
 import { expectValues, graphProvenance, type AnalysisContext } from './analysis-context.ts';

@@ -4,7 +4,7 @@ import { computeRiskReport } from '../../risk/report.ts';
 import { createLicenseClient, parseDeniedLicenses } from '../../risk/licenses.ts';
 import { createOsvClient } from '../../risk/osv.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import type { StraboConfig } from '../../types.ts';
 import { sendError } from '../http.ts';
 

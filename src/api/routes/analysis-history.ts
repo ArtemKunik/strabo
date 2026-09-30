@@ -5,7 +5,7 @@ import { collectDrift } from '../../analysis/drift.ts';
 import { collectHistory } from '../../analysis/history.ts';
 import { checkDeclaredRules, readDeclaredRules } from '../../analysis/rules.ts';
 import { computeStringEdges } from '../../analysis/string-edges.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { parsePositiveInt, sendError } from '../http.ts';
 import { parseRatio, type AnalysisContext } from './analysis-context.ts';
 

@@ -7,7 +7,8 @@ import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
 import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { CACHE_ARTIFACT_VERSION, getCachedGraph } from '../../cache/graph-cache.ts';
+import { CACHE_ARTIFACT_VERSION } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
 import {

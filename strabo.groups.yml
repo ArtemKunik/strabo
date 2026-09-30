@@ -18,6 +18,16 @@ tiers:
       - "src/cli/**"
       - "src/mcp/**"
       - "src/terminal/ws.ts"
+  # The narrator's pure prompt builders and the dependency-risk analysis are domain logic;
+  # only the provider client, its settings and keys, and the OSV and deps.dev clients talk to
+  # an outside system. Specific files come first because the first matching entry wins.
+  - tier: domain
+    globs:
+      - "src/narrator/tour.ts"
+      - "src/narrator/coverage-plan.ts"
+      - "src/narrator/coverage-weekly.ts"
+      - "src/risk/report.ts"
+      - "src/risk/inventory.ts"
   - tier: integration
     globs:
       - "src/integrations/**"
@@ -30,9 +40,13 @@ tiers:
       - "src/cache/**"
       - "src/state/**"
       - "src/repository.ts"
+  # Platform plumbing every tier may use: configuration, spawning a process, and the scan
+  # ceiling's path boundary. Infra sits beside the tier stack, so reading it is never wrong-way.
   - tier: infra
     globs:
       - "src/config.ts"
+      - "src/process.ts"
+      - "src/boundary/repository-root.ts"
   - tier: build
     globs:
       - "scripts/**"
@@ -49,7 +63,6 @@ tiers:
       - "src/export/**"
       - "src/report/**"
       - "src/status.ts"
-      - "src/process.ts"
       - "src/types.ts"
       - "src/types/**"
 
@@ -75,4 +88,11 @@ rules:
   - id: api-calls-risk
     from: "src/api/**"
     to: "src/risk/**"
+    allow: import
+  # Domain code reads the graph and workspace caches and the repository store it owns. Data and
+  # integration are both adapters under domain here; the rank puts integration between them, so
+  # without this rule every domain read of a store would read as skipping a tier.
+  - id: domain-reads-data
+    from: "src/analysis/**"
+    to: "src/cache/**"
     allow: import

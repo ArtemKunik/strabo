@@ -5,15 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test, after } from 'node:test';
 
-import {
-  CACHE_ARTIFACT_VERSION,
-  MEMORY_TTL_MS,
-  cacheArtifactPath,
-  clearDiskCache,
-  clearMemoryCache,
-  fingerprint,
-  getCachedGraph,
-} from '../../src/cache/graph-cache.ts';
+import { CACHE_ARTIFACT_VERSION, MEMORY_TTL_MS, cacheArtifactPath, clearDiskCache, clearMemoryCache, fingerprint } from '../../src/cache/graph-cache.ts';
+import { getCachedGraph } from '../../src/scan/graph.ts';
 import { scanRepository } from '../../src/index.ts';
 import type { ScanReport } from '../../src/index.ts';
 

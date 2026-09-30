@@ -1,6 +1,7 @@
 import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { resolveRepositoryRoot, type ResolvedRepository } from '../../boundary/repository-root.ts';
-import { getCachedGraph, type CachedGraph } from '../../cache/graph-cache.ts';
+import { type CachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { computeFreshness, revisionFromFingerprint } from '../../status.ts';
 import type { GraphProvenance } from '../../analysis/review-types.ts';
 import type { Graph, StraboConfig } from '../../types.ts';

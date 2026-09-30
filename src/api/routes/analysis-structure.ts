@@ -15,7 +15,7 @@ import { collectRepositoryReport } from '../../report/collect.ts';
 import { renderReportHtml } from '../../report/render-html.ts';
 import { renderReportMarkdown } from '../../report/render-markdown.ts';
 import { parseDeniedLicenses } from '../../risk/licenses.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { analyzeRepository } from '../../workspace/analyze.ts';
 import { readWorkspaceConfig } from '../../workspace/config.ts';
 import { isSameOriginRequest, parseBoolean, parsePositiveInt, sendError } from '../http.ts';

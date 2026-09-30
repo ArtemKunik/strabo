@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
-import { getCachedGraph } from '../../cache/graph-cache.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import { getVulnerabilities } from '../../integrations/vulnerability.ts';
 import { describeRepository } from '../../repository.ts';
 import type { StraboConfig } from '../../types.ts';
