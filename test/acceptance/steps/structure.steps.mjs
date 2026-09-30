@@ -161,7 +161,7 @@ Then('the {string} tier is on the support shelf, not a band', async function (ti
 
 Then('the Structure legend names role tiers, not layers', async function () {
   const text = (await this.page.textContent('#legend')) ?? '';
-  assert.match(text, /band = tier/);
+  assert.match(text, /card = tier/);
   assert.match(text, /shelf = support tiers/);
   assert.doesNotMatch(text, /lane = layer/);
 });
