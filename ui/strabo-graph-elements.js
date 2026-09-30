@@ -5,6 +5,7 @@
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
 
+import { isWrongWayEdge } from './strabo-graph-facts.js';
 import { edgeStrokeWidth, locDiameter, nodeDiameter } from './strabo-graph-sizing.js';
 import {
   isStructureStack,
@@ -89,7 +90,7 @@ function structureEdgeText(edge) {
   const base = structureEdgeBase(edge, weight);
   // A wrong-way read made of type-only imports is the likely false positive the tier panel
   // warns about; say how much of it is types so the real violations stand out.
-  if (base && weight && typeOnly > 0 && (edge.tierKind === 'upward' || edge.tierKind === 'skip-layer')) {
+  if (base && weight && typeOnly > 0 && isWrongWayEdge(edge)) {
     return typeOnly >= weight ? `${base} · types only` : `${base} · ${typeOnly} type-only`;
   }
   return base;
@@ -100,7 +101,9 @@ function structureEdgeBase(edge, weight) {
     return weight ? `${weight} upward` : 'upward';
   }
   if (edge.tierKind === 'skip-layer') {
-    return weight ? `${weight} skip-layer` : 'skip-layer';
+    // A declared shortcut still says it skips a tier, and which rule allows it.
+    const intended = edge.intended === true ? ` · allowed${edge.ruleId ? ` (${edge.ruleId})` : ''}` : '';
+    return `${weight ? `${weight} skip-layer` : 'skip-layer'}${intended}`;
   }
   if (edge.violation) {
     return weight ? `${weight} rule ${weight === 1 ? 'violation' : 'violations'}` : 'rule violation';
@@ -126,7 +129,7 @@ function compactCount(value) {
 function wrongWayBySource(model) {
   const counts = new Map();
   for (const edge of model.edges ?? []) {
-    if (edge.tierKind !== 'upward' && edge.tierKind !== 'skip-layer') continue;
+    if (!isWrongWayEdge(edge)) continue;
     const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
     if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
   }
@@ -247,7 +250,7 @@ export function buildElements(model) {
     classes: [
       edge.tierKind === 'upward'
         ? 'edge-tier-upward'
-        : edge.tierKind === 'skip-layer'
+        : edge.tierKind === 'skip-layer' && isWrongWayEdge(edge)
           ? 'edge-tier-skip'
           : '',
       edge.crossUnitEdge === true ? 'edge-structure-cross-unit' : '',

@@ -143,6 +143,283 @@ function nodeDiameter(node) {
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 
+// ui/strabo-graph-facts.js
+function passportFor(model, id) {
+  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return null;
+  }
+  const edges = model.edges ?? [];
+  const imports = distinctByFile(
+    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
+  );
+  const usedBy = distinctByFile(
+    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
+  );
+  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
+  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
+    metrics.push(
+      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
+      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
+    );
+  } else {
+    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
+  }
+  metrics.push(
+    { label: "Direct imports", value: imports.length, unit: "files" },
+    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
+  );
+  if (typeof node.lines === "number") {
+    metrics.push({ label: "Lines", value: node.lines });
+  }
+  if (typeof node.files === "number") {
+    metrics.push({ label: "Files", value: node.files });
+  }
+  if (typeof node.fileShare === "number") {
+    metrics.push({ label: "File share", value: `${Math.round(node.fileShare * 100)}%` });
+  }
+  if (typeof node.periphery === "number" && node.periphery > 0) {
+    metrics.push({ label: "Support files", value: node.periphery });
+  }
+  if (node.mixed === true) {
+    metrics.push({ label: "Mixed roles", value: "yes" });
+  }
+  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
+  if (card) {
+    metrics.push(
+      { label: "Lines", value: card.loc },
+      { label: "Layers", value: card.layers.length },
+      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
+      { label: "Depends on units", value: card.dependsOn },
+      { label: "Used by units", value: card.usedBy }
+    );
+    if (card.coverage) {
+      const { value, linesHit, linesFound, notInReport } = card.coverage;
+      metrics.push({
+        label: "Measured coverage",
+        value: value === null ? "no line counts" : `${value}% (${linesHit}/${linesFound} lines)`
+      });
+      if (notInReport > 0) {
+        metrics.push({ label: "Not in report", value: notInReport });
+      }
+    }
+    if (card.hotspots !== null) {
+      metrics.push({ label: "Hotspots", value: card.hotspots });
+    }
+  }
+  if (node.shelf) {
+    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
+  }
+  return {
+    id: node.id,
+    kind: node.kind,
+    // The "why grouped" caption a System-view unit carries; absent on file nodes.
+    why: node.why,
+    metrics,
+    imports,
+    usedBy
+  };
+}
+function edgeEntry(id, edge) {
+  return {
+    id,
+    line: edge.evidence?.line,
+    specifier: edge.evidence?.specifier,
+    role: edge.role
+  };
+}
+function distinctByFile(entries) {
+  const byFile = /* @__PURE__ */ new Map();
+  for (const entry of entries) {
+    if (entry.role === "declare" || byFile.has(entry.id)) {
+      continue;
+    }
+    byFile.set(entry.id, entry);
+  }
+  return [...byFile.values()];
+}
+function coChangePartnersFor(report, file, limit = 20) {
+  const edges = (report?.edges ?? []).filter(
+    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
+  );
+  return edges.sort(
+    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
+      b2.source === file ? b2.target : b2.source
+    )
+  ).slice(0, limit).map((edge) => ({
+    file: edge.source === file ? edge.target : edge.source,
+    hidden: edge.hidden === true,
+    ratio: edge.ratio,
+    commitsShared: edge.commitsShared ?? edge.commits.length,
+    commits: edge.commits
+  }));
+}
+function unitHoverFacts(model, id) {
+  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
+  if (!card) {
+    return null;
+  }
+  return {
+    title: `${card.ecosystem} package \`${card.name}\``,
+    rows: [
+      `${card.files} files`,
+      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
+      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
+      `why: ${card.manifest ?? card.why}`
+    ]
+  };
+}
+function shelfHoverText(shelf) {
+  if (!shelf) {
+    return "support files";
+  }
+  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
+  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
+  return `${tests}, ${scripts}: folded support`;
+}
+function withUnitHotspots(cards, report) {
+  const list2 = cards ?? [];
+  const byPrefix = list2.map((card) => card.id).sort((a, b2) => b2.length - a.length);
+  const counts = new Map(list2.map((card) => [card.id, 0]));
+  for (const spot of report?.hotspots ?? []) {
+    const owner = byPrefix.find(
+      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
+    );
+    if (owner !== void 0) {
+      counts.set(owner, (counts.get(owner) ?? 0) + 1);
+    }
+  }
+  return list2.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
+}
+function isWrongWayEdge(edge) {
+  if (edge?.tierKind === "upward") {
+    return true;
+  }
+  return edge?.tierKind === "skip-layer" && edge.intended !== true;
+}
+function edgeEvidenceFor(model, edgeId) {
+  const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
+  if (!edge) {
+    return null;
+  }
+  const evidence = edge.evidence ?? {};
+  return {
+    id: edgeId,
+    source: edge.source,
+    target: edge.target,
+    kind: edge.kind,
+    line: evidence.line ?? null,
+    specifier: evidence.specifier ?? null,
+    resolution: evidence.resolution ?? null,
+    resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? "not recorded",
+    tierKind: edge.tierKind ?? null,
+    weight: typeof edge.weight === "number" ? edge.weight : null,
+    violation: edge.violation === true,
+    intended: edge.intended === true,
+    ruleId: edge.ruleId ?? null,
+    crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
+    typeOnlyCount: typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : null,
+    tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
+    provenance: graphProvenanceFromModel(model)
+  };
+}
+function wrongWayFlowsFor(model, id) {
+  if (!model?.structure) {
+    return null;
+  }
+  const nodes = model.nodes ?? [];
+  const node = nodes.find((candidate) => candidate.id === id);
+  if (!node || node.kind !== "tier" && node.kind !== "shelf") {
+    return null;
+  }
+  const labelOf2 = (nodeId) => nodes.find((candidate) => candidate.id === nodeId)?.label ?? nodeId;
+  const groups = [];
+  (model.edges ?? []).forEach((edge, index) => {
+    if (edge.source !== id || edge.ghost === true) {
+      return;
+    }
+    if (!isWrongWayEdge(edge)) {
+      return;
+    }
+    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
+    const weight = typeof edge.weight === "number" ? edge.weight : imports.length;
+    if (weight <= 0) {
+      return;
+    }
+    const typeOnlyCount = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
+    groups.push({
+      id: `e${index}`,
+      kind: edge.tierKind,
+      target: edge.target,
+      targetLabel: labelOf2(edge.target),
+      weight,
+      typeOnlyCount,
+      valueCount: Math.max(0, weight - typeOnlyCount),
+      imports
+    });
+  });
+  if (groups.length === 0) {
+    return null;
+  }
+  return {
+    id,
+    label: node.label ?? id,
+    valueCount: groups.reduce((sum, group) => sum + group.valueCount, 0),
+    typeOnlyCount: groups.reduce((sum, group) => sum + group.typeOnlyCount, 0),
+    flows: groups.flatMap((group) => group.imports),
+    groups
+  };
+}
+function structureWrongWayEvidence(model, { importLimit = 20 } = {}) {
+  if (!model?.structure) {
+    return [];
+  }
+  const lines = [];
+  for (const node of model.nodes ?? []) {
+    const flows = wrongWayFlowsFor(model, node.id);
+    if (!flows) {
+      continue;
+    }
+    for (const group of flows.groups) {
+      const typeOnly = group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : "";
+      lines.push(`${group.kind}: ${flows.label} \u2192 ${group.targetLabel} \u2014 ${group.weight} import(s)${typeOnly}`);
+      for (const entry of group.imports.slice(0, importLimit)) {
+        lines.push(`  ${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
+      }
+      const unlisted = group.weight - Math.min(group.imports.length, importLimit);
+      if (unlisted > 0) {
+        lines.push(`  \u2026and ${unlisted} more import(s) not listed`);
+      }
+    }
+  }
+  return lines;
+}
+function graphProvenanceFromModel(model) {
+  const cache = model?.cache;
+  if (!cache || !cache.fingerprint) {
+    return null;
+  }
+  return {
+    fingerprint: cache.fingerprint,
+    revision: String(cache.fingerprint).split(":")[0] || null,
+    scannedAt: cache.generatedAt ?? null,
+    currentFingerprint: null,
+    behind: null,
+    stale: cache.stale === true
+  };
+}
+var RESOLUTION_LABELS = {
+  exact: "exact match",
+  extension: "extension added",
+  index: "index file",
+  "index-of-package": "package member",
+  "module-tree": "module tree",
+  "index-packed": "packed index",
+  alias: "path alias",
+  root: "repo root",
+  "subpath-import": "package subpath"
+};
+
 // ui/strabo-structure-layout.js
 var STACK_GAP = 150;
 var SHELF_GAP = 120;
@@ -329,7 +606,7 @@ function structureEdgeText(edge) {
   const weight = typeof edge.weight === "number" && edge.weight > 0 ? edge.weight : null;
   const typeOnly = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
   const base = structureEdgeBase(edge, weight);
-  if (base && weight && typeOnly > 0 && (edge.tierKind === "upward" || edge.tierKind === "skip-layer")) {
+  if (base && weight && typeOnly > 0 && isWrongWayEdge(edge)) {
     return typeOnly >= weight ? `${base} \xB7 types only` : `${base} \xB7 ${typeOnly} type-only`;
   }
   return base;
@@ -339,7 +616,8 @@ function structureEdgeBase(edge, weight) {
     return weight ? `${weight} upward` : "upward";
   }
   if (edge.tierKind === "skip-layer") {
-    return weight ? `${weight} skip-layer` : "skip-layer";
+    const intended = edge.intended === true ? ` \xB7 allowed${edge.ruleId ? ` (${edge.ruleId})` : ""}` : "";
+    return `${weight ? `${weight} skip-layer` : "skip-layer"}${intended}`;
   }
   if (edge.violation) {
     return weight ? `${weight} rule ${weight === 1 ? "violation" : "violations"}` : "rule violation";
@@ -358,7 +636,7 @@ function compactCount(value) {
 function wrongWayBySource(model) {
   const counts = /* @__PURE__ */ new Map();
   for (const edge of model.edges ?? []) {
-    if (edge.tierKind !== "upward" && edge.tierKind !== "skip-layer") continue;
+    if (!isWrongWayEdge(edge)) continue;
     const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
     if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
   }
@@ -450,7 +728,7 @@ function buildElements(model) {
     // draws a wrong-way one apart (Phase 35 Y3), and a cell edge crossing a unit boundary
     // (Y4) apart from a same-unit one.
     classes: [
-      edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" ? "edge-tier-skip" : "",
+      edge.tierKind === "upward" ? "edge-tier-upward" : edge.tierKind === "skip-layer" && isWrongWayEdge(edge) ? "edge-tier-skip" : "",
       edge.crossUnitEdge === true ? "edge-structure-cross-unit" : "",
       edge.ghost === true ? "edge-ghost" : "",
       edge.violation === true ? "edge-violation" : "",
@@ -664,276 +942,6 @@ function filterNodes(model, text) {
   }
   return model.nodes.filter((node) => node.id.toLowerCase().includes(needle)).map((node) => node.id);
 }
-
-// ui/strabo-graph-facts.js
-function passportFor(model, id) {
-  const node = (model.nodes ?? []).find((candidate) => candidate.id === id);
-  if (!node) {
-    return null;
-  }
-  const edges = model.edges ?? [];
-  const imports = distinctByFile(
-    edges.filter((edge) => edge.source === id).map((edge) => edgeEntry(edge.target, edge))
-  );
-  const usedBy = distinctByFile(
-    edges.filter((edge) => edge.target === id).map((edge) => edgeEntry(edge.source, edge))
-  );
-  const metrics = [{ label: "Direct importers", value: usedBy.length, unit: "files" }];
-  if (typeof node.systemUnit === "string" && !node.id.endsWith("#support")) {
-    metrics.push(
-      { label: "Blast radius in unit", value: node.inUnitDependents ?? 0 },
-      { label: "Blast radius outside", value: node.outsideDependents ?? 0 }
-    );
-  } else {
-    metrics.push({ label: "Blast radius", value: node.transitiveDependents ?? 0, unit: "files" });
-  }
-  metrics.push(
-    { label: "Direct imports", value: imports.length, unit: "files" },
-    { label: "Depends on (all)", value: node.transitiveDependencies ?? 0, unit: "files" }
-  );
-  if (typeof node.lines === "number") {
-    metrics.push({ label: "Lines", value: node.lines });
-  }
-  if (typeof node.files === "number") {
-    metrics.push({ label: "Files", value: node.files });
-  }
-  if (typeof node.fileShare === "number") {
-    metrics.push({ label: "File share", value: `${Math.round(node.fileShare * 100)}%` });
-  }
-  if (typeof node.periphery === "number" && node.periphery > 0) {
-    metrics.push({ label: "Support files", value: node.periphery });
-  }
-  if (node.mixed === true) {
-    metrics.push({ label: "Mixed roles", value: "yes" });
-  }
-  const card = node.kind === "unit" ? (model.unitCards ?? []).find((entry) => entry.id === node.id) : void 0;
-  if (card) {
-    metrics.push(
-      { label: "Lines", value: card.loc },
-      { label: "Layers", value: card.layers.length },
-      { label: "Test reach", value: `${card.testReach.reached}/${card.testReach.total}` },
-      { label: "Depends on units", value: card.dependsOn },
-      { label: "Used by units", value: card.usedBy }
-    );
-    if (card.coverage) {
-      const { value, linesHit, linesFound, notInReport } = card.coverage;
-      metrics.push({
-        label: "Measured coverage",
-        value: value === null ? "no line counts" : `${value}% (${linesHit}/${linesFound} lines)`
-      });
-      if (notInReport > 0) {
-        metrics.push({ label: "Not in report", value: notInReport });
-      }
-    }
-    if (card.hotspots !== null) {
-      metrics.push({ label: "Hotspots", value: card.hotspots });
-    }
-  }
-  if (node.shelf) {
-    metrics.push({ label: "Tests", value: node.shelf.test }, { label: "Scripts", value: node.shelf.script });
-  }
-  return {
-    id: node.id,
-    kind: node.kind,
-    // The "why grouped" caption a System-view unit carries; absent on file nodes.
-    why: node.why,
-    metrics,
-    imports,
-    usedBy
-  };
-}
-function edgeEntry(id, edge) {
-  return {
-    id,
-    line: edge.evidence?.line,
-    specifier: edge.evidence?.specifier,
-    role: edge.role
-  };
-}
-function distinctByFile(entries) {
-  const byFile = /* @__PURE__ */ new Map();
-  for (const entry of entries) {
-    if (entry.role === "declare" || byFile.has(entry.id)) {
-      continue;
-    }
-    byFile.set(entry.id, entry);
-  }
-  return [...byFile.values()];
-}
-function coChangePartnersFor(report, file, limit = 20) {
-  const edges = (report?.edges ?? []).filter(
-    (edge) => (edge.source === file || edge.target === file) && Array.isArray(edge.commits) && edge.commits.length > 0
-  );
-  return edges.sort(
-    (a, b2) => (b2.commitsShared ?? 0) - (a.commitsShared ?? 0) || (a.source === file ? a.target : a.source).localeCompare(
-      b2.source === file ? b2.target : b2.source
-    )
-  ).slice(0, limit).map((edge) => ({
-    file: edge.source === file ? edge.target : edge.source,
-    hidden: edge.hidden === true,
-    ratio: edge.ratio,
-    commitsShared: edge.commitsShared ?? edge.commits.length,
-    commits: edge.commits
-  }));
-}
-function unitHoverFacts(model, id) {
-  const card = (model?.unitCards ?? []).find((entry) => entry.id === id);
-  if (!card) {
-    return null;
-  }
-  return {
-    title: `${card.ecosystem} package \`${card.name}\``,
-    rows: [
-      `${card.files} files`,
-      `depends on ${card.dependsOn} unit${card.dependsOn === 1 ? "" : "s"}`,
-      `used by ${card.usedBy} unit${card.usedBy === 1 ? "" : "s"}`,
-      `why: ${card.manifest ?? card.why}`
-    ]
-  };
-}
-function shelfHoverText(shelf) {
-  if (!shelf) {
-    return "support files";
-  }
-  const tests = `${shelf.test} test file${shelf.test === 1 ? "" : "s"}`;
-  const scripts = `${shelf.script} script${shelf.script === 1 ? "" : "s"}`;
-  return `${tests}, ${scripts}: folded support`;
-}
-function withUnitHotspots(cards, report) {
-  const list2 = cards ?? [];
-  const byPrefix = list2.map((card) => card.id).sort((a, b2) => b2.length - a.length);
-  const counts = new Map(list2.map((card) => [card.id, 0]));
-  for (const spot of report?.hotspots ?? []) {
-    const owner = byPrefix.find(
-      (id) => id === "." || spot.file === id || spot.file.startsWith(`${id}/`)
-    );
-    if (owner !== void 0) {
-      counts.set(owner, (counts.get(owner) ?? 0) + 1);
-    }
-  }
-  return list2.map((card) => ({ ...card, hotspots: counts.get(card.id) ?? 0 }));
-}
-function edgeEvidenceFor(model, edgeId) {
-  const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
-  if (!edge) {
-    return null;
-  }
-  const evidence = edge.evidence ?? {};
-  return {
-    id: edgeId,
-    source: edge.source,
-    target: edge.target,
-    kind: edge.kind,
-    line: evidence.line ?? null,
-    specifier: evidence.specifier ?? null,
-    resolution: evidence.resolution ?? null,
-    resolutionLabel: RESOLUTION_LABELS[evidence.resolution] ?? "not recorded",
-    tierKind: edge.tierKind ?? null,
-    weight: typeof edge.weight === "number" ? edge.weight : null,
-    violation: edge.violation === true,
-    ruleId: edge.ruleId ?? null,
-    crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
-    typeOnlyCount: typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : null,
-    tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
-    provenance: graphProvenanceFromModel(model)
-  };
-}
-function wrongWayFlowsFor(model, id) {
-  if (!model?.structure) {
-    return null;
-  }
-  const nodes = model.nodes ?? [];
-  const node = nodes.find((candidate) => candidate.id === id);
-  if (!node || node.kind !== "tier" && node.kind !== "shelf") {
-    return null;
-  }
-  const labelOf2 = (nodeId) => nodes.find((candidate) => candidate.id === nodeId)?.label ?? nodeId;
-  const groups = [];
-  (model.edges ?? []).forEach((edge, index) => {
-    if (edge.source !== id || edge.ghost === true) {
-      return;
-    }
-    if (edge.tierKind !== "upward" && edge.tierKind !== "skip-layer") {
-      return;
-    }
-    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
-    const weight = typeof edge.weight === "number" ? edge.weight : imports.length;
-    if (weight <= 0) {
-      return;
-    }
-    const typeOnlyCount = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
-    groups.push({
-      id: `e${index}`,
-      kind: edge.tierKind,
-      target: edge.target,
-      targetLabel: labelOf2(edge.target),
-      weight,
-      typeOnlyCount,
-      valueCount: Math.max(0, weight - typeOnlyCount),
-      imports
-    });
-  });
-  if (groups.length === 0) {
-    return null;
-  }
-  return {
-    id,
-    label: node.label ?? id,
-    valueCount: groups.reduce((sum, group) => sum + group.valueCount, 0),
-    typeOnlyCount: groups.reduce((sum, group) => sum + group.typeOnlyCount, 0),
-    flows: groups.flatMap((group) => group.imports),
-    groups
-  };
-}
-function structureWrongWayEvidence(model, { importLimit = 20 } = {}) {
-  if (!model?.structure) {
-    return [];
-  }
-  const lines = [];
-  for (const node of model.nodes ?? []) {
-    const flows = wrongWayFlowsFor(model, node.id);
-    if (!flows) {
-      continue;
-    }
-    for (const group of flows.groups) {
-      const typeOnly = group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : "";
-      lines.push(`${group.kind}: ${flows.label} \u2192 ${group.targetLabel} \u2014 ${group.weight} import(s)${typeOnly}`);
-      for (const entry of group.imports.slice(0, importLimit)) {
-        lines.push(`  ${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
-      }
-      const unlisted = group.weight - Math.min(group.imports.length, importLimit);
-      if (unlisted > 0) {
-        lines.push(`  \u2026and ${unlisted} more import(s) not listed`);
-      }
-    }
-  }
-  return lines;
-}
-function graphProvenanceFromModel(model) {
-  const cache = model?.cache;
-  if (!cache || !cache.fingerprint) {
-    return null;
-  }
-  return {
-    fingerprint: cache.fingerprint,
-    revision: String(cache.fingerprint).split(":")[0] || null,
-    scannedAt: cache.generatedAt ?? null,
-    currentFingerprint: null,
-    behind: null,
-    stale: cache.stale === true
-  };
-}
-var RESOLUTION_LABELS = {
-  exact: "exact match",
-  extension: "extension added",
-  index: "index file",
-  "index-of-package": "package member",
-  "module-tree": "module tree",
-  "index-packed": "packed index",
-  alias: "path alias",
-  root: "repo root",
-  "subpath-import": "package subpath"
-};
 
 // ui/strabo-graph-query.js
 var API_PATH = "/api/strabo";
@@ -1192,7 +1200,7 @@ function graphSummary(model) {
   let summary = `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
   if (model?.structure) {
     const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation);
-    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer");
+    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer" && isWrongWayEdge(e));
     const upward = upwardEdges.length;
     const skip = skipEdges.length;
     const imports = (list2) => list2.reduce((sum, e) => sum + (typeof e.weight === "number" ? e.weight : 1), 0);
@@ -10802,7 +10810,7 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.dataset.delegateEdge = evidence.id;
   const heading3 = document.createElement("h3");
   heading3.className = "overlay-summary";
-  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip-layer" ? " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
+  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip-layer" ? evidence.intended ? " \xB7 Skip-layer (allowed by a declared rule)" : " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
   heading3.textContent = `Edge${headingDetail}`;
   container.append(heading3);
   const route = document.createElement("p");

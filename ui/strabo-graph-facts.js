@@ -225,6 +225,21 @@ export function withUnitHotspots(cards, report) {
  * Returns null for an unknown id so the caller can stay silent instead of inventing an
  * explanation. `resolution` is rendered as a human label, never re-derived.
  */
+/**
+ * Whether a Structure edge is a wrong-way read that should be drawn and counted as one.
+ *
+ * Upward edges always are: they run against the tier order whatever the rules say. A
+ * skip-layer edge that a declared `allow: import` rule covers (Phase 35 Y7 `intended`) is the
+ * architecture the operator stated, so it is kept as a skip-layer for the layout but not
+ * painted or counted as wrong-way; otherwise every declared shortcut would stay red.
+ */
+export function isWrongWayEdge(edge) {
+  if (edge?.tierKind === 'upward') {
+    return true;
+  }
+  return edge?.tierKind === 'skip-layer' && edge.intended !== true;
+}
+
 export function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
   if (!edge) {
@@ -243,6 +258,7 @@ export function edgeEvidenceFor(model, edgeId) {
     tierKind: edge.tierKind ?? null,
     weight: typeof edge.weight === 'number' ? edge.weight : null,
     violation: edge.violation === true,
+    intended: edge.intended === true,
     ruleId: edge.ruleId ?? null,
     crossUnit: typeof edge.crossUnit === 'number' ? edge.crossUnit : null,
     typeOnlyCount: typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : null,
@@ -276,7 +292,7 @@ export function wrongWayFlowsFor(model, id) {
     if (edge.source !== id || edge.ghost === true) {
       return;
     }
-    if (edge.tierKind !== 'upward' && edge.tierKind !== 'skip-layer') {
+    if (!isWrongWayEdge(edge)) {
       return;
     }
     const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];

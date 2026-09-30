@@ -283,7 +283,9 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
     evidence.tierKind === 'upward'
       ? ' · Upward (Architecture Violation)'
       : evidence.tierKind === 'skip-layer'
-        ? ' · Skip-layer'
+        ? evidence.intended
+          ? ' · Skip-layer (allowed by a declared rule)'
+          : ' · Skip-layer'
         : evidence.violation
           ? ' · Architecture Violation'
           : ` · ${evidence.kind}`;

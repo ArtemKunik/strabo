@@ -5,6 +5,7 @@
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
 
+import { isWrongWayEdge } from './strabo-graph-facts.js';
 import { topLevelDirectory } from './strabo-graph-ids.js';
 
 /** Counts for the tests / components strip, in file, block, or system mode. */
@@ -237,7 +238,7 @@ export function graphSummary(model) {
   let summary = `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
   if (model?.structure) {
     const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation);
-    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer');
+    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer' && isWrongWayEdge(e));
     const upward = upwardEdges.length;
     const skip = skipEdges.length;
     // The canvas labels count imports per edge ("6 upward"), so the summary names both the

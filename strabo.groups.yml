@@ -11,12 +11,20 @@ tiers:
     globs:
       - "src/api/**"
       - "src/server.ts"
+      - "src/server-restart.ts"
       - "src/index.ts"
+      # Entry surfaces: the CLI, the MCP server, and the terminal's WebSocket endpoint.
+      - "src/cli.ts"
+      - "src/cli/**"
+      - "src/mcp/**"
+      - "src/terminal/ws.ts"
   - tier: integration
     globs:
       - "src/integrations/**"
       - "src/narrator/**"
       - "src/risk/**"
+      # The terminal hosts external agent processes over a PTY.
+      - "src/terminal/**"
   - tier: data
     globs:
       - "src/cache/**"
@@ -37,5 +45,34 @@ tiers:
       - "src/scan/**"
       - "src/view/**"
       - "src/workspace/**"
-      - "src/cli.ts"
+      - "src/check/**"
+      - "src/export/**"
+      - "src/report/**"
+      - "src/status.ts"
+      - "src/process.ts"
       - "src/types.ts"
+      - "src/types/**"
+
+# Declared architecture, read by the tier lens (Phase 35 Y7) and `strabo check`.
+#
+# `allow: import` states an intended path: the tier edge it covers is drawn as allowed rather
+# than wrong-way. The server's routes read the stores and caches and call the narrator and
+# risk integrations directly, without a domain service in between; that is the design, so
+# those skip-layer edges are declared. Upward edges stay flagged whatever the rules say.
+rules:
+  - id: api-reads-stores
+    from: "src/api/**"
+    to: "src/state/**"
+    allow: import
+  - id: api-reads-caches
+    from: "src/api/**"
+    to: "src/cache/**"
+    allow: import
+  - id: api-calls-narrator
+    from: "src/api/**"
+    to: "src/narrator/**"
+    allow: import
+  - id: api-calls-risk
+    from: "src/api/**"
+    to: "src/risk/**"
+    allow: import

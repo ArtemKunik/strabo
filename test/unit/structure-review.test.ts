@@ -7,7 +7,7 @@ import { scanRepository } from '../../src/index.ts';
 import { isTypeOnlyStatement } from '../../src/scan/scan-js.ts';
 import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
 import { buildElements } from '../../ui/strabo-graph-elements.js';
-import { structureWrongWayEvidence, wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
+import { isWrongWayEdge, structureWrongWayEvidence, wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
 import { graphSummary } from '../../ui/strabo-graph-summary.js';
 import { fitLabel } from '../../ui/strabo-islands.js';
 
@@ -188,4 +188,27 @@ test('an edge whose imports exceed the cap names how many were not listed', () =
     '  src/data/a.ts:2 → src/api/b.ts',
     '  …and 3 more import(s) not listed',
   ]);
+});
+
+test('a skip-layer edge a declared rule allows is drawn and counted as allowed, not wrong-way', () => {
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'api', kind: 'tier', label: 'API surface', files: 3 },
+      { id: 'domain', kind: 'tier', label: 'Domain', files: 3 },
+      { id: 'data', kind: 'tier', label: 'Data', files: 3 },
+    ],
+    edges: [
+      { source: 'api', target: 'data', tierKind: 'skip-layer', weight: 4, intended: true, ruleId: 'api-reads-stores' },
+      { source: 'domain', target: 'api', tierKind: 'upward', weight: 2, intended: true },
+    ],
+  };
+  assert.equal(isWrongWayEdge(model.edges[0]), false);
+  // Upward stays wrong-way whatever the rules say.
+  assert.equal(isWrongWayEdge(model.edges[1]), true);
+  const drawn = buildElements(model as never).edges;
+  assert.doesNotMatch(drawn[0].classes ?? '', /edge-tier-skip/);
+  assert.equal(drawn[0].data.label, '4 skip-layer · allowed (api-reads-stores)');
+  assert.equal(wrongWayFlowsFor(model, 'api'), null);
+  assert.doesNotMatch(graphSummary(model), /skip-layer/);
 });
