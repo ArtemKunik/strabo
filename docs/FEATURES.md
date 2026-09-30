@@ -172,6 +172,44 @@ Files mode because the analyses are per file.
 | Function hotspots | `/analysis/functions` | Functions whose recorded metrics cross a fixed threshold (nested loops, deep nesting, high complexity, long body, many parameters, recursion), ranked worst-first |
 | Data contracts | `/analysis/contracts/overlay` | Contract definitions (`ov-contract-def`), drifting implementations (`ov-cycle`), and ungoverned boundary endpoints (`ov-unreached`/`ov-affected`); the panel lists definitions, governed boundaries, deviations, and ungoverned candidates |
 
+## Declared architecture rules
+
+The Structure view compares the tier stack with the architecture an operator intends. Intent
+is stated as rules in `strabo.rules.yml`, or under the `rules:` key of `strabo.groups.yml`:
+
+```yaml
+rules:
+  - id: api-reads-stores
+    from: "src/api/**"      # glob over the importing file, or tier:<name>
+    to: "src/state/**"      # glob over the imported file, or tier:<name>
+    allow: import           # import | never | string
+    ghost: false            # optional: never draw an intended-flow edge for this rule
+```
+
+Every ranked cross-tier import is checked against the `allow: import` rules **one import at a
+time**: a rule covers an import when the importing file matches `from` and the imported file
+matches `to`, and the first matching rule is the one credited. An import no rule matches is
+*unexplained*.
+
+- An edge is **intended** only when every import on it is covered. It is drawn as an ordinary
+  edge, labelled `41 skip-layer · allowed (6 rules)` (or the rule id when one rule covers it),
+  and left out of the wrong-way counts.
+- An edge covered **in part** stays wrong-way and says how much: `8 skip-layer · 4 allowed`.
+  Its card counts, the summary line, and the agent task carry and list only the unexplained
+  imports; the covered ones are marked `allowed` in the import list, which puts unexplained
+  imports first so the 50-import cap never hides them.
+- An **upward** import is never excused by a rule.
+- A rule with **`ghost: false`** excuses the imports it matches but never draws a dashed
+  intent edge for a tier pair with no recorded imports. Use it for broad rules such as "the
+  composition root may reach anything". A rule whose two ends share a tier draws no intent
+  edge either, since a flow inside one tier is not a layer relationship.
+- **`allow: never`** marks any matching import a violation, and a rule id passed to
+  `strabo check --fail-on=<id>` fails on it. A rule that matches no file is reported as unused.
+
+The edge panel names the rules that apply, and a selected edge's agent task marks each import a
+rule allows. Rules judge imports, not calls, and the tier a file lands in can itself be declared
+under `tiers:` in `strabo.groups.yml`, which is often the first fix for a wrong-way edge.
+
 ## Repository passport
 
 Opening an unfamiliar repository shows a **Repository passport** once, before the operator

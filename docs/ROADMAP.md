@@ -2364,7 +2364,13 @@ with no recorded cross-tier edge says so rather than being filled in; and the ro
   declared flows with 0 observed imports become ghost edges (`ghost: true`, dashed), unrepresented tiers become ghost bands,
   and mismatches (both `allow: never` and upward layer order) are highlighted as violations in the cycle hue. Carried in
   `TierReport.intent` and `ViewModel.structureIntent`. Coverage in `test/unit/structure.test.ts` and the acceptance
-  scenario `@intent` in `structure.feature`.
+  scenario `@intent` in `structure.feature`. **Follow-up (done):** rules are judged import by
+  import (`markAllowedImports`), not per tier pair. An edge is `intended` only when every import
+  on it is covered; otherwise it carries `allowedCount`, `allowedTypeOnly`, and `allowedRules`,
+  each sampled import carries `allowed`, and the sample lists unexplained imports first. A rule
+  may set `ghost: false`, and a same-tier flow draws no ghost edge. Coverage in
+  `test/unit/tier-intent.test.ts` and `test/unit/structure-review.test.ts`; usage is in
+  `docs/FEATURES.md`, *Declared architecture rules*.
 - **Y8 - Agent and report surface (done).** MCP `get_tier_flow` (`GET /analysis/tiers/flow`,
   returning nodes, edges, kinds, shelf, and intra-tier ratio with basis and scan ceiling), a
   **Structure** section in the repository report (`RepositoryStructureSection`, JSON, Markdown, HTML),
