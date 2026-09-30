@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
+import type { Socket } from 'node:net';
 
 /**
  * Injection points so a test can observe the relaunch without spawning a real process.
@@ -31,6 +32,16 @@ export function createRestart(server: Server, deps: Partial<RestartDeps> = {}): 
   const cwd = deps.cwd ?? process.cwd();
   const env = deps.env ?? process.env;
 
+  // `closeAllConnections` only reaches sockets the HTTP parser still owns; a socket upgraded
+  // to a WebSocket (the Terminal screen's) is detached from it, so it stayed open, the close
+  // callback never ran, and the process sat alive with no listener and no replacement. Every
+  // raw socket is tracked from its `connection` event so the relaunch can drop them all.
+  const sockets = new Set<Socket>();
+  server.on?.('connection', (socket: Socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+
   return () => {
     server.close(() => {
       const child = spawnProcess(execPath, [...argv], {
@@ -45,5 +56,8 @@ export function createRestart(server: Server, deps: Partial<RestartDeps> = {}): 
     });
     // Drop keep-alive and WebSocket connections so the close callback is not held open.
     server.closeAllConnections?.();
+    for (const socket of sockets) {
+      socket.destroy();
+    }
   };
 }

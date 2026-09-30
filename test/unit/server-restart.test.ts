@@ -69,3 +69,39 @@ test('createRestart drops open connections so the close callback is not held ope
 
   assert.equal(dropped, true);
 });
+
+test('createRestart relaunches even while a WebSocket upgrade holds a socket open', async () => {
+  const http = await import('node:http');
+  const { WebSocketServer, WebSocket } = await import('ws');
+  const server = http.createServer((_request, response) => response.end('ok'));
+  const wss = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (request, socket, head) => wss.handleUpgrade(request, socket, head, () => {}));
+  let exited: number | null = null;
+  let spawned = false;
+  const restart = createRestart(server, {
+    spawn: (() => {
+      spawned = true;
+      return { unref: () => {} };
+    }) as never,
+    exit: (code: number) => {
+      exited = code;
+    },
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as { port: number };
+  const client = new WebSocket(`ws://127.0.0.1:${port}/`);
+  await new Promise((resolve, reject) => {
+    client.once('open', resolve);
+    client.once('error', reject);
+  });
+
+  restart();
+  // Before the fix the upgraded socket kept `server.close` waiting forever.
+  for (let i = 0; i < 50 && exited === null; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(spawned, true);
+  assert.equal(exited, 0);
+  client.terminate();
+  wss.close();
+});
