@@ -11,11 +11,13 @@ import {
   buildNarratorEvidence,
   buildReviewNarrationEvidence,
   buildRouteStepEvidence,
+  buildTierNarratorEvidence,
   GROUP_NAMING_INSTRUCTION,
   MEMBER_NARRATION_INSTRUCTION,
   narratorMenuState,
   REVIEW_NARRATION_INSTRUCTION,
   ROUTE_STEP_INSTRUCTION,
+  TIER_NARRATION_INSTRUCTION,
 } from './strabo-narrator.js';
 import { renderNarrationPanel } from './strabo-panels.js';
 
@@ -125,7 +127,7 @@ export function createNarrationController(app) {
     return buildNarratorEvidence({ functions: source?.functions });
   }
 
-  /** True when a graph node is something the narrator can describe: a file or a System unit. */
+  /** True when a graph node is something the narrator can describe: a file, System unit, or tier. */
   function isNarratable(id) {
     if (!id || !app.current || state.mode === 'block' || id.endsWith('#support')) {
       return false;
@@ -148,7 +150,10 @@ export function createNarrationController(app) {
     app.floatingWindows.find((controller) => controller.key === 'narration')?.open();
     try {
       let reply;
-      if (app.current?.system && !app.current?.systemUnit) {
+      const node = app.current?.nodes.find((candidate) => candidate.id === id);
+      if (app.current?.structure && (node?.kind === 'tier' || node?.kind === 'shelf')) {
+        reply = await postNarration(TIER_NARRATION_INSTRUCTION, buildTierNarratorEvidence(app.current, id));
+      } else if (app.current?.system && !app.current?.systemUnit) {
         reply = await narrateGroup(id);
       } else {
         const params = new URLSearchParams({ file: id });
@@ -232,7 +237,7 @@ export function createNarrationController(app) {
     }
     const menuState = isNarratable(target.id)
       ? narratorMenuState(app.narratorStatus)
-      : { enabled: false, hint: 'Narrate works on a file or a System unit — open the folder to reach its files.' };
+      : { enabled: false, hint: 'Narrate works on a file, a System unit, or a tier — open the folder to reach its files.' };
     return [
       {
         label: '✦ Narrate',

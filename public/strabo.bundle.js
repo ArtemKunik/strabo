@@ -4906,6 +4906,45 @@ function narratorReplyLabel(reply) {
   return `Narrator unavailable: ${reason}${detail}`;
 }
 var GROUP_NAMING_INSTRUCTION = "Propose one short name and a one-line purpose for this build unit, using only the recorded evidence. Do not create, merge, or split groups, and do not claim relationships the evidence does not show.";
+var TIER_NARRATION_INSTRUCTION = 'In three to five sentences of plain prose, say what this architecture tier appears to be for, what it leans on, what leans on it, and anything a reviewer should know about its wrong-way imports. Do not use lists, headings, or markdown, and do not repeat counts the reader can already see. The tier name, folders, and import relationships are recorded and may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
+function tierEdgePhrase(model, edge, otherId) {
+  const other = (model.nodes ?? []).find((candidate) => candidate.id === otherId);
+  const parts = [`${other?.label ?? otherId}`];
+  const detail = [];
+  if (typeof edge.weight === "number" && edge.weight > 0) {
+    detail.push(`${edge.weight} ${edge.weight === 1 ? "import" : "imports"}`);
+  }
+  if (edge.tierKind && edge.tierKind !== "down") {
+    detail.push(edge.tierKind);
+  }
+  if (typeof edge.typeOnlyCount === "number" && edge.typeOnlyCount > 0) {
+    detail.push(`${edge.typeOnlyCount} type-only`);
+  }
+  if (edge.intended === true) {
+    detail.push("allowed by a declared rule");
+  }
+  return detail.length > 0 ? `${parts[0]} (${detail.join(", ")})` : parts[0];
+}
+function buildTierNarratorEvidence(model, id) {
+  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return "No tier is recorded for this selection.";
+  }
+  const edges = model?.edges ?? [];
+  const outgoing = edges.filter((edge) => edge.source === id).map((edge) => tierEdgePhrase(model, edge, edge.target));
+  const incoming = edges.filter((edge) => edge.target === id).map((edge) => tierEdgePhrase(model, edge, edge.source));
+  const share = typeof node.fileShare === "number" ? `${Math.round(node.fileShare * 100)}% of the repository's files` : "share not recorded";
+  const lines = [
+    `${node.kind === "shelf" ? "Support shelf entry" : "Tier"}: ${node.label ?? id}`,
+    `Folders most of its files live in: ${node.why ?? "not recorded"}`,
+    `Files: ${node.files ?? "not recorded"} (${share})`,
+    `Lines: ${node.lines ?? "not recorded"}`,
+    `Imports between its own files: ${node.internalImports ?? "not recorded"}`,
+    `Recorded imports into other tiers: ${outgoing.length > 0 ? outgoing.join("; ") : "none recorded"}`,
+    `Recorded imports from other tiers: ${incoming.length > 0 ? incoming.join("; ") : "none recorded"}`
+  ];
+  return lines.join("\n");
+}
 function buildGroupNamingEvidence(model, id) {
   const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
   if (!node) {
@@ -13404,7 +13443,10 @@ function createNarrationController(app2) {
     app2.floatingWindows.find((controller) => controller.key === "narration")?.open();
     try {
       let reply;
-      if (app2.current?.system && !app2.current?.systemUnit) {
+      const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+      if (app2.current?.structure && (node?.kind === "tier" || node?.kind === "shelf")) {
+        reply = await postNarration(TIER_NARRATION_INSTRUCTION, buildTierNarratorEvidence(app2.current, id));
+      } else if (app2.current?.system && !app2.current?.systemUnit) {
         reply = await narrateGroup(id);
       } else {
         const params = new URLSearchParams({ file: id });
@@ -13463,7 +13505,7 @@ function createNarrationController(app2) {
     if (target?.kind !== "node") {
       return [];
     }
-    const menuState = isNarratable(target.id) ? narratorMenuState(app2.narratorStatus) : { enabled: false, hint: "Narrate works on a file or a System unit \u2014 open the folder to reach its files." };
+    const menuState = isNarratable(target.id) ? narratorMenuState(app2.narratorStatus) : { enabled: false, hint: "Narrate works on a file, a System unit, or a tier \u2014 open the folder to reach its files." };
     return [
       {
         label: "\u2726 Narrate",

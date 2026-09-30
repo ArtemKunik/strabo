@@ -69,6 +69,8 @@ import {
   MEMBER_NARRATION_INSTRUCTION,
   REVIEW_NARRATION_INSTRUCTION,
   buildGroupNamingEvidence,
+  buildTierNarratorEvidence,
+  TIER_NARRATION_INSTRUCTION,
   buildMemberNarratorEvidence,
   buildNarratorEvidence,
   buildReviewNarrationEvidence,
@@ -853,6 +855,30 @@ test('buildGroupNamingEvidence reports only recorded unit facts', () => {
   assert.match(evidence, /Support files folded into its shelf: 2/);
   assert.match(evidence, /Recorded imports: ledger-core/);
   assert.match(GROUP_NAMING_INSTRUCTION, /do not create, merge, or split/i);
+});
+
+test('buildTierNarratorEvidence reports only the recorded tier facts and edges', () => {
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'tier:api', kind: 'tier', label: 'API surface', files: 36, lines: 8200, fileShare: 0.07, why: 'src/api', internalImports: 89 },
+      { id: 'tier:domain', kind: 'tier', label: 'Domain/service' },
+      { id: 'tier:integration', kind: 'tier', label: 'Integration' },
+    ],
+    edges: [
+      { source: 'tier:api', target: 'tier:domain', weight: 374, tierKind: 'down' },
+      { source: 'tier:integration', target: 'tier:api', weight: 12, tierKind: 'upward', typeOnlyCount: 12 },
+    ],
+  };
+  const evidence = buildTierNarratorEvidence(model, 'tier:api');
+  assert.match(evidence, /Tier: API surface/);
+  assert.match(evidence, /Folders most of its files live in: src\/api/);
+  assert.match(evidence, /Files: 36 \(7% of the repository's files\)/);
+  assert.match(evidence, /Imports between its own files: 89/);
+  assert.match(evidence, /imports into other tiers: Domain\/service \(374 imports\)/);
+  assert.match(evidence, /imports from other tiers: Integration \(12 imports, upward, 12 type-only\)/);
+  assert.equal(buildTierNarratorEvidence(model, 'missing'), 'No tier is recorded for this selection.');
+  assert.match(TIER_NARRATION_INSTRUCTION, /never invent behaviour/);
 });
 
 test('the tier helpers map a report to classes, colours, and a filter set', () => {

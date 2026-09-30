@@ -111,6 +111,69 @@ export const GROUP_NAMING_INSTRUCTION =
   'evidence does not show.';
 
 /**
+ * The instruction for narrating one Structure card: an architecture tier or the support shelf.
+ *
+ * The tier's name, folders, and neighbours are recorded and may be read for meaning, worded as
+ * a reading ("appears to"); the reply never reassigns files or redraws the stack.
+ */
+export const TIER_NARRATION_INSTRUCTION =
+  'In three to five sentences of plain prose, say what this architecture tier appears to be ' +
+  'for, what it leans on, what leans on it, and anything a reviewer should know about its ' +
+  'wrong-way imports. Do not use lists, headings, or markdown, and do not repeat counts the ' +
+  'reader can already see. The tier name, folders, and import relationships are recorded and ' +
+  'may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the ' +
+  'recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
+
+/** One Structure edge as a recorded phrase: its count, direction, and how much of it is types only. */
+function tierEdgePhrase(model, edge, otherId) {
+  const other = (model.nodes ?? []).find((candidate) => candidate.id === otherId);
+  const parts = [`${other?.label ?? otherId}`];
+  const detail = [];
+  if (typeof edge.weight === 'number' && edge.weight > 0) {
+    detail.push(`${edge.weight} ${edge.weight === 1 ? 'import' : 'imports'}`);
+  }
+  if (edge.tierKind && edge.tierKind !== 'down') {
+    detail.push(edge.tierKind);
+  }
+  if (typeof edge.typeOnlyCount === 'number' && edge.typeOnlyCount > 0) {
+    detail.push(`${edge.typeOnlyCount} type-only`);
+  }
+  if (edge.intended === true) {
+    detail.push('allowed by a declared rule');
+  }
+  return detail.length > 0 ? `${parts[0]} (${detail.join(', ')})` : parts[0];
+}
+
+/**
+ * Build the recorded evidence sent to the narrator for one Structure card (a tier or the shelf).
+ *
+ * Only recorded facts are included: the tier's name, its folders, file, line, and share counts,
+ * same-tier imports, and every recorded edge to and from another tier with its count and
+ * direction. Unrecorded values are named as such rather than guessed at.
+ */
+export function buildTierNarratorEvidence(model, id) {
+  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return 'No tier is recorded for this selection.';
+  }
+  const edges = model?.edges ?? [];
+  const outgoing = edges.filter((edge) => edge.source === id).map((edge) => tierEdgePhrase(model, edge, edge.target));
+  const incoming = edges.filter((edge) => edge.target === id).map((edge) => tierEdgePhrase(model, edge, edge.source));
+  const share =
+    typeof node.fileShare === 'number' ? `${Math.round(node.fileShare * 100)}% of the repository's files` : 'share not recorded';
+  const lines = [
+    `${node.kind === 'shelf' ? 'Support shelf entry' : 'Tier'}: ${node.label ?? id}`,
+    `Folders most of its files live in: ${node.why ?? 'not recorded'}`,
+    `Files: ${node.files ?? 'not recorded'} (${share})`,
+    `Lines: ${node.lines ?? 'not recorded'}`,
+    `Imports between its own files: ${node.internalImports ?? 'not recorded'}`,
+    `Recorded imports into other tiers: ${outgoing.length > 0 ? outgoing.join('; ') : 'none recorded'}`,
+    `Recorded imports from other tiers: ${incoming.length > 0 ? incoming.join('; ') : 'none recorded'}`,
+  ];
+  return lines.join('\n');
+}
+
+/**
  * Build the recorded evidence sent to the narrator for one System-view unit.
  *
  * Only recorded facts are included: the unit's manifest name, its file and support counts,
