@@ -310,6 +310,41 @@ export function wrongWayFlowsFor(model, id) {
 }
 
 /**
+ * Every wrong-way read on a Structure map, as evidence lines a prompt can quote.
+ *
+ * The summary line counts wrong-way *edges* ("3 upward") while each canvas label counts the
+ * *imports* behind one edge ("6 upward"), so a view-level task that carried only the counts
+ * left a reader unable to say what those reads are. This lists each upward and skip-layer
+ * edge by its tier labels and import count, then the recorded imports behind it (capped per
+ * edge, with the remainder named). Empty for a map that is not a Structure view or has no
+ * wrong-way read.
+ */
+export function structureWrongWayEvidence(model, { importLimit = 20 } = {}) {
+  if (!model?.structure) {
+    return [];
+  }
+  const lines = [];
+  for (const node of model.nodes ?? []) {
+    const flows = wrongWayFlowsFor(model, node.id);
+    if (!flows) {
+      continue;
+    }
+    for (const group of flows.groups) {
+      const typeOnly = group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : '';
+      lines.push(`${group.kind}: ${flows.label} → ${group.targetLabel} — ${group.weight} import(s)${typeOnly}`);
+      for (const entry of group.imports.slice(0, importLimit)) {
+        lines.push(`  ${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`);
+      }
+      const unlisted = group.weight - Math.min(group.imports.length, importLimit);
+      if (unlisted > 0) {
+        lines.push(`  …and ${unlisted} more import(s) not listed`);
+      }
+    }
+  }
+  return lines;
+}
+
+/**
  * The fingerprint and scan time behind a served graph, read from the model's cache metadata.
  *
  * The graph route carries `cache.fingerprint`, `cache.generatedAt`, and `cache.stale`; an

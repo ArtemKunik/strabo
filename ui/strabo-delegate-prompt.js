@@ -23,6 +23,10 @@ const DELEGATE_TASKS = {
   selection: 'Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in.',
 };
 
+/** Facts shown for a single item. A Structure view lists each wrong-way edge with the imports
+ * behind it, so the cap leaves room for that list rather than cutting it after a few edges. */
+const MAX_FACTS = 120;
+
 /** Selected text kept in a prompt; a whole panel can be selected. */
 const MAX_SELECTION = 4000;
 
@@ -109,7 +113,7 @@ export function buildAgentPrompt({ agent, repository, target }) {
     if (item.detail) {
       facts.unshift(String(item.detail));
     }
-    renderFacts(lines, facts, 20);
+    renderFacts(lines, facts, MAX_FACTS);
   }
   lines.push('');
   lines.push('## Task');

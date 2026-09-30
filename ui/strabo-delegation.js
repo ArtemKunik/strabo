@@ -4,7 +4,14 @@
  * session on them or copies the prompt. Targets carry recorded evidence only.
  */
 
-import { buildAgentPrompt, edgeEvidenceFor, graphSummary, passportFor, wrongWayFlowsFor } from './strabo-core.js';
+import {
+  buildAgentPrompt,
+  edgeEvidenceFor,
+  graphSummary,
+  passportFor,
+  structureWrongWayEvidence,
+  wrongWayFlowsFor,
+} from './strabo-core.js';
 import {
   closeContextMenu,
   copyText,
@@ -228,7 +235,12 @@ export function createDelegation(app) {
     };
   }
 
+  /**
+   * Recorded facts for the whole view. On a Structure map the wrong-way reads are listed
+   * import by import, so a task about the view can name what "N upward" actually is.
+   */
   function viewDelegateTarget(detail) {
+    const wrongWay = app.current ? structureWrongWayEvidence(app.current) : [];
     return {
       kind: 'view',
       label: detail ?? graphSummary(app.current ?? { nodes: [], edges: [] }),
@@ -241,7 +253,10 @@ export function createDelegation(app) {
           ? `directory view${state.prefix ? ` at ${state.prefix}` : ''}`
           : state.mode === 'system'
             ? 'system view'
-            : 'file view',
+            : state.mode === 'structure'
+              ? 'structure view (role tiers)'
+              : 'file view',
+        ...(wrongWay.length > 0 ? ['wrong-way reads (upward and skip-layer imports):', ...wrongWay] : []),
       ],
     };
   }

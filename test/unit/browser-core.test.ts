@@ -1394,7 +1394,7 @@ test('buildAgentPrompt caps runaway evidence', () => {
   const prompt = buildAgentPrompt({
     agent: 'opencode',
     repository: { name: 'demo', root: '/demo' },
-    target: { kind: 'diagnostic', id: 'a.ts:1', evidence: Array.from({ length: 40 }, (_, i) => `fact ${i}`) },
+    target: { kind: 'diagnostic', id: 'a.ts:1', evidence: Array.from({ length: 200 }, (_, i) => `fact ${i}`) },
   });
   assert.ok(prompt.length <= MAX_DELEGATE_PROMPT + 20);
   assert.match(prompt, /truncated/);

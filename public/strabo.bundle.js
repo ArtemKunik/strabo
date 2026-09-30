@@ -885,6 +885,30 @@ function wrongWayFlowsFor(model, id) {
     groups
   };
 }
+function structureWrongWayEvidence(model, { importLimit = 20 } = {}) {
+  if (!model?.structure) {
+    return [];
+  }
+  const lines = [];
+  for (const node of model.nodes ?? []) {
+    const flows = wrongWayFlowsFor(model, node.id);
+    if (!flows) {
+      continue;
+    }
+    for (const group of flows.groups) {
+      const typeOnly = group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : "";
+      lines.push(`${group.kind}: ${flows.label} \u2192 ${group.targetLabel} \u2014 ${group.weight} import(s)${typeOnly}`);
+      for (const entry of group.imports.slice(0, importLimit)) {
+        lines.push(`  ${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
+      }
+      const unlisted = group.weight - Math.min(group.imports.length, importLimit);
+      if (unlisted > 0) {
+        lines.push(`  \u2026and ${unlisted} more import(s) not listed`);
+      }
+    }
+  }
+  return lines;
+}
 function graphProvenanceFromModel(model) {
   const cache = model?.cache;
   if (!cache || !cache.fingerprint) {
@@ -1167,12 +1191,19 @@ function graphSummary(model) {
   const edgeWord = edges === 1 ? "edge" : "edges";
   let summary = `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
   if (model?.structure) {
-    const upward = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation).length;
-    const skip = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer").length;
+    const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation);
+    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer");
+    const upward = upwardEdges.length;
+    const skip = skipEdges.length;
+    const imports = (list2) => list2.reduce((sum, e) => sum + (typeof e.weight === "number" ? e.weight : 1), 0);
+    const counted = (count, list2, word) => {
+      const total = imports(list2);
+      return `${count} ${word} ${count === 1 ? "edge" : "edges"} \xB7 ${total} ${total === 1 ? "import" : "imports"}`;
+    };
     if (upward > 0 || skip > 0) {
       const parts = [];
-      if (upward > 0) parts.push(`${upward} upward`);
-      if (skip > 0) parts.push(`${skip} skip`);
+      if (upward > 0) parts.push(counted(upward, upwardEdges, "upward"));
+      if (skip > 0) parts.push(counted(skip, skipEdges, "skip-layer"));
       summary += ` (${parts.join(", ")})`;
     }
     const baseline = model.structureBaseline;
@@ -2608,6 +2639,7 @@ var DELEGATE_TASKS = {
   group: "Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.",
   selection: "Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in."
 };
+var MAX_FACTS = 120;
 var MAX_SELECTION = 4e3;
 var MAX_FACTS_PER_GROUP_ITEM = 6;
 var MAX_GROUP_ITEMS = 30;
@@ -2672,7 +2704,7 @@ function buildAgentPrompt({ agent, repository, target }) {
     if (item.detail) {
       facts.unshift(String(item.detail));
     }
-    renderFacts(lines, facts, 20);
+    renderFacts(lines, facts, MAX_FACTS);
   }
   lines.push("");
   lines.push("## Task");
@@ -28326,6 +28358,7 @@ function createDelegation(app2) {
     };
   }
   function viewDelegateTarget(detail) {
+    const wrongWay = app2.current ? structureWrongWayEvidence(app2.current) : [];
     return {
       kind: "view",
       label: detail ?? graphSummary(app2.current ?? { nodes: [], edges: [] }),
@@ -28334,7 +28367,8 @@ function createDelegation(app2) {
         app2.current ? graphSummary(app2.current) : "No scan loaded.",
         state2.filter ? `active filter: ${state2.filter}` : "no active filter",
         state2.overlay !== "none" ? `active review: ${state2.overlay}` : "no active review overlay",
-        state2.mode === "block" ? `directory view${state2.prefix ? ` at ${state2.prefix}` : ""}` : state2.mode === "system" ? "system view" : "file view"
+        state2.mode === "block" ? `directory view${state2.prefix ? ` at ${state2.prefix}` : ""}` : state2.mode === "system" ? "system view" : state2.mode === "structure" ? "structure view (role tiers)" : "file view",
+        ...wrongWay.length > 0 ? ["wrong-way reads (upward and skip-layer imports):", ...wrongWay] : []
       ]
     };
   }

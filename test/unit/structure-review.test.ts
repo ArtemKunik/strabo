@@ -7,7 +7,8 @@ import { scanRepository } from '../../src/index.ts';
 import { isTypeOnlyStatement } from '../../src/scan/scan-js.ts';
 import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
 import { buildElements } from '../../ui/strabo-graph-elements.js';
-import { wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
+import { structureWrongWayEvidence, wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
+import { graphSummary } from '../../ui/strabo-graph-summary.js';
 import { fitLabel } from '../../ui/strabo-islands.js';
 
 const root = path.resolve('test/fixtures/structure-repo');
@@ -155,4 +156,36 @@ test('a type-only wrong-way read is counted out of the card value total', async 
   const flows = wrongWayFlowsFor(model, 'data');
   assert.equal(flows?.valueCount, 0);
   assert.equal(flows?.typeOnlyCount, 1);
+});
+
+test('a Structure view names every wrong-way read, import by import, for a view-level task', async () => {
+  const { graph } = await scanRepository(root);
+  const model = buildStructureViewModel(buildTierReport(root, 'structure-repo', graph), descriptor, cache);
+  const evidence = structureWrongWayEvidence(model);
+  const upward = evidence.findIndex((line) => line.startsWith('upward: '));
+  assert.ok(upward >= 0, 'the upward edge is named by its tiers');
+  assert.match(evidence[upward], /— 1 import\(s\)$/);
+  assert.equal(evidence[upward + 1], '  orders/src/data/audit.ts:1 → orders/src/domain/orders.ts');
+  // The summary counts edges and the imports behind them, matching the canvas labels.
+  assert.match(graphSummary(model), /1 upward edge · 1 import/);
+  // Not a Structure view: nothing to list.
+  assert.deepEqual(structureWrongWayEvidence({ nodes: [], edges: [] }), []);
+});
+
+test('an edge whose imports exceed the cap names how many were not listed', () => {
+  const imports = [1, 2, 3].map((line) => ({ source: 'src/data/a.ts', target: 'src/api/b.ts', line, specifier: '../api/b' }));
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'data', kind: 'tier', label: 'Data' },
+      { id: 'api', kind: 'tier', label: 'API surface' },
+    ],
+    edges: [{ source: 'data', target: 'api', tierKind: 'upward', weight: 5, tierImports: imports }],
+  };
+  assert.deepEqual(structureWrongWayEvidence(model, { importLimit: 2 }), [
+    'upward: Data → API surface — 5 import(s)',
+    '  src/data/a.ts:1 → src/api/b.ts',
+    '  src/data/a.ts:2 → src/api/b.ts',
+    '  …and 3 more import(s) not listed',
+  ]);
 });

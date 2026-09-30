@@ -236,12 +236,21 @@ export function graphSummary(model) {
   const edgeWord = edges === 1 ? 'edge' : 'edges';
   let summary = `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
   if (model?.structure) {
-    const upward = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation).length;
-    const skip = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer').length;
+    const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation);
+    const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer');
+    const upward = upwardEdges.length;
+    const skip = skipEdges.length;
+    // The canvas labels count imports per edge ("6 upward"), so the summary names both the
+    // edges and the imports behind them rather than a bare edge count that reads as smaller.
+    const imports = (list) => list.reduce((sum, e) => sum + (typeof e.weight === 'number' ? e.weight : 1), 0);
+    const counted = (count, list, word) => {
+      const total = imports(list);
+      return `${count} ${word} ${count === 1 ? 'edge' : 'edges'} · ${total} ${total === 1 ? 'import' : 'imports'}`;
+    };
     if (upward > 0 || skip > 0) {
       const parts = [];
-      if (upward > 0) parts.push(`${upward} upward`);
-      if (skip > 0) parts.push(`${skip} skip`);
+      if (upward > 0) parts.push(counted(upward, upwardEdges, 'upward'));
+      if (skip > 0) parts.push(counted(skip, skipEdges, 'skip-layer'));
       summary += ` (${parts.join(', ')})`;
     }
     // A comparison that could not be read says so, rather than showing a map with no deltas.
