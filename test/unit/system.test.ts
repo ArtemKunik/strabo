@@ -698,3 +698,26 @@ test('buildDirectoryLabels anchors a directory label at its unit', () => {
   );
   assert.equal(labels['service-rust/src/handlers'], 'service \u203a handlers');
 });
+
+test('a lane holding many files wraps into sub-columns instead of one very tall strip', () => {
+  const root = tempDir();
+  write(root, 'crates/api/Cargo.toml', '[package]\nname = "ledger-api"\n');
+  const service = Array.from({ length: 120 }, (_, i) => `crates/api/src/service/s${String(i).padStart(3, '0')}.rs`);
+  const http = ['crates/api/src/http/routes.rs'];
+  const graph = graphOf([...service, ...http], [['crates/api/src/http/routes.rs', service[0]]]);
+  const report = buildSystemReport(root, 'ledger', graph);
+  const model = buildSystemUnitViewModel(report, graph, 'crates/api', unitDescriptor(root), unitCache);
+  assert.ok(model);
+  const at = (id: string) => model.positions.find((position) => position.id === id)!;
+  const lane = service.map(at);
+  const distinctX = new Set(lane.map((position) => position.x));
+  const height = Math.max(...lane.map((position) => position.y));
+  // 120 files at 110px in one column would be 13,200px tall.
+  assert.ok(distinctX.size > 1, 'the lane spreads over several sub-columns');
+  assert.ok(height < 4000, `the lane stays readable (height ${height})`);
+  // No two files share a slot, and the next lane clears the wrapped one.
+  assert.equal(new Set(model.positions.map((p) => `${p.x},${p.y}`)).size, model.positions.length);
+  const wrappedRight = Math.max(...lane.map((position) => position.x));
+  const others = http.map(at);
+  assert.ok(others.every((position) => position.x > wrappedRight || position.x < Math.min(...lane.map((p) => p.x))));
+});

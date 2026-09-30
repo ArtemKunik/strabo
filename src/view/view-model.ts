@@ -547,6 +547,7 @@ function layoutUnitLanes(
   nodes: ViewNode[],
 ): { id: string; x: number; y: number }[] {
   const LANE_X = 360;
+  const SUB_X = 230;
   const ROW_Y = 110;
   const COMMUNITY_GAP = 48;
   const byLayer = new Map<number, string[]>();
@@ -557,7 +558,12 @@ function layoutUnitLanes(
 
   const positions = new Map<string, { x: number; y: number }>();
   let maxY = 0;
-  for (const [order, files] of [...byLayer.entries()].sort((a, b) => a[0] - b[0])) {
+  let laneX = 0;
+  for (const [, files] of [...byLayer.entries()].sort((a, b) => a[0] - b[0])) {
+    // A lane holding hundreds of files would be one strip thousands of pixels tall, so it wraps
+    // into sub-columns sized to keep the lane roughly as wide as it is tall. A small lane still
+    // reads as a single column.
+    const rows = Math.min(24, Math.max(6, Math.ceil(Math.sqrt((files.length * SUB_X) / ROW_Y))));
     // Group by community so a community's members stay adjacent; a file with no community
     // (a singleton the pass left alone) keeps its own slot.
     const groups = new Map<string, string[]>();
@@ -566,15 +572,24 @@ function layoutUnitLanes(
       groups.set(key, [...(groups.get(key) ?? []), file]);
     }
     let y = 0;
+    let row = 0;
+    let subColumn = 0;
     for (const [, members] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       for (const file of members) {
+        if (row >= rows) {
+          subColumn += 1;
+          row = 0;
+          y = 0;
+        }
         y += ROW_Y;
-        positions.set(file, { x: order * LANE_X, y });
+        row += 1;
+        positions.set(file, { x: laneX + subColumn * SUB_X, y });
         maxY = Math.max(maxY, y);
       }
       y += COMMUNITY_GAP;
       maxY = Math.max(maxY, y);
     }
+    laneX += subColumn * SUB_X + LANE_X;
   }
 
   let cursorX = 0;
