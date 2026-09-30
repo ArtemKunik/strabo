@@ -388,6 +388,8 @@ export function buildTierReport(
       targetTier: Tier;
       kind: TierFlowEdge['kind'];
       weight: number;
+      typeOnly: number;
+      imports: TierFlowImport[];
     }
   >();
   for (const edge of graph.edges ?? []) {
@@ -424,8 +426,23 @@ export function buildTierReport(
       targetTier,
       kind,
       weight: 0,
+      typeOnly: 0,
+      imports: [] as TierFlowImport[],
     };
     entry.weight += 1;
+    // The same evidence the stack's edges carry, so a grid edge can list what flows along it.
+    if (edge.typeOnly === true) {
+      entry.typeOnly += 1;
+    }
+    if (entry.imports.length < TIER_FLOW_SAMPLE_LIMIT) {
+      entry.imports.push({
+        source: edge.source,
+        target: edge.target,
+        line: edge.evidence?.line ?? 0,
+        specifier: edge.evidence?.specifier ?? '',
+        ...(edge.typeOnly === true ? { typeOnly: true } : {}),
+      });
+    }
     gridEdges.set(key, entry);
   }
   const gridEdgeList: TierGridEdge[] = [...gridEdges.values()]
@@ -439,6 +456,10 @@ export function buildTierReport(
       kind: entry.kind,
       weight: entry.weight,
       crossUnit: entry.sourceUnit !== entry.targetUnit,
+      typeOnly: entry.typeOnly,
+      imports: entry.imports.sort(
+        (a, b) => a.source.localeCompare(b.source) || a.line - b.line || a.target.localeCompare(b.target),
+      ),
     }))
     .sort(
       (a, b) =>

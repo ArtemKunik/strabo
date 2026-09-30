@@ -72,6 +72,27 @@ export function createDelegation(app) {
     if (!evidence) {
       return null;
     }
+    // A Structure edge rolls up many imports: name its tiers (or cells) by their labels, and
+    // carry the imports so the menu can list what flows along it and a prompt can cite them.
+    if (evidence.tierImports) {
+      const labelOf = (id) => app.current.nodes?.find((node) => node.id === id)?.label ?? id;
+      const kind = evidence.tierKind && evidence.tierKind !== 'down' ? `${evidence.tierKind} ` : '';
+      const count = evidence.weight ?? evidence.tierImports.length;
+      return {
+        kind: 'edge',
+        id: edgeId,
+        label: `${labelOf(evidence.source)} → ${labelOf(evidence.target)}`,
+        summary: `${count} ${kind}${count === 1 ? 'import' : 'imports'}${evidence.typeOnlyCount ? ` (${evidence.typeOnlyCount} type-only)` : ''}`,
+        flows: evidence.tierImports,
+        flowCount: count,
+        evidence: [
+          `relationship: ${count} recorded ${kind}import(s) between two tiers`,
+          ...evidence.tierImports.slice(0, 20).map(
+            (entry) => `${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`,
+          ),
+        ],
+      };
+    }
     return {
       kind: 'edge',
       id: edgeId,
@@ -304,6 +325,36 @@ export function createDelegation(app) {
     ];
   }
 
+  /** How many of an edge's imports the right-click menu lists before "Show all". */
+  const MENU_FLOW_LIMIT = 8;
+
+  /**
+   * The flows behind a Structure edge, as menu entries: a summary line, the imports (value
+   * imports first, since type-only ones are the likely false positives), each opening its
+   * source at the import, then "Show all" selecting the edge so its panel lists every one.
+   */
+  function flowMenuItems(target) {
+    if (!Array.isArray(target?.flows) || target.flows.length === 0) {
+      return [];
+    }
+    const base = (file) => file.split('/').pop();
+    const ordered = [...target.flows].sort((a, b) => Number(a.typeOnly === true) - Number(b.typeOnly === true));
+    return [
+      { label: target.summary ?? `${target.flows.length} imports` },
+      ...ordered.slice(0, MENU_FLOW_LIMIT).map((entry) => ({
+        label: `${base(entry.source)}:${entry.line} → ${base(entry.target)}`,
+        hint: entry.typeOnly ? 'type' : '',
+        title: `${entry.source}:${entry.line} → ${entry.target} (${entry.specifier}) — open the source at this import`,
+        action: () => app.source.viewSource(entry.source, { line: entry.line }),
+      })),
+      {
+        label: `☰ Show all ${target.flowCount ?? target.flows.length} in the edge panel`,
+        action: () => app.selection.selectEdge(target.id),
+      },
+      { separator: true },
+    ];
+  }
+
   /** Right-click menu for one delegated item: launch, or copy the prompt. */
   function openDelegateMenu(target, x, y) {
     if (!target) {
@@ -317,6 +368,7 @@ export function createDelegation(app) {
       y,
       title: menuTitle,
       items: [
+        ...flowMenuItems(target),
         ...app.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
         { label: '▶ Delegate to OpenCode', hint: 'opens agent session', action: () => delegateToAgent('opencode', target) },
@@ -329,7 +381,17 @@ export function createDelegation(app) {
             showToast('Prompt copied — paste it into your agent.');
           },
         },
-        ...(target.id
+        ...(Array.isArray(target.flows)
+          ? [{
+            label: '⧉ Copy imports',
+            action: async () => {
+              await copyText(
+                target.flows.map((entry) => `${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`).join('\n'),
+              );
+              showToast(`${target.flows.length} import(s) copied.`);
+            },
+          }]
+          : target.id
           ? [{
             label: '⧉ Copy path',
             action: async () => {

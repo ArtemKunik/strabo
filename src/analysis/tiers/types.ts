@@ -240,6 +240,10 @@ export interface TierGridEdge {
   /** `down` follows the tier order; `upward`/`skip-layer` are the wrong-way reads. */
   kind: TierFlowEdge['kind'];
   weight: number;
+  /** Contributing imports that bring in types only. */
+  typeOnly?: number;
+  /** The contributing imports themselves, capped like the tier-flow edges' list. */
+  imports?: TierFlowImport[];
   /** True when the two ends sit in different build units, so the drawing styles it apart. */
   crossUnit: boolean;
   /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */

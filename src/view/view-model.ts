@@ -1024,6 +1024,8 @@ export function buildStructureGridViewModel(
     intended: edge.intended,
     violation: edge.violation,
     ruleId: edge.ruleId,
+    typeOnlyCount: edge.typeOnly ?? 0,
+    tierImports: edge.imports ?? [],
   }));
 
   return {

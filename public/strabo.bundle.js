@@ -28155,6 +28155,25 @@ function createDelegation(app2) {
     if (!evidence) {
       return null;
     }
+    if (evidence.tierImports) {
+      const labelOf2 = (id) => app2.current.nodes?.find((node) => node.id === id)?.label ?? id;
+      const kind = evidence.tierKind && evidence.tierKind !== "down" ? `${evidence.tierKind} ` : "";
+      const count = evidence.weight ?? evidence.tierImports.length;
+      return {
+        kind: "edge",
+        id: edgeId,
+        label: `${labelOf2(evidence.source)} \u2192 ${labelOf2(evidence.target)}`,
+        summary: `${count} ${kind}${count === 1 ? "import" : "imports"}${evidence.typeOnlyCount ? ` (${evidence.typeOnlyCount} type-only)` : ""}`,
+        flows: evidence.tierImports,
+        flowCount: count,
+        evidence: [
+          `relationship: ${count} recorded ${kind}import(s) between two tiers`,
+          ...evidence.tierImports.slice(0, 20).map(
+            (entry) => `${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`
+          )
+        ]
+      };
+    }
     return {
       kind: "edge",
       id: edgeId,
@@ -28343,6 +28362,28 @@ function createDelegation(app2) {
       { separator: true }
     ];
   }
+  const MENU_FLOW_LIMIT = 8;
+  function flowMenuItems(target) {
+    if (!Array.isArray(target?.flows) || target.flows.length === 0) {
+      return [];
+    }
+    const base = (file) => file.split("/").pop();
+    const ordered = [...target.flows].sort((a, b2) => Number(a.typeOnly === true) - Number(b2.typeOnly === true));
+    return [
+      { label: target.summary ?? `${target.flows.length} imports` },
+      ...ordered.slice(0, MENU_FLOW_LIMIT).map((entry) => ({
+        label: `${base(entry.source)}:${entry.line} \u2192 ${base(entry.target)}`,
+        hint: entry.typeOnly ? "type" : "",
+        title: `${entry.source}:${entry.line} \u2192 ${entry.target} (${entry.specifier}) \u2014 open the source at this import`,
+        action: () => app2.source.viewSource(entry.source, { line: entry.line })
+      })),
+      {
+        label: `\u2630 Show all ${target.flowCount ?? target.flows.length} in the edge panel`,
+        action: () => app2.selection.selectEdge(target.id)
+      },
+      { separator: true }
+    ];
+  }
   function openDelegateMenu(target, x, y) {
     if (!target) {
       return;
@@ -28355,6 +28396,7 @@ function createDelegation(app2) {
       y,
       title: menuTitle,
       items: [
+        ...flowMenuItems(target),
         ...app2.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
         { label: "\u25B6 Delegate to OpenCode", hint: "opens agent session", action: () => delegateToAgent("opencode", target) },
@@ -28367,7 +28409,15 @@ function createDelegation(app2) {
             showToast("Prompt copied \u2014 paste it into your agent.");
           }
         },
-        ...target.id ? [{
+        ...Array.isArray(target.flows) ? [{
+          label: "\u29C9 Copy imports",
+          action: async () => {
+            await copyText(
+              target.flows.map((entry) => `${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`).join("\n")
+            );
+            showToast(`${target.flows.length} import(s) copied.`);
+          }
+        }] : target.id ? [{
           label: "\u29C9 Copy path",
           action: async () => {
             await copyText(target.id);

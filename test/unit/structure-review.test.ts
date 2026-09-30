@@ -108,3 +108,17 @@ test('the Structure grid folds same-cell imports into the cell instead of drawin
     assert.equal(node.internalImports, internal.get(node.id) ?? 0);
   }
 });
+
+test('a Structure grid edge lists the imports behind it, like a stack edge', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  for (const edge of report.grid.edges) {
+    assert.equal(edge.imports?.length, Math.min(edge.weight, 50));
+  }
+  const model = buildStructureGridViewModel(report, descriptor, cache);
+  const upward = model.edges.find((edge) => edge.tierKind === 'upward');
+  assert.deepEqual(
+    upward?.tierImports?.map((entry) => `${entry.source}:${entry.line} → ${entry.target}`),
+    ['orders/src/data/audit.ts:1 → orders/src/domain/orders.ts'],
+  );
+});
