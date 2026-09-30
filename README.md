@@ -88,8 +88,9 @@ in [docs/USAGE.md](docs/USAGE.md).
   radius, and recorded signals for each changed file.
   See [docs/FEATURES.md](docs/FEATURES.md#change-impact-passport).
 - **Branches** — local and remote branch listing with upstream sync, divergence from a base,
-  and a branch review, plus three explicit buttons: push/publish, create merge request, and
-  drop stale branches. Those are the only places Strabo writes to Git, and none force-pushes.
+  and a branch review, plus explicit buttons: fetch, pull/sync, push/publish, create merge
+  request, drop stale branches, and an opt-in narrator commit on the Change impact panel.
+  Those are the only places Strabo writes to Git, and none force-pushes.
   See [docs/FEATURES.md](docs/FEATURES.md#branches).
 - **Workspace analysis** — cross-repo package and service flows, shared data contracts and
   drift, plus schema snapshots, compatibility, migration preflight, and a live read-only

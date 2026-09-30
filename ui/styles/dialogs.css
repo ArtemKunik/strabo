@@ -125,3 +125,31 @@
   gap: 8px;
 }
 
+/* ------------------------------------------------------ Narrator commit dialog */
+.commit-dialog .commit-message {
+  height: 26vh;
+  min-height: 140px;
+}
+
+.commit-dialog .commit-status {
+  min-height: 16px;
+}
+
+.commit-dialog .commit-status.is-error {
+  color: var(--status-critical);
+}
+
+.commit-footer-left {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.commit-push {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+

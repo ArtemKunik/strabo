@@ -2412,14 +2412,14 @@ function orderMetricFiles(files) {
 function totalMembers(memberMap, key) {
   return (memberMap?.types ?? []).reduce((sum, type) => sum + (type[key] ?? []).length, 0);
 }
-function memberMapSteps(memberMap, context = {}) {
+function memberMapSteps(memberMap, context2 = {}) {
   const types = memberMap?.types ?? [];
   const primary = types[0] ?? null;
   const fields = totalMembers(memberMap, "fields");
   const methods = totalMembers(memberMap, "methods");
   const reExports = memberMap?.reExports ?? [];
   const flow = memberMap?.dataFlow;
-  const consumers = context.consumers ?? null;
+  const consumers = context2.consumers ?? null;
   const subject = types.length > 1 ? `This file (${types.length} types) contains` : `${primary?.name ?? "This file"} contains`;
   const reExportModules = new Set(reExports.map((entry) => entry.from)).size;
   const barrel = fields === 0 && methods === 0 && reExports.length > 0;
@@ -4979,18 +4979,18 @@ function fileStem(file) {
 function recordedList(items) {
   return Array.isArray(items) && items.length > 0 ? items.join(", ") : "none recorded";
 }
-function buildMemberNarratorEvidence(memberMap, context = {}) {
+function buildMemberNarratorEvidence(memberMap, context2 = {}) {
   const types = memberMap?.types ?? [];
   if (types.length === 0) {
     return "No type is recorded for this file.";
   }
-  const file = context.file ?? memberMap?.file;
+  const file = context2.file ?? memberMap?.file;
   const moduleName = file ? fileStem(file) : null;
   const lines = [];
   if (file) {
     lines.push(`File: ${file}`);
   }
-  for (const [label, ids] of [["imports", context.imports], ["used-by", context.usedBy]]) {
+  for (const [label, ids] of [["imports", context2.imports], ["used-by", context2.usedBy]]) {
     if (Array.isArray(ids)) {
       const distinct = [...new Set(ids)];
       lines.push(`Recorded ${label} (${distinct.length}): ${recordedList(distinct.slice(0, 12))}`);
@@ -5029,7 +5029,7 @@ function buildMemberNarratorEvidence(memberMap, context = {}) {
     lines.push(`Data flow transforms: ${recordedList(flow.transforms)}`);
     lines.push(`Data flow sinks: ${recordedList(flow.sinks)}`);
   }
-  const inventory = context.functions ? buildNarratorEvidence({ functions: context.functions }) : "";
+  const inventory = context2.functions ? buildNarratorEvidence({ functions: context2.functions }) : "";
   if (inventory && !inventory.startsWith("No function inventory")) {
     lines.push("", "Function metrics, signals, and same-file calls:", inventory);
   }
@@ -9584,6 +9584,39 @@ function renderBranches(container, result, handlers = {}) {
   summary.dataset.role = "branches-summary";
   summary.textContent = `${others.length} branch(es) \xB7 ${unmerged} with unmerged work${result.capped ? " \xB7 list capped" : ""}`;
   container.append(summary);
+  const headerActions = document.createElement("div");
+  headerActions.className = "branch-actions branch-header-actions";
+  headerActions.dataset.role = "branch-actions";
+  const addHeaderAction = (role, label, title2, handler) => {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = `branch-action ${role}`;
+    action.dataset.role = role;
+    action.textContent = label;
+    action.title = title2;
+    action.disabled = Boolean(handlers.busy);
+    action.addEventListener("click", () => handler());
+    headerActions.append(action);
+  };
+  if (handlers.onFetch) {
+    addHeaderAction("branch-fetch", "Fetch", "Update the remote-tracking refs; the counts are as of the last fetch", handlers.onFetch);
+  }
+  if (handlers.onPull && result.current) {
+    addHeaderAction("branch-pull", `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, () => handlers.onPull(result.current));
+  }
+  if (handlers.onSync && result.current) {
+    addHeaderAction("branch-sync", `Sync ${result.current}`, `Fast-forward ${result.current} when behind, then push when ahead`, () => handlers.onSync(result.current));
+  }
+  if (headerActions.childElementCount > 0) {
+    if (handlers.busy) {
+      const running = document.createElement("span");
+      running.className = "evidence";
+      running.dataset.role = "branch-busy";
+      running.textContent = "Running\u2026";
+      headerActions.append(running);
+    }
+    container.append(headerActions);
+  }
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0))
@@ -9642,6 +9675,15 @@ function branchActions(branch, handlers) {
   const buttons = [];
   if (branch.kind === "local" && !branch.isBase) {
     const publish = !branch.upstream || branch.upstream.gone;
+    const behind = branch.upstream?.behind ?? 0;
+    if (handlers.onPullBranch && !branch.current && !branch.upstream?.gone && behind > 0) {
+      buttons.push({
+        label: `Pull \u2193${behind}`,
+        role: "branch-pull-branch",
+        title: `Fast-forward ${branch.name} from ${branch.upstream?.name ?? "its upstream"}`,
+        run: () => handlers.onPullBranch(branch.name)
+      });
+    }
     if (handlers.onPush && (publish || branch.upstream.ahead > 0)) {
       buttons.push({
         label: publish ? "Publish" : "Push",
@@ -9682,6 +9724,7 @@ function branchActions(branch, handlers) {
     action.dataset.branch = branch.name;
     action.textContent = spec.label;
     action.title = spec.title;
+    action.disabled = Boolean(handlers.busy);
     action.addEventListener("click", (event) => {
       event.stopPropagation();
       spec.run();
@@ -10820,6 +10863,25 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     container.append(empty);
     renderList();
     list2.refresh();
+  }
+  if (Array.isArray(options.actions) && options.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "overlay-actions";
+    for (const action of options.actions) {
+      const actionButton = document.createElement("button");
+      actionButton.type = "button";
+      actionButton.className = "overlay-action";
+      actionButton.textContent = action.label;
+      if (action.title) {
+        actionButton.title = action.title;
+      }
+      if (action.disabled) {
+        actionButton.disabled = true;
+      }
+      actionButton.addEventListener("click", () => action.onClick?.());
+      actions.append(actionButton);
+    }
+    container.append(actions);
   }
 }
 function renderTierImports(imports, weight, handlers) {
@@ -12334,6 +12396,7 @@ function defaultSettings() {
     labels: true,
     allLabels: false,
     reduceMotion: false,
+    commitEnabled: false,
     locThreshold: LOC_THRESHOLD_DEFAULT
   };
 }
@@ -12347,6 +12410,7 @@ function sanitize(parsed, defaults) {
   if (typeof parsed.labels === "boolean") settings.labels = parsed.labels;
   if (typeof parsed.allLabels === "boolean") settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === "boolean") settings.reduceMotion = parsed.reduceMotion;
+  if (typeof parsed.commitEnabled === "boolean") settings.commitEnabled = parsed.commitEnabled;
   const locThreshold = sanitizeLocThreshold(parsed.locThreshold);
   if (locThreshold !== null) settings.locThreshold = locThreshold;
   return settings;
@@ -12724,6 +12788,18 @@ function renderingSection() {
   );
   return group;
 }
+function commitSection(prefs, handlers) {
+  const group = section("Commit");
+  group.append(
+    field("Narrator commit", checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.("commitEnabled", value)))
+  );
+  group.append(
+    note2(
+      "Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default."
+    )
+  );
+  return group;
+}
 function renderSettings(container, handlers = {}) {
   const { prefs = defaultSettings(), server = null, status = null, statusError = false } = handlers;
   container.replaceChildren();
@@ -12756,6 +12832,7 @@ function renderSettings(container, handlers = {}) {
   );
   container.append(local);
   container.append(renderingSection());
+  container.append(commitSection(prefs, handlers));
   const remote = section("Server");
   if (!server) {
     remote.append(note2("Loading server settings\u2026"));
@@ -13844,10 +13921,10 @@ function ensurePromptDialog() {
   if (promptDialog) {
     return promptDialog;
   }
-  const dialog = document.createElement("dialog");
-  dialog.id = "prompt-dialog";
-  dialog.className = "dialog prompt-dialog";
-  dialog.setAttribute("aria-label", "Review the task before sending it to an agent");
+  const dialog2 = document.createElement("dialog");
+  dialog2.id = "prompt-dialog";
+  dialog2.className = "dialog prompt-dialog";
+  dialog2.setAttribute("aria-label", "Review the task before sending it to an agent");
   const header = document.createElement("header");
   header.className = "dialog-header";
   const heading3 = document.createElement("strong");
@@ -13857,7 +13934,7 @@ function ensurePromptDialog() {
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
-  close.addEventListener("click", () => dialog.close());
+  close.addEventListener("click", () => dialog2.close());
   header.append(heading3, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
@@ -13882,37 +13959,37 @@ function ensurePromptDialog() {
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => dialog.close());
+  cancel.addEventListener("click", () => dialog2.close());
   const send = document.createElement("button");
   send.type = "button";
   send.className = "primary prompt-dialog-send";
   send.addEventListener("click", () => {
     const reviewed = text.value;
     settlePromptReview(reviewed);
-    dialog.close();
+    dialog2.close();
   });
   actions.append(cancel, send);
   footer.append(copy, actions);
-  dialog.append(header, target, text, footer);
-  dialog.addEventListener("close", () => settlePromptReview(null));
-  document.body.append(dialog);
-  promptDialog = dialog;
-  return dialog;
+  dialog2.append(header, target, text, footer);
+  dialog2.addEventListener("close", () => settlePromptReview(null));
+  document.body.append(dialog2);
+  promptDialog = dialog2;
+  return dialog2;
 }
 function showPromptReview({ agent, title, prompt }) {
-  const dialog = ensurePromptDialog();
+  const dialog2 = ensurePromptDialog();
   settlePromptReview(null);
   const agentName = AGENT_LABELS[agent] ?? agent;
-  dialog.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
-  dialog.querySelector(".prompt-dialog-target").textContent = title;
-  const text = dialog.querySelector(".prompt-dialog-text");
+  dialog2.querySelector(".prompt-dialog-title").textContent = `Review task for ${agentName}`;
+  dialog2.querySelector(".prompt-dialog-target").textContent = title;
+  const text = dialog2.querySelector(".prompt-dialog-text");
   text.value = prompt;
-  dialog.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
+  dialog2.querySelector(".prompt-dialog-send").textContent = `Open ${agentName}`;
   const pending = new Promise((resolve) => {
     promptDialogResolve = resolve;
   });
-  if (!dialog.open) {
-    dialog.showModal();
+  if (!dialog2.open) {
+    dialog2.showModal();
   }
   text.focus();
   text.setSelectionRange(text.value.length, text.value.length);
@@ -13952,6 +14029,7 @@ function createGitController(app2) {
   let selectedCommitHash = null;
   let selectedBranchName = null;
   let branchBase = null;
+  let branchesBusy = false;
   let reviewHistory = [];
   let currentReviewRequest = null;
   let selectedWorktree = null;
@@ -14025,6 +14103,7 @@ function createGitController(app2) {
     if (result?.available && result.base) branchBase = result.base.name;
     renderBranches(elements2.branchesPanel, result, {
       selected: selectedBranchName,
+      busy: branchesBusy,
       onSelect: (branch) => {
         selectBranch(branch.name).catch((error) => {
           elements2.status.textContent = `Error: ${error.message}`;
@@ -14036,6 +14115,10 @@ function createGitController(app2) {
           elements2.status.textContent = `Error: ${error.message}`;
         });
       },
+      onFetch: () => runBranchAction("fetch", {}),
+      onPull: (name) => runBranchAction("pull", { branch: name }),
+      onPullBranch: (name) => runBranchAction("pull", { branch: name }),
+      onSync: (name) => runBranchAction("sync", { branch: name }),
       onPush: (name) => pushBranch(name),
       onMergeRequest: (name) => createMergeRequest(name),
       onDrop: (name) => dropBranch(name),
@@ -14043,6 +14126,37 @@ function createGitController(app2) {
         elements2.branchesPanel.hidden = true;
       }
     });
+  }
+  async function runBranchAction(action, payload) {
+    if (branchesBusy) return;
+    if ((action === "sync" || action === "pull") && !payload.branch) {
+      elements2.status.textContent = `${action === "pull" ? "Pull" : "Sync"} needs a checked-out branch.`;
+      return;
+    }
+    branchesBusy = true;
+    await loadBranches().catch((error) => {
+      elements2.status.textContent = `Error: ${error.message}`;
+    });
+    try {
+      const params = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+      const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      }
+      elements2.status.textContent = body.available === false ? `${action} failed: ${body.detail}` : body.message;
+    } catch (error) {
+      elements2.status.textContent = `Error: ${error.message}`;
+    } finally {
+      branchesBusy = false;
+      await loadBranches().catch((error) => {
+        elements2.status.textContent = `Error: ${error.message}`;
+      });
+    }
   }
   async function pushBranch(name) {
     elements2.status.textContent = `Pushing ${name}\u2026`;
@@ -14666,7 +14780,7 @@ function createGitController(app2) {
 
 // ui/strabo-settings-controller.js
 function createSettingsController(app2) {
-  const { elements: elements2, request: request2 } = app2;
+  const { state: state2, elements: elements2, request: request2 } = app2;
   let serverSettings = null;
   let settingsStatus = "";
   let settingsStatusError = false;
@@ -14680,6 +14794,9 @@ function createSettingsController(app2) {
       app2.lenses.applyLocLens();
     }
     renderSettingsView();
+    if (key === "commitEnabled" && state2.overlay === "impact") {
+      app2.lenses.applyOverlay();
+    }
   }
   function renderSettingsView() {
     if (!elements2.settingsPanel) return;
@@ -15979,6 +16096,183 @@ function renderTierPanel(container, report, filter = "all", options = {}) {
   }
 }
 
+// ui/strabo-commit.js
+async function requestCommitMessage(repository) {
+  const response = await fetch(`${API_PATH}/narrator/commit-message`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(repository ? { repository } : {})
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Could not generate a message (${response.status}).`);
+  }
+  return body;
+}
+async function commitWorkingTree(repository, message, { push = true } = {}) {
+  const response = await fetch(`${API_PATH}/analysis/commit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message, push, ...repository ? { repository } : {} })
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Commit failed (${response.status}).`);
+  }
+  return body;
+}
+var dialog = null;
+var context = null;
+function ensureDialog() {
+  if (dialog) {
+    return dialog;
+  }
+  const element3 = document.createElement("dialog");
+  element3.id = "commit-dialog";
+  element3.className = "dialog prompt-dialog commit-dialog";
+  element3.setAttribute("aria-label", "Review the commit message before committing");
+  const header = document.createElement("header");
+  header.className = "dialog-header";
+  const heading3 = document.createElement("strong");
+  heading3.className = "commit-dialog-title";
+  heading3.textContent = "Commit changes";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "dialog-close";
+  close.setAttribute("aria-label", "Close");
+  close.textContent = "\xD7";
+  close.addEventListener("click", () => element3.close());
+  header.append(heading3, close);
+  const target = document.createElement("p");
+  target.className = "dialog-path prompt-dialog-target";
+  const status = document.createElement("p");
+  status.className = "dialog-note commit-status";
+  status.setAttribute("role", "status");
+  const text = document.createElement("textarea");
+  text.className = "prompt-dialog-text commit-message";
+  text.spellcheck = false;
+  text.setAttribute("aria-label", "Commit message");
+  const footer = document.createElement("footer");
+  footer.className = "dialog-footer";
+  const generate = document.createElement("button");
+  generate.type = "button";
+  generate.className = "commit-generate";
+  generate.textContent = "Generate again";
+  generate.addEventListener("click", () => void generateMessage());
+  const pushLabel = document.createElement("label");
+  pushLabel.className = "commit-push";
+  const pushToggle = document.createElement("input");
+  pushToggle.type = "checkbox";
+  pushToggle.checked = true;
+  pushToggle.className = "commit-push-toggle";
+  pushLabel.append(pushToggle, document.createTextNode("Push after commit"));
+  const left = document.createElement("span");
+  left.className = "commit-footer-left";
+  left.append(generate, pushLabel);
+  const actions = document.createElement("span");
+  actions.className = "dialog-footer-actions";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => element3.close());
+  const confirm2 = document.createElement("button");
+  confirm2.type = "button";
+  confirm2.className = "primary commit-confirm";
+  confirm2.textContent = "Commit & push";
+  confirm2.addEventListener("click", () => void submit());
+  actions.append(cancel, confirm2);
+  footer.append(left, actions);
+  element3.append(header, target, status, text, footer);
+  document.body.append(element3);
+  dialog = element3;
+  return element3;
+}
+async function generateMessage() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm2 = dialog.querySelector(".commit-confirm");
+  generate.disabled = true;
+  confirm2.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  try {
+    const result = await requestCommitMessage(context.repository);
+    if (result?.available && typeof result.message === "string" && result.message.trim() !== "") {
+      text.value = result.message.trim();
+      const model = result.model ?? "the narrator";
+      status.textContent = `Generated by ${model}${result.cached ? " (cached)" : ""}. Review and edit before committing.`;
+    } else {
+      status.textContent = `Narrator unavailable (${result?.detail ?? result?.reason ?? "not configured"}). Write a message, or set the narrator up in Settings.`;
+      if (!text.value.trim()) {
+        text.value = "";
+      }
+    }
+  } catch (error) {
+    status.textContent = error.message ?? "Could not generate a message.";
+    status.classList.add("is-error");
+  } finally {
+    generate.disabled = false;
+    confirm2.disabled = false;
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+  }
+}
+async function submit() {
+  if (!dialog || !context) {
+    return;
+  }
+  const text = dialog.querySelector(".commit-message");
+  const status = dialog.querySelector(".commit-status");
+  const generate = dialog.querySelector(".commit-generate");
+  const confirm2 = dialog.querySelector(".commit-confirm");
+  const push = dialog.querySelector(".commit-push-toggle")?.checked !== false;
+  const message = text.value.trim();
+  if (message === "") {
+    status.classList.add("is-error");
+    status.textContent = "A commit message is required.";
+    text.focus();
+    return;
+  }
+  generate.disabled = true;
+  confirm2.disabled = true;
+  status.classList.remove("is-error");
+  status.textContent = push ? "Committing and pushing\u2026" : "Committing\u2026";
+  try {
+    const result = await commitWorkingTree(context.repository, message, { push });
+    if (!result?.available) {
+      status.classList.add("is-error");
+      status.textContent = result?.detail ?? "The commit did not run.";
+      return;
+    }
+    showToast(result.message);
+    dialog.close();
+    context.onCommitted?.(result);
+  } catch (error) {
+    status.classList.add("is-error");
+    status.textContent = error.message ?? "The commit did not run.";
+  } finally {
+    generate.disabled = false;
+    confirm2.disabled = false;
+  }
+}
+function openCommitDialog({ repository, onCommitted } = {}) {
+  const element3 = ensureDialog();
+  context = { repository: repository ?? null, onCommitted };
+  element3.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
+  element3.querySelector(".commit-message").value = "";
+  const status = element3.querySelector(".commit-status");
+  status.classList.remove("is-error");
+  status.textContent = "Generating a message with the narrator\u2026";
+  if (!element3.open) {
+    element3.showModal();
+  }
+  void generateMessage();
+}
+
 // ui/strabo-lens-controller.js
 function createLensController(app2) {
   const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
@@ -16088,10 +16382,22 @@ function createLensController(app2) {
     const overlay2 = overlayFor(kind, data);
     view2.overlay(overlay2.classes);
     view2.setHiddenCoupling(kind === "hidden-coupling" ? data : null, kind === "hidden-coupling");
+    const actions = [];
+    if (kind === "impact" && app2.clientPrefs.commitEnabled) {
+      actions.push({
+        label: "Commit\u2026",
+        title: "Generate a commit message with the narrator, then commit and push",
+        onClick: () => openCommitDialog({
+          repository: state2.repository,
+          onCommitted: () => applyOverlay()
+        })
+      });
+    }
     renderOverlayPanel(elements2.overlayPanel, OVERLAY_TITLES[kind], overlay2, {
       kind,
       onClose: closeLensPanel,
-      onSelect: (id) => app2.selection.selectNode(id)
+      onSelect: (id) => app2.selection.selectNode(id),
+      ...actions.length > 0 ? { actions } : {}
     });
     app2.windows.refreshDock();
   }
@@ -28692,12 +28998,12 @@ function createDelegation(app2) {
     if (resolved) {
       return { ...resolved, selection };
     }
-    const context = fallbackDelegateTarget();
+    const context2 = fallbackDelegateTarget();
     const excerpt = selection.replace(/\s+/g, " ");
     return {
       kind: "selection",
       label: `\u201C${excerpt.length > 60 ? `${excerpt.slice(0, 60)}\u2026` : excerpt}\u201D`,
-      evidence: context.evidence,
+      evidence: context2.evidence,
       selection
     };
   }

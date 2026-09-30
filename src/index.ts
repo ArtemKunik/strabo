@@ -337,25 +337,36 @@ export {
 export type { BranchBase, BranchesResult, BranchSummary, BranchSync } from './analysis/branches.ts';
 export {
   dropBranches,
+  fetchBranches,
   forgeMergeRequestUrl,
   isSafeBranch,
   mergeRequest,
   parseRemoteUrl,
+  pullBranch,
   pushBranch,
+  syncBranch,
 } from './analysis/branch-actions.ts';
 export type {
   BranchActionFailure,
   BranchActionName,
   BranchActionReason,
   BranchDropResult,
+  BranchFetchResult,
+  BranchPullResult,
   BranchPushResult,
+  BranchSyncResult,
   DropResult,
   DropSkip,
+  FetchResult,
   MergeRequestFailure,
   MergeRequestResult,
   MergeRequestSuccess,
+  PullResult,
   PushResult,
+  SyncResult,
 } from './analysis/branch-actions.ts';
+export { buildCommitEvidence, commitWorkingTree, normalizeCommitMessage } from './analysis/commit.ts';
+export type { CommitFailure, CommitReason, CommitResult, CommitSuccess } from './analysis/commit.ts';
 export { computeOwnership, getFileAuthorHistory } from './analysis/ownership.ts';
 export { computeQualityScorecard, smellsFromScorecard, SMELL_RULES } from './analysis/quality.ts';
 export type {

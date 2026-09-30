@@ -1216,16 +1216,21 @@ Where every branch stands against the trunk, and what merging one would do.
   `stale` after 90 days), with a base picker. Selecting a branch opens the review panel as
   a Branch review with the merge verdict, conflicting files, and what moved underneath,
   and annotates the map like any other review. Right-click delegation carries the verdict.
-- **B2 (removed, then partially restored).** The original branch write actions
+- **B2 (removed, then restored).** The original branch write actions
   (`POST /analysis/branches/fetch|push|sync`, plus pull, and the narrator commit) were removed
   rather than kept: Strabo only reads, and Git and the operator's own workflow own most state
   changes. A reduced, explicit write set later returned: **push/publish**
   (`POST /analysis/branches/push`), **drop stale** (`POST /analysis/branches/drop`), and a
   read-only **merge-request URL** (`GET /analysis/branches/merge-request`) that the browser
-  opens. They are guarded same-origin, validate every ref, never force-push, and only drop a
-  branch the listing already calls stale (`src/analysis/branch-actions.ts`). Branch listing
-  (B1) and branch review stay, and the panel labels its counts *as of the last fetch* rather
-  than implying a live remote. See [Removed or frozen](#removed-or-frozen).
+  opens. The removed actions were then restored alongside them: **fetch**
+  (`POST /analysis/branches/fetch`), **pull** (`POST /analysis/branches/pull`), **sync**
+  (`POST /analysis/branches/sync`), and the opt-in narrator **commit**
+  (`POST /analysis/commit`, `POST /narrator/commit-message`). Every action is guarded
+  same-origin, validates its refs, never force-pushes or rebases, fast-forwards only where a
+  fast-forward is possible, and only drops a branch the listing already calls stale
+  (`src/analysis/branch-actions.ts`, `src/analysis/commit.ts`). Branch listing (B1) and branch
+  review stay, and the panel labels its counts *as of the last fetch* until Fetch refreshes
+  them. See [Removed or frozen](#removed-or-frozen).
 
 Unit coverage is `test/unit/branches.test.ts` and `test/unit/branches-panel.test.ts`; the
 browser scenario is `timeline.feature` `@branches`.
@@ -2511,16 +2516,16 @@ file appears before a file that imports it within the same unit (`test/unit/rout
 
 ### Removed or frozen
 
-- **Git push / sync / publish (Phase 19 B2) — mostly removed.** Every other part of Strabo
-  only reads; Git and the operator's existing workflow own state changes. The original branch
-  write actions are out of the tree — the `fetch|push|pull|sync` routes, the fetch/pull/sync
-  panel buttons, and their tests — as is the opt-in narrator **Commit** action
+- **Git write actions (Phase 19 B2) — removed, then restored with guards.** Every other part of
+  Strabo only reads. The original branch write actions were briefly out of the tree; they are
+  back, guarded same-origin and bounded: **fetch**, **pull**, **sync**, and **push/publish**
+  (`src/analysis/branch-actions.ts`; `POST /analysis/branches/fetch|pull|sync|push`),
+  **drop stale** branches (`POST /analysis/branches/drop`), a read-only **merge-request URL**
+  (`GET /analysis/branches/merge-request`), and the opt-in narrator **commit**
   (`src/analysis/commit.ts`, `POST /analysis/commit`, `POST /narrator/commit-message`, the
-  commit dialog, and the browser preference). Branch listing and branch review stay. A reduced
-  write set returned separately: **push/publish**, **drop stale** branches, and a read-only
-  **merge-request URL** (`src/analysis/branch-actions.ts`, `POST /analysis/branches/push`,
-  `POST /analysis/branches/drop`, `GET /analysis/branches/merge-request`). It never
-  force-pushes and never deletes a branch that is not already stale, checked out, or the base.
+  commit dialog, and the browser preference). None force-pushes or rebases; pull and sync
+  fast-forward only and refuse a diverged branch, and drop never deletes a branch that is not
+  already stale, checked out, or the base.
 - **Live database migration probes — not pursued.** Static contract and schema compatibility
   (Phase 20) is the extension; the live read-only probe (D5) stays as a labelled experiment
   and gets no follow-on.

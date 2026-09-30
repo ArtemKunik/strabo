@@ -111,6 +111,73 @@ test('renderBranches offers push, merge-request, and drop actions', () => {
   assert.deepEqual(calls, ['drop:merged', 'push:feature', 'mr:feature']);
 });
 
+test('renderBranches offers Fetch, Pull, a per-branch Pull, and Sync', () => {
+  const target = document.createElement('div');
+  const calls: string[] = [];
+  renderBranches(
+    target,
+    {
+      available: true,
+      current: 'main',
+      head: 'h',
+      base: { name: 'main', hash: 'h', source: 'conventional' },
+      capped: false,
+      branches: [
+        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 2, behind: 0, gone: false }, againstBase: null },
+        { name: 'behind', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/behind', ahead: 0, behind: 3, gone: false }, againstBase: null },
+      ],
+    },
+    {
+      onFetch: () => calls.push('fetch'),
+      onPull: (name: string) => calls.push(`pull:${name}`),
+      onPullBranch: (name: string) => calls.push(`pull-branch:${name}`),
+      onSync: (name: string) => calls.push(`sync:${name}`),
+    },
+  );
+
+  const fetch = target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement;
+  const pull = target.querySelector('[data-role="branch-pull"]') as HTMLButtonElement;
+  const sync = target.querySelector('[data-role="branch-sync"]') as HTMLButtonElement;
+  assert.ok(fetch && pull && sync);
+  assert.equal(pull.textContent, 'Pull main');
+  assert.equal(sync.textContent, 'Sync main');
+  fetch.click();
+  pull.click();
+  sync.click();
+  assert.deepEqual(calls, ['fetch', 'pull:main', 'sync:main']);
+
+  const rowPulls = [...target.querySelectorAll('[data-role="branch-pull-branch"]')] as HTMLButtonElement[];
+  assert.deepEqual(rowPulls.map((button) => button.dataset.branch), ['behind']);
+  assert.equal(rowPulls[0]?.textContent, 'Pull ↓3');
+  rowPulls[0]?.click();
+  assert.equal(calls.at(-1), 'pull-branch:behind');
+});
+
+test('renderBranches disables branch actions while one is running', () => {
+  const target = document.createElement('div');
+  renderBranches(
+    target,
+    {
+      available: true,
+      current: 'main',
+      head: 'h',
+      base: { name: 'main', hash: 'h', source: 'conventional' },
+      capped: false,
+      branches: [
+        { name: 'main', kind: 'local', current: true, isBase: true, tip: tip('2026-09-20'), upstream: null, againstBase: null },
+        { name: 'feature', kind: 'local', current: false, isBase: false, tip: tip('2026-09-20'), upstream: { name: 'origin/feature', ahead: 1, behind: 0, gone: false }, againstBase: null },
+      ],
+    },
+    { onFetch: () => {}, onPull: () => {}, onSync: () => {}, onPush: () => {}, busy: true },
+  );
+  assert.equal((target.querySelector('[data-role="branch-fetch"]') as HTMLButtonElement).disabled, true);
+  assert.equal((target.querySelector('[data-role="branch-pull"]') as HTMLButtonElement).disabled, true);
+  assert.equal((target.querySelector('[data-role="branch-sync"]') as HTMLButtonElement).disabled, true);
+  assert.equal((target.querySelector('[data-role="branch-push"]') as HTMLButtonElement).disabled, true);
+  assert.ok(target.querySelector('[data-role="branch-busy"]'));
+});
+
 test('renderBranches omits write actions when no handlers are given', () => {
   const target = document.createElement('div');
   renderBranches(target, {

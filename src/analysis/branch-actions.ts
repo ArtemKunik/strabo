@@ -26,8 +26,9 @@ import { run } from '../process.ts';
 const ACTION_TIMEOUT_MS = 120_000;
 /** First character is alphanumeric, which rules out a leading `-` being read as an option. */
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const SAFE_REMOTE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-export type BranchActionName = 'push' | 'drop';
+export type BranchActionName = 'fetch' | 'pull' | 'push' | 'sync' | 'drop';
 
 export type BranchActionReason =
   | 'no-git'
@@ -37,7 +38,9 @@ export type BranchActionReason =
   | 'unknown-branch'
   | 'unknown-remote'
   | 'no-remote'
+  | 'no-upstream'
   | 'not-current'
+  | 'not-fast-forward'
   | 'not-stale'
   | 'dirty'
   | 'unknown-forge';
@@ -83,6 +86,48 @@ export interface DropResult {
 
 export type BranchPushResult = PushResult | BranchActionFailure;
 export type BranchDropResult = DropResult | BranchActionFailure;
+
+/** The remotes a fetch contacted, and its bounded output. */
+export interface FetchResult {
+  available: true;
+  action: 'fetch';
+  /** The remote(s) contacted. */
+  remotes: string[];
+  message: string;
+  output: string;
+}
+
+/**
+ * A pull that fast-forwarded a branch, or found it already up to date. `fastForwarded` says
+ * whether the branch moved; a diverged branch is a {@link BranchActionFailure} instead.
+ */
+export interface PullResult {
+  available: true;
+  action: 'pull';
+  branch: string;
+  remote: string;
+  /** True when the branch was advanced to its upstream. */
+  fastForwarded: boolean;
+  message: string;
+  output: string;
+}
+
+/** A sync: fetch, fast-forward when behind, then push when ahead. */
+export interface SyncResult {
+  available: true;
+  action: 'sync';
+  /** The branch the action ran on, for push and sync. */
+  branch: string;
+  remote: string;
+  fastForwarded: boolean;
+  pushed: boolean;
+  message: string;
+  output: string;
+}
+
+export type BranchFetchResult = FetchResult | BranchActionFailure;
+export type BranchPullResult = PullResult | BranchActionFailure;
+export type BranchSyncResult = SyncResult | BranchActionFailure;
 
 export interface MergeRequestSuccess {
   available: true;
@@ -232,6 +277,207 @@ export async function dropBranches(root: string, names: readonly string[]): Prom
 }
 
 /**
+ * Fetch every remote the listed branches track, else the default remote, with `--prune`.
+ *
+ * The counts the Branches panel shows are as fresh as the last fetch, so this is what makes
+ * them live. It only updates remote-tracking refs; the working tree is untouched.
+ */
+export async function fetchBranches(root: string, requestedRemote?: string): Promise<BranchFetchResult> {
+  return guard('fetch', root, async () => {
+    const remotes = await listRemotes(root);
+    if (remotes.length === 0) {
+      return fail('fetch', 'no-remote', 'This repository has no configured remote.');
+    }
+
+    let targets: string[];
+    if (requestedRemote) {
+      if (!SAFE_REMOTE.test(requestedRemote) || !remotes.includes(requestedRemote)) {
+        return fail('fetch', 'unknown-remote', `Unknown remote "${requestedRemote}".`);
+      }
+      targets = [requestedRemote];
+    } else {
+      targets = [...new Set(await upstreamRemotes(root))].filter((remote) => remotes.includes(remote)).sort();
+      if (targets.length === 0) {
+        const fallback = defaultRemote(remotes);
+        targets = fallback ? [fallback] : [];
+      }
+      if (targets.length === 0) {
+        return fail('fetch', 'no-remote', 'No upstream remote to fetch from.');
+      }
+    }
+
+    const output: string[] = [];
+    for (const remote of targets) {
+      const { stdout, stderr } = await gitAction(root, ['fetch', '--prune', remote]);
+      const text = [String(stdout), String(stderr)].join('\n').trim();
+      if (text) output.push(text);
+    }
+    return {
+      available: true,
+      action: 'fetch',
+      remotes: targets,
+      message: `Fetched ${targets.join(', ')}.`,
+      output: bound(output.join('\n')),
+    };
+  });
+}
+
+/**
+ * Pull a local branch: fetch its upstream and fast-forward it, never pushing.
+ *
+ * The checked-out branch is advanced with `merge --ff-only` so the working tree follows; any
+ * other local branch is advanced through its ref (`git fetch <remote> <remote>:<branch>`),
+ * which Git refuses to update when it would not be a fast-forward. A diverged or dirty tree
+ * is reported, not merged.
+ */
+export async function pullBranch(root: string, branch: string): Promise<BranchPullResult> {
+  return guard('pull', root, async () => {
+    if (!isSafeBranch(branch)) {
+      return fail('pull', 'unknown-branch', `Refusing to pull "${branch}".`);
+    }
+    if (!(await branchExists(root, branch))) {
+      return fail('pull', 'unknown-branch', `No local branch named "${branch}".`);
+    }
+    const remote = await gitValue(root, ['config', '--get', `branch.${branch}.remote`]);
+    const merge = await gitValue(root, ['config', '--get', `branch.${branch}.merge`]);
+    if (!remote || !merge) {
+      return fail('pull', 'no-upstream', `"${branch}" has no upstream to pull from.`);
+    }
+    const remotes = await listRemotes(root);
+    if (!remotes.includes(remote) || !merge.startsWith('refs/heads/')) {
+      return fail('pull', 'git-error', `"${branch}" has an upstream this tool will not pull from.`);
+    }
+
+    await gitAction(root, ['fetch', '--prune', remote]);
+    const upstreamRef = await gitValue(root, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+    if (!upstreamRef) {
+      return fail('pull', 'no-upstream', `"${branch}" has no upstream to pull from.`);
+    }
+    const counts = await gitValue(root, ['rev-list', '--left-right', '--count', `${branch}...${upstreamRef}`]);
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+    if (behind === 0) {
+      return {
+        available: true,
+        action: 'pull',
+        branch,
+        remote,
+        fastForwarded: false,
+        message: ahead > 0
+          ? `${branch} is ${ahead} commit(s) ahead of ${upstreamRef}; nothing to pull.`
+          : `${branch} is already up to date with ${upstreamRef}.`,
+        output: '',
+      };
+    }
+
+    const current = await currentBranch(root);
+    if (current === branch) {
+      try {
+        await gitAction(root, ['merge', '--ff-only', upstreamRef]);
+      } catch (error) {
+        return classifyMergeFailure(error, 'pull', branch, upstreamRef);
+      }
+    } else {
+      const remoteBranch = merge.slice('refs/heads/'.length);
+      try {
+        await gitAction(root, ['fetch', remote, `${remoteBranch}:${branch}`]);
+      } catch (error) {
+        return classifyMergeFailure(error, 'pull', branch, upstreamRef);
+      }
+    }
+    return {
+      available: true,
+      action: 'pull',
+      branch,
+      remote,
+      fastForwarded: true,
+      message: `Fast-forwarded ${branch} to ${upstreamRef}.`,
+      output: '',
+    };
+  });
+}
+
+/**
+ * Sync the checked-out branch: fetch its upstream, fast-forward when behind (refusing a
+ * diverged branch or a dirty tree), then push when ahead.
+ */
+export async function syncBranch(root: string, branch: string): Promise<BranchSyncResult> {
+  return guard('sync', root, async () => {
+    if (!isSafeBranch(branch)) {
+      return fail('sync', 'unknown-branch', `Refusing to sync "${branch}".`);
+    }
+    const current = await currentBranch(root);
+    if (current !== branch) {
+      return fail('sync', 'not-current', `"${branch}" is not checked out; sync only runs on the current branch.`);
+    }
+
+    const remote = await gitValue(root, ['config', '--get', `branch.${branch}.remote`]);
+    const merge = await gitValue(root, ['config', '--get', `branch.${branch}.merge`]);
+    if (!remote || !merge) {
+      return fail('sync', 'no-upstream', `"${branch}" has no upstream to sync with.`);
+    }
+
+    await gitAction(root, ['fetch', '--prune', remote]);
+    const upstreamRef = await gitValue(root, ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]);
+    if (!upstreamRef) {
+      return fail('sync', 'no-upstream', `"${branch}" has no upstream to sync with.`);
+    }
+    const counts = await gitValue(root, ['rev-list', '--left-right', '--count', `${branch}...${upstreamRef}`]);
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map((value) => Number.parseInt(value, 10) || 0);
+
+    let fastForwarded = false;
+    if (behind > 0) {
+      try {
+        await gitAction(root, ['merge', '--ff-only', upstreamRef]);
+        fastForwarded = true;
+      } catch (error) {
+        return classifyMergeFailure(error, 'sync', branch, upstreamRef);
+      }
+    }
+
+    let pushed = false;
+    if (!fastForwarded && ahead > 0) {
+      await gitAction(root, ['push', remote, `${branch}:${merge}`]);
+      pushed = true;
+    }
+
+    const message = fastForwarded
+      ? `Fast-forwarded ${branch} to ${upstreamRef}.`
+      : pushed
+        ? `Pushed ${branch} to ${remote}.`
+        : `${branch} is already in sync with ${upstreamRef}.`;
+    return {
+      available: true,
+      action: 'sync',
+      branch,
+      remote,
+      fastForwarded,
+      pushed,
+      message,
+      output: '',
+    };
+  });
+}
+
+function classifyMergeFailure(
+  error: unknown,
+  action: 'pull' | 'sync',
+  branch: string,
+  upstreamRef: string,
+): BranchActionFailure {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/local changes|would be overwritten|Please commit|Please stash|unstaged|untracked working tree/i.test(message)) {
+    const verb = action === 'sync' ? 'syncing' : 'pulling';
+    return { available: false, action, reason: 'dirty', detail: `Working tree is not clean; commit or stash before ${verb} ${branch}.` };
+  }
+  return {
+    available: false,
+    action,
+    reason: 'not-fast-forward',
+    detail: `"${branch}" and "${upstreamRef}" have diverged; a fast-forward is not possible.`,
+  };
+}
+
+/**
  * The forge URL that opens a new merge request for `branch` into `base`, from the remote's
  * URL alone. GitHub, GitLab, and Bitbucket are named; any other host returns its repository
  * page with `unknown-forge` rather than inventing a route it does not know.
@@ -364,9 +610,20 @@ async function listRemotes(root: string): Promise<string[]> {
   return stdout.split('\n').map((line) => line.trim()).filter(Boolean).sort();
 }
 
+/** Remote names the local branches track, from one `for-each-ref`. */
+async function upstreamRemotes(root: string): Promise<string[]> {
+  const stdout = await gitValue(root, ['for-each-ref', '--format=%(upstream:remotename)', 'refs/heads']);
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
 function defaultRemote(remotes: readonly string[]): string | null {
   if (remotes.includes('origin')) return 'origin';
   return remotes.length === 1 ? remotes[0] ?? null : null;
+}
+
+async function currentBranch(root: string): Promise<string | null> {
+  const name = await gitValue(root, ['symbolic-ref', '-q', '--short', 'HEAD']);
+  return name || null;
 }
 
 async function branchExists(root: string, branch: string): Promise<boolean> {

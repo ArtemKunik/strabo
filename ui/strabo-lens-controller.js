@@ -16,6 +16,7 @@ import { tierDirectionClasses } from './strabo-tiers.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
 import { renderOverlayPanel } from './strabo-panels.js';
 import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
+import { openCommitDialog } from './strabo-commit.js';
 
 export function createLensController(app) {
   const { state, view, elements, request } = app;
@@ -161,10 +162,25 @@ export function createLensController(app) {
     // K3: the hidden-coupling lens draws the no-import-path co-change edges itself, distinctly
     // from the general co-change lens, and clears them for every other overlay.
     view.setHiddenCoupling(kind === 'hidden-coupling' ? data : null, kind === 'hidden-coupling');
+    // The Change impact list is the working tree's own changes, so it is where the opt-in
+    // commit action lives. It generates a message with the narrator, then commits and pushes.
+    const actions = [];
+    if (kind === 'impact' && app.clientPrefs.commitEnabled) {
+      actions.push({
+        label: 'Commit…',
+        title: 'Generate a commit message with the narrator, then commit and push',
+        onClick: () =>
+          openCommitDialog({
+            repository: state.repository,
+            onCommitted: () => applyOverlay(),
+          }),
+      });
+    }
     renderOverlayPanel(elements.overlayPanel, OVERLAY_TITLES[kind], overlay, {
       kind,
       onClose: closeLensPanel,
       onSelect: (id) => app.selection.selectNode(id),
+      ...(actions.length > 0 ? { actions } : {}),
     });
     app.windows.refreshDock();
   }

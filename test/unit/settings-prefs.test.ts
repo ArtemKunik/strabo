@@ -53,6 +53,7 @@ test('readSettings ignores unknown values and keeps the valid ones', () => {
     labels: false,
     allLabels: false,
     reduceMotion: false,
+    commitEnabled: false,
     locThreshold: LOC_THRESHOLD_DEFAULT,
   });
 });
@@ -69,6 +70,7 @@ test('writeSettings round-trips a sanitized preference set', () => {
     labels: false,
     allLabels: true,
     reduceMotion: true,
+    commitEnabled: false,
     locThreshold: 450,
   });
 });

@@ -212,6 +212,27 @@ export function renderOverlayPanel(container, title, overlay, options = {}) {
     renderList();
     list.refresh();
   }
+
+  // Buttons an overlay contributes, e.g. committing the working tree the impact list shows.
+  if (Array.isArray(options.actions) && options.actions.length > 0) {
+    const actions = document.createElement('div');
+    actions.className = 'overlay-actions';
+    for (const action of options.actions) {
+      const actionButton = document.createElement('button');
+      actionButton.type = 'button';
+      actionButton.className = 'overlay-action';
+      actionButton.textContent = action.label;
+      if (action.title) {
+        actionButton.title = action.title;
+      }
+      if (action.disabled) {
+        actionButton.disabled = true;
+      }
+      actionButton.addEventListener('click', () => action.onClick?.());
+      actions.append(actionButton);
+    }
+    container.append(actions);
+  }
 }
 
 

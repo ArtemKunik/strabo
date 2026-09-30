@@ -8,7 +8,7 @@ import { showToast } from './strabo-delegate.js';
 import { API_PATH } from './strabo-core.js';
 
 export function createSettingsController(app) {
-  const { elements, request } = app;
+  const { state, elements, request } = app;
 
   /** Server settings from `/settings`, or null while loading. */
   let serverSettings = null;
@@ -32,6 +32,10 @@ export function createSettingsController(app) {
       app.lenses.applyLocLens();
     }
     renderSettingsView();
+    // The commit action is drawn by the impact overlay, so re-render it when it toggles.
+    if (key === 'commitEnabled' && state.overlay === 'impact') {
+      app.lenses.applyOverlay();
+    }
   }
 
   function renderSettingsView() {

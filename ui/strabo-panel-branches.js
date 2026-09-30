@@ -124,6 +124,42 @@ export function renderBranches(container, result, handlers = {}) {
   }`;
   container.append(summary);
 
+  // The listing-wide actions: fetch refreshes every count, pull and sync move the checked-out
+  // branch. Each is guarded server-side and never force-pushes.
+  const headerActions = document.createElement('div');
+  headerActions.className = 'branch-actions branch-header-actions';
+  headerActions.dataset.role = 'branch-actions';
+  const addHeaderAction = (role, label, title, handler) => {
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = `branch-action ${role}`;
+    action.dataset.role = role;
+    action.textContent = label;
+    action.title = title;
+    action.disabled = Boolean(handlers.busy);
+    action.addEventListener('click', () => handler());
+    headerActions.append(action);
+  };
+  if (handlers.onFetch) {
+    addHeaderAction('branch-fetch', 'Fetch', 'Update the remote-tracking refs; the counts are as of the last fetch', handlers.onFetch);
+  }
+  if (handlers.onPull && result.current) {
+    addHeaderAction('branch-pull', `Pull ${result.current}`, `Fetch and fast-forward ${result.current} from its upstream (no push)`, () => handlers.onPull(result.current));
+  }
+  if (handlers.onSync && result.current) {
+    addHeaderAction('branch-sync', `Sync ${result.current}`, `Fast-forward ${result.current} when behind, then push when ahead`, () => handlers.onSync(result.current));
+  }
+  if (headerActions.childElementCount > 0) {
+    if (handlers.busy) {
+      const running = document.createElement('span');
+      running.className = 'evidence';
+      running.dataset.role = 'branch-busy';
+      running.textContent = 'Running…';
+      headerActions.append(running);
+    }
+    container.append(headerActions);
+  }
+
   const maxCount = Math.max(
     1,
     ...others.map((branch) => Math.max(branch.againstBase?.ahead ?? 0, branch.againstBase?.behind ?? 0)),
@@ -195,6 +231,15 @@ function branchActions(branch, handlers) {
   const buttons = [];
   if (branch.kind === 'local' && !branch.isBase) {
     const publish = !branch.upstream || branch.upstream.gone;
+    const behind = branch.upstream?.behind ?? 0;
+    if (handlers.onPullBranch && !branch.current && !branch.upstream?.gone && behind > 0) {
+      buttons.push({
+        label: `Pull ↓${behind}`,
+        role: 'branch-pull-branch',
+        title: `Fast-forward ${branch.name} from ${branch.upstream?.name ?? 'its upstream'}`,
+        run: () => handlers.onPullBranch(branch.name),
+      });
+    }
     if (handlers.onPush && (publish || branch.upstream.ahead > 0)) {
       buttons.push({
         label: publish ? 'Publish' : 'Push',
@@ -239,6 +284,7 @@ function branchActions(branch, handlers) {
     action.dataset.branch = branch.name;
     action.textContent = spec.label;
     action.title = spec.title;
+    action.disabled = Boolean(handlers.busy);
     action.addEventListener('click', (event) => {
       event.stopPropagation();
       spec.run();

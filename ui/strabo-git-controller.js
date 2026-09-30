@@ -42,6 +42,9 @@ export function createGitController(app) {
   /** The base the Branches panel compares with; null lets the server pick the trunk. */
   let branchBase = null;
 
+  /** True while a branch fetch/pull/sync is in flight, so the panel disables its actions. */
+  let branchesBusy = false;
+
   /** Reviews shown in the Review panel, oldest first, so Back can step down to one. */
   let reviewHistory = [];
 
@@ -160,6 +163,7 @@ export function createGitController(app) {
     if (result?.available && result.base) branchBase = result.base.name;
     renderBranches(elements.branchesPanel, result, {
       selected: selectedBranchName,
+      busy: branchesBusy,
       onSelect: (branch) => {
         selectBranch(branch.name).catch((error) => {
           elements.status.textContent = `Error: ${error.message}`;
@@ -171,6 +175,10 @@ export function createGitController(app) {
           elements.status.textContent = `Error: ${error.message}`;
         });
       },
+      onFetch: () => runBranchAction('fetch', {}),
+      onPull: (name) => runBranchAction('pull', { branch: name }),
+      onPullBranch: (name) => runBranchAction('pull', { branch: name }),
+      onSync: (name) => runBranchAction('sync', { branch: name }),
       onPush: (name) => pushBranch(name),
       onMergeRequest: (name) => createMergeRequest(name),
       onDrop: (name) => dropBranch(name),
@@ -178,6 +186,46 @@ export function createGitController(app) {
         elements.branchesPanel.hidden = true;
       },
     });
+  }
+
+  /**
+   * Run one branch action (fetch, pull, or fast-forward sync) and reload the listing.
+   *
+   * The server is the authority: it validates the ref, never force-pushes, and reports a
+   * classified reason. The panel simply shows the message and refreshes its counts.
+   */
+  async function runBranchAction(action, payload) {
+    if (branchesBusy) return;
+    if ((action === 'sync' || action === 'pull') && !payload.branch) {
+      elements.status.textContent = `${action === 'pull' ? 'Pull' : 'Sync'} needs a checked-out branch.`;
+      return;
+    }
+    branchesBusy = true;
+    await loadBranches().catch((error) => {
+      elements.status.textContent = `Error: ${error.message}`;
+    });
+    try {
+      const params = state.repository ? `?repository=${encodeURIComponent(state.repository)}` : '';
+      const response = await fetch(`${API_PATH}/analysis/branches/${action}${params}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+      }
+      elements.status.textContent = body.available === false
+        ? `${action} failed: ${body.detail}`
+        : body.message;
+    } catch (error) {
+      elements.status.textContent = `Error: ${error.message}`;
+    } finally {
+      branchesBusy = false;
+      await loadBranches().catch((error) => {
+        elements.status.textContent = `Error: ${error.message}`;
+      });
+    }
   }
 
   /** Push a branch, then refresh the listing so its sync tags reflect the push. */

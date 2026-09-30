@@ -317,9 +317,18 @@ divergence from a base you can pick (the remote's default branch by default), an
 Counts come from the local object store and are as fresh as the last fetch.
 
 Listing reads Git and never changes it; the counts are labelled *as of the last fetch* rather
-than implying a live remote, and selecting a branch opens its branch review. Three explicit
-buttons are the one place Strabo writes to Git:
+than implying a live remote, and selecting a branch opens its branch review. The panel's
+actions are the only place Strabo writes to Git:
 
+- **Fetch** (`POST /analysis/branches/fetch`) updates the remote-tracking refs for the remotes
+  the branches track (else the default remote), so the ahead/behind counts become live. The
+  working tree is untouched.
+- **Pull** (`POST /analysis/branches/pull`) fetches a branch's upstream and fast-forwards it:
+  the checked-out branch advances with `merge --ff-only` so the working tree follows, any other
+  local branch through its ref. It never pushes, and a diverged or dirty branch is refused
+  with a reason rather than merged.
+- **Sync** (`POST /analysis/branches/sync`) runs only on the checked-out branch: it fetches,
+  fast-forwards when behind, then pushes when ahead.
 - **Push / Publish** sends a local branch to its upstream; a branch with no upstream is
   published and gets one set. A *Push* button appears when the branch is ahead of its
   upstream, a *Publish* button when it has none (or its upstream is gone). It never
@@ -333,12 +342,19 @@ buttons are the one place Strabo writes to Git:
   a live, unmerged branch is refused with a reason. Deletion is `git branch -D`, which is only
   reached after that staleness check.
 
-The three actions are state-changing, so they are accepted only from the page's own origin
-(`isSameOriginRequest`). Every branch name is validated against a strict pattern before it
-reaches Git, arguments are passed as a vector (never a shell), credential prompts are
+An opt-in **Commit** action (Settings → Commit) appears on the Change impact panel: it asks
+the narrator for a message built server-side from the recorded change set, shows it for the
+operator to edit, and only on confirmation commits the whole working tree (`git add -A`) and
+pushes the current branch. The message reaches Git as an argument, never a shell, and a failed
+push leaves the commit in place and is reported rather than rolled back.
+
+Every action is state-changing, so it is accepted only from the page's own origin
+(`isSameOriginRequest`). Every branch and remote name is validated against a strict pattern
+before it reaches Git, arguments are passed as a vector (never a shell), credential prompts are
 disabled so an unauthenticated push fails with a reason instead of hanging, and each action
-is time-bounded. A failure is classified (`no-git`, `auth`, `no-remote`, `unknown-forge`,
-`not-stale`, `timeout`, …) and shown in the status bar.
+is time-bounded. A failure is classified (`no-git`, `auth`, `no-remote`, `no-upstream`,
+`not-fast-forward`, `dirty`, `unknown-forge`, `not-stale`, `timeout`, …) and shown in the
+status bar.
 
 ## Workspace analysis
 

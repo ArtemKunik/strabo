@@ -89,6 +89,7 @@ export function defaultSettings() {
     labels: true,
     allLabels: false,
     reduceMotion: false,
+    commitEnabled: false,
     locThreshold: LOC_THRESHOLD_DEFAULT,
   };
 }
@@ -103,6 +104,7 @@ function sanitize(parsed, defaults) {
   if (typeof parsed.labels === 'boolean') settings.labels = parsed.labels;
   if (typeof parsed.allLabels === 'boolean') settings.allLabels = parsed.allLabels;
   if (typeof parsed.reduceMotion === 'boolean') settings.reduceMotion = parsed.reduceMotion;
+  if (typeof parsed.commitEnabled === 'boolean') settings.commitEnabled = parsed.commitEnabled;
   const locThreshold = sanitizeLocThreshold(parsed.locThreshold);
   if (locThreshold !== null) settings.locThreshold = locThreshold;
   return settings;
@@ -575,6 +577,27 @@ function renderingSection() {
 }
 
 /**
+ * Commit preferences.
+ *
+ * The commit action writes to the operator's Git repository and contacts the narrator, so it
+ * is off until asked for. It is a browser preference: turning it on reveals the action in
+ * this browser only, and every commit still has to be confirmed with its message before it
+ * runs.
+ */
+function commitSection(prefs, handlers) {
+  const group = section('Commit');
+  group.append(
+    field('Narrator commit', checkboxInput(prefs.commitEnabled, (value) => handlers.onPref?.('commitEnabled', value))),
+  );
+  group.append(
+    note(
+      'Shows a Commit action on the Change impact panel. It generates a message with the narrator, commits the whole working tree, and pushes the current branch. Off by default.',
+    ),
+  );
+  return group;
+}
+
+/**
  * Render the settings form into `container`.
  *
  * `handlers.onPref(key, value)` is called for every client preference change;
@@ -617,6 +640,7 @@ export function renderSettings(container, handlers = {}) {
   container.append(local);
 
   container.append(renderingSection());
+  container.append(commitSection(prefs, handlers));
 
   const remote = section('Server');
   if (!server) {
