@@ -3372,15 +3372,22 @@ function stylesheet() {
     {
       selector: "edge.edge-structure-stack",
       style: {
-        "curve-style": "unbundled-bezier",
-        "control-point-distances": (ele) => ele.data("bend") ?? 0,
-        "control-point-weights": 0.5,
         // Level text reads crisply; text turned along a steep arc blurs at small sizes.
         "text-rotation": "none",
         "text-margin-y": (ele) => (ele.data("labelShift") ?? 0) / Math.max(1e-4, ele.cy().zoom()),
         // A wider arc passes over the tighter ones' labels; drawing tighter arcs on top keeps
         // every label whole.
         "z-index": (ele) => Math.max(1, 9 - Math.round(Math.abs(ele.data("bend") ?? 0) / 80))
+      }
+    },
+    // Only a bowed edge is a bezier: with a zero control distance the renderer draws the
+    // arrowheads and no line between adjacent cards, so an unbowed edge stays straight.
+    {
+      selector: "edge.edge-structure-stack[bend != 0]",
+      style: {
+        "curve-style": "unbundled-bezier",
+        "control-point-distances": (ele) => ele.data("bend") ?? 0,
+        "control-point-weights": 0.5
       }
     },
     {
@@ -5279,7 +5286,8 @@ function appendNarratorBlock(container, handlers, { id, label }) {
 // ui/strabo-panel-inspector.js
 var inspectorSeq = 0;
 function renderInspector(container, model, id, handlers = {}) {
-  const passport = passportFor(model, id);
+  const offMap = !model.system && !(model.nodes ?? []).some((candidate) => candidate.id === id);
+  const passport = passportFor(model, id) ?? (offMap ? { kind: "module", metrics: [], imports: [], usedBy: [] } : null);
   if (!passport) {
     container.hidden = true;
     return;
@@ -5443,8 +5451,10 @@ function renderInspector(container, model, id, handlers = {}) {
   coverageBody.textContent = "Loading coverage\u2026";
   coverage.append(coverageBody);
   const tabDefs = [
-    ["deps", `Dependencies (${passport.imports.length} file(s))`, depsSection],
-    ["dependents", `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
+    ...offMap ? [] : [
+      ["deps", `Dependencies (${passport.imports.length} file(s))`, depsSection],
+      ["dependents", `Dependents (${passport.usedBy.length} file(s))`, dependentsSection]
+    ],
     ["members", "Members", members],
     ["functions", "Functions", functions],
     ["impact", "Impact", impact],
@@ -28724,18 +28734,20 @@ function createSelectionController(app2) {
       state2.unitFile = id;
       view2.focusFile(id);
     }
+    const offMap = !unitNode && !app2.current?.system;
+    const fileLike = offMap || isFileNode(id);
     renderInspector(elements2.inspector, app2.current, id, {
       onSelect: (target) => selectNode(target),
       onTrace: (from, to) => tracePath(from, to),
       // Everything below reads one file, so it is offered only when the selected node is one.
       // A roll-up node (tier band, shelf, unit) declares no members to map and no file to
       // open, so showing these would offer a control that cannot act.
-      ...isFileNode(id) ? { onOpenWorkspace: (target) => openFile(target) } : {},
+      ...fileLike ? { onOpenWorkspace: (target) => openFile(target) } : {},
       onBack: passportBack,
       backTitle: passportHistory.length > 0 ? "Back to the previously selected module" : "Back to the map",
-      ...isFileNode(id) ? { onViewSource: (target) => app2.source.viewSource(target) } : {},
+      ...fileLike ? { onViewSource: (target) => app2.source.viewSource(target) } : {},
       // The reading route is repository-wide; a Module Passport opens it at its own file.
-      ...isFileNode(id) ? { onOpenRoute: (target) => app2.panels.showRoute(target) } : {},
+      ...fileLike ? { onOpenRoute: (target) => app2.panels.showRoute(target) } : {},
       ...isFileNode(id) ? {
         onOpenMemberMap: (target) => {
           app2.memberMap.openMemberMap(target).then(() => {
@@ -28764,7 +28776,7 @@ function createSelectionController(app2) {
     if (!app2.current?.system && !app2.current?.structure) {
       loadMembers(id);
       app2.coverage?.loadFileCoverage(id, isFileNode(id));
-    } else if (app2.current?.structure && isFileNode(id)) {
+    } else if (app2.current?.structure && fileLike) {
       loadMembers(id);
       app2.coverage?.loadFileCoverage(id, true);
     }

@@ -108,18 +108,22 @@ export function createSelectionController(app) {
       state.unitFile = id;
       view.focusFile(id);
     }
+    // A file the current map does not draw (a Structure view shows tiers, not files) still has
+    // a passport: the server reads it by path, so it is treated as a file.
+    const offMap = !unitNode && !app.current?.system;
+    const fileLike = offMap || isFileNode(id);
     renderInspector(elements.inspector, app.current, id, {
       onSelect: (target) => selectNode(target),
       onTrace: (from, to) => tracePath(from, to),
       // Everything below reads one file, so it is offered only when the selected node is one.
       // A roll-up node (tier band, shelf, unit) declares no members to map and no file to
       // open, so showing these would offer a control that cannot act.
-      ...(isFileNode(id) ? { onOpenWorkspace: (target) => openFile(target) } : {}),
+      ...(fileLike ? { onOpenWorkspace: (target) => openFile(target) } : {}),
       onBack: passportBack,
       backTitle: passportHistory.length > 0 ? 'Back to the previously selected module' : 'Back to the map',
-      ...(isFileNode(id) ? { onViewSource: (target) => app.source.viewSource(target) } : {}),
+      ...(fileLike ? { onViewSource: (target) => app.source.viewSource(target) } : {}),
       // The reading route is repository-wide; a Module Passport opens it at its own file.
-      ...(isFileNode(id) ? { onOpenRoute: (target) => app.panels.showRoute(target) } : {}),
+      ...(fileLike ? { onOpenRoute: (target) => app.panels.showRoute(target) } : {}),
       ...(isFileNode(id)
         ? {
             onOpenMemberMap: (target) => {
@@ -160,7 +164,7 @@ export function createSelectionController(app) {
       loadMembers(id);
       // The Coverage tab loads on demand, like Members and Functions; a directory says so.
       app.coverage?.loadFileCoverage(id, isFileNode(id));
-    } else if (app.current?.structure && isFileNode(id)) {
+    } else if (app.current?.structure && fileLike) {
       loadMembers(id);
       app.coverage?.loadFileCoverage(id, true);
     }

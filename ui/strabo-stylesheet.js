@@ -284,15 +284,22 @@ export function stylesheet() {
     {
       selector: 'edge.edge-structure-stack',
       style: {
-        'curve-style': 'unbundled-bezier',
-        'control-point-distances': (ele) => ele.data('bend') ?? 0,
-        'control-point-weights': 0.5,
         // Level text reads crisply; text turned along a steep arc blurs at small sizes.
         'text-rotation': 'none',
         'text-margin-y': (ele) => (ele.data('labelShift') ?? 0) / Math.max(0.0001, ele.cy().zoom()),
         // A wider arc passes over the tighter ones' labels; drawing tighter arcs on top keeps
         // every label whole.
         'z-index': (ele) => Math.max(1, 9 - Math.round(Math.abs(ele.data('bend') ?? 0) / 80)),
+      },
+    },
+    // Only a bowed edge is a bezier: with a zero control distance the renderer draws the
+    // arrowheads and no line between adjacent cards, so an unbowed edge stays straight.
+    {
+      selector: 'edge.edge-structure-stack[bend != 0]',
+      style: {
+        'curve-style': 'unbundled-bezier',
+        'control-point-distances': (ele) => ele.data('bend') ?? 0,
+        'control-point-weights': 0.5,
       },
     },
     {

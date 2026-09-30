@@ -18,7 +18,9 @@ let inspectorSeq = 0;
 
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
-  const passport = passportFor(model, id);
+  // A file the map does not draw has no graph facts, only what the server reads by path.
+  const offMap = !model.system && !(model.nodes ?? []).some((candidate) => candidate.id === id);
+  const passport = passportFor(model, id) ?? (offMap ? { kind: 'module', metrics: [], imports: [], usedBy: [] } : null);
   if (!passport) {
     container.hidden = true;
     return;
@@ -200,8 +202,12 @@ export function renderInspector(container, model, id, handlers = {}) {
   coverage.append(coverageBody);
 
   const tabDefs = [
-    ['deps', `Dependencies (${passport.imports.length} file(s))`, depsSection],
-    ['dependents', `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
+    ...(offMap
+      ? []
+      : [
+          ['deps', `Dependencies (${passport.imports.length} file(s))`, depsSection],
+          ['dependents', `Dependents (${passport.usedBy.length} file(s))`, dependentsSection],
+        ]),
     ['members', 'Members', members],
     ['functions', 'Functions', functions],
     ['impact', 'Impact', impact],
