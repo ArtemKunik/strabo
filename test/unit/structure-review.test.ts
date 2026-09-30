@@ -212,3 +212,43 @@ test('a skip-layer edge a declared rule allows is drawn and counted as allowed, 
   assert.equal(wrongWayFlowsFor(model, 'api'), null);
   assert.doesNotMatch(graphSummary(model), /skip-layer/);
 });
+
+test('an edge a rule covers only in part is still wrong-way, and counts and lists just the unexplained imports', () => {
+  const imports = [
+    { source: 'src/api/a.ts', target: 'src/state/s.ts', line: 1, specifier: './s', allowed: true },
+    { source: 'src/api/a.ts', target: 'src/state/s.ts', line: 2, specifier: './s', allowed: true },
+    { source: 'src/api/b.ts', target: 'src/cache/c.ts', line: 3, specifier: './c' },
+    { source: 'src/api/c.ts', target: 'src/cache/c.ts', line: 4, specifier: './c', typeOnly: true },
+  ];
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'api', kind: 'tier', label: 'API surface', files: 3 },
+      { id: 'domain', kind: 'tier', label: 'Domain', files: 3 },
+      { id: 'data', kind: 'tier', label: 'Data', files: 3 },
+    ],
+    edges: [
+      {
+        source: 'api',
+        target: 'data',
+        tierKind: 'skip-layer',
+        weight: 4,
+        typeOnlyCount: 1,
+        allowedCount: 2,
+        allowedTypeOnly: 0,
+        tierImports: imports,
+      },
+    ],
+  };
+  assert.equal(isWrongWayEdge(model.edges[0]), true);
+  assert.equal(buildElements(model as never).edges[0].data.label, '4 skip-layer · 2 allowed · 1 type-only');
+  const flows = wrongWayFlowsFor(model, 'api');
+  assert.equal(flows?.groups[0].weight, 2, 'four imports minus the two a rule covers');
+  assert.equal(flows?.valueCount, 1, 'one of the two left is type-only');
+  assert.deepEqual(
+    flows?.groups[0].imports.map((entry: { line: number }) => entry.line),
+    [3, 4],
+  );
+  assert.match(graphSummary(model), /1 skip-layer edge · 2 imports/);
+  assert.ok(structureWrongWayEvidence(model).some((line) => line.includes('src/api/b.ts:3')));
+});

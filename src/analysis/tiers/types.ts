@@ -165,6 +165,8 @@ export interface TierFlowImport {
   specifier: string;
   /** True when the import brings in types only. */
   typeOnly?: boolean;
+  /** True when a declared `allow: import` rule covers this import (Phase 35 Y7). */
+  allowed?: boolean;
 }
 
 /** One aggregated flow between two role tiers, read from recorded imports (calls excluded). */
@@ -185,8 +187,14 @@ export interface TierFlowEdge {
   units: string[];
   /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */
   ghost?: boolean;
-  /** True when this edge matches a declared allowed rule. */
+  /** True when every import on this edge is covered by a declared `allow: import` rule. */
   intended?: boolean;
+  /** Imports on this edge that a declared rule covers; the rest are unexplained. */
+  allowedCount?: number;
+  /** Of `allowedCount`, how many are type-only. */
+  allowedTypeOnly?: number;
+  /** The declared rules that cover imports on this edge, most imports first. */
+  allowedRules?: string[];
   /** True when this edge breaks declared intent or tier order. */
   violation?: boolean;
   /** The declared rule id behind this intent or violation. */
@@ -248,8 +256,14 @@ export interface TierGridEdge {
   crossUnit: boolean;
   /** True when this edge is declared in intent but has 0 observed imports (Phase 35 Y7). */
   ghost?: boolean;
-  /** True when this edge matches a declared allowed rule. */
+  /** True when every import on this edge is covered by a declared `allow: import` rule. */
   intended?: boolean;
+  /** Imports on this edge that a declared rule covers; the rest are unexplained. */
+  allowedCount?: number;
+  /** Of `allowedCount`, how many are type-only. */
+  allowedTypeOnly?: number;
+  /** The declared rules that cover imports on this edge, most imports first. */
+  allowedRules?: string[];
   /** True when this edge breaks declared intent or tier order. */
   violation?: boolean;
   /** The declared rule id behind this intent or violation. */

@@ -297,6 +297,15 @@ function isWrongWayEdge(edge) {
   }
   return edge?.tierKind === "skip-layer" && edge.intended !== true;
 }
+function unexplainedImports(edge) {
+  const weight = typeof edge?.weight === "number" ? edge.weight : 0;
+  const typeOnly = typeof edge?.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
+  const excused = edge?.tierKind === "skip-layer" ? Math.min(weight, edge.allowedCount ?? 0) : 0;
+  const excusedTypeOnly = edge?.tierKind === "skip-layer" ? Math.min(typeOnly, edge.allowedTypeOnly ?? 0) : 0;
+  const count = weight - excused;
+  const typed = Math.min(count, typeOnly - excusedTypeOnly);
+  return { count, typeOnly: typed, value: Math.max(0, count - typed) };
+}
 function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
   if (!edge) {
@@ -316,6 +325,8 @@ function edgeEvidenceFor(model, edgeId) {
     weight: typeof edge.weight === "number" ? edge.weight : null,
     violation: edge.violation === true,
     intended: edge.intended === true,
+    allowedCount: typeof edge.allowedCount === "number" ? edge.allowedCount : null,
+    allowedRules: Array.isArray(edge.allowedRules) ? edge.allowedRules : [],
     ruleId: edge.ruleId ?? null,
     crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
     typeOnlyCount: typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : null,
@@ -341,20 +352,25 @@ function wrongWayFlowsFor(model, id) {
     if (!isWrongWayEdge(edge)) {
       return;
     }
-    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
-    const weight = typeof edge.weight === "number" ? edge.weight : imports.length;
-    if (weight <= 0) {
+    const sample = Array.isArray(edge.tierImports) ? edge.tierImports : [];
+    const total = typeof edge.weight === "number" ? edge.weight : sample.length;
+    if (total <= 0) {
       return;
     }
-    const typeOnlyCount = typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : 0;
+    const left = unexplainedImports({ ...edge, weight: total });
+    if (left.count <= 0) {
+      return;
+    }
+    const imports = edge.tierKind === "skip-layer" ? sample.filter((entry) => entry.allowed !== true) : sample;
     groups.push({
       id: `e${index}`,
       kind: edge.tierKind,
       target: edge.target,
       targetLabel: labelOf2(edge.target),
-      weight,
-      typeOnlyCount,
-      valueCount: Math.max(0, weight - typeOnlyCount),
+      weight: left.count,
+      typeOnlyCount: left.typeOnly,
+      valueCount: left.value,
+      allowedCount: total - left.count,
       imports
     });
   });
@@ -616,7 +632,7 @@ function structureEdgeBase(edge, weight) {
     return weight ? `${weight} upward` : "upward";
   }
   if (edge.tierKind === "skip-layer") {
-    const intended = edge.intended === true ? ` \xB7 allowed${edge.ruleId ? ` (${edge.ruleId})` : ""}` : "";
+    const intended = edge.intended === true ? ` \xB7 allowed (${edge.ruleId ?? (edge.allowedRules?.length > 1 ? `${edge.allowedRules.length} rules` : edge.allowedRules?.[0] ?? "rule")})` : edge.allowedCount > 0 ? ` \xB7 ${edge.allowedCount} allowed` : "";
     return `${weight ? `${weight} skip-layer` : "skip-layer"}${intended}`;
   }
   if (edge.violation) {
@@ -637,7 +653,7 @@ function wrongWayBySource(model) {
   const counts = /* @__PURE__ */ new Map();
   for (const edge of model.edges ?? []) {
     if (!isWrongWayEdge(edge)) continue;
-    const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
+    const value = unexplainedImports(edge).value;
     if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
   }
   return counts;
@@ -1203,7 +1219,7 @@ function graphSummary(model) {
     const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer" && isWrongWayEdge(e));
     const upward = upwardEdges.length;
     const skip = skipEdges.length;
-    const imports = (list2) => list2.reduce((sum, e) => sum + (typeof e.weight === "number" ? e.weight : 1), 0);
+    const imports = (list2) => list2.reduce((sum, e) => sum + (typeof e.weight === "number" ? unexplainedImports(e).count : 1), 0);
     const counted = (count, list2, word) => {
       const total = imports(list2);
       return `${count} ${word} ${count === 1 ? "edge" : "edges"} \xB7 ${total} ${total === 1 ? "import" : "imports"}`;
@@ -10810,7 +10826,7 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   container.dataset.delegateEdge = evidence.id;
   const heading3 = document.createElement("h3");
   heading3.className = "overlay-summary";
-  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip-layer" ? evidence.intended ? " \xB7 Skip-layer (allowed by a declared rule)" : " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
+  const headingDetail = evidence.tierKind === "upward" ? " \xB7 Upward (Architecture Violation)" : evidence.tierKind === "skip-layer" ? evidence.intended ? " \xB7 Skip-layer (allowed by a declared rule)" : evidence.allowedCount > 0 ? ` \xB7 Skip-layer (${evidence.allowedCount} of ${evidence.weight} imports allowed by a declared rule)` : " \xB7 Skip-layer" : evidence.violation ? " \xB7 Architecture Violation" : ` \xB7 ${evidence.kind}`;
   heading3.textContent = `Edge${headingDetail}`;
   container.append(heading3);
   const route = document.createElement("p");
@@ -10828,7 +10844,9 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
       evidence.tierKind === "upward" ? "Upward (against stack order)" : evidence.tierKind === "skip-layer" ? "Skip-layer" : "Down (follows stack order)"
     );
   }
-  if (evidence.ruleId) {
+  if (evidence.allowedRules?.length > 1) {
+    appendFact(facts, "Allowed by", evidence.allowedRules.join(", "));
+  } else if (evidence.ruleId) {
     appendFact(facts, "Rule", evidence.ruleId);
   }
   if (typeof evidence.weight === "number") {
@@ -28211,7 +28229,7 @@ function createDelegation(app2) {
         `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ""}`
       );
       for (const group of wrongWay.groups) {
-        evidence.push(`${group.kind} \u2192 ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ""}`);
+        evidence.push(`${group.kind} \u2192 ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ""}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ""}`);
         for (const entry of group.imports.slice(0, 20)) {
           evidence.push(`${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
         }
@@ -28275,8 +28293,9 @@ function createDelegation(app2) {
         flowCount: count,
         evidence: [
           `relationship: ${count} recorded ${kind}import(s) between two tiers`,
+          ...evidence.allowedCount > 0 ? [`${evidence.allowedCount} of ${count} import(s) are allowed by a declared rule${evidence.ruleId ? ` (${evidence.ruleId})` : ""}`] : [],
           ...evidence.tierImports.slice(0, 20).map(
-            (entry) => `${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`
+            (entry) => `${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}${entry.allowed ? " (allowed by rule)" : ""}`
           )
         ]
       };

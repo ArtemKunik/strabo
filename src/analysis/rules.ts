@@ -26,6 +26,12 @@ export interface DeclaredRule {
   /** Glob over file paths. */
   to: string;
   allow: RuleAllow;
+  /**
+   * True when the rule was declared with `ghost: false`: it excuses the imports it matches but
+   * never draws an intended-flow edge for a tier pair with none, so a broad rule such as
+   * "the composition root may reach anything" does not fill the map with dashed intent edges.
+   */
+  quiet?: boolean;
 }
 
 export interface RuleViolation {
@@ -251,7 +257,7 @@ function extractRules(parsed: unknown): DeclaredRule[] {
   }
   const found: DeclaredRule[] = [];
   for (const entry of entries) {
-    const record = entry as { id?: unknown; from?: unknown; to?: unknown; allow?: unknown };
+    const record = entry as { id?: unknown; from?: unknown; to?: unknown; allow?: unknown; ghost?: unknown };
     const id = typeof record.id === 'string' ? record.id.trim() : '';
     const from = typeof record.from === 'string' ? record.from.trim() : '';
     const to = typeof record.to === 'string' ? record.to.trim() : '';
@@ -261,7 +267,7 @@ function extractRules(parsed: unknown): DeclaredRule[] {
     if (id === '' || from === '' || to === '' || allow === null) {
       continue;
     }
-    found.push({ id, from, to, allow });
+    found.push({ id, from, to, allow, ...(record.ghost === false ? { quiet: true } : {}) });
   }
   return found;
 }

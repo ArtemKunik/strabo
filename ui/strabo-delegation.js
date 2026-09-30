@@ -40,7 +40,7 @@ export function createDelegation(app) {
         `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ''}`,
       );
       for (const group of wrongWay.groups) {
-        evidence.push(`${group.kind} → ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ''}`);
+        evidence.push(`${group.kind} → ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ''}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ''}`);
         for (const entry of group.imports.slice(0, 20)) {
           evidence.push(`${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`);
         }
@@ -120,8 +120,12 @@ export function createDelegation(app) {
         flowCount: count,
         evidence: [
           `relationship: ${count} recorded ${kind}import(s) between two tiers`,
+          ...(evidence.allowedCount > 0
+            ? [`${evidence.allowedCount} of ${count} import(s) are allowed by a declared rule${evidence.ruleId ? ` (${evidence.ruleId})` : ''}`]
+            : []),
           ...evidence.tierImports.slice(0, 20).map(
-            (entry) => `${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`,
+            (entry) =>
+              `${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}${entry.allowed ? ' (allowed by rule)' : ''}`,
           ),
         ],
       };

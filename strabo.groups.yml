@@ -4,6 +4,11 @@
 # file kinds, and path tokens, and is reported as `declared` evidence. Globs are POSIX and
 # `**` matches any depth. The first matching entry wins, so put specific globs first.
 tiers:
+  # Tests import routes and stores to exercise them; without a declaration the framework evidence
+  # in some of them outranks their file kind and they read as API code.
+  - tier: tests
+    globs:
+      - "test/**"
   - tier: frontend
     globs:
       - "ui/**"
@@ -39,13 +44,13 @@ tiers:
     globs:
       - "src/cache/**"
       - "src/state/**"
-      - "src/repository.ts"
-  # Platform plumbing every tier may use: configuration, spawning a process, and the scan
-  # ceiling's path boundary. Infra sits beside the tier stack, so reading it is never wrong-way.
+  # Platform plumbing every tier may use: configuration, spawning a process, describing a
+  # checkout through git (repository.ts), and the scan ceiling's path boundary. Infra sits beside the tier stack, so reading it is never wrong-way.
   - tier: infra
     globs:
       - "src/config.ts"
       - "src/process.ts"
+      - "src/repository.ts"
       - "src/boundary/repository-root.ts"
   - tier: build
     globs:
@@ -96,3 +101,44 @@ rules:
     from: "src/analysis/**"
     to: "src/cache/**"
     allow: import
+  - id: api-calls-integrations
+    from: "src/api/**"
+    to: "src/integrations/**"
+    allow: import
+  - id: api-calls-terminal
+    from: "src/api/**"
+    to: "src/terminal/**"
+    allow: import
+  - id: terminal-transport
+    from: "src/terminal/ws.ts"
+    to: "src/terminal/**"
+    allow: import
+  # src/scan/graph.ts is where the default scanner meets the graph cache: the cache takes the
+  # scanner as an argument, so this file is the one place the two are joined.
+  - id: scan-graph-bridge
+    from: "src/scan/graph.ts"
+    to: "src/cache/**"
+    allow: import
+
+  # The composition root and the entry points wire the parts together; that is their job, not a
+  # layering choice. `ghost: false` keeps these broad rules from drawing intended-flow edges.
+  - id: wiring-router
+    from: "src/api/router.ts"
+    to: "**"
+    allow: import
+    ghost: false
+  - id: wiring-index
+    from: "src/index.ts"
+    to: "**"
+    allow: import
+    ghost: false
+  - id: wiring-cli
+    from: "src/cli/**"
+    to: "**"
+    allow: import
+    ghost: false
+  - id: wiring-cli-entry
+    from: "src/cli.ts"
+    to: "**"
+    allow: import
+    ghost: false

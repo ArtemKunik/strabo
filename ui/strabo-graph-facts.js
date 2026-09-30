@@ -240,6 +240,23 @@ export function isWrongWayEdge(edge) {
   return edge?.tierKind === 'skip-layer' && edge.intended !== true;
 }
 
+/**
+ * The imports on a wrong-way edge that no declared rule explains.
+ *
+ * A rule excuses a skip-layer import, never an upward one, so an upward edge keeps every import
+ * and a skip-layer edge loses the ones a rule covers (`allowedCount`, of which `allowedTypeOnly`
+ * bring in types only). `value` is the runtime share of what is left.
+ */
+export function unexplainedImports(edge) {
+  const weight = typeof edge?.weight === 'number' ? edge.weight : 0;
+  const typeOnly = typeof edge?.typeOnlyCount === 'number' ? edge.typeOnlyCount : 0;
+  const excused = edge?.tierKind === 'skip-layer' ? Math.min(weight, edge.allowedCount ?? 0) : 0;
+  const excusedTypeOnly = edge?.tierKind === 'skip-layer' ? Math.min(typeOnly, edge.allowedTypeOnly ?? 0) : 0;
+  const count = weight - excused;
+  const typed = Math.min(count, typeOnly - excusedTypeOnly);
+  return { count, typeOnly: typed, value: Math.max(0, count - typed) };
+}
+
 export function edgeEvidenceFor(model, edgeId) {
   const edge = (model.edges ?? []).find((candidate, index) => `e${index}` === edgeId);
   if (!edge) {
@@ -259,6 +276,8 @@ export function edgeEvidenceFor(model, edgeId) {
     weight: typeof edge.weight === 'number' ? edge.weight : null,
     violation: edge.violation === true,
     intended: edge.intended === true,
+    allowedCount: typeof edge.allowedCount === 'number' ? edge.allowedCount : null,
+    allowedRules: Array.isArray(edge.allowedRules) ? edge.allowedRules : [],
     ruleId: edge.ruleId ?? null,
     crossUnit: typeof edge.crossUnit === 'number' ? edge.crossUnit : null,
     typeOnlyCount: typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : null,
@@ -295,20 +314,26 @@ export function wrongWayFlowsFor(model, id) {
     if (!isWrongWayEdge(edge)) {
       return;
     }
-    const imports = Array.isArray(edge.tierImports) ? edge.tierImports : [];
-    const weight = typeof edge.weight === 'number' ? edge.weight : imports.length;
-    if (weight <= 0) {
+    const sample = Array.isArray(edge.tierImports) ? edge.tierImports : [];
+    const total = typeof edge.weight === 'number' ? edge.weight : sample.length;
+    if (total <= 0) {
       return;
     }
-    const typeOnlyCount = typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : 0;
+    // Only what no declared rule explains is a wrong-way read; a partly covered edge lists the rest.
+    const left = unexplainedImports({ ...edge, weight: total });
+    if (left.count <= 0) {
+      return;
+    }
+    const imports = edge.tierKind === 'skip-layer' ? sample.filter((entry) => entry.allowed !== true) : sample;
     groups.push({
       id: `e${index}`,
       kind: edge.tierKind,
       target: edge.target,
       targetLabel: labelOf(edge.target),
-      weight,
-      typeOnlyCount,
-      valueCount: Math.max(0, weight - typeOnlyCount),
+      weight: left.count,
+      typeOnlyCount: left.typeOnly,
+      valueCount: left.value,
+      allowedCount: total - left.count,
       imports,
     });
   });

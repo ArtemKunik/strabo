@@ -1,6 +1,14 @@
 import { matchesGlob } from '../glob.ts';
 import { readDeclaredRules, type DeclaredRule } from '../rules.ts';
-import type { Tier, TierClassification, TierFlow, TierFlowEdge, TierGrid } from './types.ts';
+import type {
+  Tier,
+  TierClassification,
+  TierFlow,
+  TierFlowEdge,
+  TierFlowImport,
+  TierGrid,
+  TierGridEdge,
+} from './types.ts';
 import { tierRank } from './types.ts';
 
 export interface TierIntentGhostEdge {
@@ -159,24 +167,19 @@ export function buildTierIntent(
           });
         }
       }
-    } else if (rule.allow === 'import') {
+    } else if (rule.allow === 'import' && rule.quiet !== true) {
+      // Which imports a rule excuses is decided import by import below; here a rule only draws
+      // the intended flow it states when the repository records none of it.
       for (const sourceTier of fromTiers) {
         for (const targetTier of toTiers) {
+          // A flow inside one tier is not a layer relationship, and the stack draws none.
+          if (sourceTier === targetTier) {
+            continue;
+          }
           const observedEdge = tierFlow.edges.find(
             (e) => e.source === sourceTier && e.target === targetTier,
           );
-          if (observedEdge) {
-            observedEdge.intended = true;
-            observedEdge.ruleId = rule.id;
-            if (grid) {
-              for (const gridEdge of grid.edges) {
-                if (gridEdge.sourceTier === sourceTier && gridEdge.targetTier === targetTier) {
-                  gridEdge.intended = true;
-                  gridEdge.ruleId = rule.id;
-                }
-              }
-            }
-          } else {
+          if (!observedEdge) {
             const sourceRank = tierRank(sourceTier);
             const targetRank = tierRank(targetTier);
             const kind: TierFlowEdge['kind'] =
@@ -210,6 +213,8 @@ export function buildTierIntent(
     }
   }
 
+  markAllowedImports(rules, tierOfFile, tierFlow, graphEdges, assignment, grid, fileMatches);
+
   return {
     available: true,
     rules,
@@ -217,4 +222,143 @@ export function buildTierIntent(
     ghostBands,
     violations,
   };
+}
+
+
+interface AllowTally {
+  total: number;
+  allowed: number;
+  allowedTypeOnly: number;
+  byRule: Map<string, number>;
+}
+
+/**
+ * Judge every ranked cross-tier import against the `allow: import` rules, one import at a time.
+ *
+ * A rule covers an import only when the importing file matches its `from` and the imported file
+ * its `to`. An edge is `intended` when every import on it is covered; one that is only partly
+ * covered keeps the count (`allowedCount`), so the drawing can say "31 allowed, 9 unexplained"
+ * instead of excusing a whole tier pair because one rule matched part of it. Each import in the
+ * shown sample carries `allowed`, and the sample lists unexplained imports first, so the ones
+ * worth reading are never cut off by the cap.
+ */
+function markAllowedImports(
+  rules: DeclaredRule[],
+  tierOfFile: Map<string, Tier>,
+  tierFlow: TierFlow,
+  graphEdges: Array<{
+    source: string;
+    target: string;
+    kind?: string;
+    typeOnly?: boolean;
+    evidence?: { line?: number; specifier?: string };
+  }>,
+  assignment: Map<string, string>,
+  grid: TierGrid | undefined,
+  fileMatches: (file: string, tier: Tier, pattern: string) => boolean,
+): void {
+  const allowRules = rules.filter((rule) => rule.allow === 'import');
+  if (allowRules.length === 0) {
+    return;
+  }
+  const flowTally = new Map<string, AllowTally>();
+  const gridTally = new Map<string, AllowTally>();
+  const flowImports = new Map<string, TierFlowImport[]>();
+  const tally = (map: Map<string, AllowTally>, key: string, ruleId: string | null, typeOnly: boolean): void => {
+    const entry = map.get(key) ?? { total: 0, allowed: 0, allowedTypeOnly: 0, byRule: new Map() };
+    entry.total += 1;
+    if (ruleId !== null) {
+      entry.allowed += 1;
+      if (typeOnly) {
+        entry.allowedTypeOnly += 1;
+      }
+      entry.byRule.set(ruleId, (entry.byRule.get(ruleId) ?? 0) + 1);
+    }
+    map.set(key, entry);
+  };
+
+  for (const edge of graphEdges) {
+    if (edge.kind === 'call') {
+      continue;
+    }
+    const sourceTier = tierOfFile.get(edge.source);
+    const targetTier = tierOfFile.get(edge.target);
+    if (!sourceTier || !targetTier) {
+      continue;
+    }
+    const sourceRank = tierRank(sourceTier);
+    const targetRank = tierRank(targetTier);
+    if (sourceRank === null || targetRank === null || sourceRank === targetRank) {
+      continue;
+    }
+    const rule = allowRules.find(
+      (candidate) =>
+        fileMatches(edge.source, sourceTier, candidate.from) && fileMatches(edge.target, targetTier, candidate.to),
+    );
+    const ruleId = rule?.id ?? null;
+    const typeOnly = edge.typeOnly === true;
+    const flowKey = `${sourceTier} ${targetTier}`;
+    tally(flowTally, flowKey, ruleId, typeOnly);
+    const list = flowImports.get(flowKey) ?? [];
+    list.push({
+      source: edge.source,
+      target: edge.target,
+      line: edge.evidence?.line ?? 0,
+      specifier: edge.evidence?.specifier ?? '',
+      ...(typeOnly ? { typeOnly: true } : {}),
+      ...(ruleId !== null ? { allowed: true } : {}),
+    });
+    flowImports.set(flowKey, list);
+    const sourceUnit = assignment.get(edge.source) ?? '.';
+    const targetUnit = assignment.get(edge.target) ?? '.';
+    tally(gridTally, `${sourceUnit} ${targetUnit} ${sourceTier} ${targetTier}`, ruleId, typeOnly);
+  }
+
+  const apply = (
+    target: TierFlowEdge | TierGridEdge,
+    entry: AllowTally | undefined,
+  ): void => {
+    if (!entry || entry.allowed === 0) {
+      return;
+    }
+    target.allowedCount = entry.allowed;
+    target.allowedTypeOnly = entry.allowedTypeOnly;
+    const ranked = [...entry.byRule.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    target.allowedRules = ranked.map(([id]) => id);
+    if (ranked.length === 1) {
+      target.ruleId = ranked[0]![0];
+    }
+    if (entry.allowed === entry.total) {
+      target.intended = true;
+    }
+  };
+
+  for (const edge of tierFlow.edges) {
+    const key = `${edge.source} ${edge.target}`;
+    apply(edge, flowTally.get(key));
+    const all = flowImports.get(key);
+    if (all && edge.imports) {
+      const order = (a: TierFlowImport, b: TierFlowImport): number =>
+        a.source.localeCompare(b.source) || a.line - b.line || a.target.localeCompare(b.target);
+      // Unexplained imports first, so the sample cap never hides the ones a reader must judge.
+      const unexplained = all.filter((entry) => entry.allowed !== true).sort(order);
+      const covered = all.filter((entry) => entry.allowed === true).sort(order);
+      edge.imports = [...unexplained, ...covered].slice(0, edge.imports.length).sort(order);
+    }
+  }
+  if (grid) {
+    for (const edge of grid.edges) {
+      apply(edge, gridTally.get(`${edge.sourceUnit} ${edge.targetUnit} ${edge.sourceTier} ${edge.targetTier}`));
+      if (edge.imports) {
+        const allowedKeys = new Set(
+          (flowImports.get(`${edge.sourceTier} ${edge.targetTier}`) ?? [])
+            .filter((entry) => entry.allowed === true)
+            .map((entry) => `${entry.source} ${entry.line} ${entry.target}`),
+        );
+        edge.imports = edge.imports.map((entry) =>
+          allowedKeys.has(`${entry.source} ${entry.line} ${entry.target}`) ? { ...entry, allowed: true } : entry,
+        );
+      }
+    }
+  }
 }

@@ -5,7 +5,7 @@
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
 
-import { isWrongWayEdge } from './strabo-graph-facts.js';
+import { isWrongWayEdge, unexplainedImports } from './strabo-graph-facts.js';
 import { edgeStrokeWidth, locDiameter, nodeDiameter } from './strabo-graph-sizing.js';
 import {
   isStructureStack,
@@ -101,8 +101,16 @@ function structureEdgeBase(edge, weight) {
     return weight ? `${weight} upward` : 'upward';
   }
   if (edge.tierKind === 'skip-layer') {
-    // A declared shortcut still says it skips a tier, and which rule allows it.
-    const intended = edge.intended === true ? ` · allowed${edge.ruleId ? ` (${edge.ruleId})` : ''}` : '';
+    // A declared shortcut still says it skips a tier, and which rule allows it; an edge a rule
+    // covers only in part says how many of its imports that is.
+    const intended =
+      edge.intended === true
+        ? ` · allowed (${
+            edge.ruleId ?? (edge.allowedRules?.length > 1 ? `${edge.allowedRules.length} rules` : (edge.allowedRules?.[0] ?? 'rule'))
+          })`
+        : edge.allowedCount > 0
+          ? ` · ${edge.allowedCount} allowed`
+          : '';
     return `${weight ? `${weight} skip-layer` : 'skip-layer'}${intended}`;
   }
   if (edge.violation) {
@@ -130,7 +138,7 @@ function wrongWayBySource(model) {
   const counts = new Map();
   for (const edge of model.edges ?? []) {
     if (!isWrongWayEdge(edge)) continue;
-    const value = Math.max(0, (edge.weight ?? 0) - (edge.typeOnlyCount ?? 0));
+    const value = unexplainedImports(edge).value;
     if (value > 0) counts.set(edge.source, (counts.get(edge.source) ?? 0) + value);
   }
   return counts;

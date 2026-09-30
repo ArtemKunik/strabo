@@ -72,8 +72,14 @@ export interface ViewEdge extends GraphEdge {
   crossUnitEdge?: boolean;
   /** In Structure mode (Y7), true when the edge is declared in intent but has 0 observed imports. */
   ghost?: boolean;
-  /** In Structure mode (Y7), true when the edge reflects declared architecture intent. */
+  /** In Structure mode (Y7), true when every import on the edge is covered by a declared rule. */
   intended?: boolean;
+  /** In Structure mode, imports on the edge a declared rule covers; the rest are unexplained. */
+  allowedCount?: number;
+  /** Of `allowedCount`, how many are type-only. */
+  allowedTypeOnly?: number;
+  /** The declared rules that cover imports on the edge, most imports first. */
+  allowedRules?: string[];
   /** In Structure mode (Y7), true when the edge breaks declared intent or layer order. */
   violation?: boolean;
   /** The declared rule id behind this intent or violation. */
@@ -85,7 +91,7 @@ export interface ViewEdge extends GraphEdge {
   /** In a Structure view, how many of the rolled-up imports bring in types only. */
   typeOnlyCount?: number;
   /** In a Structure view, the rolled-up imports themselves (capped), for the edge panel. */
-  tierImports?: Array<{ source: string; target: string; line: number; specifier: string; typeOnly?: boolean }>;
+  tierImports?: Array<{ source: string; target: string; line: number; specifier: string; typeOnly?: boolean; allowed?: boolean }>;
 }
 
 export interface ViewPosition {

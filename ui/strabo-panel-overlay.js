@@ -285,7 +285,9 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
       : evidence.tierKind === 'skip-layer'
         ? evidence.intended
           ? ' · Skip-layer (allowed by a declared rule)'
-          : ' · Skip-layer'
+          : evidence.allowedCount > 0
+            ? ` · Skip-layer (${evidence.allowedCount} of ${evidence.weight} imports allowed by a declared rule)`
+            : ' · Skip-layer'
         : evidence.violation
           ? ' · Architecture Violation'
           : ` · ${evidence.kind}`;
@@ -312,7 +314,9 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
           : 'Down (follows stack order)',
     );
   }
-  if (evidence.ruleId) {
+  if (evidence.allowedRules?.length > 1) {
+    appendFact(facts, 'Allowed by', evidence.allowedRules.join(', '));
+  } else if (evidence.ruleId) {
     appendFact(facts, 'Rule', evidence.ruleId);
   }
   if (typeof evidence.weight === 'number') {

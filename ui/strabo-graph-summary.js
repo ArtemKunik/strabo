@@ -5,7 +5,7 @@
  * Pure functions only: no DOM, no Cytoscape, no fetch.
  */
 
-import { isWrongWayEdge } from './strabo-graph-facts.js';
+import { isWrongWayEdge, unexplainedImports } from './strabo-graph-facts.js';
 import { topLevelDirectory } from './strabo-graph-ids.js';
 
 /** Counts for the tests / components strip, in file, block, or system mode. */
@@ -243,7 +243,7 @@ export function graphSummary(model) {
     const skip = skipEdges.length;
     // The canvas labels count imports per edge ("6 upward"), so the summary names both the
     // edges and the imports behind them rather than a bare edge count that reads as smaller.
-    const imports = (list) => list.reduce((sum, e) => sum + (typeof e.weight === 'number' ? e.weight : 1), 0);
+    const imports = (list) => list.reduce((sum, e) => sum + (typeof e.weight === 'number' ? unexplainedImports(e).count : 1), 0);
     const counted = (count, list, word) => {
       const total = imports(list);
       return `${count} ${word} ${count === 1 ? 'edge' : 'edges'} · ${total} ${total === 1 ? 'import' : 'imports'}`;
