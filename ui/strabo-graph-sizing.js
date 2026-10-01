@@ -59,9 +59,13 @@ export function shelfDiameter(files) {
   return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
 }
 
-/** The diameter a node draws at: a unit/tier by file count, a shelf tag smaller, a file by blast radius. */
+/** A data hub is a dataset, not a component: a fixed ring that stays clear of the tier cards. */
+export const DATA_HUB_DIAMETER = 44;
+
+/** The diameter a node draws at: a unit/tier by file count, a shelf tag smaller, a hub fixed, a file by blast radius. */
 export function nodeDiameter(node) {
   if (node?.kind === 'unit' || node?.kind === 'tier') return unitDiameter(node.files ?? node.size);
   if (node?.kind === 'shelf') return shelfDiameter(node.files);
+  if (node?.kind === 'dataset') return DATA_HUB_DIAMETER;
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }

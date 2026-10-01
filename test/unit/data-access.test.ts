@@ -5,7 +5,12 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { openWorkspaceCache, WORKSPACE_CACHE_VERSION, type CachedRepoFacts } from '../../src/cache/workspace-cache.ts';
-import { extractDataUses, extractDataUsesFromSource, ormMethodAccess } from '../../src/workspace/data-usage.ts';
+import {
+  extractDataUses,
+  extractDataUsesFromSource,
+  ormMethodAccess,
+  STORE_TABLE_PREFIX,
+} from '../../src/workspace/data-usage.ts';
 import type { CodeDataUse } from '../../src/types.ts';
 
 function accesses(file: string, content: string): Array<[string, string]> {
@@ -90,6 +95,59 @@ class AccountDao {
   fun insert(account: Account)
 }`;
   assert.deepEqual(accesses('AccountDao.kt', source), [['accounts', 'write']]);
+});
+
+test('a SharedPreferences accessor records its reads and writes, named by its constant', () => {
+  const source = [
+    'private const val PREFS_NAME = "ai_settings"',
+    'private fun prefs(context: Context): SharedPreferences =',
+    '    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)',
+    'fun read(context: Context): String? = prefs(context).getString("key", null)',
+    'fun write(context: Context) { prefs(context).edit().putString("key", "v").apply() }',
+  ].join('\n');
+
+  assert.deepEqual(accesses('AiSettings.kt', source), [
+    [`${STORE_TABLE_PREFIX}sharedprefs/ai_settings`, 'read'],
+    [`${STORE_TABLE_PREFIX}sharedprefs/ai_settings`, 'write'],
+  ]);
+});
+
+test('a DataStore and an EncryptedSharedPreferences accessor each record their store', () => {
+  const dataStore = [
+    'private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "watchlist")',
+    'suspend fun add() { context.dataStore.edit { it[stringPreferencesKey("x")] = "y" } }',
+    'suspend fun read() = context.dataStore.data.first()',
+  ].join('\n');
+  assert.deepEqual(accesses('WatchlistRepository.kt', dataStore), [
+    [`${STORE_TABLE_PREFIX}datastore/watchlist`, 'read'],
+    [`${STORE_TABLE_PREFIX}datastore/watchlist`, 'write'],
+  ]);
+
+  const secure = [
+    'private const val PREFS_SECURE = "opencode_secure"',
+    'private fun securePrefs(context: Context): SharedPreferences =',
+    '    EncryptedSharedPreferences.create(context, PREFS_SECURE, key, a, b)',
+    'fun read(context: Context) = securePrefs(context).getString("pw", "")',
+  ].join('\n');
+  assert.deepEqual(accesses('OpenCodeSettings.kt', secure), [
+    [`${STORE_TABLE_PREFIX}secureprefs/opencode_secure`, 'read'],
+  ]);
+});
+
+test('a raw SQLiteDatabase records the store its accessor opens', () => {
+  const source = [
+    'val db = SQLiteDatabase.openOrCreateDatabase(dbFile, null)',
+    'db.execSQL("DROP TABLE IF EXISTS words")',
+    'val rows = db.rawQuery("PRAGMA user_version", null)',
+  ].join('\n');
+  const stores = extractDataUsesFromSource('AnkiPackage.kt', source).filter((use) => use.table.startsWith(STORE_TABLE_PREFIX));
+  assert.deepEqual(
+    stores.map((use) => [use.table, use.access]),
+    [
+      [`${STORE_TABLE_PREFIX}sqlite/dbFile`, 'write'],
+      [`${STORE_TABLE_PREFIX}sqlite/dbFile`, 'read'],
+    ],
+  );
 });
 
 test('extractDataUses attributes the direction to the repository', () => {

@@ -61,7 +61,10 @@ export function freezeLabels(cy) {
   if (!labelsVisible) {
     return false;
   }
-  cy.batch(() => cy.nodes().addClass('label-hidden'));
+  cy.batch(() => {
+    cy.nodes().addClass('label-hidden');
+    cy.edges('.edge-structure-stack').addClass('label-hidden');
+  });
   return true;
 }
 
@@ -100,7 +103,10 @@ export function applyLabelBudget(cy, force = false) {
       return;
     }
     cy.scratch('_straboLabelHidden', true);
-    cy.batch(() => cy.nodes().addClass('label-hidden'));
+    cy.batch(() => {
+      cy.nodes().addClass('label-hidden');
+      cy.edges('.edge-structure-stack').addClass('label-hidden');
+    });
     return;
   }
   if (cy.scratch('_straboLabelHidden') === true) {
@@ -139,6 +145,20 @@ export function applyLabelBudget(cy, force = false) {
   cy.batch(() => {
     cy.nodes().forEach((node) => {
       node.toggleClass('label-hidden', !shown.has(node.id()));
+    });
+  });
+
+  // A Structure stack draws a level label at each edge's midpoint, and several edges meet the
+  // same card (a tier writing to, or reading from, several hubs). Their labels then land on top
+  // of one another and read as a doubled "reads reads 1". Give them the same collision budget as
+  // node labels: keep the more important edge of a colliding pair and hide the other's text.
+  const stackEdges = cy
+    .edges('.edge-structure-stack')
+    .filter((edge) => edge.visible() && String(edge.data('label') ?? '') !== '');
+  const shownEdges = chooseEdgeLabels(stackEdges.toArray(), zoom);
+  cy.batch(() => {
+    cy.edges('.edge-structure-stack').forEach((edge) => {
+      edge.toggleClass('label-hidden', String(edge.data('label') ?? '') !== '' && !shownEdges.has(edge.id()));
     });
   });
 }
@@ -180,6 +200,86 @@ export function chooseLabels(nodes, zoom) {
       };
     })
     .sort((a, b) => Number(b.selected) - Number(a.selected) || b.weight - a.weight || a.id.localeCompare(b.id));
+
+  const bucket = 96;
+  const grid = new Map();
+  const shown = new Set();
+  for (const candidate of ranked) {
+    const { rect } = candidate;
+    const cells = [];
+    for (let cx = Math.floor(rect.x / bucket); cx <= Math.floor((rect.x + rect.width) / bucket); cx += 1) {
+      for (let cy = Math.floor(rect.y / bucket); cy <= Math.floor((rect.y + rect.height) / bucket); cy += 1) {
+        cells.push(`${cx},${cy}`);
+      }
+    }
+    const clear = !cells.some((key) =>
+      (grid.get(key) ?? []).some(
+        (other) =>
+          rect.x < other.x + other.width &&
+          other.x < rect.x + rect.width &&
+          rect.y < other.y + other.height &&
+          other.y < rect.y + rect.height,
+      ),
+    );
+    if (!clear && !candidate.selected) {
+      continue;
+    }
+    shown.add(candidate.id);
+    for (const key of cells) {
+      const list = grid.get(key);
+      if (list) list.push(rect);
+      else grid.set(key, [rect]);
+    }
+  }
+  return shown;
+}
+
+/** Label padding and the loop constraint box: edge labels never carry a badge. */
+const EDGE_LABEL_PAD = 4;
+
+/**
+ * Pick the Structure stack's edge labels that can be drawn without landing on one another.
+ *
+ * The midpoint of a stack edge is where its level label sits; edges that share a card share a
+ * region, so their labels collide. Candidates are walked most-important first — selected, then
+ * a wrong-way or write edge, then the heavier roll-up — and one is kept only if its box clears
+ * every label already kept. This is the edge counterpart of {@link chooseLabels}.
+ */
+export function chooseEdgeLabels(edges, zoom) {
+  const ranked = edges
+    .map((edge) => {
+      const mid = edge.renderedMidpoint();
+      const text = String(edge.data('label') ?? '');
+      const width = text.length * LABEL_DEVICE_PX * LABEL_GLYPH_PX + EDGE_LABEL_PAD * 2;
+      const shift = typeof edge.data('labelShift') === 'number' ? edge.data('labelShift') : 0;
+      const kind = String(edge.data('flowKind') ?? '');
+      const strong =
+        kind === 'writes' ||
+        kind === 'produces' ||
+        edge.data('tierKind') === 'upward' ||
+        edge.data('tierKind') === 'skip-layer' ||
+        edge.data('violation') === true ||
+        edge.data('ghost') === true;
+      return {
+        id: edge.id(),
+        selected: edge.selected(),
+        strong,
+        weight: Number(edge.data('weight') ?? 0),
+        rect: {
+          x: mid.x - width / 2,
+          y: mid.y - (LABEL_BOX_HEIGHT + EDGE_LABEL_PAD * 2) / 2 + shift,
+          width,
+          height: LABEL_BOX_HEIGHT + EDGE_LABEL_PAD * 2,
+        },
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.selected) - Number(a.selected) ||
+        Number(b.strong) - Number(a.strong) ||
+        b.weight - a.weight ||
+        a.id.localeCompare(b.id),
+    );
 
   const bucket = 96;
   const grid = new Map();

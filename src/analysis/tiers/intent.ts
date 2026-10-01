@@ -122,11 +122,14 @@ export function buildTierIntent(
     const fromTiers = new Set<Tier>(fromFiles.map((f) => f.tier));
     const toTiers = new Set<Tier>(toFiles.map((f) => f.tier));
 
-    const inferredFrom = inferTierFromPattern(rule.from);
+    // Infer a tier from a directory-named pattern only when the pattern matches no file:
+    // otherwise the glob is classified by the declared groups (`api/**` may be a real tier's
+    // directory), and inferring a same-named tier would name a tier that has no node.
+    const inferredFrom = fromFiles.length === 0 ? inferTierFromPattern(rule.from) : null;
     if (inferredFrom) {
       fromTiers.add(inferredFrom);
     }
-    const inferredTo = inferTierFromPattern(rule.to);
+    const inferredTo = toFiles.length === 0 ? inferTierFromPattern(rule.to) : null;
     if (inferredTo) {
       toTiers.add(inferredTo);
     }
@@ -203,12 +206,16 @@ export function buildTierIntent(
         }
       }
 
-      if (inferredTo && !presentTiers.has(inferredTo) && !ghostBands.some((gb) => gb.tier === inferredTo)) {
-        ghostBands.push({
-          tier: inferredTo,
-          label: inferredTo.charAt(0).toUpperCase() + inferredTo.slice(1),
-          ruleId: rule.id,
-        });
+      // An inferred tier on either side has no files, so the stack must draw a ghost band for
+      // it; a ghost edge to a tier with no node would otherwise fail to render.
+      for (const inferred of [inferredFrom, inferredTo]) {
+        if (inferred && !presentTiers.has(inferred) && !ghostBands.some((gb) => gb.tier === inferred)) {
+          ghostBands.push({
+            tier: inferred,
+            label: inferred.charAt(0).toUpperCase() + inferred.slice(1),
+            ruleId: rule.id,
+          });
+        }
       }
     }
   }

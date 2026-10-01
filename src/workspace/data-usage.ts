@@ -40,6 +40,7 @@ export function extractDataUsesFromSource(file: string, content: string): RawDat
   const uses: RawDataUse[] = [...sqlLiteralUses(file, content)];
   if (extension === '.java' || extension === '.kt' || extension === '.kts') {
     uses.push(...jpaUses(file, content));
+    uses.push(...androidStoreUses(file, content));
   }
   if (['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(extension)) {
     uses.push(...typeOrmUses(file, content));
@@ -385,6 +386,202 @@ function jpaUses(file: string, content: string): RawDataUse[] {
     });
   }
   return uses;
+}
+
+// ---------------------------------------------------------------------------------------
+// Local device stores (Android / Kotlin)
+// ---------------------------------------------------------------------------------------
+
+/**
+ * The marker a local device store carries in `CodeDataUse.table`, so the report can tell a
+ * store use from a SQL table name and build a store dataset for it. What follows the prefix is
+ * `<kind>/<name>`, e.g. `sharedprefs/watchlist`; the same name in two files joins one hub.
+ */
+export const STORE_TABLE_PREFIX = '@store/';
+
+/** The local store families this scanner records, one hub kind each. */
+type StoreKind = 'sharedprefs' | 'secureprefs' | 'datastore' | 'sqlite';
+
+/** The methods that read a local store, matched against the store's accessor name. */
+const STORE_READ_METHODS = [
+  'getString', 'getInt', 'getLong', 'getFloat', 'getBoolean', 'getStringSet',
+  'contains', 'getAll', 'data', 'query', 'queryWithFactory', 'rawQuery', 'compileStatement',
+];
+
+/** The methods that write a local store, or open its editor, matched against the accessor name. */
+const STORE_WRITE_METHODS = [
+  'edit', 'putString', 'putInt', 'putLong', 'putFloat', 'putBoolean', 'putStringSet',
+  'remove', 'clear', 'apply', 'commit',
+  'insert', 'insertOrThrow', 'insertWithOnConflict', 'replace', 'replaceOrThrow',
+  'update', 'updateWithOnConflict', 'delete', 'execSQL', 'execSQLOrThrow',
+];
+
+/** One local store an accessor names: a `val` or a single-expression function. */
+interface StoreAccessor {
+  kind: StoreKind;
+  name: string;
+}
+
+/**
+ * Read a local store's name: a string literal, or the constant it is held in.
+ *
+ * Android stores are named by a `String` constant as often as by a literal, so `PREFS_NAME`
+ * is resolved to its declared value inside the same file; an unresolved identifier is kept
+ * verbatim rather than dropped, so the hub still exists and is named after the constant.
+ */
+function storeName(argument: string | undefined, constants: Map<string, string>): string | null {
+  const value = (argument ?? '').trim();
+  const literal = /^"([^"]*)"$/.exec(value);
+  if (literal) {
+    return literal[1] ?? null;
+  }
+  if (/^[A-Za-z_]\w*$/.test(value)) {
+    return constants.get(value) ?? value;
+  }
+  return null;
+}
+
+/** The columns a line has left open, so a declaration continued on the next line reads whole. */
+function openParens(text: string): number {
+  let depth = 0;
+  for (const character of text) {
+    if (character === '(') depth += 1;
+    else if (character === ')') depth -= 1;
+  }
+  return depth;
+}
+
+/** The declaration at `start`, continued across lines until its `=` has a balanced right side. */
+function declarationStatement(lines: readonly string[], start: number): string {
+  let text = '';
+  for (let index = start; index < lines.length && index < start + 10; index += 1) {
+    text += `${text ? ' ' : ''}${(lines[index] ?? '').trim()}`;
+    const equals = text.indexOf('=');
+    if (equals === -1) {
+      continue;
+    }
+    const right = text.slice(equals + 1);
+    if (right.trim() !== '' && openParens(right) <= 0) {
+      return text;
+    }
+  }
+  return text;
+}
+
+/** The store a declaration names, or null when it constructs none of the known stores. */
+function accessorFrom(statement: string, constants: Map<string, string>): { key: string; store: StoreAccessor } | null {
+  const named = /(?:val|var)\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)/.exec(statement);
+  const fn = /fun\s+([A-Za-z_]\w*)\s*\(/.exec(statement);
+  const key = named ? (named[1]?.split('.').pop() ?? null) : fn ? fn[1] ?? null : null;
+  if (!key) {
+    return null;
+  }
+  const shared = /getSharedPreferences\s*\(\s*([^,()]+)/.exec(statement);
+  if (shared) {
+    const name = storeName(shared[1], constants);
+    return name ? { key, store: { kind: 'sharedprefs', name } } : null;
+  }
+  const secure = /EncryptedSharedPreferences\.create\s*\(\s*[^,()]+,\s*([^,()]+)/.exec(statement);
+  if (secure) {
+    const name = storeName(secure[1], constants);
+    return name ? { key, store: { kind: 'secureprefs', name } } : null;
+  }
+  const dataStore = /preferencesDataStore\s*\(\s*name\s*=\s*([^,()]+)/.exec(statement);
+  if (dataStore) {
+    const name = storeName(dataStore[1], constants);
+    return name ? { key, store: { kind: 'datastore', name } } : null;
+  }
+  const sqlite = /SQLiteDatabase\.(?:openOrCreateDatabase|openDatabase)\s*\(\s*([^,()]+)/.exec(statement);
+  if (sqlite) {
+    const name = storeName(sqlite[1], constants) ?? sqlite[1]?.trim().replace(/\s+/g, ' ');
+    return name ? { key, store: { kind: 'sqlite', name } } : null;
+  }
+  return null;
+}
+
+/**
+ * Record the local device stores a Kotlin/Java source reads and writes.
+ *
+ * SharedPreferences, EncryptedSharedPreferences, DataStore and raw SQLite keep an app's data,
+ * but none is a SQL literal or an ORM mapping, so the string-literal and ORM rules never see
+ * them. This reads the accessor each store is reached through — a `val` or a single-expression
+ * function — and the accessor's read/write methods, and records one use per direction. Only a
+ * store the file actually declares is recorded, and the direction comes from the method, never
+ * from the store's name.
+ */
+function androidStoreUses(file: string, content: string): RawDataUse[] {
+  const constants = new Map<string, string>();
+  for (const match of content.matchAll(/\b(?:const\s+)?val\s+([A-Za-z_]\w*)\s*(?::\s*String)?\s*=\s*"([^"]*)"/g)) {
+    constants.set(match[1] ?? '', match[2] ?? '');
+  }
+
+  const lines = content.split(/\r?\n/);
+  const accessors = new Map<string, StoreAccessor>();
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.includes('=') || (!line.includes('val ') && !line.includes('var ') && !line.includes('fun '))) {
+      continue;
+    }
+    const accessor = accessorFrom(declarationStatement(lines, index), constants);
+    if (accessor) {
+      accessors.set(accessor.key, accessor.store);
+    }
+  }
+
+  const uses: RawDataUse[] = [];
+  for (const [key, store] of accessors) {
+    const read = methodsOn(content, key, STORE_READ_METHODS);
+    const write = methodsOn(content, key, STORE_WRITE_METHODS);
+    for (const method of read) {
+      uses.push(storeUse(file, content, store, 'read', method));
+    }
+    for (const method of write) {
+      uses.push(storeUse(file, content, store, 'write', method));
+    }
+  }
+  return uses.sort(
+    (a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.table.localeCompare(b.table) || a.evidence.localeCompare(b.evidence),
+  );
+}
+
+/**
+ * The methods on an accessor (called as `name(...)` or read as `name`) that appear in `content`.
+ *
+ * A DataStore reads through the `.data` flow property rather than a call, so the method name may
+ * be followed by an ordinary member access; every other read and write is a call or an editor
+ * chain, and the `[({]` after the name is what distinguishes a method from a same-named field.
+ */
+function methodsOn(content: string, key: string, methods: readonly string[]): string[] {
+  const found: string[] = [];
+  for (const method of methods) {
+    const called = new RegExp(String.raw`\b${key}\b\s*(?:\([^()]*\))?\s*\??\.\s*${method}\s*[({]`);
+    const read = new RegExp(String.raw`\b${key}\b\s*\??\.\s*${method}\b`);
+    if (called.test(content) || read.test(content)) {
+      found.push(method);
+    }
+  }
+  return found;
+}
+
+/** One recorded read or write of a local store, as a `CodeDataUse`. */
+function storeUse(
+  file: string,
+  content: string,
+  store: StoreAccessor,
+  access: 'read' | 'write',
+  method: string,
+): RawDataUse {
+  const pattern = new RegExp(String.raw`\b\w+\b\s*(?:\([^()]*\))?\s*\??\.\s*${method}\s*[({]`);
+  const index = content.search(pattern);
+  return {
+    file,
+    line: index >= 0 ? lineAt(content, index) : 1,
+    table: `${STORE_TABLE_PREFIX}${store.kind}/${store.name}`,
+    columns: [],
+    evidence: `${store.kind === 'sharedprefs' ? 'SharedPreferences' : store.kind === 'secureprefs' ? 'EncryptedSharedPreferences' : store.kind === 'datastore' ? 'DataStore' : 'SQLiteDatabase'} (${method})`,
+    confidence: 'strong',
+    access,
+  };
 }
 
 function typeOrmUses(file: string, content: string): RawDataUse[] {

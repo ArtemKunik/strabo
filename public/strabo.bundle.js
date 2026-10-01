@@ -137,9 +137,11 @@ function shelfDiameter(files) {
   const scaled = Math.sqrt(Math.max(0, files ?? 0)) * 8 + MIN_SHELF_DIAMETER;
   return Math.max(MIN_SHELF_DIAMETER, Math.min(MAX_SHELF_DIAMETER, Math.round(scaled)));
 }
+var DATA_HUB_DIAMETER = 44;
 function nodeDiameter(node) {
   if (node?.kind === "unit" || node?.kind === "tier") return unitDiameter(node.files ?? node.size);
   if (node?.kind === "shelf") return shelfDiameter(node.files);
+  if (node?.kind === "dataset") return DATA_HUB_DIAMETER;
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 
@@ -456,6 +458,9 @@ var LABEL_WIDTH = 240;
 var ARC_LABEL_ROOM = 16;
 var ARC_LABEL_HALF_WIDTH = 75;
 var SHELF_CLEARANCE = 110;
+var DATA_HUB_GAP = 84;
+var DATA_HUB_ROWS = 8;
+var DATA_HUB_CLEARANCE = 120;
 function sideLabelled(model, node) {
   return isStructureStack(model) && model.structureDirection !== "horizontal" && node.kind === "tier";
 }
@@ -485,6 +490,29 @@ function pack(row, axis, gap, positions) {
     previousRadius = radius;
   }
 }
+function packColumn(row, axis, start, gap, positions) {
+  let cursor = start;
+  let previousRadius = 0;
+  for (const node of row) {
+    const position = positions.get(node.id);
+    const radius = nodeDiameter(node) / 2;
+    cursor += previousRadius + gap + radius;
+    positions.set(node.id, { ...position, [axis]: cursor });
+    previousRadius = radius;
+  }
+}
+function packDataHubs(hubs, axis, cross, positions) {
+  const ordered = [...hubs].sort((a, b2) => positions.get(a.id)[axis] - positions.get(b2.id)[axis]);
+  const start = ordered.length === 0 ? 0 : Math.min(...ordered.map((node) => positions.get(node.id)[cross]));
+  const perColumn = Math.max(1, DATA_HUB_ROWS);
+  const result = [];
+  for (let index = 0; index < ordered.length; index += perColumn) {
+    const members = ordered.slice(index, index + perColumn);
+    packColumn(members, cross, start, DATA_HUB_GAP, positions);
+    result.push(members);
+  }
+  return result;
+}
 function packStructureStack(model) {
   if (!isStructureStack(model)) {
     return model;
@@ -494,10 +522,13 @@ function packStructureStack(model) {
   const placed = (model.nodes ?? []).filter((node) => positions.has(node.id));
   const bands = placed.filter((node) => node.kind === "tier");
   const shelf = placed.filter((node) => node.kind === "shelf");
+  const dataHubs = placed.filter((node) => node.kind === "dataset");
   pack(bands, axis, STACK_GAP, positions);
   pack(shelf, axis, SHELF_GAP, positions);
+  const crossAxis = axis === "x" ? "y" : "x";
+  const hubColumns = packDataHubs(dataHubs, axis, crossAxis, positions);
   const packed = { ...model, positions: [...positions.values()] };
-  if (bands.length === 0 || shelf.length === 0) {
+  if (bands.length === 0 || shelf.length === 0 && dataHubs.length === 0) {
     return packed;
   }
   const cross = axis === "x" ? "y" : "x";
@@ -518,10 +549,22 @@ function packStructureStack(model) {
     const apex = { x: (from.x + to.x) / 2 + -dy / length * (bends[index] / 2), y: (from.y + to.y) / 2 + dx / length * (bends[index] / 2) };
     stackEdge = Math.max(stackEdge, apex[cross] + (cross === "x" ? ARC_LABEL_HALF_WIDTH : ARC_LABEL_ROOM));
   });
-  const shelfReach = Math.max(...shelf.map((node) => nodeDiameter(node) / 2));
-  const shelfAt = stackEdge + SHELF_CLEARANCE + shelfReach;
-  for (const node of shelf) {
-    positions.set(node.id, { ...positions.get(node.id), [cross]: shelfAt });
+  const shelfReach = shelf.length > 0 ? Math.max(...shelf.map((node) => nodeDiameter(node) / 2)) : 0;
+  let shelfAt = stackEdge;
+  if (shelf.length > 0) {
+    shelfAt = stackEdge + SHELF_CLEARANCE + shelfReach;
+    for (const node of shelf) {
+      positions.set(node.id, { ...positions.get(node.id), [cross]: shelfAt });
+    }
+  }
+  let hubEdge = shelfAt + (shelf.length > 0 ? shelfReach : 0);
+  for (const column of hubColumns) {
+    const reach = Math.max(...column.map((node) => nodeDiameter(node) / 2));
+    const at2 = hubEdge + DATA_HUB_CLEARANCE + reach;
+    for (const node of column) {
+      positions.set(node.id, { ...positions.get(node.id), [cross]: at2 });
+    }
+    hubEdge = at2 + reach;
   }
   return { ...model, positions: [...positions.values()] };
 }
@@ -764,7 +807,8 @@ function buildElements(model) {
       position: positionOf(positions.get(node.id))
     };
   });
-  const edges = (model.edges ?? []).map((edge, index) => ({
+  const nodeIds = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = (model.edges ?? []).map((edge, index) => nodeIds.has(edge.source) && nodeIds.has(edge.target) ? {
     group: "edges",
     // A Structure-view edge states how it runs through the layer order; the stylesheet
     // draws a wrong-way one apart (Phase 35 Y3), and a cell edge crossing a unit boundary
@@ -819,7 +863,7 @@ function buildElements(model) {
       flowConformance: edge.flowConformance,
       flowEvidence: edge.flowEvidence
     }
-  }));
+  } : null).filter(Boolean);
   return { nodes, edges };
 }
 function buildCoChangeElements(model, report, startIndex = 0) {
@@ -3094,7 +3138,10 @@ function freezeLabels(cy) {
   if (!labelsVisible) {
     return false;
   }
-  cy.batch(() => cy.nodes().addClass("label-hidden"));
+  cy.batch(() => {
+    cy.nodes().addClass("label-hidden");
+    cy.edges(".edge-structure-stack").addClass("label-hidden");
+  });
   return true;
 }
 function rescaleLabels(cy) {
@@ -3112,7 +3159,10 @@ function applyLabelBudget(cy, force = false) {
       return;
     }
     cy.scratch("_straboLabelHidden", true);
-    cy.batch(() => cy.nodes().addClass("label-hidden"));
+    cy.batch(() => {
+      cy.nodes().addClass("label-hidden");
+      cy.edges(".edge-structure-stack").addClass("label-hidden");
+    });
     return;
   }
   if (cy.scratch("_straboLabelHidden") === true) {
@@ -3141,6 +3191,13 @@ function applyLabelBudget(cy, force = false) {
       node.toggleClass("label-hidden", !shown.has(node.id()));
     });
   });
+  const stackEdges = cy.edges(".edge-structure-stack").filter((edge) => edge.visible() && String(edge.data("label") ?? "") !== "");
+  const shownEdges = chooseEdgeLabels(stackEdges.toArray(), zoom);
+  cy.batch(() => {
+    cy.edges(".edge-structure-stack").forEach((edge) => {
+      edge.toggleClass("label-hidden", String(edge.data("label") ?? "") !== "" && !shownEdges.has(edge.id()));
+    });
+  });
 }
 var LABEL_BOX_HEIGHT = 14;
 var LABEL_NODE_GAP = 4;
@@ -3165,6 +3222,58 @@ function chooseLabels(nodes, zoom) {
       }
     };
   }).sort((a, b2) => Number(b2.selected) - Number(a.selected) || b2.weight - a.weight || a.id.localeCompare(b2.id));
+  const bucket = 96;
+  const grid = /* @__PURE__ */ new Map();
+  const shown = /* @__PURE__ */ new Set();
+  for (const candidate of ranked) {
+    const { rect } = candidate;
+    const cells = [];
+    for (let cx = Math.floor(rect.x / bucket); cx <= Math.floor((rect.x + rect.width) / bucket); cx += 1) {
+      for (let cy = Math.floor(rect.y / bucket); cy <= Math.floor((rect.y + rect.height) / bucket); cy += 1) {
+        cells.push(`${cx},${cy}`);
+      }
+    }
+    const clear = !cells.some(
+      (key) => (grid.get(key) ?? []).some(
+        (other) => rect.x < other.x + other.width && other.x < rect.x + rect.width && rect.y < other.y + other.height && other.y < rect.y + rect.height
+      )
+    );
+    if (!clear && !candidate.selected) {
+      continue;
+    }
+    shown.add(candidate.id);
+    for (const key of cells) {
+      const list2 = grid.get(key);
+      if (list2) list2.push(rect);
+      else grid.set(key, [rect]);
+    }
+  }
+  return shown;
+}
+var EDGE_LABEL_PAD = 4;
+function chooseEdgeLabels(edges, zoom) {
+  const ranked = edges.map((edge) => {
+    const mid = edge.renderedMidpoint();
+    const text = String(edge.data("label") ?? "");
+    const width = text.length * LABEL_DEVICE_PX * LABEL_GLYPH_PX + EDGE_LABEL_PAD * 2;
+    const shift = typeof edge.data("labelShift") === "number" ? edge.data("labelShift") : 0;
+    const kind = String(edge.data("flowKind") ?? "");
+    const strong = kind === "writes" || kind === "produces" || edge.data("tierKind") === "upward" || edge.data("tierKind") === "skip-layer" || edge.data("violation") === true || edge.data("ghost") === true;
+    return {
+      id: edge.id(),
+      selected: edge.selected(),
+      strong,
+      weight: Number(edge.data("weight") ?? 0),
+      rect: {
+        x: mid.x - width / 2,
+        y: mid.y - (LABEL_BOX_HEIGHT + EDGE_LABEL_PAD * 2) / 2 + shift,
+        width,
+        height: LABEL_BOX_HEIGHT + EDGE_LABEL_PAD * 2
+      }
+    };
+  }).sort(
+    (a, b2) => Number(b2.selected) - Number(a.selected) || Number(b2.strong) - Number(a.strong) || b2.weight - a.weight || a.id.localeCompare(b2.id)
+  );
   const bucket = 96;
   const grid = /* @__PURE__ */ new Map();
   const shown = /* @__PURE__ */ new Set();
@@ -3424,6 +3533,9 @@ function stylesheet() {
     { selector: "node.structure-node", style: { "background-opacity": 0.14 } },
     { selector: "node.node-ghost", style: { "border-style": "dashed", opacity: 0.6 } },
     { selector: "node.label-hidden", style: { "text-opacity": 0 } },
+    // A Structure stack edge label the collision budget dropped: hide the text and its plate,
+    // keep the line.
+    { selector: "edge.label-hidden", style: { "text-opacity": 0, "text-background-opacity": 0 } },
     { selector: "node.filtered-out", style: { display: "none" } },
     { selector: "node.tier-hidden", style: { display: "none" } },
     { selector: "node.loc-hidden", style: { display: "none" } },

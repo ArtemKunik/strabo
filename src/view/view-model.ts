@@ -796,10 +796,26 @@ export function buildStructureViewModel(
     });
   });
 
-  // Ghost bands: intended tiers from rules that have no files in the repository yet (Y7)
+  // Ghost bands: intended tiers from rules that have no files in the repository yet (Y7).
+  // A ghost edge can also name such a tier without a declared band, so take the union of both
+  // locators: every tier an edge names must have a node, or Cytoscape cannot draw the edge.
   const existingTiers = new Set(nodes.map((n) => n.id));
   let ghostIndex = report.tierFlow.tiers.length;
-  for (const ghostBand of report.intent?.ghostBands ?? []) {
+  const ghostBandByTier = new Map(
+    (report.intent?.ghostBands ?? []).map((band) => [band.tier, band] as const),
+  );
+  for (const ghost of report.intent?.ghostEdges ?? []) {
+    for (const tier of [ghost.source, ghost.target]) {
+      if (!ghostBandByTier.has(tier)) {
+        ghostBandByTier.set(tier, {
+          tier,
+          label: tier.charAt(0).toUpperCase() + tier.slice(1),
+          ruleId: ghost.ruleId,
+        });
+      }
+    }
+  }
+  for (const ghostBand of ghostBandByTier.values()) {
     if (!existingTiers.has(ghostBand.tier)) {
       const node = tierNode(ghostBand.tier, 'tier');
       node.ghost = true;

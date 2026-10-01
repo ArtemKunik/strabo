@@ -241,6 +241,9 @@ export function stylesheet() {
     { selector: 'node.structure-node', style: { 'background-opacity': 0.14 } },
     { selector: 'node.node-ghost', style: { 'border-style': 'dashed', opacity: 0.6 } },
     { selector: 'node.label-hidden', style: { 'text-opacity': 0 } },
+    // A Structure stack edge label the collision budget dropped: hide the text and its plate,
+    // keep the line.
+    { selector: 'edge.label-hidden', style: { 'text-opacity': 0, 'text-background-opacity': 0 } },
     { selector: 'node.filtered-out', style: { display: 'none' } },
     { selector: 'node.tier-hidden', style: { display: 'none' } },
     { selector: 'node.loc-hidden', style: { display: 'none' } },

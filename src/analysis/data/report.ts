@@ -15,6 +15,7 @@ import type {
   SchemaSnapshot,
 } from '../../types.ts';
 import { assignUnits, detectUnits } from '../units.ts';
+import { STORE_TABLE_PREFIX } from '../../workspace/data-usage.ts';
 import { buildCandidates } from './candidates.ts';
 import { propagateClassification } from './classification.ts';
 import { readCodeowners } from './codeowners.ts';
@@ -94,6 +95,7 @@ export function buildDataReport(input: DataReportInput): DataReport {
 
   addPathDatasets(datasets, edges, input.pathIo);
   addDbtModelDatasets(datasets, input.dbt);
+  addStoreDatasets(datasets, edges, input.usage);
   const lineage = buildLineage(input);
   for (const edge of lineage) {
     if (!datasets.has(edge.source)) {
@@ -273,6 +275,42 @@ function addDbtModelDatasets(datasets: Map<string, DatasetNode>, dbt: DbtExtract
       repository,
       columns: columns.sort((a, b) => a.name.localeCompare(b.name)),
       strength: 'strong',
+    });
+  }
+}
+
+/**
+ * A local device store the code reads or writes (SharedPreferences, DataStore, SQLite) is a hub
+ * like any other; the string-literal and ORM rules cannot see one, so its use arrives marked
+ * with {@link STORE_TABLE_PREFIX}. Build the dataset from the use itself, because no migration
+ * declares a preferences file, and one `reads`/`writes` edge per recorded direction.
+ */
+function addStoreDatasets(
+  datasets: Map<string, DatasetNode>,
+  edges: DataEdge[],
+  usage: readonly CodeDataUse[],
+): void {
+  const storeKinds = new Set<string>(['sharedprefs', 'secureprefs', 'datastore', 'sqlite']);
+  for (const use of usage) {
+    if (!use.table.startsWith(STORE_TABLE_PREFIX) || (use.access !== 'read' && use.access !== 'write')) {
+      continue;
+    }
+    const [kind, ...rest] = use.table.slice(STORE_TABLE_PREFIX.length).split('/');
+    const name = rest.join('/');
+    if (!kind || !storeKinds.has(kind) || name === '') {
+      continue;
+    }
+    const id = `store:${use.repository}/${kind}/${name}`;
+    if (!datasets.has(id)) {
+      datasets.set(id, { id, kind: 'store', label: name, repository: use.repository, strength: use.confidence });
+    }
+    edges.push({
+      kind: use.access === 'read' ? 'reads' : 'writes',
+      source: use.file,
+      target: id,
+      strength: use.confidence,
+      evidence: { repository: use.repository, file: use.file, line: use.line },
+      detail: use.evidence,
     });
   }
 }

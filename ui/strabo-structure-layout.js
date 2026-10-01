@@ -33,6 +33,12 @@ const LABEL_WIDTH = 240;
 const ARC_LABEL_ROOM = 16;
 const ARC_LABEL_HALF_WIDTH = 75;
 const SHELF_CLEARANCE = 110;
+/** Clear space between neighbouring data hubs in a column. */
+const DATA_HUB_GAP = 84;
+/** How many hubs a data-hub column holds before the reading wraps to the next column. */
+const DATA_HUB_ROWS = 8;
+/** Clear space between the stack's plate and the first data-hub column beyond it. */
+const DATA_HUB_CLEARANCE = 120;
 
 /**
  * Whether a card writes its label beside it rather than beneath: the bands of a vertical
@@ -78,6 +84,41 @@ function pack(row, axis, gap, positions) {
   }
 }
 
+/** Lay a column of nodes from a shared starting coordinate, so every column begins level. */
+function packColumn(row, axis, start, gap, positions) {
+  let cursor = start;
+  let previousRadius = 0;
+  for (const node of row) {
+    const position = positions.get(node.id);
+    const radius = nodeDiameter(node) / 2;
+    cursor += previousRadius + gap + radius;
+    positions.set(node.id, { ...position, [axis]: cursor });
+    previousRadius = radius;
+  }
+}
+
+/**
+ * Pack the data hubs into a grid of up to {@link DATA_HUB_COLUMNS} columns beside the stack.
+ *
+ * `axis` is the stack's own axis and `cross` the direction it faces (the shelf's). A column runs
+ * along `cross`, so it stands perpendicular to the stack, and columns repeat along `axis`, so a
+ * long list wraps into a compact block instead of one column far longer than the stack. Every
+ * column starts level, so the block reads as a grid rather than a staircase. Returns the columns
+ * in order along `axis`, each with its `cross` offset, for the caller to place beyond the shelf.
+ */
+function packDataHubs(hubs, axis, cross, positions) {
+  const ordered = [...hubs].sort((a, b) => positions.get(a.id)[axis] - positions.get(b.id)[axis]);
+  const start = ordered.length === 0 ? 0 : Math.min(...ordered.map((node) => positions.get(node.id)[cross]));
+  const perColumn = Math.max(1, DATA_HUB_ROWS);
+  const result = [];
+  for (let index = 0; index < ordered.length; index += perColumn) {
+    const members = ordered.slice(index, index + perColumn);
+    packColumn(members, cross, start, DATA_HUB_GAP, positions);
+    result.push(members);
+  }
+  return result;
+}
+
 /**
  * Re-pack the stack and the support shelf by drawn card size.
  *
@@ -94,10 +135,18 @@ export function packStructureStack(model) {
   const placed = (model.nodes ?? []).filter((node) => positions.has(node.id));
   const bands = placed.filter((node) => node.kind === 'tier');
   const shelf = placed.filter((node) => node.kind === 'shelf');
+  // The data-flow reading draws one hub per recorded dataset beside the stack. They are not
+  // bands, so pack them into their own columns along the stack axis by drawn size. The server's
+  // raw pitch would run them into the shelf and one long column would dwarf the stack.
+  const dataHubs = placed.filter((node) => node.kind === 'dataset');
   pack(bands, axis, STACK_GAP, positions);
   pack(shelf, axis, SHELF_GAP, positions);
+  // The hub columns run along the facing axis beyond the stack; the caller places each column
+  // past the shelf. Pack them here so their drawn sizes set the spacing.
+  const crossAxis = axis === 'x' ? 'y' : 'x';
+  const hubColumns = packDataHubs(dataHubs, axis, crossAxis, positions);
   const packed = { ...model, positions: [...positions.values()] };
-  if (bands.length === 0 || shelf.length === 0) {
+  if (bands.length === 0 || (shelf.length === 0 && dataHubs.length === 0)) {
     return packed;
   }
   // The shelf row sits beside the stack (below it when horizontal, right of it when
@@ -121,10 +170,24 @@ export function packStructureStack(model) {
     const apex = { x: (from.x + to.x) / 2 + (-dy / length) * (bends[index] / 2), y: (from.y + to.y) / 2 + (dx / length) * (bends[index] / 2) };
     stackEdge = Math.max(stackEdge, apex[cross] + (cross === 'x' ? ARC_LABEL_HALF_WIDTH : ARC_LABEL_ROOM));
   });
-  const shelfReach = Math.max(...shelf.map((node) => nodeDiameter(node) / 2));
-  const shelfAt = stackEdge + SHELF_CLEARANCE + shelfReach;
-  for (const node of shelf) {
-    positions.set(node.id, { ...positions.get(node.id), [cross]: shelfAt });
+  const shelfReach = shelf.length > 0 ? Math.max(...shelf.map((node) => nodeDiameter(node) / 2)) : 0;
+  let shelfAt = stackEdge;
+  if (shelf.length > 0) {
+    shelfAt = stackEdge + SHELF_CLEARANCE + shelfReach;
+    for (const node of shelf) {
+      positions.set(node.id, { ...positions.get(node.id), [cross]: shelfAt });
+    }
+  }
+  // The data-hub columns sit beyond the shelf, so a write from a band to a hub crosses the
+  // shelf rather than landing on it.
+  let hubEdge = shelfAt + (shelf.length > 0 ? shelfReach : 0);
+  for (const column of hubColumns) {
+    const reach = Math.max(...column.map((node) => nodeDiameter(node) / 2));
+    const at = hubEdge + DATA_HUB_CLEARANCE + reach;
+    for (const node of column) {
+      positions.set(node.id, { ...positions.get(node.id), [cross]: at });
+    }
+    hubEdge = at + reach;
   }
   return { ...model, positions: [...positions.values()] };
 }

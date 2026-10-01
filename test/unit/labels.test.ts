@@ -70,6 +70,8 @@ function fakeGraph(kinds: string[] = ['file', 'file']) {
         return value;
       },
       nodes: () => collection(nodes),
+      // The budget also walks Structure edge labels; these fixtures carry none.
+      edges: () => collection([]),
       batch: (fn: () => void) => fn(),
       style: () => ({ update: () => {} }),
     },

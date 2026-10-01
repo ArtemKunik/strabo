@@ -1,6 +1,6 @@
 {
   "name": "strabo-map",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn a local source repository into an interactive map of its files, dependencies, and change impact.",
   "keywords": [
     "repository",

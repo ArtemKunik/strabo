@@ -20,7 +20,8 @@ export type DatasetKind =
   | 'topic'
   | 'queue'
   | 'path'
-  | 'api-resource';
+  | 'api-resource'
+  | 'store';
 
 /** One dataset, identified by a qualified id so it can join across repositories. */
 export interface DatasetNode {

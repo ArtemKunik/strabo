@@ -276,7 +276,10 @@ export function buildElements(model) {
     };
   });
 
-  const edges = (model.edges ?? []).map((edge, index) => ({
+  // A ghost intent edge can name a tier that has no files (and so no node), which Cytoscape
+  // refuses to create; drop such edges. The original index is kept for `bends`/`labelShifts`.
+  const nodeIds = new Set((model.nodes ?? []).map((node) => node.id));
+  const edges = (model.edges ?? []).map((edge, index) => (nodeIds.has(edge.source) && nodeIds.has(edge.target) ? ({
     group: 'edges',
     // A Structure-view edge states how it runs through the layer order; the stylesheet
     // draws a wrong-way one apart (Phase 35 Y3), and a cell edge crossing a unit boundary
@@ -339,7 +342,7 @@ export function buildElements(model) {
       flowConformance: edge.flowConformance,
       flowEvidence: edge.flowEvidence,
     },
-  }));
+  }) : null)).filter(Boolean);
 
   return { nodes, edges };
 }
