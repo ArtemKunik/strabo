@@ -63,6 +63,7 @@ export function buildViewModel(
     diagnostics: graph.diagnostics,
     excluded: graph.excluded,
     cache,
+    ...(cache.revision ? { scannedRef: cache.revision } : {}),
   };
 }
 

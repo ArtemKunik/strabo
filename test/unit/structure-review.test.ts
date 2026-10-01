@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import { scanRepository } from '../../src/index.ts';
 import { isTypeOnlyStatement } from '../../src/scan/scan-js.ts';
-import { buildStructureGridViewModel, buildStructureViewModel } from '../../src/view/view-model.ts';
+import { buildStructureGridViewModel, buildStructureViewModel, buildViewModel } from '../../src/view/view-model.ts';
 import { buildElements } from '../../ui/strabo-graph-elements.js';
 import { isWrongWayEdge, structureWrongWayEvidence, wrongWayFlowsFor } from '../../ui/strabo-graph-facts.js';
 import { graphSummary } from '../../ui/strabo-graph-summary.js';
@@ -14,6 +14,16 @@ import { fitLabel } from '../../ui/strabo-islands.js';
 const root = path.resolve('test/fixtures/structure-repo');
 const cache = { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false } as never;
 const descriptor = { name: 'structure-repo', root } as never;
+
+test('buildViewModel carries the scanned revision so a removed file stays readable', async () => {
+  const { graph, scannedAt } = await scanRepository(root);
+  const scan = { graph, scannedAt } as never;
+  const withRef = buildViewModel(root, scan, descriptor, { ...(cache as object), revision: 'abc1234' } as never);
+  assert.equal(withRef.scannedRef, 'abc1234');
+
+  const withoutRef = buildViewModel(root, scan, descriptor, cache);
+  assert.equal(withoutRef.scannedRef, undefined);
+});
 
 test('isTypeOnlyStatement tells a type-only import or re-export from a value one', () => {
   assert.equal(isTypeOnlyStatement("import type { A } from './a'"), true);

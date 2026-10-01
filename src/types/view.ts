@@ -216,6 +216,11 @@ export interface ViewModel {
   diagnostics: Diagnostic[];
   excluded: Exclusion[];
   cache: ScanCacheMetadata;
+  /**
+   * The revision the map was read at, so the viewer can show a file that has since left the
+   * working tree from the version the map actually describes. Absent when it was not recorded.
+   */
+  scannedRef?: string;
   /** True when the model is a build-unit roll-up (Phase 16 System view), not files. */
   system?: boolean;
   /** Compressed, unit-anchored label per directory, for the islands and block nodes. */

@@ -19,6 +19,8 @@ export interface ScanCacheMetadata {
   fingerprint: string | null;
   artifactVersion: string;
   generatedAt: string;
+  /** The git revision the map was read at, when the scan recorded one. */
+  revision?: string | null;
   /** True when a stale entry was served while a refresh runs in the background. */
   stale?: boolean;
 }

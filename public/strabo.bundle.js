@@ -17700,6 +17700,18 @@ function createSourceViewer(app2) {
       }
     } catch (error) {
       if (sourceView !== target) return;
+      if (mode === "content" && !target.ref && state2.scannedRef) {
+        target.ref = state2.scannedRef;
+        query.set("ref", state2.scannedRef);
+        try {
+          const body = await request2(`/source?${query.toString()}`);
+          if (sourceView !== target) return;
+          target.content = body.content;
+          target.error = null;
+          return;
+        } catch {
+        }
+      }
       target.error = error.message;
     } finally {
       if (sourceView === target) {
@@ -31361,6 +31373,8 @@ var app = {
 var store = createStore({
   view: {
     repository: null,
+    /** The revision the current map was scanned at, for reading a file that is gone from disk. */
+    scannedRef: null,
     mode: "block",
     depth: 1,
     prefix: "",
@@ -31528,6 +31542,7 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     app.current = model;
+    state.scannedRef = model.scannedRef ?? null;
     if (state.mode === "system" && !model.systemUnit && model.systemSingleUnit && !state.systemAutoOpened) {
       state.systemAutoOpened = true;
       app.units.openUnit(model.systemSingleUnit);

@@ -86,6 +86,8 @@ const app = {
 const store = createStore({
   view: {
     repository: null,
+    /** The revision the current map was scanned at, for reading a file that is gone from disk. */
+    scannedRef: null,
     mode: 'block',
     depth: 1,
     prefix: '',
@@ -286,6 +288,9 @@ async function scan({ refresh = false } = {}) {
       return;
     }
     app.current = model;
+    // The revision this map was read at, so a file that is gone from the working tree can
+    // still be shown in the viewer from the version the map actually knows.
+    state.scannedRef = model.scannedRef ?? null;
     // L19: with one build unit there is no L0 worth drawing, so open it at its layers. The
     // flag keeps a later Escape from bouncing straight back into the unit.
     if (

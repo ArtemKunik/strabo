@@ -55,6 +55,7 @@ export function createGraphRouter(config: StraboConfig): Router {
         fingerprint: cached.fingerprint,
         artifactVersion: CACHE_ARTIFACT_VERSION,
         generatedAt: cached.report.scannedAt,
+        revision: descriptor.head,
         stale: cached.stale,
       };
 

@@ -66,6 +66,22 @@ export function createSourceViewer(app) {
       }
     } catch (error) {
       if (sourceView !== target) return;
+      // The working copy is unreadable — deleted, or inside a worktree the scan did not
+      // walk — but the map still knows the revision it was read at. Read the file there,
+      // once, and show that text rather than reporting the file as unavailable.
+      if (mode === 'content' && !target.ref && state.scannedRef) {
+        target.ref = state.scannedRef;
+        query.set('ref', state.scannedRef);
+        try {
+          const body = await request(`/source?${query.toString()}`);
+          if (sourceView !== target) return;
+          target.content = body.content;
+          target.error = null;
+          return;
+        } catch {
+          // Fall through to the original error when the revision cannot be read either.
+        }
+      }
       target.error = error.message;
     } finally {
       if (sourceView === target) {
