@@ -27966,7 +27966,7 @@ function readTheme() {
 }
 function readFontFamily() {
   const value = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
-  return value || "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  return value || 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace';
 }
 function initTerminalScreen(container, hooks = {}) {
   if (!container || typeof container.querySelector !== "function") {
@@ -28854,6 +28854,13 @@ function initTerminalScreen(container, hooks = {}) {
     });
     resizeObserver.observe(panesEl);
   }
+  if (typeof document !== "undefined" && document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      if (!screen.hidden) {
+        fitVisible();
+      }
+    });
+  }
   return {
     /** The screen became visible: restore once, then fit and focus the active pane. */
     activate() {
@@ -28861,6 +28868,13 @@ function initTerminalScreen(container, hooks = {}) {
       renderLayoutDom();
       render();
       fitVisible();
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => {
+          if (!screen.hidden) {
+            fitVisible();
+          }
+        });
+      }
       const sessionId = activeSessionId();
       if (sessionId) {
         views.get(sessionId)?.term.focus();

@@ -83,8 +83,10 @@
   --radius-l: 16px;
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.45), 0 18px 50px rgba(0, 0, 0, 0.5);
-  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans", Cantarell, Ubuntu,
+    "DejaVu Sans", "Liberation Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono",
+    "Liberation Mono", "Noto Sans Mono", "Cascadia Mono", monospace;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;

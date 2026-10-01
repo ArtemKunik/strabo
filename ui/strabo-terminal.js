@@ -76,7 +76,10 @@ function readTheme() {
 
 function readFontFamily() {
   const value = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim();
-  return value || 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  return (
+    value ||
+    'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace'
+  );
 }
 
 export function initTerminalScreen(container, hooks = {}) {
@@ -1150,6 +1153,17 @@ export function initTerminalScreen(container, hooks = {}) {
     });
     resizeObserver.observe(panesEl);
   }
+  // xterm measures the glyph box when a terminal opens. When the resolved monospace font
+  // swaps in after first paint (common on Linux, where `ui-monospace` falls through to a
+  // distro font), that grid is wrong and the terminal can collapse to a sliver. Refit once
+  // the font faces are ready.
+  if (typeof document !== 'undefined' && document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      if (!screen.hidden) {
+        fitVisible();
+      }
+    });
+  }
 
   return {
     /** The screen became visible: restore once, then fit and focus the active pane. */
@@ -1158,6 +1172,15 @@ export function initTerminalScreen(container, hooks = {}) {
       renderLayoutDom();
       render();
       fitVisible();
+      // The screen was just un-hidden; fit once more on the next frame so a box that only
+      // settles after layout (a scrollbar appearing, a font swap) is measured correctly.
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          if (!screen.hidden) {
+            fitVisible();
+          }
+        });
+      }
       const sessionId = activeSessionId();
       if (sessionId) {
         views.get(sessionId)?.term.focus();

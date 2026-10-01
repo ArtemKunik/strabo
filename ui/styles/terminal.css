@@ -250,11 +250,106 @@
 
 .terminal-surface,
 .terminal-surface .xterm {
+  width: 100%;
   height: 100%;
 }
 
 .terminal-surface .xterm-viewport {
   background: transparent;
+}
+
+/*
+ * The layout rules xterm cannot render without, repeated from `@xterm/xterm/css/xterm.css`
+ * (served as /xterm.css). A host that embeds Strabo can drop that <link>, which leaves the
+ * helper textarea visible as a stray input and the canvas unstacked; these few rules keep
+ * the terminal usable on their own. Colours are omitted on purpose — the terminal is themed
+ * from the app tokens by `readTheme`, not by xterm's stylesheet.
+ */
+.xterm {
+  position: relative;
+  cursor: text;
+  user-select: none;
+}
+
+.xterm.focus,
+.xterm:focus {
+  outline: none;
+}
+
+.xterm .xterm-helpers {
+  position: absolute;
+  top: 0;
+  z-index: 5;
+}
+
+.xterm .xterm-helper-textarea {
+  position: absolute;
+  left: -9999em;
+  top: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  z-index: -5;
+  white-space: nowrap;
+  overflow: hidden;
+  resize: none;
+}
+
+.xterm .composition-view {
+  display: none;
+  position: absolute;
+  white-space: nowrap;
+  z-index: 1;
+}
+
+.xterm .composition-view.active {
+  display: block;
+}
+
+.xterm .xterm-viewport {
+  position: absolute;
+  inset: 0;
+  overflow-y: scroll;
+  cursor: default;
+}
+
+.xterm .xterm-screen {
+  position: relative;
+}
+
+.xterm .xterm-screen canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.xterm-char-measure-element {
+  display: inline-block;
+  position: absolute;
+  top: 0;
+  left: -9999em;
+  visibility: hidden;
+  line-height: normal;
+}
+
+.xterm .xterm-accessibility:not(.debug),
+.xterm .xterm-message {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  color: transparent;
+  pointer-events: none;
+}
+
+.xterm .live-region {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 
 /* A citation is underlined only where the pointer is: plain output stays plain. */
