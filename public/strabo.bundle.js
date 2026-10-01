@@ -5057,12 +5057,6 @@ function appendFact(list2, term, value) {
   dd.textContent = value;
   list2.append(dt2, dd);
 }
-function wiring(text) {
-  const span = document.createElement("span");
-  span.className = "wiring";
-  span.textContent = ` \xB7 ${text}`;
-  return span;
-}
 function unavailableNote(text) {
   const note4 = document.createElement("p");
   note4.className = "unavailable";
@@ -5566,6 +5560,121 @@ function appendNarratorBlock(container, handlers, { id, label }) {
 
 // ui/strabo-panel-inspector.js
 var inspectorSeq = 0;
+var TAB_HINTS = {
+  deps: "Files this one imports, with the line that names each",
+  dependents: "Files that import this one",
+  members: "Types, fields, and methods this file declares",
+  functions: "Every function with its size, complexity, and recorded calls",
+  impact: "What depends on this file transitively, and the tests that reach it",
+  coverage: "Measured line coverage, or whether a test reaches the file"
+};
+function baseName(path) {
+  return path.slice(path.lastIndexOf("/") + 1) || path;
+}
+var CRUMB_KEEP_TAIL = 3;
+function passportCrumb(model, path, handlers) {
+  const crumb = document.createElement("p");
+  crumb.className = "passport-path";
+  crumb.title = path;
+  const folders = path.split("/").slice(0, -1);
+  if (folders.length === 0) {
+    crumb.textContent = path;
+    return crumb;
+  }
+  const drawn = new Set((model.nodes ?? []).map((candidate) => candidate.id));
+  const shown = folders.map((name, index) => ({ name, id: folders.slice(0, index + 1).join("/") }));
+  const visible = shown.length > CRUMB_KEEP_TAIL + 1 ? [shown[0], { name: "\u2026", id: null, hint: folders.slice(1, -CRUMB_KEEP_TAIL).join("/") }, ...shown.slice(-CRUMB_KEEP_TAIL)] : shown;
+  visible.forEach((segment, index) => {
+    if (index > 0) {
+      const separator = document.createElement("span");
+      separator.className = "crumb-sep";
+      separator.textContent = " \u203A ";
+      separator.setAttribute("aria-hidden", "true");
+      crumb.append(separator);
+    }
+    if (segment.id && drawn.has(segment.id) && handlers.onSelect) {
+      const link = document.createElement("button");
+      link.type = "button";
+      link.className = "crumb-link";
+      link.textContent = segment.name;
+      link.title = segment.id;
+      link.addEventListener("click", () => handlers.onSelect(segment.id));
+      crumb.append(link);
+    } else {
+      const text = document.createElement("span");
+      text.className = "crumb-part";
+      text.textContent = segment.name;
+      if (segment.hint) text.title = segment.hint;
+      crumb.append(text);
+    }
+  });
+  return crumb;
+}
+function factChip(text, className = "", title = "") {
+  const chip = document.createElement("span");
+  chip.className = `fact-chip ${className}`.trim();
+  chip.textContent = text;
+  if (title) chip.title = title;
+  return chip;
+}
+function coverageFact(coverage) {
+  if (!coverage || coverage.value === null || coverage.value === void 0) {
+    return null;
+  }
+  const measured = coverage.basis !== "reachable";
+  const text = measured ? `${Math.round(coverage.value)}% covered` : coverage.value > 0 ? "reached by tests" : "no test reaches it";
+  return {
+    text,
+    tone: coverage.value >= 70 ? "good" : coverage.value > 0 ? "warning" : "critical",
+    title: measured ? `Measured line coverage${coverage.stale ? " (report older than the file)" : ""}` : coverage.detail ?? "Static reach from test files"
+  };
+}
+function renderPassportFacts(container, result, impact) {
+  const facts = container.querySelector('[data-role="passport-facts"]');
+  if (facts) {
+    facts.querySelector(".fact-pending")?.remove();
+    if (result?.available === false) {
+      facts.append(factChip(result.detail ?? "File facts unavailable", "fact-muted"));
+    } else if (result) {
+      const types2 = result.memberMap?.types ?? [];
+      const members = types2.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0);
+      if (result.language) facts.append(factChip(result.language, "fact-language"));
+      if (Number.isFinite(result.lines)) facts.append(factChip(`${result.lines} lines`));
+      if (types2.length > 0) facts.append(factChip(`${types2.length} type(s)`));
+      if (members > 0) facts.append(factChip(`${members} member(s)`));
+      const coverage2 = coverageFact(result.coverage);
+      if (coverage2) facts.append(factChip(coverage2.text, `fact-${coverage2.tone}`, coverage2.title));
+    }
+  }
+  const types = result?.memberMap?.types;
+  if (types) {
+    setTabCount(container, "members", types.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0));
+  }
+  if (Array.isArray(result?.functions?.functions)) {
+    setTabCount(container, "functions", result.functions.functions.length);
+  }
+  const blast = impact?.snapshot?.blastRadius;
+  if (Number.isFinite(blast)) {
+    setTabCount(container, "impact", blast, `${blast} file(s) depend on this one transitively`);
+  }
+  const coverage = coverageFact(result?.coverage);
+  if (coverage) {
+    const measured = result.coverage.basis !== "reachable";
+    setTabCount(container, "coverage", measured ? `${Math.round(result.coverage.value)}%` : result.coverage.value > 0 ? "\u2713" : "\u2717", coverage.title, coverage.tone);
+  }
+}
+function setTabCount(container, key, value, title = "", tone = "") {
+  const tab = container.querySelector(`.inspector-tab[data-tab="${key}"]`);
+  if (!tab) {
+    return;
+  }
+  tab.querySelector(".tab-count")?.remove();
+  const badge = document.createElement("span");
+  badge.className = `tab-count${value === 0 ? " is-zero" : ""}${tone ? ` tone-${tone}` : ""}`;
+  badge.textContent = String(value);
+  if (title) badge.title = title;
+  tab.append(badge);
+}
 function renderInspector(container, model, id, handlers = {}) {
   const offMap = !model.system && !(model.nodes ?? []).some((candidate) => candidate.id === id);
   const passport = passportFor(model, id) ?? (offMap ? { kind: "module", metrics: [], imports: [], usedBy: [] } : null);
@@ -5581,15 +5690,17 @@ function renderInspector(container, model, id, handlers = {}) {
   chip.className = `kind-chip kind-${passport.kind ?? "module"}`;
   chip.textContent = passport.kind ?? "module";
   title.append(chip);
-  title.append(document.createTextNode(node?.label ?? id));
+  const label = node?.label && node.label !== id ? node.label : baseName(id);
+  const titleText = document.createElement("span");
+  titleText.className = "passport-title";
+  titleText.textContent = label;
+  titleText.title = node?.workspacePath ?? id;
+  title.append(titleText);
   container.append(title);
   if (handlers.onBack) {
     title.prepend(backButton(handlers, "Back to the map"));
   }
-  const path = document.createElement("p");
-  path.className = "passport-path";
-  path.textContent = node?.workspacePath ?? id;
-  container.append(path);
+  container.append(passportCrumb(model, node?.workspacePath ?? id, handlers));
   if (passport.why) {
     const why = document.createElement("p");
     why.className = "passport-why";
@@ -5598,11 +5709,13 @@ function renderInspector(container, model, id, handlers = {}) {
   }
   const actions = document.createElement("div");
   actions.className = "inspector-actions";
+  const memberMapPrimary = offMap && Boolean(handlers.onOpenMemberMap);
   if (handlers.onOpenWorkspace) {
     const open = document.createElement("button");
     open.type = "button";
-    open.className = "primary";
+    open.className = memberMapPrimary ? "workspace-open" : "primary";
     open.textContent = "Open in Workspace";
+    open.title = "Open this file in the Workspace editor and terminal";
     open.addEventListener("click", () => handlers.onOpenWorkspace(id));
     actions.append(open);
   }
@@ -5611,17 +5724,23 @@ function renderInspector(container, model, id, handlers = {}) {
     source.type = "button";
     source.className = "source-open";
     source.textContent = "View source";
+    source.title = "Read the file here without leaving the map";
     source.addEventListener("click", () => handlers.onViewSource(id));
     actions.append(source);
   }
   if (handlers.onOpenMemberMap) {
     const memberMap = document.createElement("button");
     memberMap.type = "button";
-    memberMap.className = "member-open";
+    memberMap.className = memberMapPrimary ? "member-open primary" : "member-open";
     memberMap.id = "open-member-map";
     memberMap.textContent = "Member map";
+    memberMap.title = "Fields, methods, and their recorded read/write wiring, full screen";
     memberMap.addEventListener("click", () => handlers.onOpenMemberMap(id));
-    actions.append(memberMap);
+    if (memberMapPrimary) {
+      actions.prepend(memberMap);
+    } else {
+      actions.append(memberMap);
+    }
   }
   if (handlers.onOpenRoute) {
     const route = document.createElement("button");
@@ -5665,13 +5784,21 @@ function renderInspector(container, model, id, handlers = {}) {
       unit.textContent = metric.unit;
       value.append(unit);
     }
-    const label = document.createElement("div");
-    label.className = "stat-label";
-    label.textContent = metric.label;
-    card.append(value, label);
+    const label2 = document.createElement("div");
+    label2.className = "stat-label";
+    label2.textContent = metric.label;
+    card.append(value, label2);
     cards.append(card);
   }
   container.append(cards);
+  if (offMap && passport.metrics.length === 0) {
+    const facts = document.createElement("div");
+    facts.className = "passport-facts";
+    facts.dataset.role = "passport-facts";
+    facts.append(factChip("Not drawn in this view", "fact-offmap", "This view does not draw this file; the passport reads it by path."));
+    facts.append(factChip("Reading file\u2026", "fact-pending"));
+    container.append(facts);
+  }
   if (model.system) {
     if (model.systemUnit) {
       appendOutsideLinks(container, model, id, node, handlers);
@@ -5757,13 +5884,16 @@ function renderInspector(container, model, id, handlers = {}) {
       tabButtons[index].focus();
     }
   };
-  for (const [key, label, section2] of tabDefs) {
+  for (const [key, label2, section2] of tabDefs) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "inspector-tab";
     tab.setAttribute("role", "tab");
     tab.dataset.tab = key;
-    tab.textContent = label;
+    tab.textContent = label2;
+    if (TAB_HINTS[key]) {
+      tab.title = TAB_HINTS[key];
+    }
     tab.id = `${base}-tab-${key}`;
     tab.setAttribute("aria-controls", `${base}-panel-${key}`);
     section2.id = `${base}-panel-${key}`;
@@ -8163,32 +8293,69 @@ function buildSuperTypeLine(type) {
   line.textContent = describeSuperTypes(superTypes);
   return line;
 }
-function renderMembers(container, result) {
+var DEFAULT_VISIBILITY = {
+  kotlin: "public",
+  typescript: "public",
+  javascript: "public",
+  python: "public",
+  java: "package",
+  csharp: "private",
+  rust: "private"
+};
+var COLLAPSE_ABOVE_TYPES = 3;
+var FIND_ABOVE_MEMBERS = 12;
+var TYPE_REF_BASIS = {
+  "this-file": "declared in this file",
+  import: "imported",
+  "same-folder": "same folder"
+};
+function renderMembers(container, result, handlers = {}) {
   container.replaceChildren();
   const symbols = result?.symbols ?? [];
-  const memberMap = result.memberMap;
+  const memberMap = result?.memberMap;
   const reExports = memberMap?.reExports ?? [];
-  const title = document.createElement("h3");
-  title.textContent = reExports.length > 0 ? `Members (${symbols.length}) \xB7 ${reExports.length} re-export(s)` : `Members (${symbols.length})`;
-  container.append(title);
-  if (!result || result.available === false) {
-    const note4 = document.createElement("p");
-    note4.className = "unavailable";
-    note4.textContent = result?.detail ?? "Not recorded by the scan.";
-    container.append(note4);
-    return;
-  }
-  if (symbols.length === 0 && reExports.length === 0) {
-    const note4 = document.createElement("p");
-    note4.className = "unavailable";
-    note4.textContent = "No members declared.";
-    container.append(note4);
-    return;
-  }
   const types = memberMap?.types ?? [];
+  const memberCount = types.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0) || symbols.filter((symbol) => symbol.kind !== "type").length;
+  const header = document.createElement("div");
+  header.className = "members-header";
+  const title = document.createElement("h3");
+  const parts = [`Members (${memberCount})`];
+  if (types.length > 0) parts.push(`${types.length} type(s)`);
+  if (reExports.length > 0) parts.push(`${reExports.length} re-export(s)`);
+  title.textContent = parts.join(" \xB7 ");
+  header.append(title);
+  container.append(header);
+  if (!result || result.available === false) {
+    container.append(unavailableNote(result?.detail ?? "Not recorded by the scan."));
+    return;
+  }
+  if (memberCount === 0 && reExports.length === 0) {
+    container.append(unavailableNote("No members declared."));
+    return;
+  }
+  const wired = memberMap?.dataFlow?.available === true;
+  if (types.length > 0 && !wired) {
+    const note4 = unavailableNote(
+      "Read/write counts are hidden: no method in this file references a field. Use from other files is not tracked."
+    );
+    note4.dataset.role = "wiring-note";
+    container.append(note4);
+  }
+  const context2 = {
+    wired,
+    defaultVisibility: DEFAULT_VISIBILITY[result.language] ?? null,
+    typeRefs: result.typeRefs ?? {},
+    file: result.file ?? memberMap?.file ?? "",
+    container,
+    handlers
+  };
   if (types.length > 0) {
-    for (const type of types) {
-      container.append(renderMemberType(type));
+    const open = types.length <= COLLAPSE_ABOVE_TYPES;
+    types.forEach((type, index) => {
+      container.append(renderMemberType(type, context2, open || index === 0));
+    });
+    if (memberCount > FIND_ABOVE_MEMBERS) {
+      header.append(memberFind(container));
     }
   } else if (symbols.length > 0) {
     const list2 = document.createElement("ul");
@@ -8206,60 +8373,228 @@ function renderMembers(container, result) {
   }
   container.append(renderDataFlow(memberMap?.dataFlow));
 }
-function renderMemberType(type) {
-  const section2 = document.createElement("section");
+function memberFind(container) {
+  const input = document.createElement("input");
+  input.type = "search";
+  input.className = "members-find";
+  input.placeholder = "Find member";
+  input.setAttribute("aria-label", "Find member");
+  input.addEventListener("input", () => {
+    const query = input.value.trim().toLowerCase();
+    for (const block of container.querySelectorAll("details.member-type")) {
+      let hits = 0;
+      for (const row of block.querySelectorAll(".member-row")) {
+        const hit = !query || row.dataset.member.toLowerCase().includes(query);
+        row.hidden = !hit;
+        if (hit) hits += 1;
+      }
+      block.hidden = Boolean(query) && hits === 0;
+      if (query && hits > 0) block.open = true;
+    }
+  });
+  return input;
+}
+function renderMemberType(type, context2, open) {
+  const section2 = document.createElement("details");
   section2.className = "member-type";
-  const title = document.createElement("h4");
-  title.className = "member-type-name";
-  title.textContent = type.name;
-  section2.append(title);
-  const superTypeLine = buildSuperTypeLine(type);
-  if (superTypeLine) {
-    section2.append(superTypeLine);
+  section2.dataset.type = type.name;
+  section2.open = open;
+  const summary = document.createElement("summary");
+  const name = document.createElement("span");
+  name.className = "member-type-name";
+  name.textContent = type.name;
+  summary.append(name);
+  if (type.declaration) {
+    const chip = document.createElement("span");
+    chip.className = `decl-chip decl-${type.declaration.split(" ").at(-1).replace(/\W/g, "")}`;
+    chip.textContent = type.declaration;
+    summary.append(chip);
+  }
+  const visibility = visibilityBadge(type.visibility, context2.defaultVisibility);
+  if (visibility) summary.append(visibility);
+  const count = document.createElement("span");
+  count.className = "member-count";
+  const countParts = [];
+  if (type.fields.length > 0) countParts.push(`${type.fields.length} field(s)`);
+  if (type.methods.length > 0) countParts.push(`${type.methods.length} method(s)`);
+  count.textContent = countParts.join(" \xB7 ") || "no members";
+  summary.append(count);
+  if (Number.isFinite(type.line)) {
+    summary.title = `${type.name}, line ${type.line}`;
+  }
+  section2.append(summary);
+  const superTypes = type.superTypes ?? [];
+  if (superTypes.length > 0) {
+    const line = document.createElement("p");
+    line.className = "member-supertypes";
+    for (const relation of ["extends", "implements"]) {
+      const names = superTypes.filter((entry) => entry.relation === relation);
+      if (names.length === 0) continue;
+      line.append(tokenSpan("tok-kw", `${relation} `));
+      names.forEach((entry, index) => {
+        if (index > 0) line.append(", ");
+        line.append(typeToken(entry.name, context2));
+      });
+      line.append(" ");
+    }
+    section2.append(line);
   }
   if (type.fields.length > 0) {
-    const heading3 = document.createElement("h5");
-    heading3.textContent = `Fields (${type.fields.length})`;
-    section2.append(heading3);
+    section2.append(memberHeading(`Fields (${type.fields.length})`));
     const list2 = document.createElement("ul");
-    list2.className = "member-fields";
+    list2.className = "member-fields member-grid";
     for (const field2 of type.fields) {
-      const item = document.createElement("li");
-      item.className = "member-field";
-      const kind = field2.mutable === false ? "val" : "var";
-      item.textContent = `${field2.visibility} ${kind} ${field2.name}: ${field2.type ?? "unrecorded type"}`;
-      item.append(wiring(`reads ${field2.reads} \xB7 writes ${field2.writes}`));
-      list2.append(item);
+      list2.append(fieldRow(field2, context2));
     }
     section2.append(list2);
   }
   if (type.methods.length > 0) {
-    const heading3 = document.createElement("h5");
-    heading3.textContent = `Methods (${type.methods.length})`;
-    section2.append(heading3);
+    section2.append(memberHeading(`Methods (${type.methods.length})`));
     const list2 = document.createElement("ul");
-    list2.className = "member-methods";
+    list2.className = "member-methods member-grid";
     for (const method of type.methods) {
-      const item = document.createElement("li");
-      item.className = "member-method";
-      const returns = method.type ? `: ${method.type}` : "";
-      item.textContent = `${method.visibility} fun ${method.name}(${method.parameters ?? 0})${returns}`;
-      if (method.reads.length > 0 || method.writes.length > 0) {
-        item.append(
-          wiring(`reads ${method.reads.join(", ") || "none"} \xB7 writes ${method.writes.join(", ") || "none"}`)
-        );
-      }
-      list2.append(item);
+      list2.append(methodRow(method, context2));
     }
     section2.append(list2);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
-    const note4 = document.createElement("p");
-    note4.className = "unavailable";
-    note4.textContent = "No members declared.";
-    section2.append(note4);
+    section2.append(unavailableNote("No members declared."));
   }
   return section2;
+}
+function memberHeading(text) {
+  const heading3 = document.createElement("h5");
+  heading3.textContent = text;
+  return heading3;
+}
+function fieldRow(field2, context2) {
+  const item = memberRow("member-field", field2, context2);
+  const keyword = field2.mutable === false ? "val" : "var";
+  const head = item.querySelector(".member-head");
+  head.append(tokenSpan(field2.mutable === false ? "tok-kw" : "tok-kw tok-mutable", `${keyword} `));
+  if (field2.mutable !== false) {
+    head.lastChild.title = "Mutable: this field can be reassigned";
+  }
+  item.append(tokenSpan("tok-name", field2.name));
+  const type = document.createElement("span");
+  type.className = "member-sig";
+  type.append(tokenSpan("tok-punct", ": "));
+  type.append(field2.type ? typeToken(field2.type, context2) : tokenSpan("tok-missing", "unrecorded type"));
+  if (field2.declaredIn) {
+    const from = tokenSpan("member-declared-in", ` from ${field2.declaredIn}`);
+    type.append(from);
+  }
+  type.title = `${field2.name}${type.textContent}`;
+  item.append(type);
+  const wiring2 = document.createElement("span");
+  wiring2.className = "member-wiring";
+  if (context2.wired) {
+    if (field2.reads === 0 && field2.writes === 0) {
+      const quiet = tokenSpan("wire-pill wire-none", "untouched here");
+      quiet.title = "No method in this file reads or writes this field. Other files may.";
+      wiring2.append(quiet);
+    } else {
+      if (field2.reads > 0) {
+        wiring2.append(wirePill("read", `R ${field2.reads}`, `Read by ${field2.reads} method(s) in this file`));
+      }
+      if (field2.writes > 0) {
+        wiring2.append(wirePill("write", `W ${field2.writes}`, `Written by ${field2.writes} method(s) in this file`));
+      }
+    }
+  }
+  item.append(wiring2);
+  return item;
+}
+function methodRow(method, context2) {
+  const item = memberRow("member-method", method, context2);
+  item.querySelector(".member-head").append(tokenSpan("tok-kw", "fun "));
+  item.append(tokenSpan("tok-name tok-fn", method.name));
+  const signature = document.createElement("span");
+  signature.className = "member-sig";
+  const parameters = method.parameters ?? 0;
+  const params = tokenSpan("tok-punct", `(${parameters})`);
+  params.title = `${parameters} parameter(s)`;
+  signature.append(params);
+  if (method.type) {
+    signature.append(tokenSpan("tok-punct", ": "));
+    signature.append(typeToken(method.type, context2));
+  }
+  signature.title = `${method.name}${signature.textContent}`;
+  item.append(signature);
+  const wiring2 = document.createElement("span");
+  wiring2.className = "member-wiring";
+  if (method.reads.length > 0) {
+    wiring2.append(wirePill("read", `reads ${method.reads.join(", ")}`, "Fields this method reads"));
+  }
+  if (method.writes.length > 0) {
+    wiring2.append(wirePill("write", `writes ${method.writes.join(", ")}`, "Fields this method writes"));
+  }
+  item.append(wiring2);
+  return item;
+}
+function memberRow(className, member, context2) {
+  const item = document.createElement("li");
+  item.className = `${className} member-row`;
+  item.dataset.member = member.name;
+  if (Number.isFinite(member.line)) {
+    item.title = `${member.visibility} \xB7 line ${member.line}`;
+  }
+  const head = document.createElement("span");
+  head.className = "member-head";
+  const badge = visibilityBadge(member.visibility, context2.defaultVisibility);
+  if (badge) head.append(badge);
+  item.append(head);
+  return item;
+}
+function visibilityBadge(visibility, defaultVisibility) {
+  if (!visibility || visibility === "not recorded" || visibility === defaultVisibility) {
+    return null;
+  }
+  const badge = tokenSpan(`vis-badge vis-${visibility.replace(/\W/g, "")}`, `${visibility} `);
+  badge.title = `Visibility: ${visibility}`;
+  return badge;
+}
+function wirePill(kind, text, title) {
+  const pill = tokenSpan(`wire-pill wire-${kind}`, text);
+  pill.title = title;
+  return pill;
+}
+function typeToken(name, context2) {
+  const ref = context2.typeRefs[name];
+  if (!ref) {
+    return tokenSpan("tok-type", name);
+  }
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "tok-type type-link";
+  link.textContent = name;
+  link.dataset.typeFile = ref.file;
+  link.title = `${ref.file} (${TYPE_REF_BASIS[ref.basis] ?? ref.basis})`;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (ref.basis === "this-file") {
+      const block = [...context2.container.querySelectorAll("details.member-type")].find(
+        (candidate) => candidate.dataset.type.split(".").at(-1) === name
+      );
+      if (block) {
+        block.hidden = false;
+        block.open = true;
+        block.scrollIntoView?.({ block: "start", behavior: "smooth" });
+        block.classList.remove("flash");
+        void block.offsetWidth;
+        block.classList.add("flash");
+      }
+      return;
+    }
+    context2.handlers.onOpenType?.(ref.file, name);
+  });
+  return link;
+}
+function tokenSpan(className, text) {
+  const span = document.createElement("span");
+  span.className = className;
+  span.textContent = text;
+  return span;
 }
 var DATA_FLOW_PANELS = [
   ["sources", "Sources / inputs"],
@@ -11735,64 +12070,252 @@ function renderDiagnostics(container, model, runtime = {}) {
   }
   return summary;
 }
-var LEGEND_SWATCHES = {
-  "size = dependents": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "size = lines of code": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "island = directory": "linear-gradient(135deg,var(--island-fill),var(--node-fill))",
-  "diamond = test": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "hover = blast radius": "linear-gradient(135deg,var(--ink-3),var(--accent))",
-  "box = build unit": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "size = files": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "edge = import between units": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "support = unit footer": "linear-gradient(135deg,var(--wash),var(--node-fill))",
-  "band = tier": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "edge = recorded import": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "wrong-way = red or dashed": "linear-gradient(135deg,var(--graph-edge),var(--accent))",
-  "shelf = support tiers": "linear-gradient(135deg,var(--wash),var(--node-fill))",
-  "card = tier": "linear-gradient(135deg,var(--node-fill),var(--accent))",
-  "edge = recorded imports": "linear-gradient(0deg,transparent 40%,var(--graph-edge) 40% 60%,transparent 60%)",
-  "dashed red = upward": "repeating-linear-gradient(90deg,var(--graph-cycle) 0 4px,transparent 4px 7px) center / 100% 3px no-repeat",
-  "arc = skip-layer": "radial-gradient(circle at 50% 110%,transparent 55%,var(--graph-affected) 56% 68%,transparent 69%)",
-  "faded = types only": "linear-gradient(0deg,transparent 40%,var(--graph-cycle) 40% 60%,transparent 60%)"
+var LEGEND_LINE_SYMBOLS = /* @__PURE__ */ new Set([
+  "edge",
+  "solid",
+  "solid edge",
+  "dashed",
+  "dashed red",
+  "dotted",
+  "arc",
+  "faded",
+  "wrong-way",
+  "cross-unit"
+]);
+var LEGEND_HINTS = {
+  "size = dependents": "Bigger nodes have more files depending on them, directly or transitively.",
+  "size = lines of code": "Bigger nodes are longer files (the large-file lens is on).",
+  "size = files": "Bigger means more files inside.",
+  "island = directory": "Files sit on one shaded island per folder.",
+  "diamond = test": "A file the scan identified as a test.",
+  "star = entry": "An entry point a manifest declares (package.json, Cargo.toml, pom.xml).",
+  "hover = blast radius": "Hover a node to light up everything that depends on it.",
+  "box = build unit": "A package, crate, or module a manifest declares.",
+  "edge = import between units": "At least one file in one unit imports a file in the other.",
+  "card = tier": "A role tier: what the code does (frontend, API, domain, data, \u2026).",
+  "band = tier": "A role tier: what the code does (frontend, API, domain, data, \u2026).",
+  "edge = recorded imports": "An import the scan read in source; nothing is inferred.",
+  "edge = recorded import": "An import the scan read in source; nothing is inferred.",
+  "dashed red = upward": "An import pointing up the stack, against the expected direction.",
+  "wrong-way = red or dashed": "An import pointing up the stack, against the expected direction.",
+  "arc = skip-layer": "An import that jumps over a tier in between.",
+  "faded = types only": "A type-only import: it couples shapes, not runtime.",
+  "shelf = support tiers": "Build, infra, and tests sit on a shelf below the stack.",
+  "column = build unit": "One column per package, crate, or module.",
+  "row = tier": "One row per role tier, upper layers first.",
+  "cell = files": "The files of one unit in one tier.",
+  "cross-unit = heavier": "A thicker line crosses build units.",
+  "ellipse = data hub": "A table, topic, or dataset the code reads or writes.",
+  "solid = writes": "Code writes to the hub.",
+  "dashed = reads": "Code reads from the hub.",
+  "dotted = lineage": "Data copied or derived from one hub into another.",
+  "double ring = governed": "A hub with a declared schema or contract.",
+  "ring = hub": "A file many others import.",
+  "file = member": "One file of the opened cell."
 };
-function legendSwatch(text) {
-  if (LEGEND_SWATCHES[text]) return LEGEND_SWATCHES[text];
-  if (text.startsWith("dotted = gone since")) {
-    return "repeating-linear-gradient(90deg,var(--graph-edge) 0 2px,transparent 2px 5px) center / 100% 2px no-repeat";
-  }
-  return "var(--accent)";
-}
 function renderLegend(container, model, options = {}) {
   container.replaceChildren();
+  const shapes = [];
+  const lines = [];
+  const notes = [];
+  for (const text of readingLegend(model, options.locLens === true)) {
+    const split = text.indexOf(" = ");
+    if (split === -1) {
+      notes.push(text);
+      continue;
+    }
+    const symbol = text.slice(0, split);
+    (isLineSymbol(symbol) ? lines : shapes).push({ text, symbol, meaning: text.slice(split + 3) });
+  }
   const guide = document.createElement("div");
   guide.className = "legend-guide";
-  for (const text of readingLegend(model, options.locLens === true)) {
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const swatch = document.createElement("span");
-    swatch.className = "legend-swatch";
-    swatch.style.background = legendSwatch(text);
-    if (text === "faded = types only") swatch.style.opacity = "0.45";
-    if (text.startsWith("diamond")) {
-      swatch.style.transform = "rotate(45deg)";
-      swatch.style.borderRadius = "2px";
-    }
-    item.append(swatch);
-    item.append(document.createTextNode(text));
-    guide.append(item);
-  }
+  if (shapes.length > 0) guide.append(legendSection("Shapes", shapes.map(legendCue)));
+  if (lines.length > 0) guide.append(legendSection("Lines", lines.map(legendCue)));
   container.append(guide);
-  const kinds = model.structure ? [] : [...new Set((model.nodes ?? []).map((node) => node.kind))].sort();
-  for (const kind of kinds) {
-    const item = document.createElement("span");
-    item.className = "legend-item";
-    const glyph = document.createElement("span");
-    glyph.className = "legend-shape";
-    glyph.textContent = kind === "test" ? "\u25C6" : kind === "entry" ? "\u2605" : kind === "service" ? "\u2B21" : kind === "unit" ? "\u25A4" : kind === "shelf" ? "\u25A5" : "\u25A3";
-    item.append(glyph);
-    item.append(document.createTextNode(`${kind} (${SHAPES[kind] ?? "round-rectangle"})`));
-    container.append(item);
+  if (model?.structure) {
+    const tiers = legendTiers(model);
+    if (tiers.length > 0) container.append(legendSection("Tiers", tiers));
+  } else {
+    const counts = /* @__PURE__ */ new Map();
+    for (const node of model?.nodes ?? []) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
+    const kinds = [...counts.keys()].sort();
+    if (kinds.length > 0) {
+      container.append(
+        legendSection(
+          "Node kinds",
+          kinds.map(
+            (kind) => legendRow(kindMark(kind), kind, ` (${SHAPES[kind] ?? "round-rectangle"})`, `${counts.get(kind)} on this map`)
+          )
+        )
+      );
+    }
   }
+  if (notes.length > 0) {
+    const list2 = document.createElement("ul");
+    list2.className = "legend-notes";
+    for (const text of notes) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      list2.append(item);
+    }
+    container.append(list2);
+  }
+}
+function isLineSymbol(symbol) {
+  return LEGEND_LINE_SYMBOLS.has(symbol) || symbol.startsWith("edge");
+}
+function legendSection(title, rows) {
+  const section2 = document.createElement("section");
+  section2.className = "legend-section";
+  const heading3 = document.createElement("h4");
+  heading3.className = "legend-heading";
+  heading3.textContent = title;
+  section2.append(heading3, ...rows);
+  return section2;
+}
+function legendCue(cue) {
+  return legendRow(cueMark(cue.symbol, cue.text), cue.symbol, ` = ${cue.meaning}`, LEGEND_HINTS[cue.text] ?? "");
+}
+function legendRow(mark, symbol, meaning, hint) {
+  const item = document.createElement("span");
+  item.className = "legend-item";
+  if (hint) item.title = hint;
+  const term = document.createElement("span");
+  term.className = "legend-term";
+  const name = document.createElement("span");
+  name.className = "legend-symbol";
+  name.textContent = symbol;
+  const rest = document.createElement("span");
+  rest.className = "legend-meaning";
+  rest.textContent = meaning;
+  term.append(name, rest);
+  item.append(mark, term);
+  return item;
+}
+function legendTiers(model) {
+  const files = /* @__PURE__ */ new Map();
+  for (const node of model.nodes ?? []) {
+    if (!node.tier || node.kind === "axis") continue;
+    files.set(node.tier, (files.get(node.tier) ?? 0) + (Number(node.files) || 0));
+  }
+  return TIER_ORDER.filter((tier) => files.has(tier)).map((tier) => {
+    const label = TIER_LABELS[tier] ?? tier;
+    const mark = legendSvg();
+    mark.append(svgElement("rect", { x: "3", y: "2", width: "18", height: "10", rx: "3", class: "lm-tier" }));
+    mark.style.setProperty("--lm-tier", tierColorVar(tier));
+    const count = files.get(tier);
+    return legendRow(mark, label, count > 0 ? ` \xB7 ${count} file(s)` : "", `Files the tier lens placed in ${label}`);
+  });
+}
+function legendSvg() {
+  return svgElement("svg", { class: "legend-mark", viewBox: "0 0 24 14", "aria-hidden": "true" });
+}
+var STAR_POINTS = "12,1 13.8,5.2 18.3,5.4 14.8,8.2 16,12.6 12,10.1 8,12.6 9.2,8.2 5.7,5.4 10.2,5.2";
+var DIAMOND_POINTS = "12,1 18,7 12,13 6,7";
+function cueMark(symbol, text) {
+  const svg = legendSvg();
+  const add = (name, attributes) => svg.append(svgElement(name, attributes));
+  const arrow = (className, extra = {}) => {
+    add("line", { x1: "2", y1: "7", x2: "18", y2: "7", class: className, ...extra });
+    add("path", { d: "M 17 4 L 22 7 L 17 10 z", class: `${className} lm-head` });
+  };
+  switch (symbol) {
+    case "size":
+      add("circle", { cx: "5", cy: "9", r: "2.5", class: "lm-node" });
+      add("circle", { cx: "16", cy: "7", r: "5.5", class: "lm-node lm-accent" });
+      break;
+    case "island":
+      add("rect", { x: "1.5", y: "1.5", width: "21", height: "11", rx: "3", class: "lm-island" });
+      add("rect", { x: "5", y: "5", width: "5", height: "4", rx: "1", class: "lm-node" });
+      add("rect", { x: "13", y: "5", width: "5", height: "4", rx: "1", class: "lm-node" });
+      break;
+    case "diamond":
+      add("polygon", { points: DIAMOND_POINTS, class: "lm-node lm-accent" });
+      break;
+    case "star":
+      add("polygon", { points: STAR_POINTS, class: "lm-node lm-accent" });
+      break;
+    case "column":
+      add("rect", { x: "8", y: "1", width: "8", height: "12", rx: "2", class: "lm-node" });
+      break;
+    case "row":
+      add("rect", { x: "1", y: "4", width: "22", height: "6", rx: "2", class: "lm-node" });
+      break;
+    case "shelf":
+    case "support":
+    case "tag":
+      add("rect", { x: "2", y: "2", width: "20", height: "6", rx: "2", class: "lm-node" });
+      add("rect", { x: "2", y: "9.5", width: "20", height: "3", rx: "1", class: "lm-shelf" });
+      break;
+    case "ellipse":
+      add("ellipse", { cx: "12", cy: "7", rx: "9", ry: "5", class: "lm-node lm-hub" });
+      break;
+    case "double ring":
+      add("circle", { cx: "12", cy: "7", r: "5.5", class: "lm-ring" });
+      add("circle", { cx: "12", cy: "7", r: "3", class: "lm-ring" });
+      break;
+    case "ring":
+      add("circle", { cx: "12", cy: "7", r: "4.5", class: "lm-node lm-ring-thick" });
+      break;
+    case "ports":
+      add("rect", { x: "4", y: "2", width: "16", height: "10", rx: "2", class: "lm-node" });
+      add("circle", { cx: "4", cy: "7", r: "2", class: "lm-port-read" });
+      add("circle", { cx: "20", cy: "7", r: "2", class: "lm-port-write" });
+      break;
+    case "badge":
+      add("rect", { x: "5", y: "3.5", width: "14", height: "7", rx: "3.5", class: "lm-badge" });
+      break;
+    case "hover":
+      add("circle", { cx: "12", cy: "7", r: "6", class: "lm-halo" });
+      add("circle", { cx: "12", cy: "7", r: "3", class: "lm-node lm-accent" });
+      break;
+    case "dashed red":
+    case "wrong-way":
+      arrow("lm-edge lm-bad", { "stroke-dasharray": "3 2" });
+      break;
+    case "dashed":
+      arrow("lm-edge", { "stroke-dasharray": "3 2" });
+      break;
+    case "dotted":
+      arrow("lm-edge", { "stroke-dasharray": "1 2" });
+      break;
+    case "arc":
+      add("path", { d: "M 2 12 Q 12 -4 22 12", class: "lm-edge lm-warn lm-open" });
+      break;
+    case "faded":
+      arrow("lm-edge lm-faded");
+      break;
+    case "cross-unit":
+      arrow("lm-edge lm-heavy");
+      break;
+    default:
+      if (isLineSymbol(symbol)) {
+        arrow("lm-edge");
+      } else if (text.startsWith("dotted = gone since")) {
+        arrow("lm-edge", { "stroke-dasharray": "1 2" });
+      } else {
+        add("rect", { x: "3", y: "2", width: "18", height: "10", rx: "3", class: "lm-node" });
+      }
+  }
+  return svg;
+}
+function kindMark(kind) {
+  const shape = SHAPES[kind] ?? "round-rectangle";
+  const svg = legendSvg();
+  const add = (name, attributes) => svg.append(svgElement(name, attributes));
+  const className = kind === "test" || kind === "entry" ? "lm-node lm-accent" : "lm-node";
+  if (shape === "diamond" || shape === "round-diamond") {
+    add("polygon", { points: DIAMOND_POINTS, class: className });
+  } else if (shape === "star") {
+    add("polygon", { points: STAR_POINTS, class: className });
+  } else if (shape === "hexagon") {
+    add("polygon", { points: "7,2 17,2 21,7 17,12 7,12 3,7", class: className });
+  } else if (shape === "ellipse") {
+    add("ellipse", { cx: "12", cy: "7", rx: "8", ry: "5", class: className });
+  } else {
+    add("rect", { x: "5", y: "2", width: "14", height: "10", rx: shape === "rectangle" ? "0" : "3", class: className });
+  }
+  return svg;
 }
 function renderShortcuts(container) {
   container.replaceChildren();
@@ -29419,7 +29942,8 @@ function createSelectionController(app2) {
       ...fileLike ? { onViewSource: (target) => app2.source.viewSource(target) } : {},
       // The reading route is repository-wide; a Module Passport opens it at its own file.
       ...fileLike ? { onOpenRoute: (target) => app2.panels.showRoute(target) } : {},
-      ...isFileNode(id) ? {
+      // An off-map file is read by path like a drawn one, so its member map opens the same way.
+      ...isFileNode(id) || offMap ? {
         onOpenMemberMap: (target) => {
           app2.memberMap.openMemberMap(target).then(() => {
             app2.floatingWindows.find((controller) => controller.key === "inspector")?.close();
@@ -29478,7 +30002,13 @@ function createSelectionController(app2) {
       const impact = impactResponse.ok ? await impactResponse.json() : null;
       const changesWith = changesWithSection ? await app2.lenses.loadChangesWith(id) : null;
       if (app2.selected === id) {
-        if (membersSection) renderMembers(membersSection, result);
+        if (membersSection) {
+          renderMembers(membersSection, { ...result, file: id }, {
+            // A type declared in another file opens that file's passport, so Back returns here.
+            onOpenType: (file) => selectNode(file)
+          });
+        }
+        renderPassportFacts(elements2.inspector, result, impact);
         if (functionsSection) renderFunctions(functionsSection, result, app2.narration.functionsHandlers(result));
         if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
         if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
@@ -29487,6 +30017,7 @@ function createSelectionController(app2) {
       if (app2.selected === id) {
         const fallback = { available: false, detail: "Symbols could not be loaded." };
         if (membersSection) renderMembers(membersSection, fallback);
+        renderPassportFacts(elements2.inspector, fallback, null);
         if (functionsSection) renderFunctions(functionsSection, fallback, app2.narration.functionsHandlers(fallback));
         if (impactSection) renderImpactPassport(impactSection, null);
         if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: "Co-change could not be loaded." });

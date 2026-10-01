@@ -7,6 +7,7 @@ import { buildFunctions } from '../../analysis/functions.ts';
 import { buildMemberMap } from '../../analysis/member-map.ts';
 import { computeMeasuredCoverage, measuredFileFigure } from '../../analysis/measured-coverage.ts';
 import { collectRelatedSources } from '../../analysis/related-sources.ts';
+import { resolveTypeRefs } from '../../analysis/type-refs.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { StraboConfig } from '../../types.ts';
@@ -73,13 +74,18 @@ export function createSymbolsRouter(config: StraboConfig): Router {
           : reached.has(file)
             ? { value: 100, detail: `reachable from ${reach.testFiles.length} test file(s)` }
             : { value: 0, detail: 'no path from a test' };
+      const memberMap = buildMemberMap(file, result.symbols, result.accesses ?? [], result.reExports ?? []);
+      const lines = graph.nodes.find((node) => node.id === file)?.lines ?? content.split('\n').length;
       response.json({
         file,
         language: extractor.language,
         available: true,
+        lines,
         symbols: result.symbols,
         diagnostics: result.diagnostics,
-        memberMap: buildMemberMap(file, result.symbols, result.accesses ?? [], result.reExports ?? []),
+        memberMap,
+        // Type names the members use, tied to their declaring file only by recorded evidence.
+        typeRefs: resolveTypeRefs(file, memberMap, graph),
         coverage:
           measuredFileFigure(measured, file) ?? {
             basis: 'reachable',

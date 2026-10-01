@@ -42,6 +42,8 @@ export interface MemberMapType {
   line: number;
   /** The supertypes the type extends or implements, as declared; empty when it names none. */
   superTypes?: SuperType[];
+  /** The declaration keywords as authored (`data class`, `enum`, `interface`), when recorded. */
+  declaration?: string;
   fields: MemberMapField[];
   methods: MemberMapMethod[];
 }
@@ -158,6 +160,7 @@ function buildType(
     visibility: declared?.visibility ?? 'not recorded',
     line: declared?.line ?? (symbols.find((symbol) => symbol.owner === owner)?.line ?? 1),
     superTypes: declared?.superTypes ?? [],
+    ...(declared?.declaration ? { declaration: declared.declaration } : {}),
     fields,
     methods: methods.map((method) => {
       const forMethod = ownAccesses.filter((access) => access.method === method.name);

@@ -11,6 +11,7 @@ import {
   renderImpactPassport,
   renderInspector,
   renderMembers,
+  renderPassportFacts,
 } from './strabo-panels.js';
 import {
   API_PATH,
@@ -124,7 +125,8 @@ export function createSelectionController(app) {
       ...(fileLike ? { onViewSource: (target) => app.source.viewSource(target) } : {}),
       // The reading route is repository-wide; a Module Passport opens it at its own file.
       ...(fileLike ? { onOpenRoute: (target) => app.panels.showRoute(target) } : {}),
-      ...(isFileNode(id)
+      // An off-map file is read by path like a drawn one, so its member map opens the same way.
+      ...(isFileNode(id) || offMap
         ? {
             onOpenMemberMap: (target) => {
               // The member map is a drill-down from the passport. Open it through its window
@@ -199,7 +201,13 @@ export function createSelectionController(app) {
       const impact = impactResponse.ok ? await impactResponse.json() : null;
       const changesWith = changesWithSection ? await app.lenses.loadChangesWith(id) : null;
       if (app.selected === id) {
-        if (membersSection) renderMembers(membersSection, result);
+        if (membersSection) {
+          renderMembers(membersSection, { ...result, file: id }, {
+            // A type declared in another file opens that file's passport, so Back returns here.
+            onOpenType: (file) => selectNode(file),
+          });
+        }
+        renderPassportFacts(elements.inspector, result, impact);
         if (functionsSection) renderFunctions(functionsSection, result, app.narration.functionsHandlers(result));
         if (impactSection) renderImpactPassport(impactSection, impact ? impactPassportSet(impact) : null);
         if (changesWithSection) renderChangesWith(changesWithSection, changesWith, { onSelect: (file) => selectNode(file) });
@@ -208,6 +216,7 @@ export function createSelectionController(app) {
       if (app.selected === id) {
         const fallback = { available: false, detail: 'Symbols could not be loaded.' };
         if (membersSection) renderMembers(membersSection, fallback);
+        renderPassportFacts(elements.inspector, fallback, null);
         if (functionsSection) renderFunctions(functionsSection, fallback, app.narration.functionsHandlers(fallback));
         if (impactSection) renderImpactPassport(impactSection, null);
         if (changesWithSection) renderChangesWith(changesWithSection, { available: false, detail: 'Co-change could not be loaded.' });

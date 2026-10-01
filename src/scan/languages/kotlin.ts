@@ -582,9 +582,18 @@ export async function extractKotlinSymbols(
         node.type === 'interface_declaration' ||
         node.type === 'object_declaration'
       ) {
-        const name = node.namedChildren.find((child) => child.type === 'type_identifier')?.text;
-        if (name) {
+        const nameNode = node.namedChildren.find((child) => child.type === 'type_identifier');
+        const name = nameNode?.text;
+        if (nameNode && name) {
           typeNames.add(name);
+          symbols.push({
+            name,
+            kind: 'type',
+            visibility: visibilityOf(node),
+            owner,
+            line: node.startPosition.row + 1,
+            declaration: kotlinDeclaration(node, nameNode),
+          });
         }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;
         // A primary-constructor `val`/`var` parameter is a property of the class, so it is a
@@ -804,6 +813,32 @@ const KOTLIN_ACCESS: AccessRules = {
       return null;
     }),
 };
+
+/** Keywords that say what kind of type a Kotlin declaration is; visibility and annotations are left out. */
+const KOTLIN_DECLARATION_WORDS = new Set([
+  'abstract',
+  'open',
+  'sealed',
+  'data',
+  'enum',
+  'value',
+  'inline',
+  'annotation',
+  'inner',
+  'fun',
+  'class',
+  'interface',
+  'object',
+]);
+
+/** `data class`, `sealed interface`, `object`: the declaration keywords before the type name. */
+function kotlinDeclaration(node: Node, nameNode: Node): string {
+  const head = node.text
+    .slice(0, nameNode.startIndex - node.startIndex)
+    .replace(/@[\w.]+(\([^)]*\))?/g, ' ');
+  const words = head.split(/\s+/).filter((word) => KOTLIN_DECLARATION_WORDS.has(word));
+  return words.length > 0 ? words.join(' ') : 'class';
+}
 
 function visibilityOf(node: Node): string {
   const modifiers = node.namedChildren.find((child) => child.type === 'modifiers');

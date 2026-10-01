@@ -42,6 +42,12 @@ export interface CodeSymbol {
    * declaration order. Absent for a declaration that names none and for non-type members.
    */
   superTypes?: SuperType[];
+  /**
+   * The declaration keywords of a type as authored (`data class`, `enum`, `interface`,
+   * `object`), so a reader can tell a value holder from a behaviour type. Absent for
+   * non-type members and where the extractor does not record it.
+   */
+  declaration?: string;
 }
 
 /** How a declared type relates to a supertype it names. */

@@ -31,7 +31,9 @@ const {
   renderInspector,
   renderLegend,
   renderMemberMap,
+  renderMembers,
   renderNarrationPanel,
+  renderPassportFacts,
   renderNarrativeReply,
   renderOverlayPanel,
   renderRepositoryPassport,
@@ -85,6 +87,26 @@ test('renderLegend labels each reading cue and each node kind', () => {
   assert.match(text, /island = directory/);
   assert.match(text, /module \(round-rectangle\)/);
   assert.match(text, /test \(diamond\)/);
+});
+
+test('renderLegend groups cues into shapes and lines with a mark and a hover hint', () => {
+  const target = container();
+  renderLegend(target, {
+    structure: true,
+    nodes: [
+      { id: 'a', kind: 'tier', tier: 'domain', files: 4 },
+      { id: 'b', kind: 'tier', tier: 'frontend', files: 2 },
+    ],
+  });
+
+  const headings = [...target.querySelectorAll('.legend-heading')].map((heading) => heading.textContent);
+  assert.deepEqual(headings, ['Shapes', 'Lines', 'Tiers']);
+  const upward = [...target.querySelectorAll('.legend-item')].find((item) => /dashed red = upward/.test(item.textContent));
+  assert.ok(upward.querySelector('svg.legend-mark .lm-bad'));
+  assert.match(upward.title, /against the expected direction/);
+  // Tiers follow the stack order, upper layers first, with their file counts.
+  const tiers = [...target.querySelectorAll('.legend-section')].at(-1).textContent;
+  assert.match(tiers, /Frontend · 2 file\(s\).*Domain\/service · 4 file\(s\)/);
 });
 
 test('renderShortcuts pairs each key with its action', () => {
@@ -1809,4 +1831,113 @@ test('the symbol-references row renders a recorded count and is absent without o
     false,
     'the roll-up row is absent without a count too',
   );
+});
+
+
+function keyTheory(overrides = {}) {
+  return {
+    file: 'app/model/KeyTheory.kt',
+    available: true,
+    language: 'kotlin',
+    lines: 120,
+    symbols: [],
+    coverage: { basis: 'measured', value: 62, stale: false },
+    functions: { available: true, functions: [{}, {}, {}] },
+    typeRefs: {
+      NoteName: { file: 'app/model/NoteName.kt', basis: 'same-folder' },
+      Key: { file: 'app/model/KeyTheory.kt', basis: 'this-file' },
+    },
+    memberMap: {
+      file: 'app/model/KeyTheory.kt',
+      available: true,
+      reExports: [],
+      dataFlow: { available: false, sources: [], resources: [], transforms: [], sinks: [] },
+      types: [
+        {
+          name: 'Key',
+          declaration: 'data class',
+          visibility: 'public',
+          line: 3,
+          superTypes: [],
+          fields: [
+            { name: 'root', visibility: 'public', type: 'NoteName', mutable: false, line: 3, reads: 0, writes: 0 },
+            { name: 'cache', visibility: 'private', type: 'String', mutable: true, line: 4, reads: 0, writes: 0 },
+          ],
+          methods: [],
+        },
+        {
+          name: 'Chord',
+          visibility: 'public',
+          line: 9,
+          superTypes: [],
+          fields: [{ name: 'key', visibility: 'public', type: 'Key', mutable: false, line: 9, reads: 0, writes: 0 }],
+          methods: [{ name: 'transpose', visibility: 'public', type: 'Chord', parameters: 1, line: 10, reads: [], writes: [] }],
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+test('renderMembers draws typed blocks without default visibility or zero wiring noise', () => {
+  const target = container();
+  const opened = [];
+  renderMembers(target, keyTheory(), { onOpenType: (file) => opened.push(file) });
+
+  assert.match(target.querySelector('h3').textContent, /Members \(4\) · 2 type\(s\)/);
+  assert.equal(target.querySelectorAll('details.member-type').length, 2);
+  assert.equal(target.querySelector('.decl-chip').textContent, 'data class');
+  // Kotlin's default `public` is not drawn; `private` is.
+  const badges = [...target.querySelectorAll('.vis-badge')].map((badge) => badge.textContent.trim());
+  assert.deepEqual(badges, ['private']);
+  // No field reference was recorded in the file: one note, no per-row "reads 0 · writes 0".
+  assert.ok(target.querySelector('[data-role="wiring-note"]'));
+  assert.doesNotMatch(target.textContent, /reads 0/);
+  assert.match(target.querySelector('.member-fields').textContent, /val root: NoteName/);
+  assert.match(target.querySelector('.member-methods').textContent, /fun transpose\(1\): Chord/);
+
+  target.querySelector('.type-link[data-type-file="app/model/NoteName.kt"]').click();
+  assert.deepEqual(opened, ['app/model/NoteName.kt']);
+  // A type declared in this file opens its own block instead of navigating.
+  const keyBlock = target.querySelector('details.member-type[data-type="Key"]');
+  keyBlock.open = false;
+  target.querySelector('.type-link[data-type-file="app/model/KeyTheory.kt"]').click();
+  assert.equal(keyBlock.open, true);
+  assert.equal(opened.length, 1);
+});
+
+test('renderMembers shows recorded wiring as read/write pills and quiet untouched fields', () => {
+  const result = keyTheory();
+  result.memberMap.dataFlow = { available: true, sources: ['root'], resources: [], transforms: [], sinks: [] };
+  result.memberMap.types[0].fields[0].reads = 2;
+  const target = container();
+  renderMembers(target, result);
+
+  assert.equal(target.querySelector('[data-role="wiring-note"]'), null);
+  assert.equal(target.querySelector('.wire-read').textContent, 'R 2');
+  assert.match(target.querySelector('.wire-none').textContent, /untouched here/);
+});
+
+test('renderPassportFacts fills the off-map facts strip and the tab counts', () => {
+  const target = container();
+  renderInspector(target, { nodes: [], edges: [] }, 'app/model/KeyTheory.kt', { onOpenMemberMap: () => {} });
+
+  assert.equal(target.querySelector('.passport-title').textContent, 'KeyTheory.kt');
+  assert.match(target.querySelector('.passport-path').textContent, /app › model/);
+  // Off the map, the member map is the primary next step.
+  assert.ok(target.querySelector('#open-member-map').classList.contains('primary'));
+
+  renderPassportFacts(target, keyTheory(), { snapshot: { blastRadius: 0 } });
+  const facts = target.querySelector('[data-role="passport-facts"]').textContent;
+  assert.match(facts, /Not drawn in this view/);
+  assert.match(facts, /kotlin/);
+  assert.match(facts, /120 lines/);
+  assert.match(facts, /62% covered/);
+  assert.doesNotMatch(facts, /Reading file/);
+
+  const count = (key) => target.querySelector(`.inspector-tab[data-tab="${key}"] .tab-count`);
+  assert.equal(count('members').textContent, '4');
+  assert.equal(count('functions').textContent, '3');
+  assert.ok(count('impact').classList.contains('is-zero'));
+  assert.equal(count('coverage').textContent, '62%');
 });

@@ -140,11 +140,38 @@ test('extractKotlinSymbols records fields and methods with visibility and owner'
       symbol.parameters ?? 0,
     ]),
     [
+      ['type', 'public', '', 'Main', '', false, 0],
       ['field', 'private', 'Main', 'helper', 'Helper', false, 0],
       ['field', 'public', 'Main', 'count', 'Int', true, 0],
       ['method', 'internal', 'Main', 'doWork', 'String', false, 1],
       ['method', 'public', 'Main', 'greet', '', false, 0],
       ['field', 'public', 'Main', 'shared', '', false, 0],
+    ],
+  );
+});
+
+test('extractKotlinSymbols records each type with its declaration keywords', async () => {
+  const source = [
+    'package com.acme.app',
+    '',
+    '@Serializable',
+    'data class Key(val root: String)',
+    'enum class Quality { MAJOR, MINOR }',
+    'internal sealed interface Shape',
+    'object Registry',
+    'class Plain',
+  ].join('\n');
+
+  const { symbols } = await extractKotlinSymbols('Key.kt', source);
+
+  assert.deepEqual(
+    symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => [symbol.name, symbol.declaration, symbol.visibility]),
+    [
+      ['Key', 'data class', 'public'],
+      ['Quality', 'enum class', 'public'],
+      ['Shape', 'sealed interface', 'internal'],
+      ['Registry', 'object', 'public'],
+      ['Plain', 'class', 'public'],
     ],
   );
 });

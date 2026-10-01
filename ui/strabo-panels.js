@@ -10,6 +10,7 @@
 export {
   renderInspector,
   renderChangesWith,
+  renderPassportFacts,
 } from './strabo-panel-inspector.js';
 
 export {

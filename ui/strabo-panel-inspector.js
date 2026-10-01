@@ -15,6 +15,151 @@ import { appendNarratorBlock } from './strabo-panel-narrative.js';
 
 let inspectorSeq = 0;
 
+/** What each passport tab holds, as a hover hint. */
+const TAB_HINTS = {
+  deps: 'Files this one imports, with the line that names each',
+  dependents: 'Files that import this one',
+  members: 'Types, fields, and methods this file declares',
+  functions: 'Every function with its size, complexity, and recorded calls',
+  impact: 'What depends on this file transitively, and the tests that reach it',
+  coverage: 'Measured line coverage, or whether a test reaches the file',
+};
+
+
+function baseName(path) {
+  return path.slice(path.lastIndexOf('/') + 1) || path;
+}
+
+
+/** Above this many folders the crumb keeps the first and the last few, eliding the middle. */
+const CRUMB_KEEP_TAIL = 3;
+
+/**
+ * The file's folders as a breadcrumb. A folder the current map draws is a link to it; the
+ * rest are plain text. The full path is the hover hint and what Copy path copies.
+ */
+function passportCrumb(model, path, handlers) {
+  const crumb = document.createElement('p');
+  crumb.className = 'passport-path';
+  crumb.title = path;
+  const folders = path.split('/').slice(0, -1);
+  if (folders.length === 0) {
+    crumb.textContent = path;
+    return crumb;
+  }
+  const drawn = new Set((model.nodes ?? []).map((candidate) => candidate.id));
+  const shown = folders.map((name, index) => ({ name, id: folders.slice(0, index + 1).join('/') }));
+  const visible = shown.length > CRUMB_KEEP_TAIL + 1
+    ? [shown[0], { name: '…', id: null, hint: folders.slice(1, -CRUMB_KEEP_TAIL).join('/') }, ...shown.slice(-CRUMB_KEEP_TAIL)]
+    : shown;
+  visible.forEach((segment, index) => {
+    if (index > 0) {
+      const separator = document.createElement('span');
+      separator.className = 'crumb-sep';
+      separator.textContent = ' › ';
+      separator.setAttribute('aria-hidden', 'true');
+      crumb.append(separator);
+    }
+    if (segment.id && drawn.has(segment.id) && handlers.onSelect) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'crumb-link';
+      link.textContent = segment.name;
+      link.title = segment.id;
+      link.addEventListener('click', () => handlers.onSelect(segment.id));
+      crumb.append(link);
+    } else {
+      const text = document.createElement('span');
+      text.className = 'crumb-part';
+      text.textContent = segment.name;
+      if (segment.hint) text.title = segment.hint;
+      crumb.append(text);
+    }
+  });
+  return crumb;
+}
+
+
+function factChip(text, className = '', title = '') {
+  const chip = document.createElement('span');
+  chip.className = `fact-chip ${className}`.trim();
+  chip.textContent = text;
+  if (title) chip.title = title;
+  return chip;
+}
+
+
+/** A coverage figure as `62%` with the basis as its hint, or null when there is none. */
+function coverageFact(coverage) {
+  if (!coverage || coverage.value === null || coverage.value === undefined) {
+    return null;
+  }
+  const measured = coverage.basis !== 'reachable';
+  const text = measured ? `${Math.round(coverage.value)}% covered` : coverage.value > 0 ? 'reached by tests' : 'no test reaches it';
+  return {
+    text,
+    tone: coverage.value >= 70 ? 'good' : coverage.value > 0 ? 'warning' : 'critical',
+    title: measured ? `Measured line coverage${coverage.stale ? ' (report older than the file)' : ''}` : coverage.detail ?? 'Static reach from test files',
+  };
+}
+
+
+/**
+ * Fill the passport's facts strip and tab counts from the file read (`/symbols`) and the
+ * impact passport. Each figure comes from that payload; one that is missing stays off the
+ * strip, and its tab keeps no count rather than showing 0.
+ */
+export function renderPassportFacts(container, result, impact) {
+  const facts = container.querySelector('[data-role="passport-facts"]');
+  if (facts) {
+    facts.querySelector('.fact-pending')?.remove();
+    if (result?.available === false) {
+      facts.append(factChip(result.detail ?? 'File facts unavailable', 'fact-muted'));
+    } else if (result) {
+      const types = result.memberMap?.types ?? [];
+      const members = types.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0);
+      if (result.language) facts.append(factChip(result.language, 'fact-language'));
+      if (Number.isFinite(result.lines)) facts.append(factChip(`${result.lines} lines`));
+      if (types.length > 0) facts.append(factChip(`${types.length} type(s)`));
+      if (members > 0) facts.append(factChip(`${members} member(s)`));
+      const coverage = coverageFact(result.coverage);
+      if (coverage) facts.append(factChip(coverage.text, `fact-${coverage.tone}`, coverage.title));
+    }
+  }
+
+  const types = result?.memberMap?.types;
+  if (types) {
+    setTabCount(container, 'members', types.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0));
+  }
+  if (Array.isArray(result?.functions?.functions)) {
+    setTabCount(container, 'functions', result.functions.functions.length);
+  }
+  const blast = impact?.snapshot?.blastRadius;
+  if (Number.isFinite(blast)) {
+    setTabCount(container, 'impact', blast, `${blast} file(s) depend on this one transitively`);
+  }
+  const coverage = coverageFact(result?.coverage);
+  if (coverage) {
+    const measured = result.coverage.basis !== 'reachable';
+    setTabCount(container, 'coverage', measured ? `${Math.round(result.coverage.value)}%` : result.coverage.value > 0 ? '✓' : '✗', coverage.title, coverage.tone);
+  }
+}
+
+
+/** Put a count badge on a passport tab; a zero count is drawn dimmed so an empty tab reads as such. */
+function setTabCount(container, key, value, title = '', tone = '') {
+  const tab = container.querySelector(`.inspector-tab[data-tab="${key}"]`);
+  if (!tab) {
+    return;
+  }
+  tab.querySelector('.tab-count')?.remove();
+  const badge = document.createElement('span');
+  badge.className = `tab-count${value === 0 ? ' is-zero' : ''}${tone ? ` tone-${tone}` : ''}`;
+  badge.textContent = String(value);
+  if (title) badge.title = title;
+  tab.append(badge);
+}
+
 
 /** The Module Passport for the selected node. */
 export function renderInspector(container, model, id, handlers = {}) {
@@ -34,16 +179,20 @@ export function renderInspector(container, model, id, handlers = {}) {
   chip.className = `kind-chip kind-${passport.kind ?? 'module'}`;
   chip.textContent = passport.kind ?? 'module';
   title.append(chip);
-  title.append(document.createTextNode(node?.label ?? id));
+  // A label that only repeats the path reads twice with the breadcrumb below; the file name
+  // is the title, the folders are the crumb.
+  const label = node?.label && node.label !== id ? node.label : baseName(id);
+  const titleText = document.createElement('span');
+  titleText.className = 'passport-title';
+  titleText.textContent = label;
+  titleText.title = node?.workspacePath ?? id;
+  title.append(titleText);
   container.append(title);
   if (handlers.onBack) {
     title.prepend(backButton(handlers, 'Back to the map'));
   }
 
-  const path = document.createElement('p');
-  path.className = 'passport-path';
-  path.textContent = node?.workspacePath ?? id;
-  container.append(path);
+  container.append(passportCrumb(model, node?.workspacePath ?? id, handlers));
 
   // A System-view unit says why it is grouped, so the caption is evidence, not decoration.
   if (passport.why) {
@@ -55,11 +204,15 @@ export function renderInspector(container, model, id, handlers = {}) {
 
   const actions = document.createElement('div');
   actions.className = 'inspector-actions';
+  // A file this view does not draw is read here rather than navigated on the map, so the
+  // Member map is its main next step; a drawn file keeps the Workspace as the primary action.
+  const memberMapPrimary = offMap && Boolean(handlers.onOpenMemberMap);
   if (handlers.onOpenWorkspace) {
     const open = document.createElement('button');
     open.type = 'button';
-    open.className = 'primary';
+    open.className = memberMapPrimary ? 'workspace-open' : 'primary';
     open.textContent = 'Open in Workspace';
+    open.title = 'Open this file in the Workspace editor and terminal';
     open.addEventListener('click', () => handlers.onOpenWorkspace(id));
     actions.append(open);
   }
@@ -68,17 +221,23 @@ export function renderInspector(container, model, id, handlers = {}) {
     source.type = 'button';
     source.className = 'source-open';
     source.textContent = 'View source';
+    source.title = 'Read the file here without leaving the map';
     source.addEventListener('click', () => handlers.onViewSource(id));
     actions.append(source);
   }
   if (handlers.onOpenMemberMap) {
     const memberMap = document.createElement('button');
     memberMap.type = 'button';
-    memberMap.className = 'member-open';
+    memberMap.className = memberMapPrimary ? 'member-open primary' : 'member-open';
     memberMap.id = 'open-member-map';
     memberMap.textContent = 'Member map';
+    memberMap.title = 'Fields, methods, and their recorded read/write wiring, full screen';
     memberMap.addEventListener('click', () => handlers.onOpenMemberMap(id));
-    actions.append(memberMap);
+    if (memberMapPrimary) {
+      actions.prepend(memberMap);
+    } else {
+      actions.append(memberMap);
+    }
   }
   if (handlers.onOpenRoute) {
     const route = document.createElement('button');
@@ -129,6 +288,17 @@ export function renderInspector(container, model, id, handlers = {}) {
     cards.append(card);
   }
   container.append(cards);
+
+  // Without graph metrics (a file this view does not draw) the passport would open on an
+  // empty band; the facts the file read returns fill it once they arrive.
+  if (offMap && passport.metrics.length === 0) {
+    const facts = document.createElement('div');
+    facts.className = 'passport-facts';
+    facts.dataset.role = 'passport-facts';
+    facts.append(factChip('Not drawn in this view', 'fact-offmap', 'This view does not draw this file; the passport reads it by path.'));
+    facts.append(factChip('Reading file…', 'fact-pending'));
+    container.append(facts);
+  }
 
   // A System-view unit has no members or functions to tab through; its one extra
   // affordance is the opt-in narrator, which may name the group but never change it.
@@ -239,6 +409,9 @@ export function renderInspector(container, model, id, handlers = {}) {
     tab.setAttribute('role', 'tab');
     tab.dataset.tab = key;
     tab.textContent = label;
+    if (TAB_HINTS[key]) {
+      tab.title = TAB_HINTS[key];
+    }
     tab.id = `${base}-tab-${key}`;
     tab.setAttribute('aria-controls', `${base}-panel-${key}`);
     section.id = `${base}-panel-${key}`;

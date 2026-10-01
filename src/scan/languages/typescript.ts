@@ -36,6 +36,13 @@ const TYPE_DECLARATIONS = new Set([
   'type_alias_declaration',
 ]);
 
+/** `class`, `abstract class`, `interface`, `enum`, `type`: what a type declaration node declares. */
+function declarationOf(nodeType: string): string {
+  return nodeType === 'type_alias_declaration'
+    ? 'type'
+    : nodeType.replace(/_declaration$/, '').replace(/_/g, ' ');
+}
+
 const FUNCTION_DECLARATIONS = new Set([
   'function_declaration',
   'generator_function_declaration',
@@ -184,6 +191,7 @@ export async function extractTypeScriptSymbols(
             owner,
             line: node.startPosition.row + 1,
             ...(superTypes.length > 0 ? { superTypes } : {}),
+            declaration: declarationOf(node.type),
           });
         }
         const nextOwner = name ? (owner ? `${owner}.${name}` : name) : owner;

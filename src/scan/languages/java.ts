@@ -77,6 +77,13 @@ const TYPE_DECLARATIONS = new Set([
   'annotation_type_declaration',
 ]);
 
+/** `class`, `interface`, `enum`, `record`, `@interface`: what a type declaration node declares. */
+function declarationOf(nodeType: string): string {
+  return nodeType === 'annotation_type_declaration'
+    ? '@interface'
+    : nodeType.replace(/_declaration$/, '').replace(/_/g, ' ');
+}
+
 /** Parse one Java file into package, imports, and declared types. */
 export async function extractJavaFacts(file: string, content: string): Promise<JavaExtraction> {
   return withParser(JAVA_LANGUAGE, (parser) => {
@@ -712,6 +719,7 @@ export async function extractJavaSymbols(
             owner,
             line: node.startPosition.row + 1,
             ...(superTypes.length > 0 ? { superTypes } : {}),
+            declaration: declarationOf(node.type),
           });
           owner = owner ? `${owner}.${name}` : name;
         }

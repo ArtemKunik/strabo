@@ -210,26 +210,93 @@
   color: var(--accent-ink);
 }
 
+/* The map's reading key: grouped rows of `mark symbol = meaning`, drawn in the map's tokens. */
 .legend-guide {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 4px 16px;
   color: var(--ink-1);
 }
 
-.legend-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  margin-right: 5px;
-  vertical-align: baseline;
+.legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin-bottom: 6px;
 }
 
-.legend-shape {
-  display: inline-block;
-  margin-right: 5px;
-  color: var(--accent);
+.legend-heading {
+  margin: 0 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: var(--text-sm);
+  cursor: default;
+}
+
+.legend-item[title]:hover {
+  background: var(--wash);
+}
+
+.legend-term {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.legend-symbol {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+.legend-meaning {
+  color: var(--ink-3);
+}
+
+.legend-mark {
+  flex: none;
+  width: 24px;
+  height: 14px;
+  overflow: visible;
+}
+
+.legend-mark .lm-node { fill: var(--node-fill); stroke: var(--node-line); stroke-width: 1; }
+.legend-mark .lm-accent { fill: var(--accent); }
+.legend-mark .lm-hub { fill: color-mix(in srgb, var(--accent) 35%, var(--node-fill)); }
+.legend-mark .lm-island { fill: var(--island-fill); stroke: var(--island-line); stroke-dasharray: 2 1.5; }
+.legend-mark .lm-shelf { fill: var(--wash); stroke: var(--hairline); }
+.legend-mark .lm-ring { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.legend-mark .lm-ring-thick { stroke: var(--graph-hub); stroke-width: 2.2; }
+.legend-mark .lm-halo { fill: color-mix(in srgb, var(--graph-affected) 30%, transparent); stroke: var(--graph-affected); }
+.legend-mark .lm-badge { fill: var(--accent-soft); stroke: var(--accent); }
+.legend-mark .lm-port-read { fill: var(--accent); }
+.legend-mark .lm-port-write { fill: var(--status-warning); }
+.legend-mark .lm-tier { fill: color-mix(in srgb, var(--lm-tier) 70%, transparent); stroke: var(--lm-tier); }
+
+.legend-mark .lm-edge { stroke: var(--graph-edge-accent); stroke-width: 1.6; fill: none; }
+.legend-mark .lm-edge.lm-head { fill: var(--graph-edge-accent); stroke: none; }
+.legend-mark .lm-bad { stroke: var(--graph-cycle); }
+.legend-mark .lm-bad.lm-head { fill: var(--graph-cycle); }
+.legend-mark .lm-warn { stroke: var(--graph-affected); }
+.legend-mark .lm-faded { opacity: 0.35; }
+.legend-mark .lm-heavy { stroke-width: 3; }
+
+/* What the view could not draw, named rather than hidden. */
+.legend-notes {
+  margin: 4px 0 0;
+  padding: 6px 0 0 16px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--status-warning);
+  font-size: var(--text-xs);
 }
 

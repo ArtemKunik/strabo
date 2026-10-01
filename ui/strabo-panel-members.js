@@ -61,42 +61,94 @@ function buildSuperTypeLine(type) {
 
 
 /**
- * Render the Member map: members grouped by type, then the data-flow panels.
- *
- * Wiring is shown only where the scan recorded field references in this file; when none
- * were recorded the panels say so instead of showing empty lists.
+ * The visibility a language gives a member that names none. Showing it on every row is noise,
+ * so only a visibility that differs from it is drawn; the tooltip still names it.
  */
-export function renderMembers(container, result) {  container.replaceChildren();
+const DEFAULT_VISIBILITY = {
+  kotlin: 'public',
+  typescript: 'public',
+  javascript: 'public',
+  python: 'public',
+  java: 'package',
+  csharp: 'private',
+  rust: 'private',
+};
+
+/** Above this many types the blocks start collapsed, so the outline reads first. */
+const COLLAPSE_ABOVE_TYPES = 3;
+
+/** Above this many members the tab offers a find box. */
+const FIND_ABOVE_MEMBERS = 12;
+
+const TYPE_REF_BASIS = {
+  'this-file': 'declared in this file',
+  import: 'imported',
+  'same-folder': 'same folder',
+};
+
+
+/**
+ * Render the passport's Members tab: one collapsible block per type, its fields and methods
+ * as aligned, token-coloured signatures, then the data-flow panels.
+ *
+ * Wiring is shown only where the scan recorded field references in this file. When none were
+ * recorded a single note says so instead of a "reads 0 · writes 0" on every row, which would
+ * read as "unused". A type name the scan tied to its declaring file is a link to it.
+ */
+export function renderMembers(container, result, handlers = {}) {
+  container.replaceChildren();
   const symbols = result?.symbols ?? [];
-  const memberMap = result.memberMap;
+  const memberMap = result?.memberMap;
   const reExports = memberMap?.reExports ?? [];
+  const types = memberMap?.types ?? [];
+  const memberCount = types.reduce((sum, type) => sum + type.fields.length + type.methods.length, 0)
+    || symbols.filter((symbol) => symbol.kind !== 'type').length;
+
+  const header = document.createElement('div');
+  header.className = 'members-header';
   const title = document.createElement('h3');
-  title.textContent =
-    reExports.length > 0
-      ? `Members (${symbols.length}) · ${reExports.length} re-export(s)`
-      : `Members (${symbols.length})`;
-  container.append(title);
+  const parts = [`Members (${memberCount})`];
+  if (types.length > 0) parts.push(`${types.length} type(s)`);
+  if (reExports.length > 0) parts.push(`${reExports.length} re-export(s)`);
+  title.textContent = parts.join(' · ');
+  header.append(title);
+  container.append(header);
 
   if (!result || result.available === false) {
-    const note = document.createElement('p');
-    note.className = 'unavailable';
-    note.textContent = result?.detail ?? 'Not recorded by the scan.';
-    container.append(note);
+    container.append(unavailableNote(result?.detail ?? 'Not recorded by the scan.'));
     return;
   }
 
-  if (symbols.length === 0 && reExports.length === 0) {
-    const note = document.createElement('p');
-    note.className = 'unavailable';
-    note.textContent = 'No members declared.';
-    container.append(note);
+  if (memberCount === 0 && reExports.length === 0) {
+    container.append(unavailableNote('No members declared.'));
     return;
   }
 
-  const types = memberMap?.types ?? [];
+  const wired = memberMap?.dataFlow?.available === true;
+  if (types.length > 0 && !wired) {
+    const note = unavailableNote(
+      'Read/write counts are hidden: no method in this file references a field. Use from other files is not tracked.',
+    );
+    note.dataset.role = 'wiring-note';
+    container.append(note);
+  }
+
+  const context = {
+    wired,
+    defaultVisibility: DEFAULT_VISIBILITY[result.language] ?? null,
+    typeRefs: result.typeRefs ?? {},
+    file: result.file ?? memberMap?.file ?? '',
+    container,
+    handlers,
+  };
+
   if (types.length > 0) {
-    for (const type of types) {
-      container.append(renderMemberType(type));
+    const open = types.length <= COLLAPSE_ABOVE_TYPES;
+    types.forEach((type, index) => {
+      container.append(renderMemberType(type, context, open || index === 0));
+    });
+    if (memberCount > FIND_ABOVE_MEMBERS) {
+      header.append(memberFind(container));
     }
   } else if (symbols.length > 0) {
     const list = document.createElement('ul');
@@ -119,65 +171,261 @@ export function renderMembers(container, result) {  container.replaceChildren();
 }
 
 
-function renderMemberType(type) {
-  const section = document.createElement('section');
-  section.className = 'member-type';
-  const title = document.createElement('h4');
-  title.className = 'member-type-name';
-  title.textContent = type.name;
-  section.append(title);
+/** A find box that hides member rows (and whole types) whose name does not match. */
+function memberFind(container) {
+  const input = document.createElement('input');
+  input.type = 'search';
+  input.className = 'members-find';
+  input.placeholder = 'Find member';
+  input.setAttribute('aria-label', 'Find member');
+  input.addEventListener('input', () => {
+    const query = input.value.trim().toLowerCase();
+    for (const block of container.querySelectorAll('details.member-type')) {
+      let hits = 0;
+      for (const row of block.querySelectorAll('.member-row')) {
+        const hit = !query || row.dataset.member.toLowerCase().includes(query);
+        row.hidden = !hit;
+        if (hit) hits += 1;
+      }
+      block.hidden = Boolean(query) && hits === 0;
+      if (query && hits > 0) block.open = true;
+    }
+  });
+  return input;
+}
 
-  const superTypeLine = buildSuperTypeLine(type);
-  if (superTypeLine) {
-    section.append(superTypeLine);
+
+function renderMemberType(type, context, open) {
+  const section = document.createElement('details');
+  section.className = 'member-type';
+  section.dataset.type = type.name;
+  section.open = open;
+
+  const summary = document.createElement('summary');
+  const name = document.createElement('span');
+  name.className = 'member-type-name';
+  name.textContent = type.name;
+  summary.append(name);
+  if (type.declaration) {
+    const chip = document.createElement('span');
+    chip.className = `decl-chip decl-${type.declaration.split(' ').at(-1).replace(/\W/g, '')}`;
+    chip.textContent = type.declaration;
+    summary.append(chip);
+  }
+  const visibility = visibilityBadge(type.visibility, context.defaultVisibility);
+  if (visibility) summary.append(visibility);
+  const count = document.createElement('span');
+  count.className = 'member-count';
+  const countParts = [];
+  if (type.fields.length > 0) countParts.push(`${type.fields.length} field(s)`);
+  if (type.methods.length > 0) countParts.push(`${type.methods.length} method(s)`);
+  count.textContent = countParts.join(' · ') || 'no members';
+  summary.append(count);
+  if (Number.isFinite(type.line)) {
+    summary.title = `${type.name}, line ${type.line}`;
+  }
+  section.append(summary);
+
+  const superTypes = type.superTypes ?? [];
+  if (superTypes.length > 0) {
+    const line = document.createElement('p');
+    line.className = 'member-supertypes';
+    for (const relation of ['extends', 'implements']) {
+      const names = superTypes.filter((entry) => entry.relation === relation);
+      if (names.length === 0) continue;
+      line.append(tokenSpan('tok-kw', `${relation} `));
+      names.forEach((entry, index) => {
+        if (index > 0) line.append(', ');
+        line.append(typeToken(entry.name, context));
+      });
+      line.append(' ');
+    }
+    section.append(line);
   }
 
   if (type.fields.length > 0) {
-    const heading = document.createElement('h5');
-    heading.textContent = `Fields (${type.fields.length})`;
-    section.append(heading);
+    section.append(memberHeading(`Fields (${type.fields.length})`));
     const list = document.createElement('ul');
-    list.className = 'member-fields';
+    list.className = 'member-fields member-grid';
     for (const field of type.fields) {
-      const item = document.createElement('li');
-      item.className = 'member-field';
-      const kind = field.mutable === false ? 'val' : 'var';
-      item.textContent = `${field.visibility} ${kind} ${field.name}: ${field.type ?? 'unrecorded type'}`;
-      item.append(wiring(`reads ${field.reads} · writes ${field.writes}`));
-      list.append(item);
+      list.append(fieldRow(field, context));
     }
     section.append(list);
   }
 
   if (type.methods.length > 0) {
-    const heading = document.createElement('h5');
-    heading.textContent = `Methods (${type.methods.length})`;
-    section.append(heading);
+    section.append(memberHeading(`Methods (${type.methods.length})`));
     const list = document.createElement('ul');
-    list.className = 'member-methods';
+    list.className = 'member-methods member-grid';
     for (const method of type.methods) {
-      const item = document.createElement('li');
-      item.className = 'member-method';
-      const returns = method.type ? `: ${method.type}` : '';
-      item.textContent = `${method.visibility} fun ${method.name}(${method.parameters ?? 0})${returns}`;
-      if (method.reads.length > 0 || method.writes.length > 0) {
-        item.append(
-          wiring(`reads ${method.reads.join(', ') || 'none'} · writes ${method.writes.join(', ') || 'none'}`),
-        );
-      }
-      list.append(item);
+      list.append(methodRow(method, context));
     }
     section.append(list);
   }
 
   if (type.fields.length === 0 && type.methods.length === 0) {
-    const note = document.createElement('p');
-    note.className = 'unavailable';
-    note.textContent = 'No members declared.';
-    section.append(note);
+    section.append(unavailableNote('No members declared.'));
   }
 
   return section;
+}
+
+
+function memberHeading(text) {
+  const heading = document.createElement('h5');
+  heading.textContent = text;
+  return heading;
+}
+
+
+/** A field as `[visibility] val name : Type   wiring`, one grid row. */
+function fieldRow(field, context) {
+  const item = memberRow('member-field', field, context);
+  const keyword = field.mutable === false ? 'val' : 'var';
+  const head = item.querySelector('.member-head');
+  head.append(tokenSpan(field.mutable === false ? 'tok-kw' : 'tok-kw tok-mutable', `${keyword} `));
+  if (field.mutable !== false) {
+    head.lastChild.title = 'Mutable: this field can be reassigned';
+  }
+  item.append(tokenSpan('tok-name', field.name));
+  const type = document.createElement('span');
+  type.className = 'member-sig';
+  type.append(tokenSpan('tok-punct', ': '));
+  type.append(field.type ? typeToken(field.type, context) : tokenSpan('tok-missing', 'unrecorded type'));
+  if (field.declaredIn) {
+    const from = tokenSpan('member-declared-in', ` from ${field.declaredIn}`);
+    type.append(from);
+  }
+  type.title = `${field.name}${type.textContent}`;
+  item.append(type);
+
+  const wiring = document.createElement('span');
+  wiring.className = 'member-wiring';
+  if (context.wired) {
+    if (field.reads === 0 && field.writes === 0) {
+      const quiet = tokenSpan('wire-pill wire-none', 'untouched here');
+      quiet.title = 'No method in this file reads or writes this field. Other files may.';
+      wiring.append(quiet);
+    } else {
+      if (field.reads > 0) {
+        wiring.append(wirePill('read', `R ${field.reads}`, `Read by ${field.reads} method(s) in this file`));
+      }
+      if (field.writes > 0) {
+        wiring.append(wirePill('write', `W ${field.writes}`, `Written by ${field.writes} method(s) in this file`));
+      }
+    }
+  }
+  item.append(wiring);
+  return item;
+}
+
+
+/** A method as `[visibility] fun name(n) : Return   reads … writes …`, one grid row. */
+function methodRow(method, context) {
+  const item = memberRow('member-method', method, context);
+  item.querySelector('.member-head').append(tokenSpan('tok-kw', 'fun '));
+  item.append(tokenSpan('tok-name tok-fn', method.name));
+  const signature = document.createElement('span');
+  signature.className = 'member-sig';
+  const parameters = method.parameters ?? 0;
+  const params = tokenSpan('tok-punct', `(${parameters})`);
+  params.title = `${parameters} parameter(s)`;
+  signature.append(params);
+  if (method.type) {
+    signature.append(tokenSpan('tok-punct', ': '));
+    signature.append(typeToken(method.type, context));
+  }
+  signature.title = `${method.name}${signature.textContent}`;
+  item.append(signature);
+
+  const wiring = document.createElement('span');
+  wiring.className = 'member-wiring';
+  if (method.reads.length > 0) {
+    wiring.append(wirePill('read', `reads ${method.reads.join(', ')}`, 'Fields this method reads'));
+  }
+  if (method.writes.length > 0) {
+    wiring.append(wirePill('write', `writes ${method.writes.join(', ')}`, 'Fields this method writes'));
+  }
+  item.append(wiring);
+  return item;
+}
+
+
+/** The shared row shell: a head cell holding the visibility badge, ready for the keyword. */
+function memberRow(className, member, context) {
+  const item = document.createElement('li');
+  item.className = `${className} member-row`;
+  item.dataset.member = member.name;
+  if (Number.isFinite(member.line)) {
+    item.title = `${member.visibility} · line ${member.line}`;
+  }
+  const head = document.createElement('span');
+  head.className = 'member-head';
+  const badge = visibilityBadge(member.visibility, context.defaultVisibility);
+  if (badge) head.append(badge);
+  item.append(head);
+  return item;
+}
+
+
+/** A visibility badge, or null when the member has the language's default visibility. */
+function visibilityBadge(visibility, defaultVisibility) {
+  if (!visibility || visibility === 'not recorded' || visibility === defaultVisibility) {
+    return null;
+  }
+  // `public` is drawn only where it is not the default (Java, C#, Rust), so it still stands out.
+  const badge = tokenSpan(`vis-badge vis-${visibility.replace(/\W/g, '')}`, `${visibility} `);
+  badge.title = `Visibility: ${visibility}`;
+  return badge;
+}
+
+
+function wirePill(kind, text, title) {
+  const pill = tokenSpan(`wire-pill wire-${kind}`, text);
+  pill.title = title;
+  return pill;
+}
+
+
+/** A type name: a link when the scan tied it to a declaring file, plain text otherwise. */
+function typeToken(name, context) {
+  const ref = context.typeRefs[name];
+  if (!ref) {
+    return tokenSpan('tok-type', name);
+  }
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'tok-type type-link';
+  link.textContent = name;
+  link.dataset.typeFile = ref.file;
+  link.title = `${ref.file} (${TYPE_REF_BASIS[ref.basis] ?? ref.basis})`;
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    if (ref.basis === 'this-file') {
+      const block = [...context.container.querySelectorAll('details.member-type')].find(
+        (candidate) => candidate.dataset.type.split('.').at(-1) === name,
+      );
+      if (block) {
+        block.hidden = false;
+        block.open = true;
+        block.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+        block.classList.remove('flash');
+        void block.offsetWidth;
+        block.classList.add('flash');
+      }
+      return;
+    }
+    context.handlers.onOpenType?.(ref.file, name);
+  });
+  return link;
+}
+
+
+function tokenSpan(className, text) {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = text;
+  return span;
 }
 
 

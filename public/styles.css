@@ -2006,27 +2006,94 @@ body.screen-off-graph .float-window {
   color: var(--accent-ink);
 }
 
+/* The map's reading key: grouped rows of `mark symbol = meaning`, drawn in the map's tokens. */
 .legend-guide {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-bottom: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 4px 16px;
   color: var(--ink-1);
 }
 
-.legend-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  margin-right: 5px;
-  vertical-align: baseline;
+.legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  margin-bottom: 6px;
 }
 
-.legend-shape {
-  display: inline-block;
-  margin-right: 5px;
-  color: var(--accent);
+.legend-heading {
+  margin: 0 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: var(--text-sm);
+  cursor: default;
+}
+
+.legend-item[title]:hover {
+  background: var(--wash);
+}
+
+.legend-term {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.legend-symbol {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+.legend-meaning {
+  color: var(--ink-3);
+}
+
+.legend-mark {
+  flex: none;
+  width: 24px;
+  height: 14px;
+  overflow: visible;
+}
+
+.legend-mark .lm-node { fill: var(--node-fill); stroke: var(--node-line); stroke-width: 1; }
+.legend-mark .lm-accent { fill: var(--accent); }
+.legend-mark .lm-hub { fill: color-mix(in srgb, var(--accent) 35%, var(--node-fill)); }
+.legend-mark .lm-island { fill: var(--island-fill); stroke: var(--island-line); stroke-dasharray: 2 1.5; }
+.legend-mark .lm-shelf { fill: var(--wash); stroke: var(--hairline); }
+.legend-mark .lm-ring { fill: none; stroke: var(--accent); stroke-width: 1.2; }
+.legend-mark .lm-ring-thick { stroke: var(--graph-hub); stroke-width: 2.2; }
+.legend-mark .lm-halo { fill: color-mix(in srgb, var(--graph-affected) 30%, transparent); stroke: var(--graph-affected); }
+.legend-mark .lm-badge { fill: var(--accent-soft); stroke: var(--accent); }
+.legend-mark .lm-port-read { fill: var(--accent); }
+.legend-mark .lm-port-write { fill: var(--status-warning); }
+.legend-mark .lm-tier { fill: color-mix(in srgb, var(--lm-tier) 70%, transparent); stroke: var(--lm-tier); }
+
+.legend-mark .lm-edge { stroke: var(--graph-edge-accent); stroke-width: 1.6; fill: none; }
+.legend-mark .lm-edge.lm-head { fill: var(--graph-edge-accent); stroke: none; }
+.legend-mark .lm-bad { stroke: var(--graph-cycle); }
+.legend-mark .lm-bad.lm-head { fill: var(--graph-cycle); }
+.legend-mark .lm-warn { stroke: var(--graph-affected); }
+.legend-mark .lm-faded { opacity: 0.35; }
+.legend-mark .lm-heavy { stroke-width: 3; }
+
+/* What the view could not draw, named rather than hidden. */
+.legend-notes {
+  margin: 4px 0 0;
+  padding: 6px 0 0 16px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--status-warning);
+  font-size: var(--text-xs);
 }
 
 .passport-path {
@@ -2142,6 +2209,306 @@ body.screen-off-graph .float-window {
   font-size: 11px;
 }
 
+
+/* ---------------------------------------------------------------- passport header */
+
+.passport-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.passport-path {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.crumb-sep {
+  color: var(--ink-3);
+  opacity: 0.6;
+}
+
+.crumb-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+}
+
+.crumb-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+/* The facts a file read returns, in place of graph metrics a view without the file lacks. */
+.passport-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+
+.fact-chip {
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-0);
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.fact-chip.fact-language {
+  color: var(--syntax-type);
+  border-color: color-mix(in srgb, var(--syntax-type) 40%, var(--line));
+}
+
+.fact-chip.fact-offmap {
+  border-style: dashed;
+  color: var(--ink-3);
+}
+
+.fact-chip.fact-pending,
+.fact-chip.fact-muted {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.fact-chip.fact-good { color: var(--status-good); border-color: color-mix(in srgb, var(--status-good) 45%, var(--line)); }
+.fact-chip.fact-warning { color: var(--status-warning); border-color: color-mix(in srgb, var(--status-warning) 45%, var(--line)); }
+.fact-chip.fact-critical { color: var(--status-critical); border-color: color-mix(in srgb, var(--status-critical) 45%, var(--line)); }
+
+/* Passport tab counts: what a tab holds before it is opened; a zero reads as empty. */
+.tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--wash);
+  color: var(--ink-2);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab-count.is-zero {
+  opacity: 0.45;
+}
+
+.tab-count.tone-good { color: var(--status-good); }
+.tab-count.tone-warning { color: var(--status-warning); }
+.tab-count.tone-critical { color: var(--status-critical); }
+
+/* ---------------------------------------------------------------- members tab */
+
+.members-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.members-find {
+  max-width: 200px;
+  padding: 3px 8px;
+  font-size: var(--text-xs);
+}
+
+details.member-type {
+  margin-top: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-s);
+  background: color-mix(in srgb, var(--bg-0) 45%, transparent);
+}
+
+details.member-type.flash {
+  animation: member-type-flash 1.2s ease-out;
+}
+
+@keyframes member-type-flash {
+  from { box-shadow: 0 0 0 2px var(--accent); }
+  to { box-shadow: 0 0 0 2px transparent; }
+}
+
+details.member-type > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+details.member-type > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.member-type > summary::before {
+  content: '▸';
+  color: var(--ink-3);
+  font-size: 10px;
+  transition: transform 0.12s;
+}
+
+details.member-type[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+details.member-type > summary .member-type-name {
+  display: inline;
+  margin: 0;
+  color: var(--syntax-type);
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+
+details.member-type > :not(summary) {
+  margin-left: 10px;
+  margin-right: 10px;
+}
+
+details.member-type > :last-child {
+  margin-bottom: 8px;
+}
+
+.decl-chip {
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--syntax-keyword) 45%, var(--line));
+  border-radius: 999px;
+  color: var(--syntax-keyword);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.decl-chip.decl-interface,
+.decl-chip.decl-type { color: var(--syntax-function); border-color: color-mix(in srgb, var(--syntax-function) 45%, var(--line)); }
+.decl-chip.decl-enum { color: var(--syntax-number); border-color: color-mix(in srgb, var(--syntax-number) 45%, var(--line)); }
+.decl-chip.decl-object { color: var(--syntax-meta); border-color: color-mix(in srgb, var(--syntax-meta) 45%, var(--line)); }
+
+details.member-type .member-supertypes {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+/* Members as aligned columns: [visibility keyword] name : Type   wiring. */
+.member-grid {
+  display: grid;
+  /* The signature keeps one line and gives way (ellipsis) before the wiring pills do. */
+  grid-template-columns: max-content max-content minmax(0, max-content) 1fr;
+  column-gap: 4px;
+  row-gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.member-grid > .member-row {
+  display: contents;
+}
+
+.member-grid > .member-row[hidden] {
+  display: none;
+}
+
+.member-grid > .member-row > * {
+  padding: 2px 0;
+  align-self: baseline;
+}
+
+.member-grid > .member-row:hover > * {
+  background: var(--wash);
+}
+
+.member-head {
+  text-align: right;
+  white-space: nowrap;
+  padding-left: 4px !important;
+}
+
+.member-sig {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-wiring {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding-right: 4px !important;
+  font-family: var(--font-ui);
+}
+
+.tok-kw { color: var(--syntax-keyword); }
+.tok-kw.tok-mutable { color: var(--status-warning); font-weight: 600; }
+.tok-name { color: var(--ink-1); font-weight: 600; }
+.tok-name.tok-fn { color: var(--syntax-function); }
+.tok-punct { color: var(--ink-3); }
+.tok-type { color: var(--syntax-type); }
+.tok-missing { color: var(--ink-3); font-style: italic; font-family: var(--font-ui); font-size: var(--text-xs); }
+
+.type-link {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  font: inherit;
+  color: var(--syntax-type);
+  text-decoration: underline dotted color-mix(in srgb, var(--syntax-type) 60%, transparent);
+  text-underline-offset: 3px;
+}
+
+.type-link:hover:not(:disabled) {
+  color: var(--syntax-type);
+  text-decoration-style: solid;
+}
+
+.type-link::after {
+  content: '↗';
+  margin-left: 1px;
+  font-size: 0.8em;
+  opacity: 0.6;
+}
+
+.member-declared-in {
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}
+
+.vis-badge {
+  margin-right: 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--ink-2);
+  background: var(--wash);
+}
+
+.vis-badge.vis-private { color: var(--status-serious); background: color-mix(in srgb, var(--status-serious) 12%, transparent); }
+.vis-badge.vis-protected { color: var(--status-warning); background: color-mix(in srgb, var(--status-warning) 12%, transparent); }
+.vis-badge.vis-internal { color: var(--syntax-meta); background: color-mix(in srgb, var(--syntax-meta) 12%, transparent); }
+.vis-badge.vis-public { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 12%, transparent); }
+
+/* Recorded wiring, in the same blue/amber as the member map's flow diagram. */
+.wire-pill {
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.wire-pill.wire-read { color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.wire-pill.wire-write { color: var(--status-warning); background: color-mix(in srgb, var(--status-warning) 15%, transparent); }
+.wire-pill.wire-none { color: var(--ink-3); opacity: 0.7; }
 .function-name {
   font-weight: 600;
 }
