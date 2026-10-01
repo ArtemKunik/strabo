@@ -63,6 +63,9 @@ export function createViewPrefs(app) {
       if (parsed.structureDirection === 'horizontal' || parsed.structureDirection === 'vertical') {
         prefs.structureDirection = parsed.structureDirection;
       }
+      if (parsed.structureFlow === 'data' || parsed.structureFlow === 'imports') {
+        prefs.structureFlow = parsed.structureFlow;
+      }
       return prefs;
     } catch {
       return null;
@@ -83,6 +86,7 @@ export function createViewPrefs(app) {
           tier: state.tier,
           structureGrid: state.structureGrid,
           structureDirection: state.structureDirection,
+          structureFlow: state.structureFlow,
         }),
       );
     } catch {
@@ -152,6 +156,9 @@ export function createViewPrefs(app) {
     }
     if (prefs.structureDirection && state.mode === 'structure') {
       state.structureDirection = prefs.structureDirection;
+    }
+    if (prefs.structureFlow && state.mode === 'structure') {
+      state.structureFlow = prefs.structureFlow;
     }
   }
 

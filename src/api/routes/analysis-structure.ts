@@ -6,6 +6,7 @@ import { computeRepositoryPassport } from '../../analysis/passport.ts';
 import { computeReadingRoute } from '../../analysis/route.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
+import { buildTierDataFlow } from '../../analysis/tiers/data-flow.ts';
 import { assignDeclaredTier } from '../../analysis/tiers/declared.ts';
 import { computeCycles } from '../../analysis/cycles.ts';
 import { analyzeModuleDepth } from '../../analysis/depth.ts';
@@ -256,6 +257,24 @@ export function createStructureRouter(context: AnalysisContext): Router {
         intraByTier: report.tierFlow.intraByTier,
         intraRatio: report.tierFlow.intraRatio,
       });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * The data-flow reading of the Structure view (Phase 37): the recorded reads and writes that
+   * route through data hubs between role tiers, plus dataset lineage and contract health.
+   */
+  router.get('/analysis/tiers/data-flow', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      const report = buildTierReport(repository.root, repository.name, cached.report.graph);
+      const data = await analyzeRepository(repository.name, repository.root, {
+        qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
+      });
+      response.json(buildTierDataFlow(report, data, { repository: repository.name }));
     } catch (error) {
       sendError(response, error);
     }

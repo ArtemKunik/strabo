@@ -6,7 +6,9 @@ import { after, test } from 'node:test';
 import express from 'express';
 
 import { buildTierReport } from '../../src/analysis/tiers.ts';
+import { buildTierDataFlow } from '../../src/analysis/tiers/data-flow.ts';
 import { createStraboRouter, scanRepository } from '../../src/index.ts';
+import type { DataReport } from '../../src/types.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
 import {
   buildStructureCellViewModel,
@@ -32,6 +34,54 @@ function listen(app: express.Express): Promise<string> {
     });
   });
 }
+
+test('buildStructureViewModel draws hubs and flow edges in the data-flow reading (Phase 37)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  const writer = report.files.find((file) => file.tier === 'data');
+  const reader = report.files.find((file) => file.tier === 'api');
+  assert.ok(writer && reader);
+  const hub = 'db:structure-repo/users';
+  const data = {
+    datasets: [{ id: hub, kind: 'table', label: 'users', repository: 'structure-repo', strength: 'strong' }],
+    edges: [
+      { kind: 'writes', source: writer.file, target: hub, strength: 'strong', evidence: { repository: 'structure-repo', file: writer.file, line: 2 } },
+      { kind: 'reads', source: reader.file, target: hub, strength: 'strong', evidence: { repository: 'structure-repo', file: reader.file, line: 5 } },
+    ],
+    model: { entities: [], findings: [] },
+    contracts: [],
+    shapeTwins: [],
+    events: [],
+    eventContracts: [],
+    products: [],
+    candidates: [],
+    conformance: [],
+    lineage: [],
+    classifications: [],
+    catalogs: [],
+    dbt: [],
+    summary: { datasets: 1, tables: 1, topics: 0, contracts: 0, products: 0, candidates: 0, conformance: 0, lineage: 0, modeled: true },
+    unavailable: [],
+  } as unknown as DataReport;
+
+  const flow = buildTierDataFlow(report, data, { repository: 'structure-repo' });
+  const model = buildStructureViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { dataFlow: flow },
+  );
+
+  assert.equal(model.structureFlow, 'data');
+  const hubNode = model.nodes.find((node) => node.id === hub);
+  assert.equal(hubNode?.kind, 'dataset');
+  assert.equal(hubNode?.dataKind, 'table');
+  assert.ok(model.edges.some((edge) => edge.flowKind === 'writes' && edge.source === 'data' && edge.target === hub));
+  assert.ok(model.edges.some((edge) => edge.flowKind === 'reads' && edge.source === hub && edge.target === 'api'));
+  // The import reading is not drawn alongside it.
+  assert.ok(model.edges.every((edge) => edge.flowKind));
+  assert.equal(model.structureDataFlow?.crossTier, 1);
+});
 
 test('buildStructureViewModel draws bands in rank order and shelves the support tiers (Y3)', async () => {
   const { graph } = await scanRepository(root);
@@ -198,6 +248,47 @@ test('GET /graph?structure=1&level=grid serves the unit × tier grid', async () 
   assert.equal(model.structureLevel, 'grid');
   assert.deepEqual(model.structureGrid?.units.map((unit) => unit.name), ['orders-api', 'web']);
   assert.equal(model.nodes.some((node) => node.unit === 'web'), true);
+});
+
+test('GET /graph?structure=1&flow=data serves the data-flow reading (Phase 37)', async () => {
+  const host = express();
+  host.use(express.json());
+  host.use(
+    '/api/strabo',
+    createStraboRouter(
+      { workspaceRoot: root, scanCeiling: root },
+      undefined,
+      createSettingsStore({ file: path.join(root, 'settings.json') }),
+    ),
+  );
+  const base = await listen(host);
+
+  const response = await fetch(`${base}/api/strabo/graph?structure=1&flow=data`);
+  assert.equal(response.status, 200);
+  const model = (await response.json()) as {
+    structure?: boolean;
+    structureFlow?: string;
+    structureDataFlow?: { hubs: number; reads: number; writes: number };
+    nodes: Array<{ id: string; kind: string }>;
+  };
+  assert.equal(model.structure, true);
+  assert.equal(model.structureFlow, 'data');
+  assert.ok(model.structureDataFlow);
+  // The tier bands stay; hubs appear only when the fixture records data use.
+  assert.equal(model.nodes.some((node) => node.kind === 'tier'), true);
+
+  const flowResponse = await fetch(`${base}/api/strabo/analysis/tiers/data-flow`);
+  assert.equal(flowResponse.status, 200);
+  const flow = (await flowResponse.json()) as {
+    repository?: string;
+    hubs: unknown[];
+    edges: unknown[];
+    summary?: { hubs: number };
+  };
+  assert.equal(flow.repository, 'structure-repo');
+  assert.ok(Array.isArray(flow.hubs));
+  assert.ok(Array.isArray(flow.edges));
+  assert.ok(flow.summary);
 });
 
 test('GET /graph?structure=1 serves the role-tier structure', async () => {

@@ -33,6 +33,9 @@ export const SHAPES = {
   // axis header (a unit column or tier row) is a bare label.
   tier: 'round-rectangle',
   axis: 'round-rectangle',
+  // A Structure data-flow hub (Phase 37): a dataset/topic the stack routes through, drawn as
+  // a distinct rounded shape so it never reads as a role band.
+  dataset: 'ellipse',
 };
 
 /**
@@ -94,6 +97,15 @@ function structureEdgeText(edge) {
     return typeOnly >= weight ? `${base} · types only` : `${base} · ${typeOnly} type-only`;
   }
   return base;
+}
+
+/**
+ * A Phase 37 data-flow edge's label: the recorded access and how many sites it rolls up.
+ * Read/write is the one distinction the drawing must never blur, so it is named in words.
+ */
+function flowEdgeLabel(edge) {
+  const weight = typeof edge.weight === 'number' && edge.weight > 0 ? edge.weight : null;
+  return weight ? `${edge.flowKind} ${weight}` : edge.flowKind;
 }
 
 function structureEdgeBase(edge, weight) {
@@ -223,6 +235,9 @@ export function buildElements(model) {
         sideLabelled(model, node) ? 'structure-label-side' : '',
         model.structureLevel === 'grid' && (node.kind === 'tier' || node.kind === 'shelf') ? 'structure-grid-cell' : '',
         model.structure && node.tier ? `tier-${node.tier}` : '',
+        model.structure && node.dataKind ? 'structure-hub' : '',
+        node.dataKind ? `data-${node.dataKind}` : '',
+        node.dataGoverned === true ? 'data-governed' : '',
       ]
         .filter(Boolean)
         .join(' '),
@@ -245,6 +260,8 @@ export function buildElements(model) {
         fileShare: typeof node.fileShare === 'number' ? node.fileShare : null,
         locDiameter: locDiameter(node.lines),
         hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
+        dataKind: node.dataKind,
+        dataGoverned: node.dataGoverned === true,
       },
       position: positionOf(positions.get(node.id)),
     };
@@ -270,6 +287,13 @@ export function buildElements(model) {
         ? 'edge-wrong-way-grew'
         : '',
       model.structure && (edge.weight ?? 0) > 0 && (edge.typeOnlyCount ?? 0) >= edge.weight ? 'edge-type-only' : '',
+      // Phase 37 data-flow reading: the access kind names the class, so read (dashed) and
+      // write (solid) never blur, and a governed/drifting hub edge takes its own tone.
+      edge.flowKind ? 'edge-flow' : '',
+      edge.flowKind ? `edge-flow-${edge.flowKind}` : '',
+      edge.flowGoverned === true ? 'edge-flow-governed' : '',
+      edge.flowConformance === 'drifting' ? 'edge-flow-drifting' : '',
+      edge.flowConformance === 'unverified' ? 'edge-flow-unverified' : '',
     ]
       .filter(Boolean)
       .join(' '),
@@ -285,7 +309,7 @@ export function buildElements(model) {
       intended: edge.intended === true,
       violation: edge.violation === true,
       ruleId: edge.ruleId,
-      label: model.structure ? structureEdgeLabel(edge) : undefined,
+      label: model.structure ? (edge.flowKind ? flowEdgeLabel(edge) : structureEdgeLabel(edge)) : undefined,
       // How far a Structure stack edge bows off the spine (see `structureEdgeBends`).
       bend: bends ? bends[index] : 0,
       labelShift: labelShifts ? labelShifts[index] : 0,
@@ -300,6 +324,11 @@ export function buildElements(model) {
       // A co-change edge is drawn only in the off-by-default coupling lens, as a dashed
       // relationship; the true value keeps the lens able to hide it without dropping it.
       coChange: edge.coChange === true,
+      // Phase 37 data-flow reading: the access kind, its governance, and its evidence sites.
+      flowKind: edge.flowKind,
+      flowGoverned: edge.flowGoverned === true,
+      flowConformance: edge.flowConformance,
+      flowEvidence: edge.flowEvidence,
     },
   }));
 

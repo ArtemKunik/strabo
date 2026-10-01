@@ -114,6 +114,22 @@ export function readingLegend(model, locLens = false) {
       model,
     );
   }
+  if (model?.structure && model.structureFlow === 'data') {
+    // The data-flow reading (Phase 37): a hub is a dataset the stack routes through, and the
+    // solid/dashed distinction is named so read vs write never rests on hue alone.
+    return withStructureLimits(
+      [
+        'card = tier',
+        'ellipse = data hub',
+        'solid = writes',
+        'dashed = reads',
+        'dotted = lineage',
+        'double ring = governed',
+        'shelf = support tiers',
+      ],
+      model,
+    );
+  }
   if (model?.structure) {
     // The stack's edge styles each get a row: a wrong-way kind is told by line, not only hue.
     const baseline = model.structureBaseline?.available ? model.structureBaseline : null;
@@ -147,6 +163,12 @@ function withStructureLimits(lines, model) {
   const truncated = Number(model?.structureSummary?.truncated ?? 0);
   if (truncated > 0) {
     lines.push(`${truncated} file(s) beyond the scan ceiling, not read`);
+  }
+  // The data-flow reading names the facts it could not turn into edges (Phase 37 DF6):
+  // files with a data use but no tier, and hubs beyond the cap. Named, never hidden.
+  const diagnostics = Array.isArray(model?.structureDataFlowDiagnostics) ? model.structureDataFlowDiagnostics : [];
+  for (const diagnostic of diagnostics.slice(0, 2)) {
+    lines.push(diagnostic.detail);
   }
   return lines;
 }
@@ -213,9 +235,10 @@ export function graphSummary(model) {
   // A grid's axis headers are labels, not components, so they are not counted as nodes.
   const nodes = (model?.nodes ?? []).filter((node) => node.kind !== 'axis').length;
   const edges = (model?.edges ?? []).length;
+  const isDataFlow = Boolean(model?.structure && model.structureFlow === 'data');
   // A System L0 map is units, not files; the drill-down and the file map are nodes. Naming
   // the unit is what stops "45 nodes" reading as if the shelves were still peers.
-  const nodeWord = model?.structure
+  const nodeWord = model?.structure && !isDataFlow
     ? model.structureLevel === 'cell'
       ? nodes === 1
         ? 'file'
@@ -236,7 +259,24 @@ export function graphSummary(model) {
         : 'nodes';
   const edgeWord = edges === 1 ? 'edge' : 'edges';
   let summary = `${nodes} ${nodeWord} · ${edges} ${edgeWord}`;
-  if (model?.structure) {
+  if (isDataFlow) {
+    const tiers = (model.nodes ?? []).filter((node) => node.kind === 'tier' || node.kind === 'shelf').length;
+    const hubs = (model.nodes ?? []).filter((node) => node.kind === 'dataset').length;
+    const flow = model.structureDataFlow;
+    const bits = [
+      `${tiers} ${tiers === 1 ? 'tier' : 'tiers'}`,
+      `${hubs} ${hubs === 1 ? 'data hub' : 'data hubs'}`,
+      `${edges} ${edgeWord}`,
+    ];
+    if (flow) {
+      bits.push(`${flow.writes} writes · ${flow.reads} reads`);
+      if (flow.crossTier > 0) bits.push(`${flow.crossTier} cross-tier`);
+      if (flow.uncontracted > 0) bits.push(`${flow.uncontracted} uncontracted`);
+      if (flow.unclassified > 0) bits.push(`${flow.unclassified} unclassified`);
+    }
+    summary = bits.join(' · ');
+  }
+  if (model?.structure && !isDataFlow) {
     const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'upward' || e.violation);
     const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === 'skip-layer' && isWrongWayEdge(e));
     const upward = upwardEdges.length;

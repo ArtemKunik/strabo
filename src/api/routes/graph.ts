@@ -5,10 +5,13 @@ import { computeMeasuredCoverage } from '../../analysis/measured-coverage.ts';
 import { revisionBaseline } from '../../analysis/structural-diff.ts';
 import { buildSystemReport } from '../../analysis/system.ts';
 import { buildTierReport } from '../../analysis/tiers.ts';
+import { buildTierDataFlow } from '../../analysis/tiers/data-flow.ts';
 import { buildBlockLabels, buildDirectoryLabels } from '../../analysis/units.ts';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { CACHE_ARTIFACT_VERSION } from '../../cache/graph-cache.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
+import { analyzeRepository } from '../../workspace/analyze.ts';
+import { readWorkspaceConfig } from '../../workspace/config.ts';
 import { describeRepository } from '../../repository.ts';
 import type { ScanCacheMetadata, StraboConfig } from '../../types.ts';
 import {
@@ -108,8 +111,18 @@ export function createGraphRouter(config: StraboConfig): Router {
         // `since=<ref>`: read the stack against the graph at that revision, classified with
         // the same working-tree rules, so the deltas show what the change did to the layering.
         const since = asString(request.query.since);
+        // `flow=data`: draw the Phase 37 data-flow reading instead of imports — the recorded
+        // reads and writes routed through data hubs. It is opt-in and never mixes with imports.
+        const wantsDataFlow = asString(request.query.flow) === 'data' || asString(request.query.overlay) === 'data-flow';
+        let dataFlow: ReturnType<typeof buildTierDataFlow> | undefined;
+        if (wantsDataFlow) {
+          const data = await analyzeRepository(repository.name, repository.root, {
+            qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
+          });
+          dataFlow = buildTierDataFlow(report, data, { repository: repository.name });
+        }
         let baseline: StructureViewOptions['baseline'];
-        if (since) {
+        if (since && !dataFlow) {
           const base = await revisionBaseline(repository.root, since, repository.name);
           baseline = base.available
             ? { ...base, report: buildTierReport(repository.root, repository.name, base.graph) }
@@ -119,6 +132,7 @@ export function createGraphRouter(config: StraboConfig): Router {
           buildStructureViewModel(report, descriptor, cache, {
             direction: isHorizontal ? 'horizontal' : 'vertical',
             baseline,
+            dataFlow,
           }),
         );
         return;

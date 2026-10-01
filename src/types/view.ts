@@ -1,4 +1,12 @@
 import type { TierEndpointSite, TierIntentReport, TierSpine } from '../analysis/tiers/types.ts';
+import type {
+  TierDataFlowDiagnostic,
+  TierDataFlowEvidence,
+  TierDataFlowSummary,
+  TierFlowKind,
+  TierGovernance,
+} from '../analysis/tiers/data-flow.ts';
+import type { DataStrength, DatasetKind } from './data.ts';
 import type { Diagnostic, Exclusion, GraphEdge, GraphNode } from './graph.ts';
 import type { RepositoryDescriptor, ScanCacheMetadata } from './scan.ts';
 
@@ -48,6 +56,15 @@ export interface ViewNode extends GraphNode {
   internalImports?: number;
   /** In a Structure comparison, files gained (+) or lost (−) since the baseline. */
   filesDelta?: number;
+  /**
+   * In a Structure data-flow reading (Phase 37), the hub's dataset kind. Present makes the node
+   * a data hub the stack routes through rather than a role tier.
+   */
+  dataKind?: DatasetKind;
+  /** In a Structure data-flow reading, a recorded contract governs this hub. */
+  dataGoverned?: boolean;
+  /** In a Structure data-flow reading, the tier role of a hub that is the endpoint of a flow. */
+  dataTier?: string;
 }
 
 export interface ViewEdge extends GraphEdge {
@@ -92,6 +109,19 @@ export interface ViewEdge extends GraphEdge {
   typeOnlyCount?: number;
   /** In a Structure view, the rolled-up imports themselves (capped), for the edge panel. */
   tierImports?: Array<{ source: string; target: string; line: number; specifier: string; typeOnly?: boolean; allowed?: boolean }>;
+  /**
+   * In a Structure data-flow reading (Phase 37), the recorded flow the edge draws: a file
+   * reading or writing a data hub. Absent on an ordinary import edge.
+   */
+  flowKind?: TierFlowKind;
+  /** In a Structure data-flow reading, the strength of the recorded access. */
+  flowStrength?: DataStrength;
+  /** In a Structure data-flow reading, a contract governs the hub this edge touches. */
+  flowGoverned?: boolean;
+  /** In a Structure data-flow reading, the governed hub's contract health. */
+  flowConformance?: TierGovernance;
+  /** In a Structure data-flow reading, the recorded evidence sites behind the edge (capped). */
+  flowEvidence?: TierDataFlowEvidence[];
 }
 
 export interface ViewPosition {
@@ -241,6 +271,15 @@ export interface ViewModel {
   structureEndpoints?: TierEndpointSite[];
   /** Intended vs observed architecture facts (Phase 35 Y7). */
   structureIntent?: TierIntentReport;
+  /**
+   * In the Structure view, which edge reading is drawn: the recorded imports (default) or the
+   * Phase 37 data-flow reading (reads/writes routed through data hubs). Absent means `imports`.
+   */
+  structureFlow?: 'imports' | 'data';
+  /** In the data-flow reading, the reading's own numbers (Phase 37). */
+  structureDataFlow?: TierDataFlowSummary;
+  /** In the data-flow reading, facts the reading could not turn into edges (Phase 37). */
+  structureDataFlowDiagnostics?: TierDataFlowDiagnostic[];
   /**
    * In the Structure stack, the revision the deltas are read against (`?since=`), or why
    * it could not be read. Absent when no comparison was asked for.

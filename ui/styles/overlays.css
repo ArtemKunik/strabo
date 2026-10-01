@@ -310,6 +310,23 @@
   color: var(--ink-3);
 }
 
+/* The recorded sites behind a Phase 37 data-flow edge: each row opens the source at the
+   access it was read from. */
+.flow-evidence ul {
+  max-height: 260px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.flow-evidence li {
+  padding: 2px 0;
+  overflow-wrap: anywhere;
+}
+
+.flow-evidence-open {
+  font-family: var(--font-mono, monospace);
+}
+
 /* Unclassified files in the tier lens, each with an "Assign to…" menu. */
 .tier-unclassified ul {
   max-height: 240px;

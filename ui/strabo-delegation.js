@@ -130,6 +130,30 @@ export function createDelegation(app) {
         ],
       };
     }
+    // A Phase 37 data-flow edge rolls up the recorded reads/writes of a tier against a hub;
+    // carry the sites so the menu can list them and open each source at the access.
+    if (evidence.flowKind) {
+      const labelOf = (id) => app.current.nodes?.find((node) => node.id === id)?.label ?? id;
+      const sites = Array.isArray(evidence.flowEvidence) ? evidence.flowEvidence : [];
+      const access = evidence.flowKind;
+      return {
+        kind: 'edge',
+        id: edgeId,
+        label: `${labelOf(evidence.source)} → ${labelOf(evidence.target)}`,
+        summary: `${access}${sites.length > 0 ? ` · ${sites.length} recorded site${sites.length === 1 ? '' : 's'}` : ''}${
+          evidence.flowGoverned ? ' · governed' : ' · uncontracted'
+        }`,
+        flows: sites.map((site) => ({ source: site.file, line: site.line, target: site.detail, specifier: site.detail })),
+        flowCount: sites.length,
+        evidence: [
+          `relationship: data flow (${access})`,
+          evidence.flowGoverned
+            ? `contract: governed${evidence.flowConformance ? ` · ${evidence.flowConformance}` : ''}`
+            : 'contract: uncontracted (no recorded contract governs this hub)',
+          ...sites.slice(0, 20).map((site) => `${site.file}:${site.line} ${site.detail}`),
+        ],
+      };
+    }
     return {
       kind: 'edge',
       id: edgeId,

@@ -29,7 +29,7 @@ record is reported as `unavailable`, never invented.
 | 16 | Logical grouping (System view) and tier lens | Done (L0-L8: System view, labels, shelf, declared groups, narrator naming; tier lens L9-L13: classification, map mode, matrix panel, direction overlay, table/call trace; system drill-down L14-L17; unit cards and the single-unit case L18-L22) |
 | 17 | Module quality and change impact | Q1-Q9 done (`use`/`declare` edge roles; percentile scorecard; hunk → function mapping; public-surface diff + tiered impact; bounded git history; quantitative change impact; smell rules + smells overlay; pending-change risk and tests to run; the Change impact passport card) |
 | 18 | Scan and analysis performance | Done (P1-P7: benchmark harness, SCC + bitset reachability gated behind an estimated-work check, per-graph memoisation, worker-thread parse pool (opt-in), content-hash parse cache, bounded/cached git-history mining, and the P7 decision: no native core) |
-| 19 | Branches | B1 done (branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath); B2 (git write actions) removed |
+| 19 | Branches | Done (B1: branch list with upstream sync and base divergence; branch review with trial-merge conflicts and code moved underneath; B2 restored: fetch, pull, sync, push/publish, drop stale, merge-request URL, and the opt-in narrator commit, all guarded) |
 | 20 | Cross-repo and database compatibility | Done (D1-D5 backend and API; D6 Workspace panel sections for schema, gaps, table drift and code findings); the live probe is not pursued beyond this |
 | 21 | Gate: verification, provenance, benchmark | Done (G1 required CI including acceptance; G2 scans all nine supported languages from the tarball; G3 provenance audited and signed off; G4 synthetic 20k-file result and a real-git run committed) |
 | 22 | Correctness and trust | Done |
@@ -47,6 +47,7 @@ record is reported as `unavailable`, never invented.
 | 34 | Code coverage that tells | Done (U0-U7: dogfood report, one coverage source everywhere, a measured Coverage overlay with reachability fallback, honest reachability depth, changed-line coverage in review, risk from coverage, covering tests, and the agent/gate surface) |
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
+| 37 | Data-flow reading of the Structure view | DF1-DF3, DF5, DF6 landed (composition + `GET /analysis/tiers/data-flow`, the bands reading and its picker, the visual language, edge evidence + menus + MCP tool, honesty diagnostics); DF0 acceptance and DF4 grid/cell pending |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2491,6 +2492,111 @@ Slice order: **K0** first (failing acceptance fixture), then **K1** (the data ag
 and **K3** (the interactive canvas overlay and edge badges). **K4** extends change impact. **K5**
 builds the boundary projection. **K6** delivers the agent/CLI tools, and **K7** enforces honesty
 reporting.
+
+## Phase 37 - Data-flow reading of the Structure view
+
+The Structure view reads one edge vocabulary: imports, rolled up as `tier → tier` bands, the
+unit-by-tier grid, and the cell drill-down. It already carries role, direction, intent, and the
+end-to-end `call → endpoint → handler → table` spine. What it does not show is the *other* graph
+Strabo already records: data movement. Tables read and written, HTTP endpoints called, events
+produced and consumed, and the contracts that govern a boundary live in the Data layer (Phase 33)
+and the governed boundaries (Phase 36) as side panels and overlays, never on the stack. So an
+operator reading the stack cannot see where data enters and leaves each tier, or which cross-tier
+dependency is really a data dependency rather than an import.
+
+This phase adds a second reading of the same stack — **Data flows** — routing recorded flow edges
+through data hubs between tiers. It is a reading of the Structure view, not a new view: the tier
+nodes, the levels, and the import reading are untouched.
+
+Principles carry over unchanged:
+
+- **Evidence over speculation.** A flow edge exists only because a recorded SQL statement, ORM
+  access, OpenAPI declaration, event rule, or import into a contract file resolves a file to a
+  dataset, endpoint, topic, or contract. An unresolved binding is reported as unverified, never
+  drawn as an edge.
+- **Data flow is not runtime flow.** Extraction is static and lexical; a flow edge is recorded
+  reach, labelled as such, the same honesty the tier spine already carries (`FEATURES.md`
+  "End-to-end spine").
+- **One vocabulary of signal.** Read vs write, contracted vs uncontracted, and declared vs weak
+  reuse the Phase 13 status scale and the Phase 36 contract badges, never new uncoordinated hues.
+
+### Shapes
+
+A flow reading introduces two shapes on top of the existing Structure model, without changing the
+tier nodes:
+
+- **Data-hub nodes** (`kind: 'dataset' | 'topic' | 'endpoint' | 'contract'`). IDs reuse the Data
+  layer's own: `db:<repo>/<table>`, `topic:<t>` / `queue:<t>`, `METHOD /path`, and the contract
+  definition file. A hub is drawn only when some tier's files record a binding to it.
+- **Flow edges** (`flowKind: 'reads' | 'writes' | 'derives' | 'produces' | 'governs' | 'service' | 'event'`),
+  each carrying the evidence the Data layer already records (`file`, `line`, `specifier`, or a
+  declared source). Direction is always as recorded; an unknown direction draws no edge, matching
+  `buildModelEdges` (`src/analysis/data/model.ts`).
+
+### The reading by level
+
+| Structure level | Import reading today | Data-flow reading |
+| --- | --- | --- |
+| **Bands** (`GET /graph?structure=1`) | tier cards + import edges | the same tier cards, plus data-hub nodes floating between bands; edges `tier --writes--> hub --reads--> tier` |
+| **Grid** (`level=grid`) | `<unit>\|<tier>` cells + import edges | cells gain **data ports** (datasets/topics/endpoints produced or consumed); edges join two cells that share a dataset, a write on one side and a read on the other |
+| **Cell** (`level=cell`) | files + intra-cell imports | files with their `DataOverlay`/`CodeDataUse` (Phase 33) and their read/write edges to hubs; the existing `TierSpine` table lineage stays as the concrete call→…→table trace |
+
+### Slices
+
+- **DF0 (pending) - Acceptance fixture first.** `test/acceptance/features/structure-data-flow.feature` and a
+  fixture repository with a ranked tier stack plus one table written in `data` and read in `api`,
+  one HTTP endpoint declared in `api` and called from `integration`, and one event produced and
+  consumed across tiers. The scenario asserts the flow edges, the hub nodes, and the uncontracted
+  boundary; it fails until DF1 lands.
+- **DF1 (done) - Composition and endpoint.** `src/analysis/tiers/data-flow.ts` exports
+  `buildStructureDataFlow(root, graph, tierReport, data, contracts)`, joining the tier
+  classification with the Data layer's `DataReport` (`src/analysis/data/report.ts`), the product
+  level (`buildProductLevel`, `src/analysis/data/product-level.ts`), and the contract boundary
+  report (`buildContractBoundary`, `src/analysis/data/contracts-graph.ts`). It returns
+  `TierDataFlow { hubs, edges, uncontracted, unverified, summary }` where each edge is
+  `{ sourceTier, hub, targetTier, flowKind, strength, governed, conformance?, evidence[] }`.
+  Served beside the import flow at `GET /analysis/tiers/data-flow`
+  (`src/api/routes/analysis-structure.ts`, next to `/analysis/tiers/flow`), workspace-scoped so an
+  external dataset is never invented as in-repo.
+- **DF2 (done) - The bands reading.** Map `TierDataFlow` into the view model the way `tierImports` was
+  added to `ViewEdge` (`src/types/view.ts`, `src/view/view-model.ts` `buildStructureViewModel`):
+  hub nodes and flow edges. Add a **Reading: imports | data** control to the Structure toolbar
+  beside the Grid/Direction/Since toggles (`ui/strabo-graph-query.js`, `ui/strabo.js`), emitting
+  `flow=data`; imports stays the default so the reading is never a surprise. A legend branch
+  (`ui/strabo-graph-summary.js`) and a summary line (`N datasets · M writers · K readers · X uncontracted`).
+- **DF3 (done) - Visual language.** Read solid and write dashed (the one distinction that must never be
+  ambiguous), direction from the arrowhead; governed edges take the Phase 36 badges (📜 contract,
+  ⚡ event, ⚠️ uncontracted); an unverified name-only binding is dotted, mirroring `edge-ghost`;
+  `strength: declared | strong | weak` sets edge opacity. Classes registered in
+  `ui/strabo-graph-classes.js` and styled in `ui/strabo-stylesheet.js`, within the Phase 13
+  colour budget.
+- **DF4 (pending) - Grid and cell.** Per-cell data ports in `buildStructureGridViewModel`, shared-dataset
+  edges between cells, and the cell's files annotated from `DataOverlay`. Keep the import reading
+  available at every level; a combined mode draws both families with flow edges dashed and hubs
+  small, and is opt-in.
+- **DF5 (partial) - Evidence, menus, and surfaces.** A `renderDataFlowEvidence` sibling to
+  `renderTierImports` in `ui/strabo-panel-overlay.js`, listing `file:line → hub` with direction
+  and sorting the weakest evidence first. Right-click on a hub or flow edge offers "Show all N
+  reads/writes" and "Open source at line", reusing `ui/strabo-delegation.js` `flowMenuItems`.
+  Agent and headless surfaces: MCP `get_structure_data_flow` (next to `get_tier_flow`), a
+  Data-flow section in the repository report beside `RepositoryStructureSection`, and — when a
+  reviewed change touches a hub — the data blast radius from `computeDataImpact`
+  (`src/analysis/data/impact.ts`) shown on the stack.
+- **DF6 (done) - Honesty and limits.** Name what is not recorded: dynamic SQL and reflection-based ORM
+  access, runtime-created topics and queues, endpoints called through a variable host, and
+  name-only contract matches (`unverifiedEdges`). Every such case is a diagnostic on the reading,
+  not an edge. A flow edge is labelled **recorded reach, never runtime data flow**.
+
+Slice order: **DF0** first (the failing acceptance fixture), then **DF1** (the composition and
+endpoint), then **DF2** and **DF3** (the bands reading and its visual language). **DF4** extends
+the grid and cell levels, **DF5** adds evidence, menus, and the agent/headless surfaces, and
+**DF6** enforces honesty reporting. Scope starts single-repo; the workspace extends hubs across
+repositories without a new perspective.
+
+Landed so far: **DF1-DF3, DF5 (edge evidence, menus, and the MCP tool), and DF6**, with unit
+coverage in `test/unit/tier-data-flow.test.ts` and the fixture-backed case in
+`test/unit/structure.test.ts`. Still pending: **DF0** (the browser acceptance scenario) and
+**DF4** (grid and cell), and the report section named in DF5.
 
 ## Reading route (landed)
 

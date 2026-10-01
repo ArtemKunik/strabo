@@ -116,6 +116,19 @@ export type {
   TierDirection,
   TableReference,
 } from './analysis/tiers.ts';
+export { buildTierDataFlow, hubLabelOf } from './analysis/tiers/data-flow.ts';
+export type {
+  TierDataFlow,
+  TierDataFlowEdge,
+  TierDataFlowEvidence,
+  TierDataFlowPair,
+  TierDataFlowSummary,
+  TierDataFlowDiagnostic,
+  TierDataFlowDiagnosticKind,
+  TierDataHub,
+  TierFlowKind,
+  TierGovernance,
+} from './analysis/tiers/data-flow.ts';
 export type {
   SystemReport,
   SystemNode,

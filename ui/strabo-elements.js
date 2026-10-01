@@ -9,6 +9,8 @@ export function queryElements(doc = document) {
     detail: doc.getElementById('detail'),
     structureDirection: doc.getElementById('structure-direction'),
     structureDirectionField: doc.getElementById('field-structure-direction'),
+    structureFlow: doc.getElementById('structure-flow'),
+    structureFlowField: doc.getElementById('field-structure-flow'),
     structureSince: doc.getElementById('structure-since'),
     structureSinceField: doc.getElementById('field-structure-since'),
     refresh: doc.getElementById('refresh'),

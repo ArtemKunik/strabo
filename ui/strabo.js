@@ -118,6 +118,8 @@ const store = createStore({
     structureGrid: false,
     /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
     structureDirection: 'vertical',
+    /** In Structure mode, which edge reading the stack draws: imports (default) or data flows. */
+    structureFlow: 'imports',
     // The revision the Structure stack is compared with (`?since=`), or null for none.
     structureSince: null,
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
@@ -322,6 +324,9 @@ async function scan({ refresh = false } = {}) {
       if (model.structureDirection) {
         state.structureDirection = model.structureDirection;
       }
+      if (model.structureFlow) {
+        state.structureFlow = model.structureFlow;
+      }
     }
     store.set('ui', { node: null });
     view.render(model);
@@ -525,6 +530,18 @@ function applyModeChrome() {
     elements.structureSinceField.hidden =
       state.mode !== 'structure' || state.structureGrid || Boolean(state.structureCell);
   }
+  // The Reading picker belongs to the stack bands: the grid, a cell, and a comparison have
+  // only the import reading, so it is hidden there.
+  if (elements.structureFlowField) {
+    elements.structureFlowField.hidden =
+      state.mode !== 'structure' ||
+      state.structureGrid ||
+      Boolean(state.structureCell) ||
+      Boolean(state.structureSince);
+  }
+  if (elements.structureFlow) {
+    elements.structureFlow.value = state.structureFlow ?? 'imports';
+  }
   if (elements.structureSince) {
     const since = state.structureSince ?? '';
     // A ref from the URL that the menu does not list gets its own option, so it shows.
@@ -652,6 +669,14 @@ if (elements.structureSince) {
   elements.structureSince.addEventListener('change', () => {
     state.structureSince = elements.structureSince.value || null;
     applyModeChrome();
+    scan();
+  });
+}
+if (elements.structureFlow) {
+  elements.structureFlow.addEventListener('change', () => {
+    state.structureFlow = elements.structureFlow.value === 'data' ? 'data' : 'imports';
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
     scan();
   });
 }

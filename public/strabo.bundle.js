@@ -331,6 +331,12 @@ function edgeEvidenceFor(model, edgeId) {
     crossUnit: typeof edge.crossUnit === "number" ? edge.crossUnit : null,
     typeOnlyCount: typeof edge.typeOnlyCount === "number" ? edge.typeOnlyCount : null,
     tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
+    // Phase 37 data-flow reading: the recorded access and its evidence sites.
+    flowKind: edge.flowKind ?? null,
+    flowStrength: edge.flowStrength ?? null,
+    flowGoverned: edge.flowGoverned === true,
+    flowConformance: edge.flowConformance ?? null,
+    flowEvidence: Array.isArray(edge.flowEvidence) ? edge.flowEvidence : null,
     provenance: graphProvenanceFromModel(model)
   };
 }
@@ -584,7 +590,10 @@ var SHAPES = {
   // Structure-view roll-ups: a role-tier band/cell is a card, on par with a unit box; an
   // axis header (a unit column or tier row) is a bare label.
   tier: "round-rectangle",
-  axis: "round-rectangle"
+  axis: "round-rectangle",
+  // A Structure data-flow hub (Phase 37): a dataset/topic the stack routes through, drawn as
+  // a distinct rounded shape so it never reads as a role band.
+  dataset: "ellipse"
 };
 function ambiguousFileIds(model) {
   const byName = /* @__PURE__ */ new Map();
@@ -626,6 +635,10 @@ function structureEdgeText(edge) {
     return typeOnly >= weight ? `${base} \xB7 types only` : `${base} \xB7 ${typeOnly} type-only`;
   }
   return base;
+}
+function flowEdgeLabel(edge) {
+  const weight = typeof edge.weight === "number" && edge.weight > 0 ? edge.weight : null;
+  return weight ? `${edge.flowKind} ${weight}` : edge.flowKind;
 }
 function structureEdgeBase(edge, weight) {
   if (edge.tierKind === "upward") {
@@ -713,7 +726,10 @@ function buildElements(model) {
         model.structure && node.kind === "shelf" ? "structure-shelf" : "",
         sideLabelled(model, node) ? "structure-label-side" : "",
         model.structureLevel === "grid" && (node.kind === "tier" || node.kind === "shelf") ? "structure-grid-cell" : "",
-        model.structure && node.tier ? `tier-${node.tier}` : ""
+        model.structure && node.tier ? `tier-${node.tier}` : "",
+        model.structure && node.dataKind ? "structure-hub" : "",
+        node.dataKind ? `data-${node.dataKind}` : "",
+        node.dataGoverned === true ? "data-governed" : ""
       ].filter(Boolean).join(" "),
       data: {
         id: node.id,
@@ -733,7 +749,9 @@ function buildElements(model) {
         files: typeof node.files === "number" ? node.files : null,
         fileShare: typeof node.fileShare === "number" ? node.fileShare : null,
         locDiameter: locDiameter(node.lines),
-        hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf"
+        hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf",
+        dataKind: node.dataKind,
+        dataGoverned: node.dataGoverned === true
       },
       position: positionOf(positions.get(node.id))
     };
@@ -751,7 +769,14 @@ function buildElements(model) {
       bends ? "edge-structure-stack" : "",
       edge.baselineOnly === true ? "edge-baseline-only" : "",
       model.structure && !edge.baselineOnly && edge.tierKind && edge.tierKind !== "down" && (edge.weightDelta ?? 0) > 0 ? "edge-wrong-way-grew" : "",
-      model.structure && (edge.weight ?? 0) > 0 && (edge.typeOnlyCount ?? 0) >= edge.weight ? "edge-type-only" : ""
+      model.structure && (edge.weight ?? 0) > 0 && (edge.typeOnlyCount ?? 0) >= edge.weight ? "edge-type-only" : "",
+      // Phase 37 data-flow reading: the access kind names the class, so read (dashed) and
+      // write (solid) never blur, and a governed/drifting hub edge takes its own tone.
+      edge.flowKind ? "edge-flow" : "",
+      edge.flowKind ? `edge-flow-${edge.flowKind}` : "",
+      edge.flowGoverned === true ? "edge-flow-governed" : "",
+      edge.flowConformance === "drifting" ? "edge-flow-drifting" : "",
+      edge.flowConformance === "unverified" ? "edge-flow-unverified" : ""
     ].filter(Boolean).join(" "),
     data: {
       id: `e${index}`,
@@ -765,7 +790,7 @@ function buildElements(model) {
       intended: edge.intended === true,
       violation: edge.violation === true,
       ruleId: edge.ruleId,
-      label: model.structure ? structureEdgeLabel(edge) : void 0,
+      label: model.structure ? edge.flowKind ? flowEdgeLabel(edge) : structureEdgeLabel(edge) : void 0,
       // How far a Structure stack edge bows off the spine (see `structureEdgeBends`).
       bend: bends ? bends[index] : 0,
       labelShift: labelShifts ? labelShifts[index] : 0,
@@ -779,7 +804,12 @@ function buildElements(model) {
       scope: edge.scope,
       // A co-change edge is drawn only in the off-by-default coupling lens, as a dashed
       // relationship; the true value keeps the lens able to hide it without dropping it.
-      coChange: edge.coChange === true
+      coChange: edge.coChange === true,
+      // Phase 37 data-flow reading: the access kind, its governance, and its evidence sites.
+      flowKind: edge.flowKind,
+      flowGoverned: edge.flowGoverned === true,
+      flowConformance: edge.flowConformance,
+      flowEvidence: edge.flowEvidence
     }
   }));
   return { nodes, edges };
@@ -999,7 +1029,9 @@ function buildGraphQuery(state2, options = {}) {
     if (state2.structureDirection === "horizontal") {
       params.set("direction", "horizontal");
     }
-    if (state2.structureSince && !state2.structureCell && !state2.structureGrid) {
+    if (state2.structureFlow === "data" && !state2.structureCell && !state2.structureGrid) {
+      params.set("flow", "data");
+    } else if (state2.structureSince && !state2.structureCell && !state2.structureGrid) {
       params.set("since", state2.structureSince);
     }
     if (state2.structureCell) {
@@ -1130,6 +1162,20 @@ function readingLegend(model, locLens = false) {
       model
     );
   }
+  if (model?.structure && model.structureFlow === "data") {
+    return withStructureLimits(
+      [
+        "card = tier",
+        "ellipse = data hub",
+        "solid = writes",
+        "dashed = reads",
+        "dotted = lineage",
+        "double ring = governed",
+        "shelf = support tiers"
+      ],
+      model
+    );
+  }
   if (model?.structure) {
     const baseline = model.structureBaseline?.available ? model.structureBaseline : null;
     return withStructureLimits(
@@ -1157,6 +1203,10 @@ function withStructureLimits(lines, model) {
   const truncated = Number(model?.structureSummary?.truncated ?? 0);
   if (truncated > 0) {
     lines.push(`${truncated} file(s) beyond the scan ceiling, not read`);
+  }
+  const diagnostics = Array.isArray(model?.structureDataFlowDiagnostics) ? model.structureDataFlowDiagnostics : [];
+  for (const diagnostic of diagnostics.slice(0, 2)) {
+    lines.push(diagnostic.detail);
   }
   return lines;
 }
@@ -1211,10 +1261,28 @@ function summarizeDiagnostics(model) {
 function graphSummary(model) {
   const nodes = (model?.nodes ?? []).filter((node) => node.kind !== "axis").length;
   const edges = (model?.edges ?? []).length;
-  const nodeWord = model?.structure ? model.structureLevel === "cell" ? nodes === 1 ? "file" : "files" : model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
+  const isDataFlow = Boolean(model?.structure && model.structureFlow === "data");
+  const nodeWord = model?.structure && !isDataFlow ? model.structureLevel === "cell" ? nodes === 1 ? "file" : "files" : model.structureLevel === "grid" ? nodes === 1 ? "cell" : "cells" : nodes === 1 ? "tier" : "tiers" : model?.system && !model?.systemUnit ? nodes === 1 ? "unit" : "units" : nodes === 1 ? "node" : "nodes";
   const edgeWord = edges === 1 ? "edge" : "edges";
   let summary = `${nodes} ${nodeWord} \xB7 ${edges} ${edgeWord}`;
-  if (model?.structure) {
+  if (isDataFlow) {
+    const tiers = (model.nodes ?? []).filter((node) => node.kind === "tier" || node.kind === "shelf").length;
+    const hubs = (model.nodes ?? []).filter((node) => node.kind === "dataset").length;
+    const flow = model.structureDataFlow;
+    const bits = [
+      `${tiers} ${tiers === 1 ? "tier" : "tiers"}`,
+      `${hubs} ${hubs === 1 ? "data hub" : "data hubs"}`,
+      `${edges} ${edgeWord}`
+    ];
+    if (flow) {
+      bits.push(`${flow.writes} writes \xB7 ${flow.reads} reads`);
+      if (flow.crossTier > 0) bits.push(`${flow.crossTier} cross-tier`);
+      if (flow.uncontracted > 0) bits.push(`${flow.uncontracted} uncontracted`);
+      if (flow.unclassified > 0) bits.push(`${flow.unclassified} unclassified`);
+    }
+    summary = bits.join(" \xB7 ");
+  }
+  if (model?.structure && !isDataFlow) {
     const upwardEdges = (model?.edges ?? []).filter((e) => e.tierKind === "upward" || e.violation);
     const skipEdges = (model?.edges ?? []).filter((e) => e.tierKind === "skip-layer" && isWrongWayEdge(e));
     const upward = upwardEdges.length;
@@ -3248,6 +3316,31 @@ function stylesheet() {
         "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
       }
     },
+    // Phase 37 data-flow reading: a hub is a dataset the stack routes recorded reads and
+    // writes through. It is a neutral ellipse with the hub tone (never a status hue), labelled
+    // beneath like a card; a governed hub takes a double ring, the same "governed" shape the
+    // contract lens uses.
+    {
+      selector: "node.kind-dataset",
+      style: {
+        "border-width": 2,
+        "border-color": theme.hub,
+        "background-color": theme.nodeFill,
+        "background-opacity": 1,
+        "text-wrap": "wrap",
+        "text-max-width": 120,
+        "text-valign": "bottom",
+        "text-halign": "center",
+        "text-margin-y": (ele) => 6 / Math.max(1e-4, ele.cy().zoom()),
+        "text-background-color": theme.nodeFill,
+        "text-background-opacity": 0.85,
+        "text-background-padding": (ele) => 2 / Math.max(1e-4, ele.cy().zoom()),
+        "text-background-shape": "round-rectangle",
+        "font-weight": 600,
+        "font-size": (ele) => labelFontSize(ele.cy().zoom(), 10)
+      }
+    },
+    { selector: "node.structure-hub.data-governed", style: { "border-width": 3, "border-style": "double" } },
     { selector: "node:selected", style: { "border-width": 3, "border-color": theme.selected, "background-opacity": 1 } },
     { selector: "node[?hub]", style: { "border-width": 2.5, "border-color": theme.hub, "font-size": (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), "font-weight": 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -3429,6 +3522,16 @@ function stylesheet() {
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: "edge.edge-structure-cross-unit", style: { width: 3, "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent, opacity: 1 } },
+    // Phase 37 data-flow reading: a write/produce is solid and accent-coloured (data leaving a
+    // tier), a read/consume is dashed in the hub tone (data entering a tier), and a lineage
+    // derive is dotted. Read vs write is never left to hue alone — the dash carries it too.
+    { selector: "edge.edge-flow", style: { width: 2.25, "line-color": theme.edge, "target-arrow-color": theme.edge, opacity: 0.9 } },
+    { selector: "edge.edge-flow-writes, edge.edge-flow-produces", style: { width: 2.75, "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent, opacity: 1 } },
+    { selector: "edge.edge-flow-reads, edge.edge-flow-consumes", style: { "line-style": "dashed", "line-dash-pattern": [6, 4], "line-color": theme.hub, "target-arrow-color": theme.hub, opacity: 0.95 } },
+    { selector: "edge.edge-flow-derives", style: { "line-style": "dotted", "line-color": theme.edge, "target-arrow-color": theme.edge, opacity: 0.8 } },
+    { selector: "edge.edge-flow-governed", style: { "text-border-color": theme.selected, "text-border-width": 1.5, "text-border-opacity": 1 } },
+    { selector: "edge.edge-flow-drifting", style: { "line-color": theme.cycle, "target-arrow-color": theme.cycle, "text-border-color": theme.cycle, "text-border-width": 1.5, "text-border-opacity": 1, opacity: 1 } },
+    { selector: "edge.edge-flow-unverified", style: { "line-style": "dotted", opacity: 0.7 } },
     { selector: "edge.edge-faded", style: { opacity: 0.1 } },
     { selector: "edge.dimmed", style: { opacity: 0.05 } },
     {
@@ -10925,6 +11028,42 @@ function renderTierImports(imports, weight, handlers) {
   }
   return section2;
 }
+function flowAccessLabel(kind) {
+  return {
+    reads: "reads (hub \u2192 tier)",
+    writes: "writes (tier \u2192 hub)",
+    produces: "produces (tier \u2192 topic)",
+    consumes: "consumes (topic \u2192 tier)",
+    derives: "derives (dataset \u2192 dataset)"
+  }[kind] ?? kind;
+}
+function renderFlowEvidence(evidence, handlers) {
+  const section2 = document.createElement("div");
+  section2.className = "flow-evidence";
+  section2.dataset.role = "flow-evidence";
+  const heading3 = document.createElement("h4");
+  heading3.textContent = "Recorded access";
+  section2.append(heading3);
+  const list2 = document.createElement("ul");
+  for (const entry of evidence) {
+    const item = document.createElement("li");
+    item.dataset.role = "flow-evidence-item";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "flow-evidence-open";
+    open.title = `${entry.detail} \u2014 open the source at this access`;
+    open.textContent = entry.line > 0 ? `${entry.file}:${entry.line}` : entry.file;
+    if (handlers.onViewSource) {
+      open.addEventListener("click", () => handlers.onViewSource(entry.file, entry.line > 0 ? entry.line : null));
+    } else {
+      open.disabled = true;
+    }
+    item.append(open, document.createTextNode(` \u2192 ${entry.detail}`));
+    list2.append(item);
+  }
+  section2.append(list2);
+  return section2;
+}
 function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (!evidence) {
     container.hidden = true;
@@ -10960,11 +11099,27 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
   } else if (evidence.ruleId) {
     appendFact(facts, "Rule", evidence.ruleId);
   }
-  if (typeof evidence.weight === "number") {
+  if (typeof evidence.weight === "number" && !evidence.flowKind) {
     appendFact(facts, "Recorded imports", String(evidence.weight));
   }
   const tierImports = evidence.tierImports;
-  if (tierImports) {
+  const flowEvidence = Array.isArray(evidence.flowEvidence) && evidence.flowEvidence.length > 0 ? evidence.flowEvidence : null;
+  if (evidence.flowKind) {
+    appendFact(facts, "Recorded access", flowAccessLabel(evidence.flowKind));
+    if (evidence.flowStrength) {
+      appendFact(facts, "Strength", evidence.flowStrength);
+    }
+    appendFact(
+      facts,
+      "Contract",
+      evidence.flowGoverned ? `governed${evidence.flowConformance ? ` \xB7 ${evidence.flowConformance}` : ""}` : "uncontracted: no recorded contract governs this hub"
+    );
+    appendFact(facts, "Recorded sites", flowEvidence ? String(flowEvidence.length) : "not recorded");
+    container.append(facts);
+    if (flowEvidence) {
+      container.append(renderFlowEvidence(flowEvidence, handlers));
+    }
+  } else if (tierImports) {
     if (typeof evidence.typeOnlyCount === "number" && evidence.typeOnlyCount > 0) {
       appendFact(facts, "Type-only", `${evidence.typeOnlyCount} of ${evidence.weight} (erased at compile time)`);
     }
@@ -10984,7 +11139,7 @@ function renderEdgeEvidence(container, evidence, handlers = {}) {
     line.textContent = evidenceProvenanceText(provenance);
     container.append(line);
   }
-  if (handlers.onViewSource && !tierImports) {
+  if (handlers.onViewSource && !tierImports && !flowEvidence) {
     const source = document.createElement("button");
     source.type = "button";
     source.className = "source-open";
@@ -13067,6 +13222,8 @@ function queryElements(doc = document) {
     detail: doc.getElementById("detail"),
     structureDirection: doc.getElementById("structure-direction"),
     structureDirectionField: doc.getElementById("field-structure-direction"),
+    structureFlow: doc.getElementById("structure-flow"),
+    structureFlowField: doc.getElementById("field-structure-flow"),
     structureSince: doc.getElementById("structure-since"),
     structureSinceField: doc.getElementById("field-structure-since"),
     refresh: doc.getElementById("refresh"),
@@ -13210,6 +13367,9 @@ function createViewPrefs(app2) {
       if (parsed.structureDirection === "horizontal" || parsed.structureDirection === "vertical") {
         prefs.structureDirection = parsed.structureDirection;
       }
+      if (parsed.structureFlow === "data" || parsed.structureFlow === "imports") {
+        prefs.structureFlow = parsed.structureFlow;
+      }
       return prefs;
     } catch {
       return null;
@@ -13228,7 +13388,8 @@ function createViewPrefs(app2) {
           locLens: state2.locLens,
           tier: state2.tier,
           structureGrid: state2.structureGrid,
-          structureDirection: state2.structureDirection
+          structureDirection: state2.structureDirection,
+          structureFlow: state2.structureFlow
         })
       );
     } catch {
@@ -13287,6 +13448,9 @@ function createViewPrefs(app2) {
     }
     if (prefs.structureDirection && state2.mode === "structure") {
       state2.structureDirection = prefs.structureDirection;
+    }
+    if (prefs.structureFlow && state2.mode === "structure") {
+      state2.structureFlow = prefs.structureFlow;
     }
   }
   return {
@@ -13386,6 +13550,7 @@ function createUrlState(app2) {
         state2.mode === "structure" && state2.structureDirection === "horizontal" ? "horizontal" : ""
       );
       set("since", state2.mode === "structure" ? state2.structureSince ?? "" : "");
+      set("flow", state2.mode === "structure" && state2.structureFlow === "data" ? "data" : "");
       set("node", store2.get().ui.node ?? "");
       set("panel", store2.get().ui.memberOpen ? "member-map" : "");
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -13418,6 +13583,7 @@ function createUrlState(app2) {
     const dir = params.get("direction") ?? params.get("orientation");
     state2.structureDirection = dir === "horizontal" || dir === "lr" ? "horizontal" : "vertical";
     state2.structureSince = mode === "structure" ? params.get("since") || null : null;
+    state2.structureFlow = mode === "structure" && params.get("flow") === "data" ? "data" : "imports";
     return params;
   }
   async function restoreUrlPanel() {
@@ -28658,6 +28824,24 @@ function createDelegation(app2) {
         ]
       };
     }
+    if (evidence.flowKind) {
+      const labelOf2 = (id) => app2.current.nodes?.find((node) => node.id === id)?.label ?? id;
+      const sites = Array.isArray(evidence.flowEvidence) ? evidence.flowEvidence : [];
+      const access = evidence.flowKind;
+      return {
+        kind: "edge",
+        id: edgeId,
+        label: `${labelOf2(evidence.source)} \u2192 ${labelOf2(evidence.target)}`,
+        summary: `${access}${sites.length > 0 ? ` \xB7 ${sites.length} recorded site${sites.length === 1 ? "" : "s"}` : ""}${evidence.flowGoverned ? " \xB7 governed" : " \xB7 uncontracted"}`,
+        flows: sites.map((site) => ({ source: site.file, line: site.line, target: site.detail, specifier: site.detail })),
+        flowCount: sites.length,
+        evidence: [
+          `relationship: data flow (${access})`,
+          evidence.flowGoverned ? `contract: governed${evidence.flowConformance ? ` \xB7 ${evidence.flowConformance}` : ""}` : "contract: uncontracted (no recorded contract governs this hub)",
+          ...sites.slice(0, 20).map((site) => `${site.file}:${site.line} ${site.detail}`)
+        ]
+      };
+    }
     return {
       kind: "edge",
       id: edgeId,
@@ -30539,6 +30723,8 @@ var store = createStore({
     structureGrid: false,
     /** In Structure mode, orientation: 'vertical' (top to bottom) or 'horizontal' (left to right). */
     structureDirection: "vertical",
+    /** In Structure mode, which edge reading the stack draws: imports (default) or data flows. */
+    structureFlow: "imports",
     // The revision the Structure stack is compared with (`?since=`), or null for none.
     structureSince: null,
     /** In Structure mode, the cell id `<unit>|<tier>` in an L2 drill-down (Y5). */
@@ -30701,6 +30887,9 @@ async function scan({ refresh = false } = {}) {
       state.structureTier = null;
       if (model.structureDirection) {
         state.structureDirection = model.structureDirection;
+      }
+      if (model.structureFlow) {
+        state.structureFlow = model.structureFlow;
       }
     }
     store.set("ui", { node: null });
@@ -30871,6 +31060,12 @@ function applyModeChrome() {
   if (elements.structureSinceField) {
     elements.structureSinceField.hidden = state.mode !== "structure" || state.structureGrid || Boolean(state.structureCell);
   }
+  if (elements.structureFlowField) {
+    elements.structureFlowField.hidden = state.mode !== "structure" || state.structureGrid || Boolean(state.structureCell) || Boolean(state.structureSince);
+  }
+  if (elements.structureFlow) {
+    elements.structureFlow.value = state.structureFlow ?? "imports";
+  }
   if (elements.structureSince) {
     const since = state.structureSince ?? "";
     if (since && ![...elements.structureSince.options].some((option) => option.value === since)) {
@@ -30990,6 +31185,14 @@ if (elements.structureSince) {
   elements.structureSince.addEventListener("change", () => {
     state.structureSince = elements.structureSince.value || null;
     applyModeChrome();
+    scan();
+  });
+}
+if (elements.structureFlow) {
+  elements.structureFlow.addEventListener("change", () => {
+    state.structureFlow = elements.structureFlow.value === "data" ? "data" : "imports";
+    applyModeChrome();
+    app.prefs.schedulePrefsSave();
     scan();
   });
 }

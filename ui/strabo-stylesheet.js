@@ -160,6 +160,31 @@ export function stylesheet() {
         'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
       },
     },
+    // Phase 37 data-flow reading: a hub is a dataset the stack routes recorded reads and
+    // writes through. It is a neutral ellipse with the hub tone (never a status hue), labelled
+    // beneath like a card; a governed hub takes a double ring, the same "governed" shape the
+    // contract lens uses.
+    {
+      selector: 'node.kind-dataset',
+      style: {
+        'border-width': 2,
+        'border-color': theme.hub,
+        'background-color': theme.nodeFill,
+        'background-opacity': 1,
+        'text-wrap': 'wrap',
+        'text-max-width': 120,
+        'text-valign': 'bottom',
+        'text-halign': 'center',
+        'text-margin-y': (ele) => 6 / Math.max(0.0001, ele.cy().zoom()),
+        'text-background-color': theme.nodeFill,
+        'text-background-opacity': 0.85,
+        'text-background-padding': (ele) => 2 / Math.max(0.0001, ele.cy().zoom()),
+        'text-background-shape': 'round-rectangle',
+        'font-weight': 600,
+        'font-size': (ele) => labelFontSize(ele.cy().zoom(), 10),
+      },
+    },
+    { selector: 'node.structure-hub.data-governed', style: { 'border-width': 3, 'border-style': 'double' } },
     { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.selected, 'background-opacity': 1 } },
     { selector: 'node[?hub]', style: { 'border-width': 2.5, 'border-color': theme.hub, 'font-size': (ele) => labelFontSize(ele.cy().zoom(), HUB_LABEL_DEVICE_PX), 'font-weight': 700 } },
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
@@ -341,6 +366,16 @@ export function stylesheet() {
     // A Structure grid edge that crosses a unit boundary is a relationship between services,
     // not only a wrong-way read: a thick accent line, distinct from the status hues.
     { selector: 'edge.edge-structure-cross-unit', style: { width: 3, 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent, opacity: 1 } },
+    // Phase 37 data-flow reading: a write/produce is solid and accent-coloured (data leaving a
+    // tier), a read/consume is dashed in the hub tone (data entering a tier), and a lineage
+    // derive is dotted. Read vs write is never left to hue alone — the dash carries it too.
+    { selector: 'edge.edge-flow', style: { width: 2.25, 'line-color': theme.edge, 'target-arrow-color': theme.edge, opacity: 0.9 } },
+    { selector: 'edge.edge-flow-writes, edge.edge-flow-produces', style: { width: 2.75, 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent, opacity: 1 } },
+    { selector: 'edge.edge-flow-reads, edge.edge-flow-consumes', style: { 'line-style': 'dashed', 'line-dash-pattern': [6, 4], 'line-color': theme.hub, 'target-arrow-color': theme.hub, opacity: 0.95 } },
+    { selector: 'edge.edge-flow-derives', style: { 'line-style': 'dotted', 'line-color': theme.edge, 'target-arrow-color': theme.edge, opacity: 0.8 } },
+    { selector: 'edge.edge-flow-governed', style: { 'text-border-color': theme.selected, 'text-border-width': 1.5, 'text-border-opacity': 1 } },
+    { selector: 'edge.edge-flow-drifting', style: { 'line-color': theme.cycle, 'target-arrow-color': theme.cycle, 'text-border-color': theme.cycle, 'text-border-width': 1.5, 'text-border-opacity': 1, opacity: 1 } },
+    { selector: 'edge.edge-flow-unverified', style: { 'line-style': 'dotted', opacity: 0.7 } },
     { selector: 'edge.edge-faded', style: { opacity: 0.1 } },
     { selector: 'edge.dimmed', style: { opacity: 0.05 } },
     {

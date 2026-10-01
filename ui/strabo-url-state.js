@@ -69,6 +69,7 @@ export function createUrlState(app) {
         state.mode === 'structure' && state.structureDirection === 'horizontal' ? 'horizontal' : '',
       );
       set('since', state.mode === 'structure' ? state.structureSince ?? '' : '');
+      set('flow', state.mode === 'structure' && state.structureFlow === 'data' ? 'data' : '');
       set('node', store.get().ui.node ?? '');
       set('panel', store.get().ui.memberOpen ? 'member-map' : '');
       if (`${url.pathname}${url.search}` !== `${window.location.pathname}${window.location.search}`) {
@@ -112,6 +113,7 @@ export function createUrlState(app) {
     const dir = params.get('direction') ?? params.get('orientation');
     state.structureDirection = dir === 'horizontal' || dir === 'lr' ? 'horizontal' : 'vertical';
     state.structureSince = mode === 'structure' ? params.get('since') || null : null;
+    state.structureFlow = mode === 'structure' && params.get('flow') === 'data' ? 'data' : 'imports';
     return params;
   }
 

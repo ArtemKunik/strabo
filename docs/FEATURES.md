@@ -210,6 +210,33 @@ The edge panel names the rules that apply, and a selected edge's agent task mark
 rule allows. Rules judge imports, not calls, and the tier a file lands in can itself be declared
 under `tiers:` in `strabo.groups.yml`, which is often the first fix for a wrong-way edge.
 
+## Data-flow reading of the Structure view
+
+The Structure view reads recorded imports by default. A **Reading** picker in the View menu
+swaps that for the recorded **data flows**: the same role-tier stack, with each tier's files'
+reads and writes routed through the **data hubs** they touch. It is opt-in and never mixed with
+the import reading, so an import is never mistaken for a data dependency. The reading is composed
+by `buildTierDataFlow` and served at `GET /analysis/tiers/data-flow`, from the tier report and
+the Data layer (Phase 33), never inferred from a name.
+
+- **Hubs** are datasets the Data layer recorded: `db:<repo>/<table>`, `topic:<name>`,
+  `queue:<name>`, and `path:<literal>`. A hub is drawn only when a classified file records a
+  read or write to it; a file with a data use but no tier is named as a diagnostic, never placed
+  on a band.
+- **Edges** run tier → hub for a write or a produce, and hub → tier for a read or a consume; a
+  dataset-to-dataset lineage edge is hub → hub. A write is solid and accent-coloured, a read is
+  dashed in the hub tone, and lineage is dotted, so read vs write never rests on hue alone.
+- **Governance** reuses the Data layer's own contracts: a hub with a recorded `governs` edge
+  takes a double ring, and a recorded conformance finding names it `drifting`. A hub a writer
+  and a reader both touch with no governing contract is counted **uncontracted**.
+- The edge panel lists the recorded access sites (`file:line → hub`), each opening the source at
+  the access, and the right-click menu lists them too. The summary line reports `N writes ·
+  M reads`, the cross-tier pairs, and the uncontracted hubs.
+
+The reading is **recorded reach, never runtime data flow**: extraction is static and lexical, so
+dynamic SQL, reflection-based ORM access, and runtime-created topics are named as diagnostics
+rather than drawn. The grid and cell levels keep the import reading for now.
+
 ## Repository passport
 
 Opening an unfamiliar repository shows a **Repository passport** once, before the operator

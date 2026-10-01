@@ -76,7 +76,10 @@ Canonical names and aliases share one implementation, so they cannot drift.
 Also canonical-only: `get_risk`, `get_cycles`, `get_smells`, `get_tier`, `get_tier_flow`
 (the application logical structure from the tier lens: ranked tiers, cross-tier dependency
 edges with weights and cross-unit flags, support tiers on the shelf, and the intra-tier
-ratio), `get_dead_code`, `get_scope_fence` (changed paths outside a declared zone, plus
+ratio), `get_structure_data_flow` (the data-flow reading of the Structure view: recorded
+reads and writes routed through data hubs between role tiers, dataset lineage, which hubs a
+contract governs, and the honesty diagnostics), `get_dead_code`, `get_scope_fence` (changed
+paths outside a declared zone, plus
 inside changes imported from outside), `get_uncovered_changes` (changed-line coverage:
 git-diff additions intersected with the repository's measured coverage report, with
 uncovered modified functions, public-surface functions first), `get_public_api_diff`

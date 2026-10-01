@@ -282,6 +282,12 @@ export function edgeEvidenceFor(model, edgeId) {
     crossUnit: typeof edge.crossUnit === 'number' ? edge.crossUnit : null,
     typeOnlyCount: typeof edge.typeOnlyCount === 'number' ? edge.typeOnlyCount : null,
     tierImports: Array.isArray(edge.tierImports) ? edge.tierImports : null,
+    // Phase 37 data-flow reading: the recorded access and its evidence sites.
+    flowKind: edge.flowKind ?? null,
+    flowStrength: edge.flowStrength ?? null,
+    flowGoverned: edge.flowGoverned === true,
+    flowConformance: edge.flowConformance ?? null,
+    flowEvidence: Array.isArray(edge.flowEvidence) ? edge.flowEvidence : null,
     provenance: graphProvenanceFromModel(model),
   };
 }

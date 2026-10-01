@@ -5,6 +5,8 @@ import { percent, type MeasuredCoverageSummary } from '../analysis/measured-cove
 import { buildPositions, buildSystemPositions } from '../analysis/layout.ts';
 import type { SystemReport } from '../analysis/system.ts';
 import type { Tier, TierReport } from '../analysis/tiers.ts';
+import type { TierDataFlow, TierDataFlowEdge } from '../analysis/tiers/data-flow.ts';
+import { hubLabelOf } from '../analysis/tiers/data-flow.ts';
 import type { OutsideLink, UnitCard, UnitCoverageFact, UnitShelfFact } from '../types.ts';
 
 import { toPosix } from '../boundary/repository-root.ts';
@@ -643,6 +645,12 @@ export interface StructureViewOptions {
   baseline?:
     | { available: true; ref: string; revision: string; report: TierReport }
     | { available: false; ref: string; detail: string };
+  /**
+   * The Phase 37 data-flow reading. When present, the drawing drops the import edges and draws
+   * the recorded reads/writes routed through data hubs instead, so the two readings never mix
+   * unless the caller asks for it.
+   */
+  dataFlow?: TierDataFlow;
 }
 
 /** The tier-flow edge key a baseline comparison matches on. */
@@ -807,59 +815,68 @@ export function buildStructureViewModel(
     }
   }
 
-  const edges: ViewEdge[] = report.tierFlow.edges.map((edge) => ({
-    source: edge.source,
-    target: edge.target,
-    kind: 'import',
-    evidence: {
-      line: 1,
-      specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
-      resolution: 'exact',
-    },
-    semanticSource: edge.source,
-    semanticTarget: edge.target,
-    weight: edge.weight,
-    crossUnit: edge.crossUnit,
-    tierKind: edge.kind,
-    ghost: edge.ghost,
-    intended: edge.intended,
-    allowedCount: edge.allowedCount,
-    allowedTypeOnly: edge.allowedTypeOnly,
-    allowedRules: edge.allowedRules,
-    violation: edge.violation,
-    ruleId: edge.ruleId,
-    typeOnlyCount: edge.typeOnly ?? 0,
-    tierImports: edge.imports ?? [],
-  }));
+  const dataFlow = options.dataFlow;
+  const edges: ViewEdge[] = dataFlow
+    ? []
+    : report.tierFlow.edges.map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        kind: 'import',
+        evidence: {
+          line: 1,
+          specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
+          resolution: 'exact',
+        },
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        weight: edge.weight,
+        crossUnit: edge.crossUnit,
+        tierKind: edge.kind,
+        ghost: edge.ghost,
+        intended: edge.intended,
+        allowedCount: edge.allowedCount,
+        allowedTypeOnly: edge.allowedTypeOnly,
+        allowedRules: edge.allowedRules,
+        violation: edge.violation,
+        ruleId: edge.ruleId,
+        typeOnlyCount: edge.typeOnly ?? 0,
+        tierImports: edge.imports ?? [],
+      }));
 
-  // Ghost edges: declared intended flows with 0 recorded imports (Y7)
-  for (const ghost of report.intent?.ghostEdges ?? []) {
-    edges.push({
-      source: ghost.source,
-      target: ghost.target,
-      kind: 'import',
-      evidence: {
-        line: 0,
-        specifier: `declared intent in ${ghost.ruleId} (0 recorded imports)`,
-        resolution: 'exact',
-      },
-      semanticSource: ghost.source,
-      semanticTarget: ghost.target,
-      weight: 0,
-      tierKind: ghost.kind,
-      ghost: true,
-      intended: true,
-      ruleId: ghost.ruleId,
-    });
+  // Ghost edges: declared intended flows with 0 recorded imports (Y7). The import reading only.
+  if (!dataFlow) {
+    for (const ghost of report.intent?.ghostEdges ?? []) {
+      edges.push({
+        source: ghost.source,
+        target: ghost.target,
+        kind: 'import',
+        evidence: {
+          line: 0,
+          specifier: `declared intent in ${ghost.ruleId} (0 recorded imports)`,
+          resolution: 'exact',
+        },
+        semanticSource: ghost.source,
+        semanticTarget: ghost.target,
+        weight: 0,
+        tierKind: ghost.kind,
+        ghost: true,
+        intended: true,
+        ruleId: ghost.ruleId,
+      });
+    }
   }
 
-  const baseline = options.baseline;
+  const baseline = dataFlow ? undefined : options.baseline;
   let structureBaseline: ViewModel['structureBaseline'];
   if (baseline?.available) {
     const deltas = applyStructureBaseline(nodes, edges, report, baseline.report);
     structureBaseline = { available: true, ref: baseline.ref, revision: baseline.revision, ...deltas };
   } else if (baseline) {
     structureBaseline = { available: false, ref: baseline.ref, detail: baseline.detail };
+  }
+
+  if (dataFlow) {
+    applyTierDataFlow(nodes, edges, positions, dataFlow, isHorizontal);
   }
 
   return {
@@ -879,8 +896,84 @@ export function buildStructureViewModel(
     structureSpines: report.spines,
     structureEndpoints: report.endpoints,
     structureIntent: report.intent,
-    directoryLabels: { stack: stackHeading(report, structureBaseline), shelf: 'Support Tiers' },
+    structureFlow: dataFlow ? 'data' : 'imports',
+    ...(dataFlow
+      ? { structureDataFlow: dataFlow.summary, structureDataFlowDiagnostics: dataFlow.diagnostics }
+      : {}),
+    directoryLabels: dataFlow
+      ? {
+          stack: `Architecture Stack — data flow · ${dataFlow.summary.writes} writes · ${dataFlow.summary.reads} reads · ${dataFlow.summary.crossTier} cross-tier`,
+          flow: 'Data Hubs',
+          shelf: 'Support Tiers',
+        }
+      : { stack: stackHeading(report, structureBaseline), shelf: 'Support Tiers' },
   };
+}
+
+/**
+ * Draw the Phase 37 data-flow reading on the stack: one hub node per recorded dataset the
+ * classified files touch, and one edge per recorded read/write (tier → hub for a write,
+ * produce, or a read, consume as hub → tier), plus dataset lineage as hub → hub. A hub is
+ * drawn only when some tier's files touch it, and an edge only when both ends are drawn.
+ */
+function applyTierDataFlow(
+  nodes: ViewNode[],
+  edges: ViewEdge[],
+  positions: ViewPosition[],
+  flow: TierDataFlow,
+  isHorizontal: boolean,
+): void {
+  const present = new Set(nodes.map((node) => node.id));
+  const drawnHubs = new Set<string>();
+  for (const hub of flow.hubs) {
+    if (present.has(hub.id)) continue;
+    present.add(hub.id);
+    drawnHubs.add(hub.id);
+    nodes.push({
+      id: hub.id,
+      kind: 'dataset',
+      directory: 'flow',
+      label: hub.label,
+      workspacePath: hub.id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: Math.max(5, hub.tiers.length * 4),
+      dataKind: hub.kind,
+      dataGoverned: hub.governed,
+      why: hub.tiers.length > 0 ? hub.tiers.map((tier) => STRUCTURE_LABELS[tier] ?? tier).join(', ') : undefined,
+    });
+  }
+
+  [...drawnHubs].sort().forEach((id, index) => {
+    positions.push(
+      isHorizontal ? { id, x: index * 180, y: 360 } : { id, x: 640, y: index * 120 },
+    );
+  });
+
+  for (const edge of flow.edges) {
+    if (!present.has(edge.source) || !present.has(edge.target)) continue;
+    const label = edge.direction === 'derives' ? hubLabelOf(edge.source) : hubLabelOf(edge.hub);
+    edges.push({
+      source: edge.source,
+      target: edge.target,
+      kind: 'import',
+      evidence: {
+        line: edge.evidence[0]?.line ?? 1,
+        specifier: `${edge.direction} ${label}`,
+        resolution: 'exact',
+      },
+      semanticSource: edge.source,
+      semanticTarget: edge.target,
+      weight: Math.max(1, edge.evidence.length),
+      flowKind: edge.direction,
+      flowStrength: edge.strength,
+      flowGoverned: edge.governed,
+      ...(edge.conformance ? { flowConformance: edge.conformance } : {}),
+      flowEvidence: edge.evidence,
+    });
+  }
 }
 
 /**

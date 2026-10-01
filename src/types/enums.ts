@@ -1,6 +1,6 @@
 /** The kind of a graph node. `unit` and `shelf` are the System-view roll-ups; `tier` is a
  * Structure-view role band. */
-export type NodeKind = 'module' | 'test' | 'entry' | 'unit' | 'shelf' | 'tier' | 'axis';
+export type NodeKind = 'module' | 'test' | 'entry' | 'unit' | 'shelf' | 'tier' | 'axis' | 'dataset';
 
 /**
  * The explicit relationship an edge records.

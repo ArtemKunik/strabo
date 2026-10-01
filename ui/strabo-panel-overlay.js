@@ -283,6 +283,55 @@ function renderTierImports(imports, weight, handlers) {
   return section;
 }
 
+
+/** A data-flow access as a plain phrase, never a bare enum. */
+function flowAccessLabel(kind) {
+  return (
+    {
+      reads: 'reads (hub → tier)',
+      writes: 'writes (tier → hub)',
+      produces: 'produces (tier → topic)',
+      consumes: 'consumes (topic → tier)',
+      derives: 'derives (dataset → dataset)',
+    }[kind] ?? kind
+  );
+}
+
+
+/**
+ * The recorded sites behind a data-flow edge (Phase 37), one row each: `file:line → detail`.
+ * A row opens the source at the access. The edge's sample is capped, so a longer roll-up says
+ * how many sites are unlisted rather than pretending the list is whole.
+ */
+function renderFlowEvidence(evidence, handlers) {
+  const section = document.createElement('div');
+  section.className = 'flow-evidence';
+  section.dataset.role = 'flow-evidence';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Recorded access';
+  section.append(heading);
+  const list = document.createElement('ul');
+  for (const entry of evidence) {
+    const item = document.createElement('li');
+    item.dataset.role = 'flow-evidence-item';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'flow-evidence-open';
+    open.title = `${entry.detail} — open the source at this access`;
+    open.textContent = entry.line > 0 ? `${entry.file}:${entry.line}` : entry.file;
+    if (handlers.onViewSource) {
+      open.addEventListener('click', () => handlers.onViewSource(entry.file, entry.line > 0 ? entry.line : null));
+    } else {
+      open.disabled = true;
+    }
+    item.append(open, document.createTextNode(` → ${entry.detail}`));
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+
 /**
  * Explain one edge: endpoints, relationship kind, and the evidence that produced it.
  * Pass null to hide. Unrecorded fields are shown as unavailable, never guessed.
@@ -340,11 +389,31 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
   } else if (evidence.ruleId) {
     appendFact(facts, 'Rule', evidence.ruleId);
   }
-  if (typeof evidence.weight === 'number') {
+  if (typeof evidence.weight === 'number' && !evidence.flowKind) {
     appendFact(facts, 'Recorded imports', String(evidence.weight));
   }
   const tierImports = evidence.tierImports;
-  if (tierImports) {
+  const flowEvidence = Array.isArray(evidence.flowEvidence) && evidence.flowEvidence.length > 0 ? evidence.flowEvidence : null;
+  if (evidence.flowKind) {
+    // Phase 37: a data-flow edge is a tier reading/writing a hub. The access and its
+    // governance are facts, and the recorded sites are the evidence below.
+    appendFact(facts, 'Recorded access', flowAccessLabel(evidence.flowKind));
+    if (evidence.flowStrength) {
+      appendFact(facts, 'Strength', evidence.flowStrength);
+    }
+    appendFact(
+      facts,
+      'Contract',
+      evidence.flowGoverned
+        ? `governed${evidence.flowConformance ? ` · ${evidence.flowConformance}` : ''}`
+        : 'uncontracted: no recorded contract governs this hub',
+    );
+    appendFact(facts, 'Recorded sites', flowEvidence ? String(flowEvidence.length) : 'not recorded');
+    container.append(facts);
+    if (flowEvidence) {
+      container.append(renderFlowEvidence(flowEvidence, handlers));
+    }
+  } else if (tierImports) {
     // A Structure edge is a roll-up: its evidence is the list of imports below, not one line.
     if (typeof evidence.typeOnlyCount === 'number' && evidence.typeOnlyCount > 0) {
       appendFact(facts, 'Type-only', `${evidence.typeOnlyCount} of ${evidence.weight} (erased at compile time)`);
@@ -369,7 +438,7 @@ export function renderEdgeEvidence(container, evidence, handlers = {}) {
     container.append(line);
   }
 
-  if (handlers.onViewSource && !tierImports) {
+  if (handlers.onViewSource && !tierImports && !flowEvidence) {
     const source = document.createElement('button');
     source.type = 'button';
     source.className = 'source-open';

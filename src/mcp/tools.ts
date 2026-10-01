@@ -763,6 +763,17 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/tiers/flow', args),
     },
     {
+      name: 'get_structure_data_flow',
+      description:
+        'The data-flow reading of the Structure view: the recorded reads and writes routed through data hubs (tables, topics, paths) between role tiers, dataset lineage, which hubs a contract governs, and the honesty diagnostics. Every edge names its evidence.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/tiers/data-flow', args),
+    },
+    {
       name: 'get_data_products',
       description:
         'The recorded data layer: datasets, declared data products with their ports, owners, contracts, and conformance findings, undeclared product candidates with ownership, and event/message flows. Every fact names its evidence.',

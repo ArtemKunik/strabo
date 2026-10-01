@@ -205,6 +205,36 @@ test('buildElements falls back to the origin when a position is missing', () => 
   assert.deepEqual(nodes[0].position, { x: 0, y: 0 });
 });
 
+test('buildElements marks data-flow hubs and edges with their access class (Phase 37)', () => {
+  const { nodes, edges } = buildElements({
+    structure: true,
+    structureDirection: 'vertical',
+    structureFlow: 'data',
+    nodes: [
+      { id: 'data', kind: 'tier', label: 'Data' },
+      { id: 'db:app/users', kind: 'dataset', label: 'users', dataKind: 'table', dataGoverned: true },
+    ],
+    edges: [{ source: 'data', target: 'db:app/users', kind: 'import', flowKind: 'writes', flowGoverned: true, weight: 1 }],
+    positions: [
+      { id: 'data', x: 0, y: 0 },
+      { id: 'db:app/users', x: 640, y: 0 },
+    ],
+  });
+
+  const hub = nodes.find((node) => node.data.id === 'db:app/users');
+  assert.ok(hub.classes.includes('kind-dataset'));
+  assert.ok(hub.classes.includes('structure-hub'));
+  assert.ok(hub.classes.includes('data-table'));
+  assert.ok(hub.classes.includes('data-governed'));
+  assert.equal(hub.data.dataKind, 'table');
+  assert.equal(hub.data.dataGoverned, true);
+
+  assert.ok(edges[0].classes.includes('edge-flow'));
+  assert.ok(edges[0].classes.includes('edge-flow-writes'));
+  assert.ok(edges[0].classes.includes('edge-flow-governed'));
+  assert.equal(edges[0].data.flowKind, 'writes');
+});
+
 test('neighbourhood and findPath report connections or no path explicitly', () => {
   assert.deepEqual(neighbourhood(model, 'src/util.ts').sort(), [
     'src/index.ts',
