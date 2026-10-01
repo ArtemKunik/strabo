@@ -43,8 +43,10 @@
     "bin",
     "dist",
     "public",
+    "!public/*.map",
     "parsers",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && npm run build:ui",

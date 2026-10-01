@@ -43,7 +43,7 @@ try {
   const tarball = path.join(packDir, packed);
   check(fs.existsSync(tarball), `tarball created: ${packed}`);
 
-  const entries = execSync(`tar -tzf "${tarball}"`, { cwd: repoRoot })
+  const entries = execSync(`tar -tzf "${packed}"`, { cwd: packDir })
     .toString()
     .split('\n')
     .map((line) => line.replace(/^package\//, '').trim())
