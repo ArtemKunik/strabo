@@ -182,6 +182,14 @@ function structureCardLabel(node, wrongWay, compact = false) {
   if (wrongWay > 0) {
     lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? 'import' : 'imports'} out`);
   }
+  // Phase 37: in the data-flow grid a cell also states the hubs it writes and reads.
+  const ports = node.dataPorts;
+  if (ports && (ports.writes > 0 || ports.reads > 0)) {
+    const parts = [];
+    if (ports.writes > 0) parts.push(`${ports.writes} ${ports.writes === 1 ? 'write' : 'writes'}`);
+    if (ports.reads > 0) parts.push(`${ports.reads} ${ports.reads === 1 ? 'read' : 'reads'}`);
+    lines.push(parts.join(' · '));
+  }
   return lines.join('\n');
 }
 
@@ -262,6 +270,7 @@ export function buildElements(model) {
         hub: hubs.has(node.id) && node.kind !== 'unit' && node.kind !== 'shelf',
         dataKind: node.dataKind,
         dataGoverned: node.dataGoverned === true,
+        dataPorts: node.dataPorts,
       },
       position: positionOf(positions.get(node.id)),
     };

@@ -47,7 +47,7 @@ record is reported as `unavailable`, never invented.
 | 34 | Code coverage that tells | Done (U0-U7: dogfood report, one coverage source everywhere, a measured Coverage overlay with reachability fallback, honest reachability depth, changed-line coverage in review, risk from coverage, covering tests, and the agent/gate surface) |
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
-| 37 | Data-flow reading of the Structure view | DF1-DF3, DF5, DF6 landed (composition + `GET /analysis/tiers/data-flow`, the bands reading and its picker, the visual language, edge evidence + menus + MCP tool, honesty diagnostics); DF0 acceptance and DF4 grid/cell pending |
+| 37 | Data-flow reading of the Structure view | DF1-DF3, DF5, DF6 landed (composition + `GET /analysis/tiers/data-flow`, the bands reading and its picker, the visual language, edge evidence + menus + MCP tool, honesty diagnostics); DF4 grid/cell landed; DF0 acceptance and the report section pending |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2570,7 +2570,7 @@ tier nodes:
   `strength: declared | strong | weak` sets edge opacity. Classes registered in
   `ui/strabo-graph-classes.js` and styled in `ui/strabo-stylesheet.js`, within the Phase 13
   colour budget.
-- **DF4 (pending) - Grid and cell.** Per-cell data ports in `buildStructureGridViewModel`, shared-dataset
+- **DF4 (done) - Grid and cell.** Per-cell data ports in `buildStructureGridViewModel`, shared-dataset
   edges between cells, and the cell's files annotated from `DataOverlay`. Keep the import reading
   available at every level; a combined mode draws both families with flow edges dashed and hubs
   small, and is opt-in.
@@ -2593,10 +2593,10 @@ the grid and cell levels, **DF5** adds evidence, menus, and the agent/headless s
 **DF6** enforces honesty reporting. Scope starts single-repo; the workspace extends hubs across
 repositories without a new perspective.
 
-Landed so far: **DF1-DF3, DF5 (edge evidence, menus, and the MCP tool), and DF6**, with unit
-coverage in `test/unit/tier-data-flow.test.ts` and the fixture-backed case in
-`test/unit/structure.test.ts`. Still pending: **DF0** (the browser acceptance scenario) and
-**DF4** (grid and cell), and the report section named in DF5.
+Landed so far: **DF1-DF4, DF5 (edge evidence, menus, and the MCP tool), and DF6**, with unit
+coverage in `test/unit/tier-data-flow.test.ts` and the fixture-backed cases in
+`test/unit/structure.test.ts`. Still pending: **DF0** (the browser acceptance scenario) and the
+report section named in DF5.
 
 ## Reading route (landed)
 

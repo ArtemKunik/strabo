@@ -1019,12 +1019,27 @@ export function buildStructureGridViewModel(
   report: TierReport,
   repository: RepositoryDescriptor,
   cache: ScanCacheMetadata,
+  options: StructureViewOptions = {},
 ): ViewModel {
   // Wide enough that a cell's in-card label and the edge labels between rows both fit.
   const CELL = 210;
   const grid = report.grid;
   const unitIndex = new Map(grid.units.map((unit, index) => [unit.id, index]));
   const tierIndex = new Map(grid.tiers.map((tier, index) => [tier, index]));
+
+  // Phase 37: the data-flow reading of the grid. A file resolves to its cell, so a hub written
+  // in one cell and read in another becomes a cell-to-cell edge rather than an import, and each
+  // cell carries the count of hubs it writes and reads.
+  const dataFlow = options.dataFlow;
+  const cellOfFile = new Map<string, string>();
+  if (dataFlow) {
+    for (const file of report.files) {
+      cellOfFile.set(file.file, `${file.unit ?? '.'}|${file.tier}`);
+    }
+  }
+  const gridFlow = dataFlow
+    ? gridDataFlowEdges(dataFlow, cellOfFile, new Set(grid.cells.map((cell) => cell.id)))
+    : null;
 
   const nodes: ViewNode[] = [];
   const positions: ViewPosition[] = [];
@@ -1087,6 +1102,7 @@ export function buildStructureGridViewModel(
       unitName: cell.unitName,
       cell: cell.id,
       internalImports: internal.get(cell.id) ?? 0,
+      ...(gridFlow?.ports.get(cell.id) ? { dataPorts: gridFlow.ports.get(cell.id) } : {}),
     });
     positions.push({
       id: cell.id,
@@ -1116,31 +1132,33 @@ export function buildStructureGridViewModel(
     positions.push({ id, x: shelfX, y: index * CELL });
   });
 
-  const edges: ViewEdge[] = grid.edges.filter((edge) => edge.source !== edge.target).map((edge) => ({
-    source: edge.source,
-    target: edge.target,
-    kind: 'import',
-    evidence: {
-      line: 1,
-      specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
-      resolution: 'exact',
-    },
-    semanticSource: edge.source,
-    semanticTarget: edge.target,
-    weight: edge.weight,
-    crossUnit: edge.crossUnit ? edge.weight : 0,
-    crossUnitEdge: edge.crossUnit,
-    tierKind: edge.kind,
-    ghost: edge.ghost,
-    intended: edge.intended,
-    allowedCount: edge.allowedCount,
-    allowedTypeOnly: edge.allowedTypeOnly,
-    allowedRules: edge.allowedRules,
-    violation: edge.violation,
-    ruleId: edge.ruleId,
-    typeOnlyCount: edge.typeOnly ?? 0,
-    tierImports: edge.imports ?? [],
-  }));
+  const edges: ViewEdge[] = gridFlow
+    ? gridFlow.edges
+    : grid.edges.filter((edge) => edge.source !== edge.target).map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        kind: 'import',
+        evidence: {
+          line: 1,
+          specifier: `${edge.weight} recorded import${edge.weight === 1 ? '' : 's'}`,
+          resolution: 'exact',
+        },
+        semanticSource: edge.source,
+        semanticTarget: edge.target,
+        weight: edge.weight,
+        crossUnit: edge.crossUnit ? edge.weight : 0,
+        crossUnitEdge: edge.crossUnit,
+        tierKind: edge.kind,
+        ghost: edge.ghost,
+        intended: edge.intended,
+        allowedCount: edge.allowedCount,
+        allowedTypeOnly: edge.allowedTypeOnly,
+        allowedRules: edge.allowedRules,
+        violation: edge.violation,
+        ruleId: edge.ruleId,
+        typeOnlyCount: edge.typeOnly ?? 0,
+        tierImports: edge.imports ?? [],
+      }));
 
   return {
     repository,
@@ -1163,7 +1181,94 @@ export function buildStructureGridViewModel(
     structureSpines: report.spines,
     structureEndpoints: report.endpoints,
     structureIntent: report.intent,
+    structureFlow: dataFlow ? 'data' : 'imports',
+    ...(dataFlow
+      ? { structureDataFlow: dataFlow.summary, structureDataFlowDiagnostics: dataFlow.diagnostics }
+      : {}),
   };
+}
+
+/**
+ * The recorded data flow of the grid (Phase 37): each hub's writer cells and reader cells become
+ * cell-to-cell edges, and each cell's distinct hub counts become its data ports. A cell that only
+ * writes, or only reads, is a producer or a consumer; a hub written and read in the same cell is
+ * not an edge (it would be a self-loop) but still counts as a port on both sides.
+ */
+function gridDataFlowEdges(
+  flow: TierDataFlow,
+  cellOfFile: Map<string, string>,
+  cellIds: Set<string>,
+): { edges: ViewEdge[]; ports: Map<string, { writes: number; reads: number }> } {
+  const byHub = new Map<
+    string,
+    {
+      writers: Set<string>;
+      readers: Set<string>;
+      evidence: Array<{ cell: string; file: string; line: number; detail: string }>;
+      strength: ViewEdge['flowStrength'];
+      governed: boolean;
+      conformance?: ViewEdge['flowConformance'];
+    }
+  >();
+  for (const edge of flow.edges) {
+    if (edge.direction === 'derives' || edge.tier === null) continue;
+    const isWrite = edge.direction === 'writes' || edge.direction === 'produces';
+    for (const site of edge.evidence) {
+      const cell = cellOfFile.get(site.file);
+      if (!cell || !cellIds.has(cell)) continue;
+      const entry = byHub.get(edge.hub) ?? {
+        writers: new Set<string>(),
+        readers: new Set<string>(),
+        evidence: [],
+        strength: edge.strength,
+        governed: edge.governed,
+        ...(edge.conformance ? { conformance: edge.conformance } : {}),
+      };
+      (isWrite ? entry.writers : entry.readers).add(cell);
+      entry.evidence.push({ cell, file: site.file, line: site.line, detail: site.detail });
+      byHub.set(edge.hub, entry);
+    }
+  }
+
+  const ports = new Map<string, { writes: number; reads: number }>();
+  const bump = (cell: string, key: 'writes' | 'reads'): void => {
+    const port = ports.get(cell) ?? { writes: 0, reads: 0 };
+    port[key] += 1;
+    ports.set(cell, port);
+  };
+
+  const edges: ViewEdge[] = [];
+  const seen = new Set<string>();
+  for (const [hubId, entry] of byHub) {
+    for (const cell of entry.writers) bump(cell, 'writes');
+    for (const cell of entry.readers) bump(cell, 'reads');
+    const label = hubLabelOf(hubId);
+    for (const source of entry.writers) {
+      for (const target of entry.readers) {
+        if (source === target) continue;
+        const key = `${source}\u0000${hubId}\u0000${target}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const sites = entry.evidence.filter((item) => item.cell === source || item.cell === target);
+        edges.push({
+          source,
+          target,
+          kind: 'import',
+          evidence: { line: sites[0]?.line ?? 1, specifier: `writes ${label}`, resolution: 'exact' },
+          semanticSource: source,
+          semanticTarget: target,
+          weight: Math.max(1, sites.length),
+          flowKind: 'writes',
+          flowStrength: entry.strength,
+          flowGoverned: entry.governed,
+          ...(entry.conformance ? { flowConformance: entry.conformance } : {}),
+          flowEvidence: sites.map((item) => ({ file: item.file, line: item.line, detail: `${item.detail} · ${label}` })),
+        });
+      }
+    }
+  }
+  edges.sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+  return { edges, ports };
 }
 
 export interface StructureCellViewOptions {
@@ -1175,6 +1280,8 @@ export interface StructureCellViewOptions {
   showOutside?: boolean;
   /** The selected file whose outside links are drawn. */
   selectedFile?: string;
+  /** The Phase 37 data-flow reading: draw the cell files' recorded read/write edges to hubs. */
+  dataFlow?: TierDataFlow;
 }
 
 /**
@@ -1254,10 +1361,10 @@ export function buildStructureCellViewModel(
     });
   }
 
-  const edges: ViewEdge[] = [];
+  const importEdges: ViewEdge[] = [];
   for (const edge of graph.edges ?? []) {
     if (memberSet.has(edge.source) && memberSet.has(edge.target)) {
-      edges.push({
+      importEdges.push({
         ...edge,
         semanticSource: edge.source,
         semanticTarget: edge.target,
@@ -1272,7 +1379,7 @@ export function buildStructureCellViewModel(
       directory: n.directory,
       kind: n.kind,
     })),
-    edges,
+    edges: importEdges,
     diagnostics: [],
     excluded: [],
   };
@@ -1287,12 +1394,24 @@ export function buildStructureCellViewModel(
     cursorX += 240;
   }
 
+  // The data-flow reading swaps the intra-cell imports for the recorded reads and writes of the
+  // cell's files against their hubs, drawn as hub nodes below the files (Phase 37).
+  let edges = importEdges;
+  if (options.dataFlow) {
+    const cellFlow = cellDataFlowNodes(options.dataFlow, memberSet);
+    nodes.push(...cellFlow.nodes);
+    cellFlow.hubIds.forEach((id, index) => {
+      positions.push({ id, x: index * 180, y: maxY + 480 });
+    });
+    edges = cellFlow.edges;
+  }
+
   return {
     repository,
     nodes,
     edges,
     positions,
-    hubs: rankHubs(metrics).filter((id) => memberSet.has(id)),
+    hubs: options.dataFlow ? [] : rankHubs(metrics).filter((id) => memberSet.has(id)),
     diagnostics: [],
     excluded: [],
     cache,
@@ -1306,5 +1425,72 @@ export function buildStructureCellViewModel(
     structureSpines: report.spines,
     structureEndpoints: report.endpoints,
     structureIntent: report.intent,
+    structureFlow: options.dataFlow ? 'data' : 'imports',
+    ...(options.dataFlow
+      ? { structureDataFlow: options.dataFlow.summary, structureDataFlowDiagnostics: options.dataFlow.diagnostics }
+      : {}),
   };
+}
+
+/**
+ * The data-flow reading of one cell (Phase 37): the cell's member files against the hubs they
+ * read and write, as hub nodes and file↔hub edges. A file with a data use elsewhere in the
+ * repository but not in this cell is left out; only the cell's own recorded accesses are drawn.
+ */
+function cellDataFlowNodes(
+  flow: TierDataFlow,
+  memberSet: Set<string>,
+): { nodes: ViewNode[]; edges: ViewEdge[]; hubIds: string[] } {
+  const hubIds = new Set<string>();
+  const edges: ViewEdge[] = [];
+  const seen = new Set<string>();
+  for (const edge of flow.edges) {
+    if (edge.direction === 'derives' || edge.tier === null) continue;
+    const isWrite = edge.direction === 'writes' || edge.direction === 'produces';
+    for (const site of edge.evidence) {
+      if (!memberSet.has(site.file)) continue;
+      hubIds.add(edge.hub);
+      const key = `${edge.hub}\u0000${site.file}\u0000${edge.direction}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const source = isWrite ? site.file : edge.hub;
+      const target = isWrite ? edge.hub : site.file;
+      edges.push({
+        source,
+        target,
+        kind: 'import',
+        evidence: { line: site.line, specifier: `${edge.direction} ${hubLabelOf(edge.hub)}`, resolution: 'exact' },
+        semanticSource: source,
+        semanticTarget: target,
+        weight: 1,
+        scope: 'unit',
+        flowKind: edge.direction,
+        flowStrength: edge.strength,
+        flowGoverned: edge.governed,
+        ...(edge.conformance ? { flowConformance: edge.conformance } : {}),
+        flowEvidence: [site],
+      });
+    }
+  }
+
+  const nodes: ViewNode[] = [...hubIds].sort().map((id) => {
+    const hub = flow.hubs.find((candidate) => candidate.id === id);
+    return {
+      id,
+      kind: 'dataset' as const,
+      directory: 'flow',
+      label: hub?.label ?? hubLabelOf(id),
+      workspacePath: id,
+      fanIn: 0,
+      fanOut: 0,
+      transitiveDependencies: 0,
+      transitiveDependents: 0,
+      size: 6,
+      dataKind: hub?.kind,
+      dataGoverned: hub?.governed === true,
+      why: hub && hub.tiers.length > 0 ? hub.tiers.map((tier) => STRUCTURE_LABELS[tier] ?? tier).join(', ') : undefined,
+    };
+  });
+
+  return { nodes, edges, hubIds: [...hubIds].sort() };
 }

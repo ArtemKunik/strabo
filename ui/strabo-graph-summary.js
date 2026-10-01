@@ -92,6 +92,42 @@ export function readingLegend(model, locLens = false) {
       'support = unit footer',
     ];
   }
+  if (model?.structure && model.structureFlow === 'data') {
+    // The data-flow reading (Phase 37): a hub is a dataset the stack routes through, and the
+    // solid/dashed distinction is named so read vs write never rests on hue alone. The grid
+    // draws cell-to-cell flow edges; a cell drill-down draws file-to-hub edges.
+    if (model.structureLevel === 'grid') {
+      return withStructureLimits(
+        [
+          'column = build unit',
+          'row = tier',
+          'solid edge = data written in one cell, read in another',
+          'ports = hubs the cell writes / reads',
+          'double ring = governed',
+          'shelf = support tiers',
+        ],
+        model,
+      );
+    }
+    if (model.structureLevel === 'cell') {
+      return withStructureLimits(
+        ['file = member', 'ellipse = data hub', 'solid = writes', 'dashed = reads', 'double ring = governed'],
+        model,
+      );
+    }
+    return withStructureLimits(
+      [
+        'card = tier',
+        'ellipse = data hub',
+        'solid = writes',
+        'dashed = reads',
+        'dotted = lineage',
+        'double ring = governed',
+        'shelf = support tiers',
+      ],
+      model,
+    );
+  }
   if (model?.structure && model.structureLevel === 'cell') {
     return [
       'file = member',
@@ -109,22 +145,6 @@ export function readingLegend(model, locLens = false) {
         'edge = recorded import',
         'cross-unit = heavier',
         'wrong-way = red or dashed',
-        'shelf = support tiers',
-      ],
-      model,
-    );
-  }
-  if (model?.structure && model.structureFlow === 'data') {
-    // The data-flow reading (Phase 37): a hub is a dataset the stack routes through, and the
-    // solid/dashed distinction is named so read vs write never rests on hue alone.
-    return withStructureLimits(
-      [
-        'card = tier',
-        'ellipse = data hub',
-        'solid = writes',
-        'dashed = reads',
-        'dotted = lineage',
-        'double ring = governed',
         'shelf = support tiers',
       ],
       model,

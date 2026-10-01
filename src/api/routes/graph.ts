@@ -68,6 +68,18 @@ export function createGraphRouter(config: StraboConfig): Router {
         const unitParam = asString(request.query.unit) ?? asString(request.query.systemUnit);
         const tierParam = asString(request.query.tier);
 
+        // `flow=data`: draw the Phase 37 data-flow reading instead of imports — the recorded
+        // reads and writes routed through data hubs. It is opt-in and never mixes with imports,
+        // and applies to the bands, the grid, and a cell drill-down alike.
+        const wantsDataFlow = asString(request.query.flow) === 'data' || asString(request.query.overlay) === 'data-flow';
+        let dataFlow: ReturnType<typeof buildTierDataFlow> | undefined;
+        if (wantsDataFlow) {
+          const data = await analyzeRepository(repository.name, repository.root, {
+            qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
+          });
+          dataFlow = buildTierDataFlow(report, data, { repository: repository.name });
+        }
+
         if (level === 'cell' || cellParam || (unitParam && tierParam)) {
           let cellUnit = unitParam;
           let cellTier = tierParam;
@@ -93,6 +105,7 @@ export function createGraphRouter(config: StraboConfig): Router {
                 tier: cellTier as never,
                 showOutside: parseBoolean(request.query.outside),
                 selectedFile: asString(request.query.selected),
+                dataFlow,
               },
             );
             if (cellModel) {
@@ -105,22 +118,12 @@ export function createGraphRouter(config: StraboConfig): Router {
         const direction = asString(request.query.direction) ?? asString(request.query.orientation);
         const isHorizontal = direction === 'horizontal' || direction === 'lr';
         if (level === 'grid') {
-          response.json(buildStructureGridViewModel(report, descriptor, cache));
+          response.json(buildStructureGridViewModel(report, descriptor, cache, { dataFlow }));
           return;
         }
         // `since=<ref>`: read the stack against the graph at that revision, classified with
         // the same working-tree rules, so the deltas show what the change did to the layering.
         const since = asString(request.query.since);
-        // `flow=data`: draw the Phase 37 data-flow reading instead of imports — the recorded
-        // reads and writes routed through data hubs. It is opt-in and never mixes with imports.
-        const wantsDataFlow = asString(request.query.flow) === 'data' || asString(request.query.overlay) === 'data-flow';
-        let dataFlow: ReturnType<typeof buildTierDataFlow> | undefined;
-        if (wantsDataFlow) {
-          const data = await analyzeRepository(repository.name, repository.root, {
-            qualifiedContracts: readWorkspaceConfig(config.configPath)?.contractsIdentity === 'qualified',
-          });
-          dataFlow = buildTierDataFlow(report, data, { repository: repository.name });
-        }
         let baseline: StructureViewOptions['baseline'];
         if (since && !dataFlow) {
           const base = await revisionBaseline(repository.root, since, repository.name);

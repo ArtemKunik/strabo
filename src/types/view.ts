@@ -65,6 +65,11 @@ export interface ViewNode extends GraphNode {
   dataGoverned?: boolean;
   /** In a Structure data-flow reading, the tier role of a hub that is the endpoint of a flow. */
   dataTier?: string;
+  /**
+   * In a Structure data-flow reading of the grid (Phase 37), a cell's data ports: how many
+   * distinct hubs its files write and read, so a cell is read as a producer/consumer too.
+   */
+  dataPorts?: { writes: number; reads: number };
 }
 
 export interface ViewEdge extends GraphEdge {

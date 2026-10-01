@@ -83,6 +83,78 @@ test('buildStructureViewModel draws hubs and flow edges in the data-flow reading
   assert.equal(model.structureDataFlow?.crossTier, 1);
 });
 
+test('the Structure grid draws data ports and cell-to-cell flow edges (Phase 37)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  const writer = report.files.find((file) => file.tier === 'data');
+  const reader = report.files.find((file) => file.tier === 'api');
+  assert.ok(writer && reader);
+  const flow = buildTierDataFlow(report, dataFlowReport(writer.file, reader.file), { repository: 'structure-repo' });
+
+  const model = buildStructureGridViewModel(
+    report,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { dataFlow: flow },
+  );
+
+  assert.equal(model.structureLevel, 'grid');
+  assert.equal(model.structureFlow, 'data');
+  assert.ok(model.edges.some((edge) => edge.flowKind === 'writes'));
+  const ports = model.nodes.filter((node) => node.dataPorts);
+  assert.ok(ports.some((node) => (node.dataPorts?.writes ?? 0) > 0));
+  assert.ok(ports.some((node) => (node.dataPorts?.reads ?? 0) > 0));
+  assert.equal(model.structureDataFlow?.reads, 1);
+});
+
+test('a Structure cell draws its files against their data hubs (Phase 37)', async () => {
+  const { graph } = await scanRepository(root);
+  const report = buildTierReport(root, 'structure-repo', graph);
+  const writer = report.files.find((file) => file.tier === 'data');
+  const reader = report.files.find((file) => file.tier === 'api');
+  assert.ok(writer && reader);
+  const flow = buildTierDataFlow(report, dataFlowReport(writer.file, reader.file), { repository: 'structure-repo' });
+
+  const cell = buildStructureCellViewModel(
+    report,
+    graph,
+    { name: 'structure-repo', root } as never,
+    { status: 'memory', fingerprint: 'x', artifactVersion: 1, generatedAt: new Date().toISOString(), stale: false },
+    { unit: writer.unit, tier: 'data' as never, dataFlow: flow },
+  );
+
+  assert.ok(cell);
+  assert.equal(cell.structureFlow, 'data');
+  assert.ok(cell.nodes.some((node) => node.kind === 'dataset' && node.id === 'db:structure-repo/users'));
+  assert.ok(cell.edges.some((edge) => edge.flowKind === 'writes' && edge.source === writer.file));
+});
+
+/** A minimal data report with one hub written by `writerFile` and read by `readerFile`. */
+function dataFlowReport(writerFile: string, readerFile: string): DataReport {
+  const hub = 'db:structure-repo/users';
+  return {
+    datasets: [{ id: hub, kind: 'table', label: 'users', repository: 'structure-repo', strength: 'strong' }],
+    edges: [
+      { kind: 'writes', source: writerFile, target: hub, strength: 'strong', evidence: { repository: 'structure-repo', file: writerFile, line: 2 } },
+      { kind: 'reads', source: readerFile, target: hub, strength: 'strong', evidence: { repository: 'structure-repo', file: readerFile, line: 5 } },
+    ],
+    model: { entities: [], findings: [] },
+    contracts: [],
+    shapeTwins: [],
+    events: [],
+    eventContracts: [],
+    products: [],
+    candidates: [],
+    conformance: [],
+    lineage: [],
+    classifications: [],
+    catalogs: [],
+    dbt: [],
+    summary: { datasets: 1, tables: 1, topics: 0, contracts: 0, products: 0, candidates: 0, conformance: 0, lineage: 0, modeled: true },
+    unavailable: [],
+  } as unknown as DataReport;
+}
+
 test('buildStructureViewModel draws bands in rank order and shelves the support tiers (Y3)', async () => {
   const { graph } = await scanRepository(root);
   const report = buildTierReport(root, 'structure-repo', graph);
@@ -276,6 +348,19 @@ test('GET /graph?structure=1&flow=data serves the data-flow reading (Phase 37)',
   assert.ok(model.structureDataFlow);
   // The tier bands stay; hubs appear only when the fixture records data use.
   assert.equal(model.nodes.some((node) => node.kind === 'tier'), true);
+
+  // The reading applies to the grid and a cell drill-down too.
+  const grid = (await (await fetch(`${base}/api/strabo/graph?structure=1&flow=data&level=grid`)).json()) as {
+    structureFlow?: string;
+    structureLevel?: string;
+  };
+  assert.equal(grid.structureLevel, 'grid');
+  assert.equal(grid.structureFlow, 'data');
+  const cell = (await (
+    await fetch(`${base}/api/strabo/graph?structure=1&flow=data&level=cell&cell=orders%7Cdata`)
+  ).json()) as { structureFlow?: string; structureLevel?: string };
+  assert.equal(cell.structureLevel, 'cell');
+  assert.equal(cell.structureFlow, 'data');
 
   const flowResponse = await fetch(`${base}/api/strabo/analysis/tiers/data-flow`);
   assert.equal(flowResponse.status, 200);

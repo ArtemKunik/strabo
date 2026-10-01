@@ -233,9 +233,12 @@ the Data layer (Phase 33), never inferred from a name.
   the access, and the right-click menu lists them too. The summary line reports `N writes ·
   M reads`, the cross-tier pairs, and the uncontracted hubs.
 
-The reading is **recorded reach, never runtime data flow**: extraction is static and lexical, so
-dynamic SQL, reflection-based ORM access, and runtime-created topics are named as diagnostics
-rather than drawn. The grid and cell levels keep the import reading for now.
+The reading applies at every Structure level. The **bands** draw the tier → hub / hub → tier
+edges; the **grid** draws a cell-to-cell edge for each hub one cell writes and another reads,
+with each cell's write/read port counts on its card; a **cell** drill-down draws its own files
+against the hubs they touch. The reading is **recorded reach, never runtime data flow**:
+extraction is static and lexical, so dynamic SQL, reflection-based ORM access, and
+runtime-created topics are named as diagnostics rather than drawn.
 
 ## Repository passport
 

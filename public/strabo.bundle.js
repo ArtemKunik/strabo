@@ -691,6 +691,13 @@ function structureCardLabel(node, wrongWay, compact = false) {
   if (wrongWay > 0) {
     lines.push(`${wrongWay} wrong-way ${wrongWay === 1 ? "import" : "imports"} out`);
   }
+  const ports = node.dataPorts;
+  if (ports && (ports.writes > 0 || ports.reads > 0)) {
+    const parts = [];
+    if (ports.writes > 0) parts.push(`${ports.writes} ${ports.writes === 1 ? "write" : "writes"}`);
+    if (ports.reads > 0) parts.push(`${ports.reads} ${ports.reads === 1 ? "read" : "reads"}`);
+    lines.push(parts.join(" \xB7 "));
+  }
   return lines.join("\n");
 }
 function structureLabelLines(model) {
@@ -751,7 +758,8 @@ function buildElements(model) {
         locDiameter: locDiameter(node.lines),
         hub: hubs.has(node.id) && node.kind !== "unit" && node.kind !== "shelf",
         dataKind: node.dataKind,
-        dataGoverned: node.dataGoverned === true
+        dataGoverned: node.dataGoverned === true,
+        dataPorts: node.dataPorts
       },
       position: positionOf(positions.get(node.id))
     };
@@ -1140,6 +1148,39 @@ function readingLegend(model, locLens = false) {
       "support = unit footer"
     ];
   }
+  if (model?.structure && model.structureFlow === "data") {
+    if (model.structureLevel === "grid") {
+      return withStructureLimits(
+        [
+          "column = build unit",
+          "row = tier",
+          "solid edge = data written in one cell, read in another",
+          "ports = hubs the cell writes / reads",
+          "double ring = governed",
+          "shelf = support tiers"
+        ],
+        model
+      );
+    }
+    if (model.structureLevel === "cell") {
+      return withStructureLimits(
+        ["file = member", "ellipse = data hub", "solid = writes", "dashed = reads", "double ring = governed"],
+        model
+      );
+    }
+    return withStructureLimits(
+      [
+        "card = tier",
+        "ellipse = data hub",
+        "solid = writes",
+        "dashed = reads",
+        "dotted = lineage",
+        "double ring = governed",
+        "shelf = support tiers"
+      ],
+      model
+    );
+  }
   if (model?.structure && model.structureLevel === "cell") {
     return [
       "file = member",
@@ -1157,20 +1198,6 @@ function readingLegend(model, locLens = false) {
         "edge = recorded import",
         "cross-unit = heavier",
         "wrong-way = red or dashed",
-        "shelf = support tiers"
-      ],
-      model
-    );
-  }
-  if (model?.structure && model.structureFlow === "data") {
-    return withStructureLimits(
-      [
-        "card = tier",
-        "ellipse = data hub",
-        "solid = writes",
-        "dashed = reads",
-        "dotted = lineage",
-        "double ring = governed",
         "shelf = support tiers"
       ],
       model
