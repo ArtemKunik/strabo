@@ -256,6 +256,26 @@ function structureHtmlSection(structure: RepositoryStructureSection | null): str
       ),
     ),
   );
+  const dataFlow = structure.dataFlow;
+  if (dataFlow) {
+    parts.push(
+      `<p>Data flow: ${dataFlow.writes} write(s) · ${dataFlow.reads} read(s) through ${dataFlow.hubs} data hub(s) · ${dataFlow.crossTier} cross-tier pair(s) · ${dataFlow.governed} governed · ${dataFlow.uncontracted} uncontracted${
+        dataFlow.unclassified > 0 ? ` · ${dataFlow.unclassified} file(s) with a data use but no tier` : ''
+      }</p>`,
+    );
+    parts.push(
+      sublist(
+        `Data-flow pairs (${dataFlow.pairs.length})`,
+        dataFlow.pairs.map(
+          (pair) =>
+            `<code>${escapeHtml(pair.source)}</code> → <code>${escapeHtml(pair.target)}</code> via <code>${escapeHtml(pair.hub)}</code>${pair.governed ? ' (governed)' : ''}`,
+        ),
+      ),
+    );
+    for (const diagnostic of dataFlow.diagnostics) {
+      parts.push(`<p class="muted">Data-flow limit: ${escapeHtml(diagnostic)}</p>`);
+    }
+  }
   parts.push('</section>');
   return parts.join('\n');
 }

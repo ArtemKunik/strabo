@@ -9,6 +9,7 @@ export const ACCEPTANCE_ROOT = path.join(ACCEPTANCE_FIXTURES, 'block-repo');
 export const ACCEPTANCE_POLYGLOT_ROOT = path.join(ACCEPTANCE_FIXTURES, 'system-repo');
 export const ACCEPTANCE_SOLO_ROOT = path.join(ACCEPTANCE_FIXTURES, 'solo-repo');
 export const ACCEPTANCE_STRUCTURE_ROOT = path.join(ACCEPTANCE_FIXTURES, 'structure-repo');
+export const ACCEPTANCE_STRUCTURE_DATA_FLOW_ROOT = path.join(ACCEPTANCE_FIXTURES, 'structure-data-flow-repo');
 
 let child = null;
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 
 import { Given, Then, When } from '@cucumber/cucumber';
 
-import { ACCEPTANCE_STRUCTURE_ROOT } from '../support/server.mjs';
+import { ACCEPTANCE_STRUCTURE_ROOT, ACCEPTANCE_STRUCTURE_DATA_FLOW_ROOT } from '../support/server.mjs';
 
 /** Register the structure fixture, select it by name, and close the first-visit passport. */
 async function openFixture(context, root, label) {
@@ -32,6 +32,86 @@ async function openFixture(context, root, label) {
 
 Given('I open the structure fixture repository', async function () {
   await openFixture(this, ACCEPTANCE_STRUCTURE_ROOT, 'structure-repo');
+});
+
+Given('I open the structure data-flow fixture repository', async function () {
+  await openFixture(this, ACCEPTANCE_STRUCTURE_DATA_FLOW_ROOT, 'structure-data-flow-repo');
+});
+
+When('I choose the data-flow reading', async function () {
+  const before = await this.page.evaluate(() => window.straboTest.renderedGeneration());
+  // The Reading picker lives in the header's View popover, beside Detail and Orientation.
+  await this.page.click('#view-menu-toggle');
+  await this.page.selectOption('#structure-flow', 'data');
+  await this.page.click('#view-menu-toggle');
+  await this.page.waitForFunction(
+    (generation) =>
+      window.straboTest?.model()?.structureFlow === 'data' &&
+      window.straboTest.renderedGeneration() > generation,
+    before,
+    { timeout: 20_000 },
+  );
+});
+
+Then('the Structure view draws a data hub for {string}', async function (label) {
+  await this.page.waitForFunction(
+    (name) =>
+      Boolean(
+        window.straboTest?.model()?.nodes.some((node) => node.kind === 'dataset' && node.label === name),
+      ),
+    label,
+    { timeout: 15_000 },
+  );
+});
+
+Then(
+  'the flow from the {string} tier into the {string} hub is drawn as a write',
+  async function (tier, hubLabel) {
+    await this.page.waitForFunction(
+      ({ from, hub }) => {
+        const model = window.straboTest?.model();
+        const hubNode = model?.nodes?.find((node) => node.kind === 'dataset' && node.label === hub);
+        return Boolean(
+          model?.edges.some(
+            (edge) =>
+              edge.flowKind === 'writes' &&
+              edge.source === from &&
+              (!hubNode || edge.target === hubNode.id),
+          ),
+        );
+      },
+      { from: tier, hub: hubLabel },
+      { timeout: 15_000 },
+    );
+  },
+);
+
+Then(
+  'the flow from the {string} hub into the {string} tier is drawn as a read',
+  async function (hubLabel, tier) {
+    await this.page.waitForFunction(
+      ({ hub, to }) => {
+        const model = window.straboTest?.model();
+        const hubNode = model?.nodes?.find((node) => node.kind === 'dataset' && node.label === hub);
+        return Boolean(
+          model?.edges.some(
+            (edge) =>
+              edge.flowKind === 'reads' &&
+              edge.target === to &&
+              (!hubNode || edge.source === hubNode.id),
+          ),
+        );
+      },
+      { hub: hubLabel, to: tier },
+      { timeout: 15_000 },
+    );
+  },
+);
+
+Then('the data-flow legend names read from write', async function () {
+  const text = (await this.page.textContent('#legend')) ?? '';
+  assert.match(text, /solid = writes/);
+  assert.match(text, /dashed = reads/);
 });
 
 When('I switch to structure detail', async function () {

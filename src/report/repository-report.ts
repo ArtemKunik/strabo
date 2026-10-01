@@ -9,12 +9,14 @@ import type { SmellRule, SmellsReport } from '../analysis/quality.ts';
 import type { HotspotReport } from '../analysis/hotspots.ts';
 import type { OwnershipContext } from '../analysis/ownership.ts';
 import type { TierReport } from '../analysis/tiers/types.ts';
+import { buildTierDataFlow, type TierDataFlow } from '../analysis/tiers/data-flow.ts';
 import {
   DEFAULT_REPORT_LIMITS,
   SEVERITY_ORDER,
   type PainPoint,
   type RepositoryContractsSection,
   type RepositoryCoverageSection,
+  type RepositoryDataFlowSection,
   type RepositoryDataSection,
   type RepositoryReportDocument,
   type RepositoryReportInputs,
@@ -130,7 +132,7 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
 
   let structure: RepositoryStructureSection | null = null;
   if (inputs.structure) {
-    structure = structureSection(inputs.structure);
+    structure = structureSection(inputs.structure, inputs.data);
   } else {
     unavailable.push('logical structure was not computed');
   }
@@ -203,9 +205,11 @@ function coverageSection(
 /** Trim a computed tier report into the report's structure section. */
 function structureSection(
   report: TierReport | RepositoryStructureSection,
+  data?: DataReport,
 ): RepositoryStructureSection {
   if ('summary' in report && 'classified' in report.summary) {
-    return report as RepositoryStructureSection;
+    const section = report as RepositoryStructureSection;
+    return { ...section, dataFlow: section.dataFlow ?? null };
   }
   const tierReport = report as TierReport;
   return {
@@ -225,6 +229,31 @@ function structureSection(
       unit: d.unit,
       line: d.line,
     })),
+    // The Phase 37 data-flow reading needs the Data layer; without it the section says null
+    // rather than showing an empty reading as if nothing flowed.
+    dataFlow: data ? dataFlowSection(buildTierDataFlow(tierReport, data)) : null,
+  };
+}
+
+/** Most cross-tier pairs listed before the report says it truncated. */
+const DATA_FLOW_PAIR_LIMIT = 40;
+
+function dataFlowSection(flow: TierDataFlow): RepositoryDataFlowSection {
+  return {
+    hubs: flow.summary.hubs,
+    reads: flow.summary.reads,
+    writes: flow.summary.writes,
+    crossTier: flow.summary.crossTier,
+    governed: flow.summary.governed,
+    uncontracted: flow.summary.uncontracted,
+    unclassified: flow.summary.unclassified,
+    pairs: flow.pairs.slice(0, DATA_FLOW_PAIR_LIMIT).map((pair) => ({
+      source: pair.source,
+      target: pair.target,
+      hub: pair.hub,
+      governed: pair.governed,
+    })),
+    diagnostics: flow.diagnostics.map((diagnostic) => diagnostic.detail),
   };
 }
 

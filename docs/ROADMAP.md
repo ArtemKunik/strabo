@@ -47,7 +47,7 @@ record is reported as `unavailable`, never invented.
 | 34 | Code coverage that tells | Done (U0-U7: dogfood report, one coverage source everywhere, a measured Coverage overlay with reachability fallback, honest reachability depth, changed-line coverage in review, risk from coverage, covering tests, and the agent/gate surface) |
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
-| 37 | Data-flow reading of the Structure view | DF1-DF3, DF5, DF6 landed (composition + `GET /analysis/tiers/data-flow`, the bands reading and its picker, the visual language, edge evidence + menus + MCP tool, honesty diagnostics); DF4 grid/cell landed; DF0 acceptance and the report section pending |
+| 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2543,20 +2543,22 @@ tier nodes:
 
 ### Slices
 
-- **DF0 (pending) - Acceptance fixture first.** `test/acceptance/features/structure-data-flow.feature` and a
-  fixture repository with a ranked tier stack plus one table written in `data` and read in `api`,
-  one HTTP endpoint declared in `api` and called from `integration`, and one event produced and
-  consumed across tiers. The scenario asserts the flow edges, the hub nodes, and the uncontracted
-  boundary; it fails until DF1 lands.
+- **DF0 (done) - Acceptance fixture first.** `test/acceptance/features/structure-data-flow.feature`
+  and the fixture `test/fixtures/structure-data-flow-repo`: a declared `domain`/`data` tier stack,
+  a recorded schema (`db/migrations/0001_init.sql`), and one table written in `domain` and read in
+  `data`. The scenario switches on the data-flow reading and asserts the hub, the write edge into
+  it, and the read edge out of it. A unit counterpart lives in
+  `test/unit/structure-data-flow-fixture.test.ts`.
 - **DF1 (done) - Composition and endpoint.** `src/analysis/tiers/data-flow.ts` exports
-  `buildStructureDataFlow(root, graph, tierReport, data, contracts)`, joining the tier
-  classification with the Data layer's `DataReport` (`src/analysis/data/report.ts`), the product
-  level (`buildProductLevel`, `src/analysis/data/product-level.ts`), and the contract boundary
-  report (`buildContractBoundary`, `src/analysis/data/contracts-graph.ts`). It returns
-  `TierDataFlow { hubs, edges, uncontracted, unverified, summary }` where each edge is
-  `{ sourceTier, hub, targetTier, flowKind, strength, governed, conformance?, evidence[] }`.
-  Served beside the import flow at `GET /analysis/tiers/data-flow`
-  (`src/api/routes/analysis-structure.ts`, next to `/analysis/tiers/flow`), workspace-scoped so an
+  `buildTierDataFlow(tierReport, data, { repository })`, joining the tier classification with the
+  Data layer's `DataReport` (`src/analysis/data/report.ts`): a `reads`/`writes` edge becomes a
+  tier ↔ hub flow edge (a topic/queue edge becomes `produces`/`consumes`), a dataset-to-dataset
+  lineage edge becomes a hub → hub `derives` edge, and a recorded `governs` edge plus a
+  conformance finding mark a hub `governed`/`drifting`. It returns
+  `TierDataFlow { hubs, edges, pairs, summary, diagnostics, unavailable }` where each edge is
+  `{ tier, hub, direction, source, target, strength, governed, conformance?, evidence[] }`.
+  Served at `GET /analysis/tiers/data-flow`
+  (`src/api/routes/analysis-structure.ts`, next to `/analysis/tiers/flow`), repository-scoped so an
   external dataset is never invented as in-repo.
 - **DF2 (done) - The bands reading.** Map `TierDataFlow` into the view model the way `tierImports` was
   added to `ViewEdge` (`src/types/view.ts`, `src/view/view-model.ts` `buildStructureViewModel`):
@@ -2574,7 +2576,7 @@ tier nodes:
   edges between cells, and the cell's files annotated from `DataOverlay`. Keep the import reading
   available at every level; a combined mode draws both families with flow edges dashed and hubs
   small, and is opt-in.
-- **DF5 (partial) - Evidence, menus, and surfaces.** A `renderDataFlowEvidence` sibling to
+- **DF5 (done) - Evidence, menus, and surfaces.** A `renderDataFlowEvidence` sibling to
   `renderTierImports` in `ui/strabo-panel-overlay.js`, listing `file:line → hub` with direction
   and sorting the weakest evidence first. Right-click on a hub or flow edge offers "Show all N
   reads/writes" and "Open source at line", reusing `ui/strabo-delegation.js` `flowMenuItems`.
@@ -2593,10 +2595,11 @@ the grid and cell levels, **DF5** adds evidence, menus, and the agent/headless s
 **DF6** enforces honesty reporting. Scope starts single-repo; the workspace extends hubs across
 repositories without a new perspective.
 
-Landed so far: **DF1-DF4, DF5 (edge evidence, menus, and the MCP tool), and DF6**, with unit
-coverage in `test/unit/tier-data-flow.test.ts` and the fixture-backed cases in
-`test/unit/structure.test.ts`. Still pending: **DF0** (the browser acceptance scenario) and the
-report section named in DF5.
+Landed: **DF0-DF6**. Unit coverage lives in `test/unit/tier-data-flow.test.ts`, the
+fixture-backed cases in `test/unit/structure.test.ts` and
+`test/unit/structure-data-flow-fixture.test.ts`, and the report section in
+`test/unit/repository-report.test.ts`; the browser scenario is
+`test/acceptance/features/structure-data-flow.feature`.
 
 ## Reading route (landed)
 

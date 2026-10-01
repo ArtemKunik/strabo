@@ -238,7 +238,9 @@ edges; the **grid** draws a cell-to-cell edge for each hub one cell writes and a
 with each cell's write/read port counts on its card; a **cell** drill-down draws its own files
 against the hubs they touch. The reading is **recorded reach, never runtime data flow**:
 extraction is static and lexical, so dynamic SQL, reflection-based ORM access, and
-runtime-created topics are named as diagnostics rather than drawn.
+runtime-created topics are named as diagnostics rather than drawn. The same reading backs the
+MCP tool `get_structure_data_flow`, and the headless repository report carries it as the
+**Data flow** lines of its Logical structure section (`strabo report`).
 
 ## Repository passport
 

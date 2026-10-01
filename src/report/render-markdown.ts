@@ -268,6 +268,24 @@ function renderTierStructure(lines: string[], structure: RepositoryStructureSect
         `\`${dir.source}\` (${dir.sourceTier}) → \`${dir.target}\` (${dir.targetTier}) [${dir.kind}] at line ${dir.line}`,
     ),
   );
+  const dataFlow = structure.dataFlow;
+  if (dataFlow) {
+    lines.push(
+      `- Data flow: ${dataFlow.writes} write(s) · ${dataFlow.reads} read(s) through ${dataFlow.hubs} data hub(s) · ${dataFlow.crossTier} cross-tier pair(s) · ${dataFlow.governed} governed · ${dataFlow.uncontracted} uncontracted${
+        dataFlow.unclassified > 0 ? ` · ${dataFlow.unclassified} file(s) with a data use but no tier` : ''
+      }`,
+    );
+    section(
+      lines,
+      `Data-flow pairs (${dataFlow.pairs.length})`,
+      dataFlow.pairs.map(
+        (pair) => `\`${pair.source}\` → \`${pair.target}\` via \`${pair.hub}\`${pair.governed ? ' (governed)' : ''}`,
+      ),
+    );
+    for (const diagnostic of dataFlow.diagnostics) {
+      lines.push(`- data-flow limit: ${diagnostic}`);
+    }
+  }
   lines.push('');
 }
 

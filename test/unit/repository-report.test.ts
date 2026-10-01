@@ -561,6 +561,8 @@ test('the coverage and structure sections are part of the report, and absent mea
   assert.equal(struct.summary.classified, 4);
   assert.equal(struct.tierFlow.tiers.length, 3);
   assert.equal(struct.tierFlow.edges.length, 1);
+  // A precomputed section names no data-flow reading rather than showing an empty one.
+  assert.equal(struct.dataFlow, null);
 
   const markdown = renderReportMarkdown(document);
   assert.match(markdown, /## Code coverage/);
@@ -576,6 +578,40 @@ test('the coverage and structure sections are part of the report, and absent mea
   const absentMd = renderReportMarkdown(absent);
   assert.match(absentMd, /## Code coverage\n- not included in this report/);
   assert.match(absentMd, /## Logical structure\n- not included in this report/);
+});
+
+test('the report carries the data-flow reading of the logical structure (Phase 37)', () => {
+  const tierReport = {
+    files: [
+      { file: 'src/data/repo.ts', tier: 'data', mixed: false, evidence: [], lines: 1, tables: [] },
+      { file: 'src/api/handler.ts', tier: 'api', mixed: false, evidence: [], lines: 1, tables: [] },
+    ],
+    tierFlow: { tiers: ['api', 'data'], edges: [], intraByTier: [], total: 0, intraRatio: 0 },
+    shelf: [],
+    summary: { total: 2, unclassified: 0, mixed: 0 },
+    directions: [],
+  } as never;
+  const data = {
+    ...(dataReport() as Record<string, unknown>),
+    datasets: [{ id: 'db:demo/orders', kind: 'table', label: 'orders', repository: 'demo', strength: 'strong' }],
+    edges: [
+      { kind: 'writes', source: 'src/data/repo.ts', target: 'db:demo/orders', strength: 'strong', evidence: { repository: 'demo', file: 'src/data/repo.ts', line: 1 } },
+      { kind: 'reads', source: 'src/api/handler.ts', target: 'db:demo/orders', strength: 'strong', evidence: { repository: 'demo', file: 'src/api/handler.ts', line: 2 } },
+    ],
+  } as never;
+
+  const document = buildRepositoryReport(inputs({ structure: tierReport, data }));
+  const dataFlow = document.structure?.dataFlow;
+  assert.ok(dataFlow);
+  assert.equal(dataFlow.writes, 1);
+  assert.equal(dataFlow.reads, 1);
+  assert.equal(dataFlow.hubs, 1);
+  assert.equal(dataFlow.crossTier, 1);
+  assert.deepEqual(dataFlow.pairs.map((pair) => `${pair.source}->${pair.target}`), ['data->api']);
+
+  const markdown = renderReportMarkdown(document);
+  assert.match(markdown, /Data flow: 1 write\(s\) · 1 read\(s\)/);
+  assert.match(markdown, /`data` → `api`/);
 });
 
 test('coverage section when unavailable reports checked locations and commands', () => {

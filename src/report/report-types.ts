@@ -143,6 +143,29 @@ export interface RepositoryStructureSection {
     unit: string;
     line: number;
   }>;
+  /** The data-flow reading of the stack (Phase 37); null when no data layer was computed. */
+  dataFlow: RepositoryDataFlowSection | null;
+}
+
+/**
+ * The data-flow reading of the logical structure (Phase 37): the recorded reads and writes
+ * routed through data hubs between role tiers, with the contract governance and the honesty
+ * diagnostics. Only recorded edges are counted; `null` on the section means the data layer was
+ * not computed, never that nothing flowed.
+ */
+export interface RepositoryDataFlowSection {
+  hubs: number;
+  reads: number;
+  writes: number;
+  /** Writer tier and reader tier that differ, joined through a hub. */
+  crossTier: number;
+  governed: number;
+  uncontracted: number;
+  /** Files with a data use but no tier evidence, so no band could be drawn. */
+  unclassified: number;
+  /** Cross-tier writer → reader pairs through a hub, most actionable first (bounded). */
+  pairs: Array<{ source: Tier; target: Tier; hub: string; governed: boolean }>;
+  diagnostics: string[];
 }
 
 export interface ReportRevision {

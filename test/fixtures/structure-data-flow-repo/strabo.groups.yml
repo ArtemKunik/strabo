@@ -1,0 +1,8 @@
+Tier declarations for this fixture, read by the tier lens (/analysis/tiers).
+A declared tier overrides the derived one, so the data-flow reading has a stable stack.
+
+tiers:
+  - tier: domain
+    globs: ["src/domain/**"]
+  - tier: data
+    globs: ["src/data/**"]
