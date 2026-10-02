@@ -5581,6 +5581,10 @@ function passportCrumb(model, path, handlers) {
     crumb.textContent = path;
     return crumb;
   }
+  const full = document.createElement("span");
+  full.className = "sr-only";
+  full.textContent = path;
+  crumb.append(full);
   const drawn = new Set((model.nodes ?? []).map((candidate) => candidate.id));
   const shown = folders.map((name, index) => ({ name, id: folders.slice(0, index + 1).join("/") }));
   const visible = shown.length > CRUMB_KEEP_TAIL + 1 ? [shown[0], { name: "\u2026", id: null, hint: folders.slice(1, -CRUMB_KEEP_TAIL).join("/") }, ...shown.slice(-CRUMB_KEEP_TAIL)] : shown;

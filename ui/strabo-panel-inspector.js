@@ -36,7 +36,9 @@ const CRUMB_KEEP_TAIL = 3;
 
 /**
  * The file's folders as a breadcrumb. A folder the current map draws is a link to it; the
- * rest are plain text. The full path is the hover hint and what Copy path copies.
+ * rest are plain text. The visible crumb elides the middle of a deep path, so the full path
+ * is also kept as the crumb's title and as screen-reader text: it stays selectable and
+ * copyable, and the selected file is readable from the DOM even when the folders are elided.
  */
 function passportCrumb(model, path, handlers) {
   const crumb = document.createElement('p');
@@ -47,6 +49,10 @@ function passportCrumb(model, path, handlers) {
     crumb.textContent = path;
     return crumb;
   }
+  const full = document.createElement('span');
+  full.className = 'sr-only';
+  full.textContent = path;
+  crumb.append(full);
   const drawn = new Set((model.nodes ?? []).map((candidate) => candidate.id));
   const shown = folders.map((name, index) => ({ name, id: folders.slice(0, index + 1).join('/') }));
   const visible = shown.length > CRUMB_KEEP_TAIL + 1
