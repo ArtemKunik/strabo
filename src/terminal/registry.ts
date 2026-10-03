@@ -23,13 +23,20 @@ export interface SessionManagerOptions {
 class Registry implements SessionManager {
   private readonly config: StraboConfig;
   private readonly spawner: PtySpawner | undefined;
-  private readonly scanCeiling: string;
   private readonly sessions = new Map<string, TerminalSession>();
 
   constructor(config: StraboConfig, spawner?: PtySpawner) {
     this.config = config;
     this.spawner = spawner;
-    this.scanCeiling = config.scanCeiling ?? config.workspaceRoot;
+  }
+
+  /**
+   * Read on every check, never captured at construction: Settings changes
+   * `config.scanCeiling` on the live config, and a registry built before that change must
+   * apply the new ceiling rather than refuse a repository the operator has just allowed.
+   */
+  private get scanCeiling(): string {
+    return this.config.scanCeiling ?? this.config.workspaceRoot;
   }
 
   list(): SessionMeta[] {
