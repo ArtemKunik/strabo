@@ -15,7 +15,7 @@ inputs:
   fail-on:
     description: >-
       Comma-separated rules that fail the check when the change introduces them
-      (`cycle`, `tier`). Empty reports without failing.
+      (`cycle`, `tier`, `http-breaking`). Empty reports without failing.
     required: false
     default: ''
   expect:

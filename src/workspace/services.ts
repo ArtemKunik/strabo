@@ -3,8 +3,10 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
 import { collectSourceFiles, isSourceExtension } from '../scan/scan.ts';
-import type { ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
+import type { ApiParameter, ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
 import { findContractFiles, resolveSchemaRef } from './contracts.ts';
+import { extractRoutesFromContent } from './routes.ts';
+import { extractGraphqlEndpoints, extractGrpcEndpoints, graphqlEndpointsFromContent } from './rpc.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -27,6 +29,66 @@ const OKHTTP_URL = /\.url\s*\(\s*"([^"\n]+)"/g;
 const URI_CREATE = /\bURI\.create\s*\(\s*"([^"\n]+)"/g;
 
 /**
+ * Extract the endpoints a repository declares: its OpenAPI operations, the routes its source
+ * registers with a web framework (`./routes.ts`), and its gRPC services and GraphQL root
+ * fields (`./rpc.ts`), including GraphQL SDL held in source.
+ *
+ * A code-declared endpoint has no host, so it joins a same-repository route edge but never a
+ * cross-repo flow, which needs a host on both sides.
+ */
+export function extractServiceEndpoints(root: string, repository: string): ServiceEndpoint[] {
+  const endpoints = [
+    ...extractOpenApiEndpoints(root, repository),
+    ...extractGrpcEndpoints(root, repository),
+    ...extractGraphqlEndpoints(root, repository),
+  ];
+  for (const file of collectSourceFiles(root, [], [])) {
+    if (!isSourceExtension(file)) {
+      continue;
+    }
+    const content = readText(root, file);
+    if (content !== null) {
+      endpoints.push(
+        ...codeEndpointsFromContent(repository, file, content),
+        ...graphqlEndpointsFromContent(repository, file, content),
+      );
+    }
+  }
+  return sortEndpoints(endpoints);
+}
+
+/** The routes a repository's source files register, as endpoints with their declaring line. */
+export function extractCodeEndpoints(root: string, repository: string): ServiceEndpoint[] {
+  const endpoints: ServiceEndpoint[] = [];
+  for (const file of collectSourceFiles(root, [], [])) {
+    if (!isSourceExtension(file)) {
+      continue;
+    }
+    const content = readText(root, file);
+    if (content !== null) {
+      endpoints.push(...codeEndpointsFromContent(repository, file, content));
+    }
+  }
+  return sortEndpoints(endpoints);
+}
+
+/** The routes one already-read file registers, as endpoints. */
+export function codeEndpointsFromContent(repository: string, file: string, content: string): ServiceEndpoint[] {
+  return extractRoutesFromContent(file, content).map((route) => ({
+    repository,
+    source: file,
+    method: route.method,
+    path: route.path,
+    host: null,
+    origin: 'code' as const,
+    line: route.line,
+    framework: route.framework,
+    handler: route.handler,
+    middleware: route.middleware,
+  }));
+}
+
+/**
  * Extract the HTTP endpoints a repository declares in its OpenAPI documents.
  *
  * One endpoint per operation (method + path). The path is the first server's path prefix
@@ -34,7 +96,7 @@ const URI_CREATE = /\bURI\.create\s*\(\s*"([^"\n]+)"/g;
  * declared or the URL is templated. A document that does not parse is skipped, never
  * guessed at.
  */
-export function extractServiceEndpoints(root: string, repository: string): ServiceEndpoint[] {
+export function extractOpenApiEndpoints(root: string, repository: string): ServiceEndpoint[] {
   const endpoints: ServiceEndpoint[] = [];
   for (const file of findContractFiles(root)) {
     const extension = path.extname(file).toLowerCase();
@@ -56,12 +118,17 @@ export function extractServiceEndpoints(root: string, repository: string): Servi
     }
     endpoints.push(...parseOpenApiEndpoints(repository, file, document));
   }
+  return sortEndpoints(endpoints);
+}
+
+function sortEndpoints(endpoints: ServiceEndpoint[]): ServiceEndpoint[] {
   return endpoints.sort(
     (a, b) =>
       a.repository.localeCompare(b.repository) ||
       a.source.localeCompare(b.source) ||
       a.path.localeCompare(b.path) ||
-      a.method.localeCompare(b.method),
+      a.method.localeCompare(b.method) ||
+      (a.line ?? 0) - (b.line ?? 0),
   );
 }
 
@@ -83,6 +150,7 @@ function parseOpenApiEndpoints(
       }
       const operation = isRecord(item[method]) ? item[method] : {};
       const operationId = readOperationId(operation);
+      const parameters = readParameters(document, item.parameters, operation.parameters);
       const request = resolveSchemaRef(document, mediaSchema(operation.requestBody));
       const response = resolveSchemaRef(document, mediaSchema(firstSuccessResponse(operation.responses)));
       endpoints.push({
@@ -91,13 +159,55 @@ function parseOpenApiEndpoints(
         method: method.toUpperCase(),
         path: joinPaths(server?.path ?? '', operationPath),
         host: server?.host ?? null,
+        origin: 'openapi',
         ...(operationId ? { operationId } : {}),
         ...(request ? { request } : {}),
         ...(response ? { response } : {}),
+        ...(parameters.length > 0 ? { parameters } : {}),
       });
     }
   }
   return endpoints;
+}
+
+/**
+ * The parameters an operation declares, its own overriding the path item's by `in` + `name`.
+ * A `$ref` to `components.parameters` is followed in the same document; one that does not
+ * resolve is left out rather than guessed at.
+ */
+function readParameters(document: Record<string, unknown>, ...lists: unknown[]): ApiParameter[] {
+  const components = isRecord(document.components) ? document.components : {};
+  const shared = isRecord(components.parameters) ? components.parameters : {};
+  const byKey = new Map<string, ApiParameter>();
+  for (const list of lists) {
+    for (const entry of Array.isArray(list) ? list : []) {
+      let parameter: unknown = entry;
+      if (isRecord(entry) && typeof entry.$ref === 'string') {
+        parameter = shared[entry.$ref.split('/').pop() ?? ''];
+      }
+      if (!isRecord(parameter) || typeof parameter.name !== 'string' || typeof parameter.in !== 'string') {
+        continue;
+      }
+      const schema = isRecord(parameter.schema) ? parameter.schema : parameter;
+      byKey.set(`${parameter.in}\u0000${parameter.name}`, {
+        name: parameter.name,
+        in: parameter.in,
+        required: parameter.required === true || parameter.in === 'path',
+        type: parameterType(schema),
+      });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.in.localeCompare(b.in) || a.name.localeCompare(b.name));
+}
+
+function parameterType(schema: Record<string, unknown>): string {
+  if (schema.type === 'array') {
+    return `array<${isRecord(schema.items) ? parameterType(schema.items) : 'unknown'}>`;
+  }
+  if (typeof schema.type === 'string') {
+    return typeof schema.format === 'string' ? `${schema.type}(${schema.format})` : schema.type;
+  }
+  return typeof schema.$ref === 'string' ? (schema.$ref.split('/').pop() ?? 'unknown') : 'unknown';
 }
 
 /** The `operationId` an operation names, or null when it is absent or blank. */
@@ -198,8 +308,11 @@ export function extractServiceCalls(root: string): ServiceCall[] {
  */
 export function extractCallsFromContent(file: string, content: string): ServiceCall[] {
   const calls: ServiceCall[] = [];
+  // A route registration (`app.get('/x', h)`, `@app.get("/x")`) reads like a verb call; it is
+  // the declaring side, so its span is kept out of the calls.
+  const declared = extractRoutesFromContent(file, content);
   const add = (method: string | null, target: string, index: number): void => {
-    if (!isServiceTarget(target)) {
+    if (!isServiceTarget(target) || declared.some((route) => index >= route.start && index < route.end)) {
       return;
     }
     const located = locateTarget(target);

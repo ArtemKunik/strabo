@@ -171,6 +171,50 @@ Files mode because the analyses are per file.
 | Architecture health | `/analysis/architecture-health` | Heuristic axes (cohesion, low coupling, low fan-out, low complexity, coverage), each with the values it came from |
 | Function hotspots | `/analysis/functions` | Functions whose recorded metrics cross a fixed threshold (nested loops, deep nesting, high complexity, long body, many parameters, recursion), ranked worst-first |
 | Data contracts | `/analysis/contracts/overlay` | Contract definitions (`ov-contract-def`), drifting implementations (`ov-cycle`), and ungoverned boundary endpoints (`ov-unreached`/`ov-affected`); the panel lists definitions, governed boundaries, deviations, and ungoverned candidates |
+| HTTP endpoints | `/analysis/endpoints` | Files that register a route (`ov-endpoint`), and those with a route no test reaches or with no guard recorded in front of its handler (`ov-endpoint-gap`); the panel lists each route with its file, line, and gaps |
+
+### HTTP endpoints and the endpoint passport
+
+`GET /analysis/endpoints` (MCP `get_endpoints`) lists every route the repository documents or
+registers in code, one entry per route, with what is recorded about it:
+
+- **Declarations** — the OpenAPI operation and the code registration, joined as the spec ↔ code
+  conformance reading joins them.
+- **Handler** — the handler name and the file it lives in: the decorated function's own file;
+  the module an import binds the handler name from, followed through the recorded import edge
+  (`basis: "import"`); a function of that name in the registering file; or the registering file,
+  named as such.
+- **Guard** — read from what is written in front of the handler: Express middleware arguments,
+  the other decorators, annotations, or attributes on the handler and its class
+  (`login_required`, `UseGuards(AuthGuard)`, `[Authorize]`, `@PreAuthorize`), FastAPI
+  `Depends(...)`, and ASP.NET `.RequireAuthorization()`. A name that reads as authorisation
+  makes it `guarded`, an explicit opt-out (`AllowAnonymous`, `permitAll`) `anonymous`, and
+  anything else `none-recorded` — never "unprotected", since global middleware such as
+  `app.use(auth)` is not followed.
+- **Tests** — literal calls to the route from test files, and the test files that import their
+  way to the handler file (which says a test can exercise the route, not that it does).
+- **Callers** — literal calls to the route from non-test source, matched against the route's
+  path template (`/users/{id}` reads `fetch('/users/42')`).
+
+**gRPC and GraphQL** are read as endpoints too. Each `rpc` of a `.proto` `service` is
+`RPC /package.Service/Method` (the path gRPC puts on the wire) with its request and response
+messages' fields and its streaming kind, and a `google.api.http` option on it is also an HTTP
+endpoint (the gRPC-gateway route). Each field of the root `Query`, `Mutation`, and
+`Subscription` types (and their `extend type`s) is `QUERY users`, with its arguments as
+parameters and its return type's fields as the response, read from `.graphql`/`.gql`/`.graphqls`
+files and from SDL in a `gql`/`graphql` tagged template or a `typeDefs` string. The handler is
+the file that implements the service or resolves the field by convention (`UserServiceImplBase`,
+`UserServiceServicer`, `UserService.UserServiceBase`, tonic `impl … for`, `@GrpcMethod`;
+`resolve_users`, `@Query(...) users(`, an Apollo `Query: { users … }` map), and callers are calls
+of the rpc on a stub- or client-named receiver and the top-level fields an operation selects in
+a `gql` template or a `.graphql` document. Guards on these (interceptors, directives) are not
+read. The same endpoints feed the workspace service list and the HTTP API diff, so a removed
+rpc or a new required GraphQL argument is a breaking change with its callers.
+
+`GET /analysis/endpoint-passport?method=GET&path=/users/{id}` (MCP `get_endpoint_passport`) is
+one route's card: the entry above plus the declared parameters and request and response
+fields, the middleware as written, and the files and database tables within three import hops
+of the handler (an import reach, not a call trace). A path matches with any parameter names.
 
 ## Declared architecture rules
 
@@ -430,6 +474,34 @@ needs a recorded host, path, and method on both sides, so a relative call or a s
 endpoint is evidence without a flow, and a call whose method is not recorded joins only when
 that host and path declares exactly one method. The `/api/strabo/workspace/services` endpoint
 returns the declared endpoints and the joined flows.
+
+Endpoints are also read from the **routes a repository registers in code** (`origin: "code"`,
+with the declaring line, the framework, and the handler when it is named): Express, Fastify,
+Koa Router, and Hono verb calls on a router receiver, `router.route('/x').get(h)` chains, and
+`fastify.route({ method, url })`; NestJS `@Controller` + `@Get(':id')`; FastAPI and Flask
+decorators with a same-file `APIRouter(prefix=)` / `Blueprint(url_prefix=)`; Spring
+`@GetMapping` / `@RequestMapping(method=)` and JAX-RS `@GET` + `@Path` under the class mapping;
+ASP.NET `MapGet` (with a same-file `MapGroup`) and `[HttpGet]` under `[Route("api/[controller]")]`;
+and Axum / Actix `.route("/x", get(h))` and `#[get("/x")]`. Path parameters are normalised to
+`{name}` (`:id`, `<int:id>`, `{id:int}`), so a code route and a spec route compare. A prefix
+applied from another file (`app.use('/api', router)`, `include_router(prefix=)`, Axum `nest`)
+is not followed, so such a route is recorded at the path its own file declares. A code route
+has no host, so it backs the in-repository route edges and the Structure trace but never joins
+a cross-repo flow. A registration is the declaring side, so it is no longer also recorded as an
+outbound call.
+
+**Spec ↔ code conformance** (`GET /api/strabo/analysis/routes/conformance`, the MCP tool
+`get_route_conformance`, the report's **HTTP API** section, and `strabo check
+--fail-on=route-drift`) compares the repository's OpenAPI operations with the routes its
+non-test source registers. An operation and a route join on the same method and path, then on
+the same path with parameter names erased (`{id}` and `{userId}`, named as such), then through
+a leading prefix one side adds (a server base such as `/v1`, or a mount the route reader does
+not follow), but only the prefix most such pairs share, so a one-off prefix never joins. What
+is left is listed as **undocumented** routes and **unimplemented** operations, each with the
+methods the other side records for that path, so a method mismatch reads as one. A document
+none of whose operations joins a route is named as describing another service (a vendored
+client spec) and kept out of the gaps; with no document, no route, or no join at all, the
+reading is unavailable with its reason rather than a list of everything.
 
 The **Workspace** panel (the panel rail's **More** list, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the

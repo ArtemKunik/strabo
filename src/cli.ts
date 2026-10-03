@@ -35,7 +35,8 @@ Report options:
   --out=<file>                    write the report to a file instead of stdout
   --expect=<globs>                scope fence: comma-separated globs the change should stay in
   --no-change                     omit the pending change set
-  --no-smells / --no-hotspots / --no-ownership / --no-drift   skip an analysis (named as not computed)
+  --no-smells / --no-hotspots / --no-ownership / --no-drift / --no-api
+                                  skip an analysis (named as not computed)
   --fail-on <rules>               fail only for these rules (cycle, tier, … or a strabo.rules id)
 
 Coverage options:
@@ -52,6 +53,7 @@ Check rules (only the ones named can fail the build):
   --fail-on-new-smells
   --fail-on-health-regression[=pct]
   --fail-on cycle,tier            comma-separated aliases for the same rules
+  --fail-on route-drift           routes and OpenAPI operations that disagree
   --baseline=<file>               baseline to compare against
   --write-baseline                record the current findings as the baseline
   --format=json                   machine-readable result

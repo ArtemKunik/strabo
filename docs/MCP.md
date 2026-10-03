@@ -82,11 +82,18 @@ contract governs, and the honesty diagnostics), `get_dead_code`, `get_scope_fenc
 paths outside a declared zone, plus
 inside changes imported from outside), `get_uncovered_changes` (changed-line coverage:
 git-diff additions intersected with the repository's measured coverage report, with
-uncovered modified functions, public-surface functions first), `get_public_api_diff`
+uncovered modified functions, public-surface functions first), `get_http_api_diff` (HTTP
+endpoints, parameters, and body fields changed between two revisions, classified breaking,
+conditional, or safe, with the recorded callers of each breaking change), `get_public_api_diff`
 (exported symbols added, removed, or re-signed between two revisions, with their recorded
 consumers), `get_clones` (functions whose normalised bodies hash the same), `get_string_edges`
 (environment variables, HTTP routes, and feature flags, with dynamic keys reported as not
-resolved), `strabo_rules` (the declared architecture rules and the edges that violate them),
+resolved), `get_endpoints` (every HTTP route with its handler file, guard, tests, and callers),
+`get_endpoint_passport` (one route's declarations, guard, declared parameters and bodies, tests,
+callers, and the tables within three import hops of its handler), `get_route_conformance` (the
+OpenAPI operations a repository documents against the
+routes its source registers, with the gaps on both sides), `strabo_rules` (the declared
+architecture rules and the edges that violate them),
 `get_drift` (one structural-measure series per recent revision, a gap rather than a zero
 where the cache has no measure), `get_data_products` (the recorded data layer: datasets,
 declared data products with their ports, owners, contracts, and conformance findings,

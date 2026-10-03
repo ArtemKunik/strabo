@@ -1993,7 +1993,8 @@ var OVERLAY_TITLES = {
   "declared-rules": "Declared rules",
   data: "Data",
   coverage: "Coverage",
-  contracts: "Data contracts"
+  contracts: "Data contracts",
+  endpoints: "HTTP endpoints"
 };
 var OVERLAY_ENDPOINTS = {
   impact: "/analysis/impact",
@@ -2008,9 +2009,10 @@ var OVERLAY_ENDPOINTS = {
   "declared-rules": "/analysis/rules",
   data: "/analysis/data/overlay",
   coverage: "/analysis/coverage",
-  contracts: "/analysis/contracts/overlay"
+  contracts: "/analysis/contracts/overlay",
+  endpoints: "/analysis/endpoints"
 };
-var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage", "contracts"];
+var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage", "contracts", "endpoints"];
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -2109,6 +2111,8 @@ function overlayFor(kind, data) {
       return contractsOverlay(data);
     case "coverage":
       return coverageOverlay(data);
+    case "endpoints":
+      return endpointsOverlay(data);
     default:
       return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
   }
@@ -2282,6 +2286,43 @@ function coverageReportAge(ageMs) {
     return "";
   }
   return ` (${coverageAge(ageMs)} old)`;
+}
+function endpointsOverlay(report) {
+  if (!report || report.available === false) {
+    return {
+      classes: /* @__PURE__ */ new Map(),
+      summary: "",
+      items: [],
+      emptyNote: report?.reason ?? "No HTTP endpoint is recorded."
+    };
+  }
+  const classes = /* @__PURE__ */ new Map();
+  const items = [];
+  for (const endpoint of report.endpoints ?? []) {
+    const code = (endpoint.declarations ?? []).find((declaration) => declaration.origin === "code");
+    if (!code) {
+      continue;
+    }
+    const gaps = [];
+    if (!endpoint.tested) gaps.push("no test reaches it");
+    if (endpoint.guard?.status === "none-recorded") gaps.push("no guard recorded");
+    if (endpoint.guard?.status === "anonymous") gaps.push("anonymous");
+    const gap = gaps.some((entry) => entry !== "anonymous");
+    if (gap || !classes.has(code.file)) {
+      classes.set(code.file, gap ? "ov-endpoint-gap" : "ov-endpoint");
+    }
+    items.push({
+      id: code.file,
+      label: `${endpoint.method} ${endpoint.path}`,
+      detail: [`${code.file}:${code.line ?? 1}`, ...gaps].join(" \xB7 ")
+    });
+  }
+  const totals = report.totals ?? {};
+  return {
+    classes,
+    summary: `${totals.endpoints ?? items.length} endpoint(s) \xB7 ${totals.untested ?? 0} untested \xB7 ${totals.noGuardRecorded ?? 0} with no guard recorded`,
+    items
+  };
 }
 function declaredRulesOverlay(report) {
   if (!report || report.available === false) {
@@ -3528,6 +3569,11 @@ function stylesheet() {
     // accent ring. Drifting implementations reuse the serious status double ring and
     // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
     { selector: "node.ov-contract-def", style: { "border-width": 3, "border-style": "solid", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    // The HTTP endpoints overlay (Phase 38 R4): a file that registers routes takes the solid
+    // accent ring, and one with an untested or unguarded route the dashed warning ring, so no
+    // new hue enters the budget.
+    { selector: "node.ov-endpoint", style: { "border-width": 3, "border-style": "solid", "border-color": theme.edgeAccent, "background-opacity": 1 } },
+    { selector: "node.ov-endpoint-gap", style: { "border-width": 3, "border-style": "dashed", "border-color": theme.affected, "background-opacity": 1 } },
     // Selection and the status rings above force a solid fill, which would bury a tier
     // card's glyph (drawn in the same hue); the card keeps its wash and shows them as rings.
     { selector: "node.structure-node", style: { "background-opacity": 0.14 } },
@@ -4019,6 +4065,8 @@ var OVERLAY_CLASSES = [
   "ov-smell",
   "ov-hidden-coupling",
   "ov-declared-rule",
+  "ov-endpoint",
+  "ov-endpoint-gap",
   "ov-data",
   "ov-product",
   "ov-contract-def",

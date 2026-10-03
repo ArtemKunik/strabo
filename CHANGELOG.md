@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+- Read HTTP routes declared in code, not only in OpenAPI documents: Express, Fastify, Koa,
+  Hono, NestJS, FastAPI, Flask, Spring, JAX-RS, ASP.NET (minimal and controllers), Axum, and
+  Actix registrations become endpoints with their line, framework, and handler, so route edges
+  and the Structure trace work in repositories without a spec.
+- Stop recording a route registration (`app.get('/x', h)`, `@app.get("/x")`) as an outbound
+  HTTP call.
+- Compare the OpenAPI document with the routes the code registers: undocumented routes and
+  unimplemented operations in `GET /analysis/routes/conformance`, the MCP tool
+  `get_route_conformance`, a new HTTP API report section, and `strabo check --fail-on=route-drift`.
+- Classify HTTP API changes between two revisions as breaking, conditional, or safe (removed
+  endpoints, new required parameters and request fields, removed or now-optional response
+  fields, incompatible types), naming the recorded callers of each breaking change. It is in
+  the change report, `GET /analysis/http-api-diff`, the MCP tool `get_http_api_diff`, and
+  `strabo report --base=<ref> --fail-on=http-breaking`.
+- List every HTTP endpoint with its handler file, the guard read from its middleware or
+  decorators, the tests that reach it, and its callers (`GET /analysis/endpoints`, MCP
+  `get_endpoints`), with a per-route passport that adds declared parameters, bodies, and the
+  tables near the handler (`GET /analysis/endpoint-passport`, MCP `get_endpoint_passport`), and
+  an **HTTP endpoints** review overlay that rings files with an untested or unguarded route.
+- Read gRPC services (`.proto` rpcs, streaming kind, message fields, gRPC-gateway routes) and
+  GraphQL root fields (schema files and SDL in source) as endpoints, with their implementing
+  files and their callers (stub calls, GraphQL selections), in the endpoint list, the
+  passport, the workspace service list, and the API diff.
+
 ## 0.1.1
 
 - Read Android/Kotlin local device stores (SharedPreferences, EncryptedSharedPreferences,

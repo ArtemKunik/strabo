@@ -12,6 +12,7 @@ import {
 import { computeClones } from '../../analysis/clones.ts';
 import { computeImpact } from '../../analysis/impact.ts';
 import { computeFileImpactPassport, rollUpImpactPassports } from '../../analysis/impact-passport.ts';
+import { computeHttpApiDiff, type SiblingCalls } from '../../analysis/http-api-diff.ts';
 import { computePublicApiDiff } from '../../analysis/public-api-diff.ts';
 import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
 import { computeScopeFence } from '../../analysis/scope-fence.ts';
@@ -19,6 +20,8 @@ import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
 import { listWorktrees, resolveWorktree, type WorktreeSummary } from '../../analysis/worktrees.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
+import { resolveWorkspaceRepositories } from '../../workspace/config.ts';
+import { extractServiceCalls } from '../../workspace/services.ts';
 import { revisionFromFingerprint } from '../../status.ts';
 import { parsePositiveInt, sendError } from '../http.ts';
 import { expectValues, graphProvenance, type AnalysisContext } from './analysis-context.ts';
@@ -332,6 +335,29 @@ export function createReviewRouter(context: AnalysisContext): Router {
       const cached = await getCachedGraph(repository.root);
       const head = typeof request.query.head === 'string' && request.query.head ? request.query.head : null;
       response.json(await computePublicApiDiff(repository.root, base, { head, graph: cached.report.graph }));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /**
+   * HTTP API diff (Phase 38 R3): endpoints, parameters, and body fields added, removed, or
+   * changed between two revisions, each breaking change naming its recorded callers here and
+   * in the declared workspace's sibling repositories.
+   */
+  router.get('/analysis/http-api-diff', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const base = typeof request.query.base === 'string' ? request.query.base : '';
+      if (!base) {
+        response.status(400).json({ error: 'base query parameter is required.' });
+        return;
+      }
+      const head = typeof request.query.head === 'string' && request.query.head ? request.query.head : null;
+      const siblings: SiblingCalls[] = resolveWorkspaceRepositories(context.config)
+        .repositories.filter((entry) => entry.root !== repository.root)
+        .map((entry) => ({ repository: entry.name, calls: extractServiceCalls(entry.root) }));
+      response.json(await computeHttpApiDiff(repository.root, base, { head, siblings }));
     } catch (error) {
       sendError(response, error);
     }

@@ -31,6 +31,7 @@ export function renderReportHtml(document: RepositoryReportDocument): string {
   body.push(driftSection(document.drift));
   body.push(dataSection(document.data));
   body.push(contractsSection(document.contracts));
+  body.push(apiSection(document.api));
   body.push(suggestionSection(document));
   body.push(evidenceSection(document));
 
@@ -308,6 +309,54 @@ function driftSection(drift: RepositoryReportDocument['drift']): string {
     parts.push(`<li>${escapeHtml(series.label)}: ${escapeHtml(values)}</li>`);
   }
   parts.push('</ul>');
+  parts.push('</section>');
+  return parts.join('\n');
+}
+
+/** Rows shown per API list; the JSON document keeps them all. */
+const API_ROWS = 20;
+
+function apiSection(api: RepositoryReportDocument['api']): string {
+  const parts: string[] = ['<section>', '<h2>HTTP API</h2>'];
+  if (!api) {
+    parts.push('<p class="muted">Not included in this report.</p>');
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  if (!api.available) {
+    parts.push(`<p class="muted">Unavailable: ${escapeHtml(api.reason ?? 'no conformance reading')}</p>`);
+    parts.push('</section>');
+    return parts.join('\n');
+  }
+  const { totals } = api;
+  parts.push(
+    `<p class="meta">${totals.operations} documented operations · ${totals.routes} registered routes · ${totals.matched} joined · ${totals.undocumented} undocumented · ${totals.unimplemented} unimplemented</p>`,
+  );
+  const list = (title: string, rows: string[]): void => {
+    if (rows.length === 0) {
+      return;
+    }
+    parts.push(`<h3>${escapeHtml(title)}</h3>`, '<ul>');
+    parts.push(...rows.slice(0, API_ROWS).map((row) => `<li>${row}</li>`));
+    if (rows.length > API_ROWS) {
+      parts.push(`<li class="muted">… ${rows.length - API_ROWS} more</li>`);
+    }
+    parts.push('</ul>');
+  };
+  list(
+    'Registered but not documented',
+    api.undocumented.map(
+      (route) =>
+        `<code>${escapeHtml(`${route.method} ${route.path}`)}</code> · <code>${escapeHtml(`${route.file}:${route.line}`)}</code>`,
+    ),
+  );
+  list(
+    'Documented but not registered',
+    api.unimplemented.map(
+      (operation) =>
+        `<code>${escapeHtml(`${operation.method} ${operation.path}`)}</code> · <code>${escapeHtml(operation.file)}</code>`,
+    ),
+  );
   parts.push('</section>');
   return parts.join('\n');
 }

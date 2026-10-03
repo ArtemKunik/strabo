@@ -8,7 +8,7 @@
 import { TIER_ORDER } from './strabo-core.js';
 
 /** Classes an analysis overlay can put on a node. */
-export const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner', 'ov-cross-repo', 'ov-smell', 'ov-hidden-coupling', 'ov-declared-rule', 'ov-data', 'ov-product', 'ov-contract-def',
+export const OVERLAY_CLASSES = ['ov-changed', 'ov-affected', 'ov-cycle', 'ov-unreached', 'ov-hotspot', 'ov-wide-interface', 'ov-pass-through', 'ov-sole-owner', 'ov-cross-repo', 'ov-smell', 'ov-hidden-coupling', 'ov-declared-rule', 'ov-endpoint', 'ov-endpoint-gap', 'ov-data', 'ov-product', 'ov-contract-def',
   // Coverage overlay (Phase 34 U1): a measured ramp plus the always-distinct states.
   'cov-90', 'cov-70', 'cov-50', 'cov-30', 'cov-10', 'cov-zero', 'cov-noreport', 'cov-reachable', 'cov-stale'];
 

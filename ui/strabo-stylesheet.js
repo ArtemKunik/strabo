@@ -236,6 +236,11 @@ export function stylesheet() {
     // accent ring. Drifting implementations reuse the serious status double ring and
     // ungoverned endpoints the dashed warning ring, so no new hue enters the budget.
     { selector: 'node.ov-contract-def', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    // The HTTP endpoints overlay (Phase 38 R4): a file that registers routes takes the solid
+    // accent ring, and one with an untested or unguarded route the dashed warning ring, so no
+    // new hue enters the budget.
+    { selector: 'node.ov-endpoint', style: { 'border-width': 3, 'border-style': 'solid', 'border-color': theme.edgeAccent, 'background-opacity': 1 } },
+    { selector: 'node.ov-endpoint-gap', style: { 'border-width': 3, 'border-style': 'dashed', 'border-color': theme.affected, 'background-opacity': 1 } },
     // Selection and the status rings above force a solid fill, which would bury a tier
     // card's glyph (drawn in the same hue); the card keeps its wash and shows them as rings.
     { selector: 'node.structure-node', style: { 'background-opacity': 0.14 } },

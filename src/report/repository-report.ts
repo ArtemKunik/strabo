@@ -151,6 +151,7 @@ export function buildRepositoryReport(inputs: RepositoryReportInputs): Repositor
     contracts,
     coverage,
     structure,
+    api: inputs.api ?? null,
     suggestions: shown.map(suggestionFor),
     evidence: {
       files: graph.nodes.length,

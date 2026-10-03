@@ -4,6 +4,7 @@ import { buildAdjacency } from '../analysis/analysis.ts';
 import { computeCoverage } from '../analysis/coverage.ts';
 import { impactFromPaths } from '../analysis/impact.ts';
 import { computeScopeFence, type ScopeFence } from '../analysis/scope-fence.ts';
+import { computeHttpApiDiff, type HttpApiDiffReport } from '../analysis/http-api-diff.ts';
 import { computePublicApiDiff, type PublicApiDiffReport } from '../analysis/public-api-diff.ts';
 import { parseNameStatus } from '../analysis/review.ts';
 import type { ReviewStatus } from '../analysis/review-types.ts';
@@ -72,6 +73,8 @@ export interface ReportDocument {
   scopeFence?: ScopeFence;
   /** Exported-symbol diff between the two revisions (Phase 29 E2). */
   publicApiDiff?: PublicApiDiffReport;
+  /** HTTP endpoints added, removed, or changed between the two revisions (Phase 38 R3). */
+  httpApiDiff?: HttpApiDiffReport;
   warnings: string[];
 }
 
@@ -144,6 +147,7 @@ async function runRepositoryReport(argv: readonly string[], io: ReportIo): Promi
     drift: !hasFlag(argv, 'drift'),
     data: !hasFlag(argv, 'data'),
     structure: !hasFlag(argv, 'structure'),
+    api: !hasFlag(argv, 'api'),
     qualifiedContracts: qualified,
     coverage: {
       ...(env.coverageReports ? { reportPaths: env.coverageReports } : {}),
@@ -248,6 +252,9 @@ async function runChangeReport(argv: readonly string[], io: ReportIo): Promise<n
   const publicApiDiff = structural.available
     ? await computePublicApiDiff(repository.root, base, { head: 'HEAD', graph })
     : undefined;
+  const httpApiDiff = structural.available
+    ? await computeHttpApiDiff(repository.root, base, { head: 'HEAD' })
+    : undefined;
 
   const findings = await collectFindings(repository.root, repository.name, graph, true);
   const hotspotsTouched = changedPaths
@@ -280,11 +287,12 @@ async function runChangeReport(argv: readonly string[], io: ReportIo): Promise<n
     structural,
     ...(scopeFence ? { scopeFence } : {}),
     ...(publicApiDiff ? { publicApiDiff } : {}),
+    ...(httpApiDiff ? { httpApiDiff } : {}),
     warnings,
   };
 
   const failOn = parseFailOnRules(collectFailOnValues(argv));
-  const failed = reportFails(failOn, structural);
+  const failed = reportFails(failOn, structural) || (failOn.includes('http-breaking') && (httpApiDiff?.totals.breaking ?? 0) > 0);
 
   write(format === 'json' ? `${JSON.stringify(document, null, 2)}\n` : renderMarkdown(document));
   return failed ? 1 : 0;
@@ -374,6 +382,12 @@ export function renderMarkdown(document: ReportDocument): string {
   if (document.publicApiDiff) {
     lines.push('## Public API');
     renderPublicApi(lines, document.publicApiDiff);
+    lines.push('');
+  }
+
+  if (document.httpApiDiff) {
+    lines.push('## HTTP API');
+    renderHttpApi(lines, document.httpApiDiff);
     lines.push('');
   }
 
@@ -478,6 +492,29 @@ function renderPublicApi(lines: string[], diff: PublicApiDiffReport): void {
     if (file.consumers.length > 0) {
       lines.push(`- recorded consumers: ${file.consumers.map((path) => `\`${path}\``).join(', ')}`);
     }
+  }
+}
+
+function renderHttpApi(lines: string[], diff: HttpApiDiffReport): void {
+  if (!diff.available) {
+    lines.push(`- unavailable: ${diff.reason ?? 'no HTTP API diff'}`);
+    return;
+  }
+  const { totals } = diff;
+  lines.push(
+    `${diff.endpoints.base} → ${diff.endpoints.head} endpoint(s) · ${totals.breaking} breaking · ${totals.conditional} conditional · ${totals.safe} safe`,
+  );
+  if (diff.changes.length === 0) {
+    lines.push('- no endpoint, parameter, or body field changed');
+    return;
+  }
+  for (const change of diff.changes) {
+    const callers = change.callers
+      .map((caller) => `\`${caller.repository ? `${caller.repository}:` : ''}${caller.file}:${caller.line}\``)
+      .join(', ');
+    lines.push(
+      `- **${change.compatibility}** \`${change.method} ${change.path}\` — ${change.detail}${callers ? `; called from ${callers}` : ''}`,
+    );
   }
 }
 

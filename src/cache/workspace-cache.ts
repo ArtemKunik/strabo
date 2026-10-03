@@ -18,7 +18,7 @@ import type { DbtExtraction } from '../workspace/dbt.ts';
 import type { RawLineage, RawPathIo } from '../workspace/lineage.ts';
 import { cacheRoot } from './graph-cache.ts';
 
-export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-6';
+export const WORKSPACE_CACHE_VERSION = 'strabo-workspace-7';
 
 /** The per-repository facts that are expensive to recompute and cheap to store. */
 export interface CachedRepoFacts {

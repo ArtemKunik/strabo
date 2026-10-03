@@ -296,6 +296,11 @@ Then('the overlay panel reports the violating edge from {string} to {string}', a
   assert.match(text, new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 });
 
+Then('the overlay panel shows {string}', async function (expected) {
+  const text = (await this.page.textContent('#overlay-panel')) ?? '';
+  assert.ok(text.includes(expected), `overlay panel "${text}" should include "${expected}"`);
+});
+
 When('I select the overlay row for {string}', async function (id) {
   const row = this.page
     .locator('#overlay-panel .overlay-list-row button')

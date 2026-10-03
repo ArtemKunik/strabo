@@ -18,6 +18,9 @@ node bin/strabo.js check --fail-on-new-smells    # then fail only on new ones
 # data-contract boundaries: ungoverned crossings and drifting implementations
 node bin/strabo.js check --fail-on=contract-ungoverned-boundary,contract-drift-detected
 
+# HTTP API: routes registered in code that the OpenAPI documents do not list, and back
+node bin/strabo.js check --fail-on=route-drift
+
 # the recorded analysis over MCP (stdio), read-only
 node bin/strabo.js mcp
 ```
@@ -72,6 +75,11 @@ The document has six parts:
   cross-unit boundaries they govern (with conformance), uncontracted crossings, orphaned
   contracts, and unverified name matches. A governed edge exists only because a recorded
   import, call, or data use resolved to the contract.
+- **HTTP API** — the OpenAPI operations the repository documents against the routes its
+  source registers: the joined count, routes registered but not documented, and operations
+  documented but not registered, each with its file (and line for a route). A document none of
+  whose operations joins a route is named as describing another service and kept out of the
+  gaps. Skip it with `--no-api`; `strabo check --fail-on=route-drift` fails on the same gaps.
 - **Evidence** — the counts, and a named list of any section the caller did not compute, so a
   missing analysis is visible rather than shown as empty.
 
@@ -124,6 +132,9 @@ node bin/strabo.js report --base=main --expect='src/auth/**' --format=md
 
 # the public API diff and the drift section are always computed for a change report
 node bin/strabo.js report --base=main --format=json
+
+# fail a pull request that breaks an HTTP endpoint a client calls
+node bin/strabo.js report --base=main --fail-on=http-breaking
 ```
 
 - **Scope fence** (`--expect`, repeatable or comma-separated globs) lists every changed path
@@ -131,6 +142,18 @@ node bin/strabo.js report --base=main --format=json
   It is a filter over the review, pure evidence: a path matches a glob or it does not.
 - **Public API** lists exported and `pub` symbols added, removed, or re-signed between the two
   revisions, per language, and names the recorded consumers of a removed or changed symbol.
+- **HTTP API** compares the endpoints each revision declares (OpenAPI operations and routes
+  registered in code, keyed by method and path shape so a renamed path parameter is not a
+  removal) and classifies every change as **breaking**, **conditional**, or **safe** from the
+  side that has to adapt: a removed endpoint, a new required parameter or request field, a
+  removed or now-optional response field, and a type that no longer fits the old values break
+  a client; a removed parameter or request field is conditional (a strict validator rejects
+  it). Each breaking or conditional change names the literal calls that fit the endpoint's
+  path template. `--fail-on=http-breaking` (aliases `api-breaking`, `breaking-api`) fails the
+  report when any change is breaking; `strabo check` has no base revision, so it only warns
+  when that rule is named. The same diff is `GET /analysis/http-api-diff?base=&head=`, which
+  also names callers in the declared workspace's sibling repositories when they call the
+  endpoint's host.
 
 Declared-architecture rules (`strabo.rules.yml`, or the `rules:` key of `strabo.groups.yml`)
 turn operator intent into a check failure: a rule id is passed straight to `--fail-on`, e.g.

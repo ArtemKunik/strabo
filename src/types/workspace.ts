@@ -58,6 +58,15 @@ export interface ApiSchemaRef {
   fields: ContractField[];
 }
 
+/** A query, header, cookie, or path parameter an OpenAPI operation declares. */
+export interface ApiParameter {
+  name: string;
+  in: string;
+  required: boolean;
+  /** `string`, `integer(int64)`, `array<string>`, or `unknown`, like a contract field. */
+  type: string;
+}
+
 /** An HTTP endpoint a repository declares in an OpenAPI document. */
 export interface ServiceEndpoint {
   /** Repository name. */
@@ -76,6 +85,26 @@ export interface ServiceEndpoint {
   request?: ApiSchemaRef | null;
   /** The first recorded 2xx JSON response schema, when the operation declares one. */
   response?: ApiSchemaRef | null;
+  /** The parameters the operation and its path item declare, when any. */
+  parameters?: ApiParameter[];
+  /**
+   * Where the endpoint is declared: an OpenAPI document, a handler registration in code, a
+   * `.proto` service, or a GraphQL schema.
+   */
+  origin?: 'openapi' | 'code' | 'proto' | 'graphql';
+  /**
+   * The protocol: absent means HTTP. A gRPC endpoint reads `RPC /package.Service/Method`; a
+   * GraphQL one reads `QUERY users` (the root operation type and the field).
+   */
+  protocol?: 'grpc' | 'graphql';
+  /** The declaring line, for a code-declared endpoint. */
+  line?: number;
+  /** The framework idiom that declared it (`express`, `fastapi`, `spring`, ...), for a code endpoint. */
+  framework?: string;
+  /** The handler the registration names, when it is readable. */
+  handler?: string | null;
+  /** Middleware, decorators, or attributes in front of a code route's handler, as written. */
+  middleware?: string[];
 }
 
 /** A recorded call from one repository to an endpoint another repository declares. */
