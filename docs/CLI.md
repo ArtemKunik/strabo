@@ -18,6 +18,9 @@ node bin/strabo.js check --fail-on-new-smells    # then fail only on new ones
 # data-contract boundaries: ungoverned crossings and drifting implementations
 node bin/strabo.js check --fail-on=contract-ungoverned-boundary,contract-drift-detected
 
+# HTTP API: routes registered in code that the OpenAPI documents do not list, and back
+node bin/strabo.js check --fail-on=route-drift
+
 # the recorded analysis over MCP (stdio), read-only
 node bin/strabo.js mcp
 ```
@@ -72,6 +75,11 @@ The document has six parts:
   cross-unit boundaries they govern (with conformance), uncontracted crossings, orphaned
   contracts, and unverified name matches. A governed edge exists only because a recorded
   import, call, or data use resolved to the contract.
+- **HTTP API** — the OpenAPI operations the repository documents against the routes its
+  source registers: the joined count, routes registered but not documented, and operations
+  documented but not registered, each with its file (and line for a route). A document none of
+  whose operations joins a route is named as describing another service and kept out of the
+  gaps. Skip it with `--no-api`; `strabo check --fail-on=route-drift` fails on the same gaps.
 - **Evidence** — the counts, and a named list of any section the caller did not compute, so a
   missing analysis is visible rather than shown as empty.
 

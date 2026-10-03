@@ -966,6 +966,17 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/string-edges', args),
     },
     {
+      name: 'get_route_conformance',
+      description:
+        'The OpenAPI operations a repository documents against the HTTP routes its source registers (Express, FastAPI, Flask, Spring, JAX-RS, ASP.NET, NestJS, Axum, Actix): routes with no documented operation, operations with no registered route, and each join with its evidence line.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/routes/conformance', args),
+    },
+    {
       name: 'strabo_rules',
       description:
         'The architecture rules declared in strabo.rules.yml (or the rules key of strabo.groups.yml), and the observed edges that violate them, each with its evidence line.',

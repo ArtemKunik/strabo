@@ -2,6 +2,7 @@ import { computeCycles } from '../analysis/cycles.ts';
 import { buildContractBoundary, type ContractBoundaryReport } from '../analysis/data/contracts-graph.ts';
 import { computeArchitectureHealth } from '../analysis/health.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../analysis/quality.ts';
+import { computeRouteConformance } from '../analysis/route-conformance.ts';
 import { checkDeclaredRules, readDeclaredRules } from '../analysis/rules.ts';
 import { computeStringEdges } from '../analysis/string-edges.ts';
 import { buildTierReport } from '../analysis/tiers.ts';
@@ -32,7 +33,8 @@ export type CheckRule =
   | 'contract-ungoverned-boundary'
   | 'contract-drift-detected'
   | 'uncovered-change'
-  | 'coverage-stale';
+  | 'coverage-stale'
+  | 'route-drift';
 
 export const CHECK_RULES: readonly CheckRule[] = [
   'cycles',
@@ -46,6 +48,7 @@ export const CHECK_RULES: readonly CheckRule[] = [
   'contract-drift-detected',
   'uncovered-change',
   'coverage-stale',
+  'route-drift',
 ];
 
 /**
@@ -82,6 +85,10 @@ export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
   'uncovered-changes': 'uncovered-change',
   'coverage-stale': 'coverage-stale',
   'stale-coverage': 'coverage-stale',
+  route: 'route-drift',
+  routes: 'route-drift',
+  'api-drift': 'route-drift',
+  'route-drift': 'route-drift',
 };
 
 /**
@@ -256,7 +263,33 @@ export async function collectFindings(
     }
   }
 
+  // Spec ↔ code conformance (Phase 38 R2): a registered route the OpenAPI documents do not
+  // list, and a documented operation no route registers. Silent when either side is absent.
+  const routes = computeRouteConformance(root, graph);
+  for (const route of routes.undocumented) {
+    findings.push({
+      rule: 'route-drift',
+      key: `route-drift:undocumented:${route.method} ${route.path}`,
+      node: route.file,
+      detail: `${route.method} ${route.path} is registered at ${route.file}:${route.line} but no OpenAPI operation documents it${methodNote(route.documentedMethods, 'documented')}`,
+      inputs: { kind: 'undocumented', method: route.method, path: route.path, line: route.line },
+    });
+  }
+  for (const operation of routes.unimplemented) {
+    findings.push({
+      rule: 'route-drift',
+      key: `route-drift:unimplemented:${operation.method} ${operation.path}`,
+      node: operation.file,
+      detail: `${operation.method} ${operation.path} is documented in ${operation.file} but no route registers it${methodNote(operation.registeredMethods, 'registered')}`,
+      inputs: { kind: 'unimplemented', method: operation.method, path: operation.path },
+    });
+  }
+
   return findings.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function methodNote(methods: readonly string[], verb: string): string {
+  return methods.length > 0 ? ` (the path is ${verb} for ${methods.join(', ')})` : '';
 }
 
 /** The check rules that read the workspace data layer (Phase 33 J10) rather than one graph. */

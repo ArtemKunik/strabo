@@ -86,7 +86,9 @@ uncovered modified functions, public-surface functions first), `get_public_api_d
 (exported symbols added, removed, or re-signed between two revisions, with their recorded
 consumers), `get_clones` (functions whose normalised bodies hash the same), `get_string_edges`
 (environment variables, HTTP routes, and feature flags, with dynamic keys reported as not
-resolved), `strabo_rules` (the declared architecture rules and the edges that violate them),
+resolved), `get_route_conformance` (the OpenAPI operations a repository documents against the
+routes its source registers, with the gaps on both sides), `strabo_rules` (the declared
+architecture rules and the edges that violate them),
 `get_drift` (one structural-measure series per recent revision, a gap rather than a zero
 where the cache has no measure), `get_data_products` (the recorded data layer: datasets,
 declared data products with their ports, owners, contracts, and conformance findings,

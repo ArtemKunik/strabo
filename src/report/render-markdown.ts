@@ -41,6 +41,7 @@ export function renderReportMarkdown(document: RepositoryReportDocument): string
   renderDrift(lines, document.drift);
   renderData(lines, document.data);
   renderContracts(lines, document.contracts);
+  renderApi(lines, document.api);
   renderSuggestions(lines, document);
   renderEvidence(lines, document);
   return `${lines.join('\n')}\n`;
@@ -314,6 +315,55 @@ function renderDrift(lines: string[], drift: RepositoryReportDocument['drift']):
     const values = series.points.map((point) => (point.value === null ? '—' : String(point.value)));
     lines.push(`- ${series.label}: ${values.join(' → ')}`);
   }
+  lines.push('');
+}
+
+/** Rows shown per API list; the JSON document keeps them all. */
+const API_ROWS = 20;
+
+function renderApi(lines: string[], api: RepositoryReportDocument['api']): void {
+  lines.push('## HTTP API');
+  if (!api) {
+    lines.push('- not included in this report');
+    lines.push('');
+    return;
+  }
+  if (!api.available) {
+    lines.push(`- unavailable: ${api.reason ?? 'no conformance reading'}`);
+    lines.push('');
+    return;
+  }
+  const { totals } = api;
+  lines.push(
+    `- ${totals.operations} documented operations · ${totals.routes} registered routes · ${totals.matched} joined · ${totals.undocumented} undocumented · ${totals.unimplemented} unimplemented`,
+  );
+  for (const document of api.documents.filter((entry) => entry.describes === 'another-service')) {
+    lines.push(`- \`${document.file}\` joins no route here; read as describing another service`);
+  }
+  const prefixed = api.matched.find((match) => match.prefix);
+  if (prefixed?.prefix) {
+    const adds = prefixed.prefix.side === 'spec' ? 'documents add' : 'code adds';
+    lines.push(`- joined through the \`${prefixed.prefix.value}\` prefix the ${adds}`);
+  }
+  const list = (title: string, rows: string[]): void => {
+    if (rows.length === 0) {
+      return;
+    }
+    lines.push('');
+    lines.push(title);
+    lines.push(...rows.slice(0, API_ROWS).map((row) => `- ${row}`));
+    if (rows.length > API_ROWS) {
+      lines.push(`- … ${rows.length - API_ROWS} more`);
+    }
+  };
+  list(
+    'Registered but not documented:',
+    api.undocumented.map((route) => `\`${route.method} ${route.path}\` · \`${route.file}:${route.line}\``),
+  );
+  list(
+    'Documented but not registered:',
+    api.unimplemented.map((operation) => `\`${operation.method} ${operation.path}\` · \`${operation.file}\``),
+  );
   lines.push('');
 }
 

@@ -48,7 +48,7 @@ record is reported as `unavailable`, never invented.
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
-| 38 | API development | In progress (R1 landed: routes declared in code; R2-R5 pending) |
+| 38 | API development | In progress (R1 routes declared in code, R2 spec ↔ code conformance landed; R3-R5 pending) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2633,6 +2633,13 @@ records nothing, and a cross-file mount prefix is not followed; Django URLconfs,
 `route {}` blocks, and Actix `web::resource` chains are not read yet.
 
 **R1 landed.** Unit coverage is `test/unit/routes.test.ts`.
+
+**R2 landed.** `src/analysis/route-conformance.ts` (`computeRouteConformance`, the pure
+`compareRoutes`) joins operations to routes by exact path, by erased parameter names, and by
+the dominant leading prefix; served at `GET /analysis/routes/conformance`, MCP
+`get_route_conformance`, the report's HTTP API section (`--no-api` skips it), and the
+`route-drift` check rule (aliases `route`, `routes`, `api-drift`). Unit coverage is
+`test/unit/route-conformance.test.ts`.
 
 ## Reading route (landed)
 

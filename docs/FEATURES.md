@@ -446,6 +446,19 @@ has no host, so it backs the in-repository route edges and the Structure trace b
 a cross-repo flow. A registration is the declaring side, so it is no longer also recorded as an
 outbound call.
 
+**Spec ↔ code conformance** (`GET /api/strabo/analysis/routes/conformance`, the MCP tool
+`get_route_conformance`, the report's **HTTP API** section, and `strabo check
+--fail-on=route-drift`) compares the repository's OpenAPI operations with the routes its
+non-test source registers. An operation and a route join on the same method and path, then on
+the same path with parameter names erased (`{id}` and `{userId}`, named as such), then through
+a leading prefix one side adds (a server base such as `/v1`, or a mount the route reader does
+not follow), but only the prefix most such pairs share, so a one-off prefix never joins. What
+is left is listed as **undocumented** routes and **unimplemented** operations, each with the
+methods the other side records for that path, so a method mismatch reads as one. A document
+none of whose operations joins a route is named as describing another service (a vendored
+client spec) and kept out of the gaps; with no document, no route, or no join at all, the
+reading is unavailable with its reason rather than a list of everything.
+
 The **Workspace** panel (the panel rail's **More** list, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the
 cross-repo flows; the service endpoints and service flows; the contracts; and the drift.

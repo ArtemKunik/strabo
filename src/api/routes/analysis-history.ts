@@ -3,13 +3,14 @@ import { Router } from 'express';
 import { buildCoChangeEdges } from '../../analysis/co-change.ts';
 import { collectDrift } from '../../analysis/drift.ts';
 import { collectHistory } from '../../analysis/history.ts';
+import { computeRouteConformance } from '../../analysis/route-conformance.ts';
 import { checkDeclaredRules, readDeclaredRules } from '../../analysis/rules.ts';
 import { computeStringEdges } from '../../analysis/string-edges.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
 import { parsePositiveInt, sendError } from '../http.ts';
 import { parseRatio, type AnalysisContext } from './analysis-context.ts';
 
-/** Co-change, string-edge, declared-rule, and drift endpoints. */
+/** Co-change, string-edge, route-conformance, declared-rule, and drift endpoints. */
 export function createHistoryRouter(context: AnalysisContext): Router {
   const router = Router();
   const { resolve } = context;
@@ -45,6 +46,20 @@ export function createHistoryRouter(context: AnalysisContext): Router {
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       response.json(await computeStringEdges(repository.root, cached.report.graph));
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
+
+  /** Spec ↔ code conformance (Phase 38 R2): documented operations against registered routes. */
+  router.get('/analysis/routes/conformance', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json({
+        repository: repository.name,
+        ...computeRouteConformance(repository.root, cached.report.graph),
+      });
     } catch (error) {
       sendError(response, error);
     }

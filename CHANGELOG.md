@@ -8,6 +8,9 @@
   and the Structure trace work in repositories without a spec.
 - Stop recording a route registration (`app.get('/x', h)`, `@app.get("/x")`) as an outbound
   HTTP call.
+- Compare the OpenAPI document with the routes the code registers: undocumented routes and
+  unimplemented operations in `GET /analysis/routes/conformance`, the MCP tool
+  `get_route_conformance`, a new HTTP API report section, and `strabo check --fail-on=route-drift`.
 
 ## 0.1.1
 

@@ -8,6 +8,7 @@ import { rankHotspots } from '../analysis/hotspots.ts';
 import { computeOwnership, getFileAuthorHistory } from '../analysis/ownership.ts';
 import { computeQualityScorecard, smellsFromScorecard } from '../analysis/quality.ts';
 import { reviewWorkingTree } from '../analysis/review.ts';
+import { computeRouteConformance } from '../analysis/route-conformance.ts';
 import { assertReadable } from '../boundary/repository-root.ts';
 import { computeRiskReport, type RiskOptions } from '../risk/report.ts';
 import { symbolExtractorFor } from '../scan/languages/registry.ts';
@@ -53,6 +54,8 @@ export interface CollectRepositoryReportOptions {
   structure?: boolean;
   /** A precomputed tier report; when given, it is used instead of computing one. */
   tierReport?: TierReport;
+  /** Compare documented OpenAPI operations with the routes the code registers. Defaults to true. */
+  api?: boolean;
   /** Use qualified contract ids alongside bare names. */
   qualifiedContracts?: boolean;
   /** Dependency-risk config; omitted means the risk section is not computed. */
@@ -122,6 +125,8 @@ export async function collectRepositoryReport(
     })
     : undefined;
 
+  const api = options.api === false ? undefined : computeRouteConformance(root, graph);
+
   return buildRepositoryReport({
     repository: options.repository,
     root,
@@ -138,6 +143,7 @@ export async function collectRepositoryReport(
     ...(contracts ? { contracts } : {}),
     coverage,
     ...(structure ? { structure } : {}),
+    ...(api ? { api } : {}),
     ...(options.generatedAt ? { generatedAt: options.generatedAt } : {}),
     ...(options.limits ? { limits: options.limits } : {}),
   });

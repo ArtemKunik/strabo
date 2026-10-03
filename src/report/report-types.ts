@@ -1,4 +1,5 @@
 import type { DriftReport } from '../analysis/drift.ts';
+import type { RouteConformanceReport } from '../analysis/route-conformance.ts';
 import type { MeasuredCoverageSummary } from '../analysis/measured-coverage.ts';
 import type { RepositoryPassport } from '../analysis/passport.ts';
 import type { StructuralDiffResult } from '../analysis/structural-diff.ts';
@@ -49,6 +50,8 @@ export interface RepositoryReportDocument {
   coverage: RepositoryCoverageSection | null;
   /** Logical structure across role tiers (Phase 35 Y8); null when not computed. */
   structure: RepositoryStructureSection | null;
+  /** Documented OpenAPI operations against the routes the code registers (Phase 38 R2); null when not computed. */
+  api: RouteConformanceReport | null;
   suggestions: Suggestion[];
   evidence: ReportEvidence;
 }
@@ -293,6 +296,8 @@ export interface RepositoryReportInputs {
   contracts?: ContractBoundaryReport;
   /** Precomputed logical structure / tier report (Phase 35 Y8); absent means not computed. */
   structure?: TierReport | RepositoryStructureSection;
+  /** Precomputed spec ↔ code route conformance (Phase 38 R2); absent means not computed. */
+  api?: RouteConformanceReport;
   generatedAt?: string;
   limits?: Partial<ReportLimits>;
 }
