@@ -88,7 +88,10 @@ conditional, or safe, with the recorded callers of each breaking change), `get_p
 (exported symbols added, removed, or re-signed between two revisions, with their recorded
 consumers), `get_clones` (functions whose normalised bodies hash the same), `get_string_edges`
 (environment variables, HTTP routes, and feature flags, with dynamic keys reported as not
-resolved), `get_route_conformance` (the OpenAPI operations a repository documents against the
+resolved), `get_endpoints` (every HTTP route with its handler file, guard, tests, and callers),
+`get_endpoint_passport` (one route's declarations, guard, declared parameters and bodies, tests,
+callers, and the tables within three import hops of its handler), `get_route_conformance` (the
+OpenAPI operations a repository documents against the
 routes its source registers, with the gaps on both sides), `strabo_rules` (the declared
 architecture rules and the edges that violate them),
 `get_drift` (one structural-measure series per recent revision, a gap rather than a zero

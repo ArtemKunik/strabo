@@ -16,6 +16,11 @@
   fields, incompatible types), naming the recorded callers of each breaking change. It is in
   the change report, `GET /analysis/http-api-diff`, the MCP tool `get_http_api_diff`, and
   `strabo report --base=<ref> --fail-on=http-breaking`.
+- List every HTTP endpoint with its handler file, the guard read from its middleware or
+  decorators, the tests that reach it, and its callers (`GET /analysis/endpoints`, MCP
+  `get_endpoints`), with a per-route passport that adds declared parameters, bodies, and the
+  tables near the handler (`GET /analysis/endpoint-passport`, MCP `get_endpoint_passport`), and
+  an **HTTP endpoints** review overlay that rings files with an untested or unguarded route.
 
 ## 0.1.1
 

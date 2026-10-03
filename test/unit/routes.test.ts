@@ -300,3 +300,89 @@ test('computeStringEdges joins a literal call to a route declared in code', asyn
   assert.deepEqual(route.declarations, [{ file: 'src/server.ts', line: 2 }]);
   assert.deepEqual(route.readers, [{ file: 'src/client.ts', line: 1 }]);
 });
+
+test('routes record the middleware, decorators, and attributes in front of the handler', () => {
+  const middleware = (file: string, content: string) =>
+    extractRoutesFromContent(file, content).map((route) => [route.method, route.path, route.middleware]);
+
+  assert.deepEqual(
+    middleware(
+      'src/server.ts',
+      [
+        "app.get('/me', requireAuth, passport.authenticate('jwt', { session: false }), [audit, rateLimit], me);",
+        "app.get('/open', (req, res) => res.send('ok'));",
+      ].join('\n'),
+    ),
+    [
+      ['GET', '/me', ['requireAuth', 'passport.authenticate()', 'audit', 'rateLimit']],
+      ['GET', '/open', []],
+    ],
+  );
+
+  assert.deepEqual(
+    middleware(
+      'app/main.py',
+      [
+        '@app.get("/me", dependencies=[Depends(verify_key)])',
+        '@login_required',
+        'async def me(user = Depends(current_user)):',
+        '    return user',
+      ].join('\n'),
+    ),
+    [['GET', '/me', ['login_required', 'Depends(verify_key)', 'Depends(current_user)']]],
+  );
+
+  assert.deepEqual(
+    middleware(
+      'src/cats.controller.ts',
+      [
+        "@Controller('cats')",
+        '@UseGuards(AuthGuard)',
+        'export class CatsController {',
+        "  @Get(':id')",
+        "  @Roles('admin')",
+        '  findOne() {}',
+        '}',
+      ].join('\n'),
+    ),
+    [['GET', '/cats/{id}', ['Roles(admin)', 'UseGuards(AuthGuard)']]],
+  );
+
+  assert.deepEqual(
+    middleware(
+      'Controllers/OrdersController.cs',
+      [
+        '[Authorize]',
+        '[Route("api/orders")]',
+        'public class OrdersController : ControllerBase',
+        '{',
+        '    [HttpGet]',
+        '    [AllowAnonymous]',
+        '    public IActionResult List() => Ok();',
+        '}',
+      ].join('\n'),
+    ),
+    [['GET', '/api/orders', ['AllowAnonymous', 'Authorize']]],
+  );
+
+  assert.deepEqual(
+    middleware('Program.cs', 'app.MapGet("/admin", Admin).RequireAuthorization("admin");'),
+    [['GET', '/admin', ['RequireAuthorization']]],
+  );
+
+  assert.deepEqual(
+    middleware(
+      'src/UserController.java',
+      [
+        '@RestController',
+        '@PreAuthorize("hasRole(\'USER\')")',
+        'public class UserController {',
+        '  @GetMapping("/me")',
+        '  @Secured("ROLE_ADMIN")',
+        '  public User me() { return null; }',
+        '}',
+      ].join('\n'),
+    ),
+    [['GET', '/me', ['Secured(ROLE_ADMIN)', 'PreAuthorize']]],
+  );
+});

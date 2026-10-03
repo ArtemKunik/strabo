@@ -36,10 +36,20 @@ export interface CodeRoute {
   framework: string;
   /** The handler the route names, when it is a plain identifier or the decorated function. */
   handler: string | null;
+  /**
+   * What runs in front of the handler, as written: Express middleware arguments, the other
+   * decorators, annotations, or attributes on the handler and its class (`login_required`,
+   * `UseGuards(AuthGuard)`, `Authorize`), FastAPI `Depends(...)`, and ASP.NET
+   * `RequireAuthorization`. Global middleware (`app.use(auth)`) is not followed.
+   */
+  middleware: string[];
   /** Offsets of the registration text, so the call reader can tell it is not a call. */
   start: number;
   end: number;
 }
+
+/** A route as a reader records it; the shared pass fills in what runs in front of it. */
+type RawRoute = Omit<CodeRoute, 'middleware'> & { middleware?: string[] };
 
 const VERBS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'] as const;
 const VERB_SET = new Set<string>(VERBS);
@@ -49,7 +59,7 @@ const MAX_ARGUMENT_SCAN = 4000;
 export function extractRoutesFromContent(file: string, content: string): CodeRoute[] {
   const extension = path.extname(file).toLowerCase();
   const lines = lineStarts(content);
-  let routes: CodeRoute[];
+  let routes: RawRoute[];
   switch (extension) {
     case '.js':
     case '.jsx':
@@ -78,7 +88,82 @@ export function extractRoutesFromContent(file: string, content: string): CodeRou
     default:
       routes = [];
   }
-  return dedupeRoutes(routes.filter((route) => !onCommentLine(content, route.start)));
+  return dedupeRoutes(
+    routes
+      .filter((route) => !onCommentLine(content, route.start))
+      .map((route) => ({ ...route, middleware: unique([...(route.middleware ?? []), ...middlewareAround(content, route)]) })),
+  );
+}
+
+/** Frameworks whose guards are decorators, annotations, or attributes beside the handler. */
+const DECORATED = new Set(['nestjs', 'fastapi', 'flask', 'spring', 'jax-rs', 'aspnet', 'actix']);
+/** The route-declaring annotations themselves, which are not middleware. */
+const ROUTE_ANNOTATION =
+  /^(?:(?:Get|Post|Put|Patch|Delete|Request)Mapping|Http(?:Get|Post|Put|Patch|Delete|Head|Options)|Route|Path|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|Get|Post|Put|Patch|Delete|Head|Options|All|Controller|RestController|ApiController|get|post|put|patch|delete|head|options|route)$|\.(?:get|post|put|patch|delete|head|options|route|api_route)$/;
+
+/**
+ * The decorators, annotations, and attributes on a decorated route's handler and its class,
+ * FastAPI dependencies, and an ASP.NET minimal route's `.RequireAuthorization()` chain.
+ */
+function middlewareAround(content: string, route: RawRoute): string[] {
+  const found: string[] = [];
+  if (route.framework === 'aspnet') {
+    const chain = /^(?:\s*\.\s*(RequireAuthorization|AllowAnonymous|RequireRateLimiting|RequireCors)\s*\([^)]*\))+/.exec(
+      content.slice(route.end, route.end + 400),
+    );
+    for (const link of chain?.[0].matchAll(/\.\s*(\w+)\s*\(/g) ?? []) {
+      found.push(link[1] ?? '');
+    }
+  }
+  if (!DECORATED.has(route.framework)) {
+    return found;
+  }
+  const block = annotationBlock(content, route.start);
+  found.push(...annotationsIn(content.slice(block.start, block.end)));
+  const type = lastTypeDeclarationBefore(content, route.start);
+  if (type !== -1) {
+    const classBlock = annotationBlock(content, type);
+    found.push(...annotationsIn(content.slice(classBlock.start, type)));
+  }
+  if (route.framework === 'fastapi') {
+    const signatureEnd = content.indexOf(':\n', route.end);
+    const scope = content.slice(route.start, signatureEnd === -1 ? route.end + 600 : signatureEnd);
+    for (const dependency of scope.matchAll(/\b(Depends|Security)\s*\(\s*([\w.]+)/g)) {
+      found.push(`${dependency[1]}(${dependency[2]})`);
+    }
+  }
+  return found;
+}
+
+/** `@Name`, `@Name(args)`, `[Name]`, and `[Name(args)]`, minus the route annotations. */
+function annotationsIn(text: string): string[] {
+  const names: string[] = [];
+  const add = (name: string, args: string | undefined) => {
+    if (ROUTE_ANNOTATION.test(name)) {
+      return;
+    }
+    const identifiers = args?.match(/[A-Za-z_][\w.]*/g)?.filter((word) => !/^(value|path|name)$/.test(word)) ?? [];
+    names.push(identifiers.length > 0 ? `${name}(${identifiers.slice(0, 3).join(', ')})` : name);
+  };
+  for (const match of text.matchAll(/@\s*([A-Za-z_][\w.]*)(?:\s*\(([^()\n]{0,120})\))?/g)) {
+    add(match[1] ?? '', match[2]);
+  }
+  for (const match of text.matchAll(/[[,]\s*([A-Z]\w*)(?:\s*\(([^()\n]{0,120})\))?\s*(?=[\],])/g)) {
+    add(match[1] ?? '', match[2]);
+  }
+  return names;
+}
+
+function lastTypeDeclarationBefore(content: string, offset: number): number {
+  let found = -1;
+  for (const match of content.slice(0, offset).matchAll(/\b(?:class|interface|object|record)\s+\w+/g)) {
+    found = match.index ?? found;
+  }
+  return found;
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value !== ''))];
 }
 
 /** A registration quoted in a `//`, `#`, or block-comment line is documentation, not a route. */
@@ -101,13 +186,13 @@ const JS_VERB_ROUTE =
 const JS_ROUTE_CHAIN = /\b((?:this\.)?[A-Za-z_$][\w$]*)\s*\.\s*route\s*\(\s*(['"`])(\/[^'"`\n]*)\2\s*\)/g;
 const JS_ROUTE_OBJECT = /\b((?:this\.)?[A-Za-z_$][\w$]*)\s*\.\s*route\s*\(\s*\{/g;
 
-function javascriptRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function javascriptRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const receivers = new Set(JS_ROUTER_NAMES);
   for (const match of content.matchAll(JS_ROUTER_FACTORY)) {
     receivers.add(match[1] ?? '');
   }
   const isRouter = (receiver: string): boolean => receivers.has(receiver.replace(/^this\./, ''));
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
 
   for (const match of content.matchAll(JS_VERB_ROUTE)) {
     const receiver = match[1] ?? '';
@@ -117,14 +202,15 @@ function javascriptRoutes(file: string, content: string, lines: number[]): CodeR
     }
     const start = match.index ?? 0;
     const argumentsEnd = closingParen(content, start + match[0].indexOf('('));
-    const rest = content.slice(start + match[0].length, argumentsEnd);
+    const { handler, middleware } = handlerArguments(content.slice(start + match[0].length, argumentsEnd));
     routes.push({
       file,
       line: lineAt(lines, start),
       method: (match[2] ?? '').toUpperCase(),
       path: normalizeRoutePath(rawPath),
       framework: 'express',
-      handler: lastIdentifierArgument(rest),
+      handler,
+      middleware,
       start,
       end: argumentsEnd + 1,
     });
@@ -146,13 +232,15 @@ function javascriptRoutes(file: string, content: string, lines: number[]): CodeR
       }
       const open = cursor + link[0].length - 1;
       const close = closingParen(content, open);
+      const { handler, middleware } = handlerArguments(content.slice(open + 1, close));
       routes.push({
         file,
         line: lineAt(lines, cursor + link[0].indexOf(link[1] ?? '')),
         method: (link[1] ?? '').toUpperCase(),
         path: normalizeRoutePath(rawPath),
         framework: 'express',
-        handler: lastIdentifierArgument(content.slice(open + 1, close)),
+        handler,
+        middleware,
         start,
         end: close + 1,
       });
@@ -194,13 +282,13 @@ function javascriptRoutes(file: string, content: string, lines: number[]): CodeR
 const NEST_CONTROLLER = /@Controller\s*\(\s*(?:(['"`])([^'"`\n]*)\1|\{[^}]*\bpath\s*:\s*(['"`])([^'"`\n]*)\3[^}]*\})?/;
 const NEST_METHOD = /@(Get|Post|Put|Patch|Delete|Head|Options)\s*\(\s*(?:(['"`])([^'"`\n]*)\2)?\s*\)/g;
 
-function nestRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function nestRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const controller = NEST_CONTROLLER.exec(content);
   if (!controller) {
     return [];
   }
   const prefix = controller[2] ?? controller[4] ?? '';
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(NEST_METHOD)) {
     const rawPath = match[3] ?? '';
     if (rawPath.includes('${')) {
@@ -229,7 +317,7 @@ const PY_DECORATOR =
   /^[ \t]*@[ \t]*([\w.]+)\.(get|post|put|patch|delete|head|options|route|api_route)[ \t]*\(\s*(?:path\s*=\s*|rule\s*=\s*)?r?(['"])([^'"\n]*)\3/gm;
 const PY_PREFIX = /^[ \t]*(\w+)\s*=\s*(APIRouter|Blueprint)\s*\(/gm;
 
-function pythonRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function pythonRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const prefixes = new Map<string, string>();
   for (const match of content.matchAll(PY_PREFIX)) {
     const open = (match.index ?? 0) + match[0].length - 1;
@@ -241,7 +329,7 @@ function pythonRoutes(file: string, content: string, lines: number[]): CodeRoute
     }
   }
 
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(PY_DECORATOR)) {
     const receiver = match[1] ?? '';
     const kind = match[2] ?? '';
@@ -283,10 +371,10 @@ const SPRING_MAPPING = /@(Get|Post|Put|Patch|Delete|Request)Mapping\b/g;
 const JAXRS_VERB = /@(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b(?!\s*\()/g;
 const TYPE_DECLARATION = /\b(?:class|interface|object|record)\s+(\w+)/;
 
-function springRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function springRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const typeIndex = TYPE_DECLARATION.exec(content)?.index ?? -1;
   let prefix = '';
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(SPRING_MAPPING)) {
     const start = match.index ?? 0;
     const annotation = readAnnotationArguments(content, start + match[0].length);
@@ -320,13 +408,13 @@ function springRoutes(file: string, content: string, lines: number[]): CodeRoute
   return routes;
 }
 
-function jaxRsRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function jaxRsRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   if (!/@Path\s*\(/.test(content)) {
     return [];
   }
   const typeIndex = TYPE_DECLARATION.exec(content)?.index ?? content.length;
   const classPath = /@Path\s*\(\s*(?:value\s*=\s*)?"([^"\n]*)"/.exec(content.slice(0, typeIndex))?.[1] ?? '';
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(JAXRS_VERB)) {
     const start = match.index ?? 0;
     if (start < typeIndex) {
@@ -378,7 +466,7 @@ const MINIMAL_MAP = /\b(\w+)\s*\.\s*Map(Get|Post|Put|Patch|Delete)\s*\(\s*@?"([^
 const MINIMAL_GROUP = /\b(?:var|[\w<>]+)\s+(\w+)\s*=\s*(\w+)\s*\.\s*MapGroup\s*\(\s*@?"([^"\n]*)"\s*\)/g;
 const HTTP_ATTRIBUTE = /\[\s*Http(Get|Post|Put|Patch|Delete|Head|Options)\s*(?:\(\s*(?:template\s*:\s*)?@?"([^"\n]*)"[^)]*\))?\s*[\],]/g;
 
-function minimalApiRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function minimalApiRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const groups = new Map<string, { parent: string; path: string }>();
   for (const match of content.matchAll(MINIMAL_GROUP)) {
     groups.set(match[1] ?? '', { parent: match[2] ?? '', path: match[3] ?? '' });
@@ -387,7 +475,7 @@ function minimalApiRoutes(file: string, content: string, lines: number[]): CodeR
     const group = groups.get(receiver);
     return group && depth < 8 ? joinRoutePath(prefixOf(group.parent, depth + 1), group.path) : '';
   };
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(MINIMAL_MAP)) {
     const start = match.index ?? 0;
     const open = start + match[0].indexOf('(');
@@ -407,7 +495,7 @@ function minimalApiRoutes(file: string, content: string, lines: number[]): CodeR
   return routes;
 }
 
-function aspNetControllerRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
+function aspNetControllerRoutes(file: string, content: string, lines: number[]): RawRoute[] {
   const type = /\bclass\s+(\w+)/.exec(content);
   if (!type || !HTTP_ATTRIBUTE.test(content)) {
     return [];
@@ -416,7 +504,7 @@ function aspNetControllerRoutes(file: string, content: string, lines: number[]):
   const typeIndex = type.index;
   const controller = (type[1] ?? '').replace(/Controller$/, '');
   const classRoute = /\[\s*Route\s*\(\s*@?"([^"\n]*)"/.exec(content.slice(0, typeIndex))?.[1] ?? '';
-  const routes: CodeRoute[] = [];
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(HTTP_ATTRIBUTE)) {
     const start = match.index ?? 0;
     if (start < typeIndex) {
@@ -454,8 +542,8 @@ const RUST_ROUTE = /\.\s*route\s*\(\s*"([^"\n]*)"\s*,/g;
 const RUST_METHOD_MACRO = /#\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*"([^"\n]*)"/g;
 const RUST_ROUTE_MACRO = /#\[\s*route\s*\(\s*"([^"\n]*)"([^\]]*)\]/g;
 
-function rustRoutes(file: string, content: string, lines: number[]): CodeRoute[] {
-  const routes: CodeRoute[] = [];
+function rustRoutes(file: string, content: string, lines: number[]): RawRoute[] {
+  const routes: RawRoute[] = [];
   for (const match of content.matchAll(RUST_ROUTE)) {
     const start = match.index ?? 0;
     const open = start + match[0].indexOf('(');
@@ -549,6 +637,61 @@ function readMethodList(source: string): string[] {
   return [...source.matchAll(/(['"`])(\w+)\1/g)]
     .map((entry) => (entry[2] ?? '').toUpperCase())
     .filter((method) => VERB_SET.has(method.toLowerCase()));
+}
+
+/**
+ * The handler and middleware of a verb registration's remaining arguments: the last argument
+ * is the handler when it is a plain name; each earlier one is middleware, read as its name or
+ * its callee (`passport.authenticate()`), and an array of them is read element by element.
+ */
+function handlerArguments(rest: string): { handler: string | null; middleware: string[] } {
+  const parts = splitTopLevel(rest);
+  const last = parts[parts.length - 1] ?? '';
+  const handler = /^[A-Za-z_$][\w$.]*$/.test(last) ? (last.split('.').pop() ?? null) : null;
+  const middleware: string[] = [];
+  const read = (part: string): void => {
+    if (part.startsWith('[') && part.endsWith(']')) {
+      splitTopLevel(part.slice(1, -1)).forEach(read);
+    } else if (/^[A-Za-z_$][\w$.]*$/.test(part)) {
+      middleware.push(part);
+    } else {
+      const callee = /^([A-Za-z_$][\w$.]*)\s*\(/.exec(part)?.[1];
+      if (callee && !/^(async|function)$/.test(callee)) {
+        middleware.push(`${callee}()`);
+      }
+    }
+  };
+  parts.slice(0, -1).forEach(read);
+  return { handler, middleware };
+}
+
+/** Split an argument list at its top-level commas, skipping nested brackets and strings. */
+function splitTopLevel(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] ?? '';
+    if (char === '"' || char === "'" || char === '`') {
+      const close = text.indexOf(char, index + 1);
+      const end = close === -1 ? text.length - 1 : close;
+      current += text.slice(index, end + 1);
+      index = end;
+      continue;
+    }
+    if ('([{'.includes(char)) {
+      depth += 1;
+    } else if (')]}'.includes(char)) {
+      depth -= 1;
+    } else if (char === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current.trim());
+  return parts.filter((part) => part !== '');
 }
 
 /** The handler when a registration's remaining arguments are all plain identifiers. */

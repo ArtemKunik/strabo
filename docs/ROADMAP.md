@@ -48,7 +48,7 @@ record is reported as `unavailable`, never invented.
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
-| 38 | API development | In progress (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking HTTP changes landed; R4-R5 pending) |
+| 38 | API development | In progress (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking HTTP changes, R4 endpoint passport landed; R5 pending) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2648,6 +2648,17 @@ at `GET /analysis/http-api-diff` (with sibling-repository callers from the works
 MCP `get_http_api_diff`, the change report's HTTP API section, and the `http-breaking` rule
 for `strabo report --base --fail-on`. Enum narrowing and response status codes other than the
 first 2xx are not compared yet. Unit coverage is `test/unit/http-api-diff.test.ts`.
+
+**R4 landed.** Routes now record the middleware, decorators, and attributes in front of the
+handler (`CodeRoute.middleware`). `src/analysis/endpoints.ts` (`listEndpoints`,
+`endpointPassport`, `guardStatus`) groups operations and routes into endpoints and reads their
+handler file, guard, tests, callers, and downstream tables; served at `GET /analysis/endpoints`
+and `GET /analysis/endpoint-passport`, MCP `get_endpoints` and `get_endpoint_passport`, and the
+**HTTP endpoints** review overlay (`ov-endpoint`, `ov-endpoint-gap`, reusing the accent and
+warning hues). The passport is served to the API and MCP; a dedicated passport panel in the
+browser is a follow-up, and the overlay's rows select the registering file. Unit coverage is
+`test/unit/endpoints.test.ts`; the browser scenario is `test/acceptance/features/http-api.feature`
+against `test/fixtures/api-repo`.
 
 ## Reading route (landed)
 

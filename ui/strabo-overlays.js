@@ -24,6 +24,7 @@ export const OVERLAY_TITLES = {
   data: 'Data',
   coverage: 'Coverage',
   contracts: 'Data contracts',
+  endpoints: 'HTTP endpoints',
 };
 
 /** The analysis endpoint each overlay reads. */
@@ -41,10 +42,11 @@ export const OVERLAY_ENDPOINTS = {
   data: '/analysis/data/overlay',
   coverage: '/analysis/coverage',
   contracts: '/analysis/contracts/overlay',
+  endpoints: '/analysis/endpoints',
 };
 
 /** Overlays that annotate file nodes and therefore need Files mode. */
-export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage', 'contracts'];
+export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage', 'contracts', 'endpoints'];
 
 /**
  * Map a review analysis result onto node classes and a panel summary.
@@ -186,6 +188,8 @@ export function overlayFor(kind, data) {
       return contractsOverlay(data);
     case 'coverage':
       return coverageOverlay(data);
+    case 'endpoints':
+      return endpointsOverlay(data);
     default:
       return { classes: new Map(), summary: '', items: [] };
   }
@@ -424,6 +428,50 @@ function coverageReportAge(ageMs) {
     return '';
   }
   return ` (${coverageAge(ageMs)} old)`;
+}
+
+/**
+ * The HTTP endpoints lens (Phase 38 R4): files that register a route. A file whose routes are
+ * all tested and guarded takes the plain endpoint ring; one with a route no test reaches, or
+ * with no guard recorded in front of it, takes the gap ring. "No guard recorded" is what the
+ * route reader saw, so global middleware the reader does not follow can still protect it.
+ */
+export function endpointsOverlay(report) {
+  if (!report || report.available === false) {
+    return {
+      classes: new Map(),
+      summary: '',
+      items: [],
+      emptyNote: report?.reason ?? 'No HTTP endpoint is recorded.',
+    };
+  }
+  const classes = new Map();
+  const items = [];
+  for (const endpoint of report.endpoints ?? []) {
+    const code = (endpoint.declarations ?? []).find((declaration) => declaration.origin === 'code');
+    if (!code) {
+      continue;
+    }
+    const gaps = [];
+    if (!endpoint.tested) gaps.push('no test reaches it');
+    if (endpoint.guard?.status === 'none-recorded') gaps.push('no guard recorded');
+    if (endpoint.guard?.status === 'anonymous') gaps.push('anonymous');
+    const gap = gaps.some((entry) => entry !== 'anonymous');
+    if (gap || !classes.has(code.file)) {
+      classes.set(code.file, gap ? 'ov-endpoint-gap' : 'ov-endpoint');
+    }
+    items.push({
+      id: code.file,
+      label: `${endpoint.method} ${endpoint.path}`,
+      detail: [`${code.file}:${code.line ?? 1}`, ...gaps].join(' · '),
+    });
+  }
+  const totals = report.totals ?? {};
+  return {
+    classes,
+    summary: `${totals.endpoints ?? items.length} endpoint(s) · ${totals.untested ?? 0} untested · ${totals.noGuardRecorded ?? 0} with no guard recorded`,
+    items,
+  };
 }
 
 export function declaredRulesOverlay(report) {

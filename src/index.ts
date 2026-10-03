@@ -498,6 +498,8 @@ export {
 export type { RepoServiceFact } from './workspace/services.ts';
 export { extractRoutesFromContent, normalizeRoutePath } from './workspace/routes.ts';
 export { computeRouteConformance, compareRoutes } from './analysis/route-conformance.ts';
+export { listEndpoints, endpointPassport, guardStatus } from './analysis/endpoints.ts';
+export type { EndpointsReport, EndpointSummary, EndpointPassport, GuardStatus } from './analysis/endpoints.ts';
 export { computeHttpApiDiff, diffHttpApi, typeWidens } from './analysis/http-api-diff.ts';
 export type { HttpApiChange, HttpApiDiffReport, HttpApiCaller, SiblingCalls } from './analysis/http-api-diff.ts';
 export type {

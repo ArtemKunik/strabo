@@ -68,6 +68,7 @@ export function codeEndpointsFromContent(repository: string, file: string, conte
     line: route.line,
     framework: route.framework,
     handler: route.handler,
+    middleware: route.middleware,
   }));
 }
 

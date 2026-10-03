@@ -988,6 +988,37 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/string-edges', args),
     },
     {
+      name: 'get_endpoints',
+      description:
+        'Every HTTP endpoint the repository documents or registers in code, each with its handler and handler file, the guard read from the middleware or decorators in front of it (guarded, anonymous, or none recorded), the tests that call it or import their way to its handler, and its literal callers.',
+      inputSchema: {
+        type: 'object',
+        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/endpoints', args),
+    },
+    {
+      name: 'get_endpoint_passport',
+      description:
+        'One HTTP endpoint before you change it: its declarations, handler, middleware and guard, declared parameters and request/response fields, tests, callers, and the files and database tables within three import hops of the handler.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          method: { type: 'string' },
+          path: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+        },
+        required: ['method', 'path'],
+        additionalProperties: false,
+      },
+      call: (args) =>
+        get(dispatch, '/analysis/endpoint-passport', args, {
+          method: requiredArg(args, 'method'),
+          path: requiredArg(args, 'path'),
+        }),
+    },
+    {
       name: 'get_route_conformance',
       description:
         'The OpenAPI operations a repository documents against the HTTP routes its source registers (Express, FastAPI, Flask, Spring, JAX-RS, ASP.NET, NestJS, Axum, Actix): routes with no documented operation, operations with no registered route, and each join with its evidence line.',

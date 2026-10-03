@@ -95,6 +95,8 @@ export interface ServiceEndpoint {
   framework?: string;
   /** The handler the registration names, when it is readable. */
   handler?: string | null;
+  /** Middleware, decorators, or attributes in front of a code route's handler, as written. */
+  middleware?: string[];
 }
 
 /** A recorded call from one repository to an endpoint another repository declares. */
