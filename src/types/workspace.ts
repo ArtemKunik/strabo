@@ -87,8 +87,16 @@ export interface ServiceEndpoint {
   response?: ApiSchemaRef | null;
   /** The parameters the operation and its path item declare, when any. */
   parameters?: ApiParameter[];
-  /** Where the endpoint is declared: an OpenAPI document, or a handler registration in code. */
-  origin?: 'openapi' | 'code';
+  /**
+   * Where the endpoint is declared: an OpenAPI document, a handler registration in code, a
+   * `.proto` service, or a GraphQL schema.
+   */
+  origin?: 'openapi' | 'code' | 'proto' | 'graphql';
+  /**
+   * The protocol: absent means HTTP. A gRPC endpoint reads `RPC /package.Service/Method`; a
+   * GraphQL one reads `QUERY users` (the root operation type and the field).
+   */
+  protocol?: 'grpc' | 'graphql';
   /** The declaring line, for a code-declared endpoint. */
   line?: number;
   /** The framework idiom that declared it (`express`, `fastapi`, `spring`, ...), for a code endpoint. */

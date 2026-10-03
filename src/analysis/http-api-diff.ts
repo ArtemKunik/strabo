@@ -3,6 +3,7 @@ import path from 'node:path';
 import { isTestLike } from '../scan/scan.ts';
 import type { ApiParameter, ApiSchemaRef, Compatibility, ContractField, ServiceCall, ServiceEndpoint } from '../types.ts';
 import { materializeRevision, RevisionError } from '../workspace/revision.ts';
+import { callReaches, extractRpcCalls, type RpcCall } from '../workspace/rpc.ts';
 import { extractServiceCalls, extractServiceEndpoints } from '../workspace/services.ts';
 
 /**
@@ -104,6 +105,7 @@ export async function computeHttpApiDiff(
       base,
       head,
       calls: after.calls,
+      rpcCalls: after.rpcCalls,
       siblings: options.siblings ?? [],
     });
   } catch (error) {
@@ -118,7 +120,14 @@ export async function computeHttpApiDiff(
 export function diffHttpApi(
   before: readonly ServiceEndpoint[],
   after: readonly ServiceEndpoint[],
-  context: { base: string; head: string | null; calls?: readonly ServiceCall[]; siblings?: readonly SiblingCalls[] },
+  context: {
+    base: string;
+    head: string | null;
+    calls?: readonly ServiceCall[];
+    /** gRPC stub calls and GraphQL selections, for the callers of a gRPC or GraphQL change. */
+    rpcCalls?: readonly RpcCall[];
+    siblings?: readonly SiblingCalls[];
+  },
 ): HttpApiDiffReport {
   const was = byOperation(before);
   const now = byOperation(after);
@@ -160,7 +169,12 @@ export function diffHttpApi(
   const withCallers: HttpApiChange[] = changes
     .map(({ endpoint, ...change }) => ({
       ...change,
-      callers: change.compatibility === 'safe' ? [] : callersOf(endpoint, context.calls ?? [], context.siblings ?? []),
+      callers:
+        change.compatibility === 'safe'
+          ? []
+          : endpoint.protocol
+            ? rpcCallersOf(endpoint, context.rpcCalls ?? [])
+            : callersOf(endpoint, context.calls ?? [], context.siblings ?? []),
     }))
     .sort(
       (a, b) =>
@@ -440,6 +454,13 @@ function callersOf(
     );
 }
 
+function rpcCallersOf(endpoint: ServiceEndpoint, calls: readonly RpcCall[]): HttpApiCaller[] {
+  return calls
+    .filter((call) => callReaches(call, endpoint))
+    .map((call) => ({ file: call.file, line: call.line }))
+    .sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+
 /** `/users/{id}` reads `/users/42` and `/users/{id}`; each parameter is one segment. */
 function templatePattern(routePath: string): RegExp {
   const source = routePath
@@ -457,16 +478,22 @@ function fieldsOf(schema: ApiSchemaRef | null): Map<string, ContractField> {
   return new Map((schema?.fields ?? []).map((field) => [field.name, field]));
 }
 
-/** The endpoints a tree declares and the calls its source makes. */
-function readSide(root: string, repository: string): { endpoints: ServiceEndpoint[]; calls: ServiceCall[] } {
-  return { endpoints: extractServiceEndpoints(root, repository), calls: extractServiceCalls(root) };
+interface Side {
+  endpoints: ServiceEndpoint[];
+  calls: ServiceCall[];
+  rpcCalls: RpcCall[];
 }
 
-async function sideAt(
-  root: string,
-  repository: string,
-  ref: string,
-): Promise<{ endpoints: ServiceEndpoint[]; calls: ServiceCall[] }> {
+/** The endpoints a tree declares and the calls its source makes. */
+function readSide(root: string, repository: string): Side {
+  return {
+    endpoints: extractServiceEndpoints(root, repository),
+    calls: extractServiceCalls(root),
+    rpcCalls: extractRpcCalls(root),
+  };
+}
+
+async function sideAt(root: string, repository: string, ref: string): Promise<Side> {
   const revision = await materializeRevision(root, ref);
   try {
     return readSide(revision.root, repository);

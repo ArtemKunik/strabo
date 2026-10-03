@@ -509,6 +509,14 @@ export type {
   UnimplementedOperation,
 } from './analysis/route-conformance.ts';
 export type { CodeRoute } from './workspace/routes.ts';
+export {
+  extractGrpcEndpoints,
+  extractGraphqlEndpoints,
+  grpcEndpointsFromContent,
+  graphqlEndpointsFromContent,
+  rpcCallsFromContent,
+} from './workspace/rpc.ts';
+export type { RpcCall } from './workspace/rpc.ts';
 export { extractSchema, buildSchema, findSqlFiles, normalizeType, constraintSignature } from './workspace/schema.ts';
 export type { SqlSource } from './workspace/schema.ts';
 export { extractDataUses, extractDataUsesFromSource } from './workspace/data-usage.ts';

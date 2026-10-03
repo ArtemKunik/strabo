@@ -11,7 +11,7 @@ const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
 
 /** Extensions the workspace extractors read: contracts, SQL, and DTO or data-access source. */
 const RELEVANT_EXTENSIONS = new Set([
-  '.proto', '.json', '.yaml', '.yml', '.sql',
+  '.proto', '.json', '.yaml', '.yml', '.sql', '.graphql', '.gql', '.graphqls',
   '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs',
   '.py', '.kt', '.kts', '.java', '.cs', '.rs',
   '.cpp', '.cc', '.cxx', '.hpp', '.hh', '.hxx', '.h',

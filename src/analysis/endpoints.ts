@@ -3,6 +3,16 @@ import path from 'node:path';
 import { isTestLike } from '../scan/scan.ts';
 import type { ApiParameter, ApiSchemaRef, DataAccess, Graph, ServiceCall, ServiceEndpoint } from '../types.ts';
 import { extractDataUsesFromSource } from '../workspace/data-usage.ts';
+import {
+  callReaches,
+  extractGraphqlEndpoints,
+  extractGrpcEndpoints,
+  findGraphqlFiles,
+  graphqlEndpointsFromContent,
+  implementationPattern,
+  rpcCallsFromContent,
+  type RpcCall,
+} from '../workspace/rpc.ts';
 import { codeEndpointsFromContent, extractCallsFromContent, extractOpenApiEndpoints } from '../workspace/services.ts';
 import { buildAdjacency } from './analysis.ts';
 import { computeDetailedTestReachByFile } from './coverage.ts';
@@ -18,6 +28,10 @@ import { compareRoutes } from './route-conformance.ts';
  * that call it or import their way to its handler. The passport adds the declared parameters
  * and bodies, and the files and tables within a few import hops of the handler.
  *
+ * gRPC rpcs and GraphQL root fields are endpoints too, each its own entry: its handler is the
+ * file that implements the service or resolves the field by convention, and its callers are
+ * stub calls and GraphQL selections. Their guards (interceptors, directives) are not read.
+ *
  * Every fact is lexical or an import edge, and is named that way: a guard is read from the
  * names in front of the handler, so global middleware (`app.use(auth)`) is not seen and an
  * endpoint with no such name reads `none-recorded`, never "unprotected"; a test that reaches the
@@ -32,7 +46,7 @@ export interface EndpointSite {
 }
 
 export interface EndpointDeclaration {
-  origin: 'openapi' | 'code';
+  origin: 'openapi' | 'code' | 'proto' | 'graphql';
   file: string;
   line: number | null;
   path: string;
@@ -42,12 +56,18 @@ export interface EndpointDeclaration {
 }
 
 export interface EndpointSummary {
+  /** `http`, `grpc`, or `graphql`. */
+  protocol: 'http' | 'grpc' | 'graphql';
   method: string;
   /** The documented path when the route is documented, else the path the code registers. */
   path: string;
   declarations: EndpointDeclaration[];
   /** The file the handler lives in, and how it was found. */
-  handler: { name: string | null; file: string | null; basis: 'import' | 'same-file' | 'declaring-file' | 'none' };
+  handler: {
+    name: string | null;
+    file: string | null;
+    basis: 'import' | 'same-file' | 'declaring-file' | 'implementation' | 'none';
+  };
   guard: { status: GuardStatus; evidence: string[] };
   tests: {
     /** Literal calls to the route from test files. */
@@ -66,7 +86,10 @@ export interface EndpointsReport {
   endpoints: EndpointSummary[];
   totals: {
     endpoints: number;
+    byProtocol: { http: number; grpc: number; graphql: number };
+    /** HTTP endpoints documented with no route registered in code. */
     documentedOnly: number;
+    /** The counts below read HTTP routes registered in code. */
     untested: number;
     guarded: number;
     anonymous: number;
@@ -109,7 +132,10 @@ export function guardStatus(middleware: readonly string[]): { status: GuardStatu
 interface Facts {
   operations: ServiceEndpoint[];
   routes: ServiceEndpoint[];
+  /** gRPC rpcs (and their gateway routes) and GraphQL root fields. */
+  surfaces: ServiceEndpoint[];
   calls: ServiceCall[];
+  rpcCalls: RpcCall[];
   contents: Map<string, string>;
 }
 
@@ -118,6 +144,8 @@ function readFacts(root: string, graph: Graph): Facts {
   const contents = new Map<string, string>();
   const routes: ServiceEndpoint[] = [];
   const calls: ServiceCall[] = [];
+  const rpcCalls: RpcCall[] = [];
+  const surfaces: ServiceEndpoint[] = [...extractGrpcEndpoints(root, repository), ...extractGraphqlEndpoints(root, repository)];
   for (const node of graph.nodes) {
     const content = readWorkingFile(root, node.id);
     if (content === null) {
@@ -125,11 +153,20 @@ function readFacts(root: string, graph: Graph): Facts {
     }
     contents.set(node.id, content);
     calls.push(...extractCallsFromContent(node.id, content));
+    rpcCalls.push(...rpcCallsFromContent(node.id, content));
     if (!isTestLike(node.id)) {
       routes.push(...codeEndpointsFromContent(repository, node.id, content));
+      surfaces.push(...graphqlEndpointsFromContent(repository, node.id, content));
     }
   }
-  return { operations: extractOpenApiEndpoints(root, repository), routes, calls, contents };
+  // GraphQL operations a client keeps in `.graphql` documents are not graph nodes.
+  for (const file of findGraphqlFiles(root)) {
+    const content = readWorkingFile(root, file);
+    if (content !== null) {
+      rpcCalls.push(...rpcCallsFromContent(file, content));
+    }
+  }
+  return { operations: extractOpenApiEndpoints(root, repository), routes, surfaces, calls, rpcCalls, contents };
 }
 
 /** Every recorded endpoint with its handler, guard, tests, and callers. */
@@ -146,11 +183,14 @@ export function endpointPassport(
 ): EndpointPassport | null {
   const facts = readFacts(root, graph);
   const { report, groups } = summarise(root, graph, facts);
-  const wanted = `${method.toUpperCase()} ${shape(normalise(routePath))}`;
+  const wanted = new Set([
+    `${method.toUpperCase()} ${shape(normalise(routePath))}`,
+    `${method.toUpperCase()} ${routePath.trim()}`,
+  ]);
   const index = report.endpoints.findIndex(
     (entry) =>
-      `${entry.method} ${shape(entry.path)}` === wanted ||
-      entry.declarations.some((declaration) => `${entry.method} ${shape(declaration.path)}` === wanted),
+      wanted.has(`${entry.method} ${shape(entry.path)}`) ||
+      entry.declarations.some((declaration) => wanted.has(`${entry.method} ${shape(declaration.path)}`)),
   );
   const summary = report.endpoints[index];
   const group = groups[index];
@@ -211,6 +251,7 @@ export function endpointPassport(
 }
 
 interface EndpointGroup {
+  protocol: 'http' | 'grpc' | 'graphql';
   method: string;
   path: string;
   operation: ServiceEndpoint | null;
@@ -222,13 +263,21 @@ function summarise(
   graph: Graph,
   facts: Facts,
 ): { report: EndpointsReport; groups: EndpointGroup[] } {
-  const groups = groupEndpoints(facts.operations, facts.routes);
-  const zeros = { endpoints: 0, documentedOnly: 0, untested: 0, guarded: 0, anonymous: 0, noGuardRecorded: 0 };
+  const groups = [...groupEndpoints(facts.operations, facts.routes), ...groupSurfaces(facts.surfaces)];
+  const zeros = {
+    endpoints: 0,
+    byProtocol: { http: 0, grpc: 0, graphql: 0 },
+    documentedOnly: 0,
+    untested: 0,
+    guarded: 0,
+    anonymous: 0,
+    noGuardRecorded: 0,
+  };
   if (groups.length === 0) {
     return {
       report: {
         available: false,
-        reason: 'no HTTP endpoint is declared in an OpenAPI document or registered in code',
+        reason: 'no endpoint is declared in an OpenAPI document, a .proto service, or a GraphQL schema, or registered in code',
         endpoints: [],
         totals: zeros,
       },
@@ -239,20 +288,31 @@ function summarise(
   const reach = computeDetailedTestReachByFile(graph);
   const endpoints = groups.map((group): EndpointSummary => {
     const route = group.routes[0] ?? null;
-    const handler = route ? resolveHandler(graph, facts.contents, route) : { name: null, file: null, basis: 'none' as const };
-    const templates = [...new Set([group.path, ...group.routes.map((entry) => entry.path)])].map(templatePattern);
-    const fits = (call: ServiceCall) =>
-      call.path !== null &&
-      (call.method === null || call.method === group.method) &&
-      templates.some((template) => template.test(call.path as string));
-    const sites = facts.calls.filter(fits);
-    const testCalls = sites.filter((call) => isTestLike(call.file)).map(site);
+    const handler = route
+      ? resolveHandler(graph, facts.contents, route)
+      : group.operation && group.protocol !== 'http'
+        ? implementationOf(facts.contents, group.operation)
+        : { name: null, file: null, basis: 'none' as const };
+    let sites: EndpointSite[];
+    if (group.protocol !== 'http' && group.operation) {
+      const surface = group.operation;
+      sites = facts.rpcCalls.filter((call) => callReaches(call, surface)).map(site);
+    } else {
+      const templates = [...new Set([group.path, ...group.routes.map((entry) => entry.path)])].map(templatePattern);
+      const fits = (call: ServiceCall) =>
+        call.path !== null &&
+        (call.method === null || call.method === group.method) &&
+        templates.some((template) => template.test(call.path as string));
+      sites = facts.calls.filter(fits).map(site);
+    }
+    const testCalls = sites.filter((call) => isTestLike(call.file));
     const reaching = handler.file
       ? [...new Set((reach.get(handler.file) ?? []).map((detail) => detail.test))]
           .filter((test) => test !== handler.file)
           .slice(0, REACHING_TESTS)
       : [];
     return {
+      protocol: group.protocol,
       method: group.method,
       path: group.path,
       declarations: [
@@ -263,7 +323,7 @@ function summarise(
       guard: guardStatus(group.routes.flatMap((entry) => entry.middleware ?? [])),
       tests: { calls: testCalls, reaching },
       tested: testCalls.length > 0 || reaching.length > 0,
-      callers: sites.filter((call) => !isTestLike(call.file)).map(site),
+      callers: sites.filter((call) => !isTestLike(call.file)),
     };
   });
 
@@ -272,14 +332,20 @@ function summarise(
     .sort((a, b) => a.entry.path.localeCompare(b.entry.path) || a.entry.method.localeCompare(b.entry.method));
   const sortedEndpoints = order.map((item) => item.entry);
   const sortedGroups = order.map((item) => groups[item.index] as EndpointGroup);
-  const coded = sortedEndpoints.filter((entry) => entry.declarations.some((declaration) => declaration.origin === 'code'));
+  const http = sortedEndpoints.filter((entry) => entry.protocol === 'http');
+  const coded = http.filter((entry) => entry.declarations.some((declaration) => declaration.origin === 'code'));
   return {
     report: {
       available: true,
       endpoints: sortedEndpoints,
       totals: {
         endpoints: sortedEndpoints.length,
-        documentedOnly: sortedEndpoints.length - coded.length,
+        byProtocol: {
+          http: http.length,
+          grpc: sortedEndpoints.filter((entry) => entry.protocol === 'grpc').length,
+          graphql: sortedEndpoints.filter((entry) => entry.protocol === 'graphql').length,
+        },
+        documentedOnly: http.length - coded.length,
         untested: coded.filter((entry) => !entry.tested).length,
         guarded: coded.filter((entry) => entry.guard.status === 'guarded').length,
         anonymous: coded.filter((entry) => entry.guard.status === 'anonymous').length,
@@ -317,7 +383,7 @@ function groupEndpoints(operations: readonly ServiceEndpoint[], routes: readonly
     const shapes = new Set(members.map((route) => shape(route.path)));
     const all = routes.filter((route) => route.method === operation.method && shapes.has(shape(route.path)));
     all.forEach((route) => claimed.add(route));
-    groups.push({ method: operation.method, path: operation.path, operation, routes: all });
+    groups.push({ protocol: 'http', method: operation.method, path: operation.path, operation, routes: all });
   }
   const byKey = new Map<string, EndpointGroup>();
   for (const route of routes) {
@@ -325,11 +391,37 @@ function groupEndpoints(operations: readonly ServiceEndpoint[], routes: readonly
       continue;
     }
     const key = `${route.method} ${shape(route.path)}`;
-    const group = byKey.get(key) ?? { method: route.method, path: route.path, operation: null, routes: [] };
+    const group = byKey.get(key) ?? { protocol: 'http' as const, method: route.method, path: route.path, operation: null, routes: [] };
     group.routes.push(route);
     byKey.set(key, group);
   }
   return [...groups, ...byKey.values()];
+}
+
+/** One group per gRPC rpc, gRPC-gateway route, and GraphQL root field, the first declaration kept. */
+function groupSurfaces(surfaces: readonly ServiceEndpoint[]): EndpointGroup[] {
+  const byKey = new Map<string, EndpointGroup>();
+  for (const surface of surfaces) {
+    const key = `${surface.protocol ?? 'http'} ${surface.method} ${surface.path}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, { protocol: surface.protocol ?? 'http', method: surface.method, path: surface.path, operation: surface, routes: [] });
+    }
+  }
+  return [...byKey.values()];
+}
+
+/** The non-test file that implements a gRPC service or resolves a GraphQL field, by convention. */
+function implementationOf(contents: ReadonlyMap<string, string>, surface: ServiceEndpoint): EndpointSummary['handler'] {
+  const pattern = implementationPattern(surface);
+  const name = surface.operationId?.split('.').pop() ?? null;
+  if (pattern) {
+    for (const [file, content] of [...contents.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (!isTestLike(file) && pattern.test(content)) {
+        return { name, file, basis: 'implementation' };
+      }
+    }
+  }
+  return { name, file: null, basis: 'none' };
 }
 
 /**
@@ -370,7 +462,7 @@ function resolveHandler(
 
 function declarationOf(endpoint: ServiceEndpoint): EndpointDeclaration {
   return {
-    origin: endpoint.origin === 'code' ? 'code' : 'openapi',
+    origin: endpoint.origin ?? 'openapi',
     file: endpoint.source,
     line: endpoint.line ?? null,
     path: endpoint.path,
@@ -380,7 +472,7 @@ function declarationOf(endpoint: ServiceEndpoint): EndpointDeclaration {
   };
 }
 
-function site(call: ServiceCall): EndpointSite {
+function site(call: { file: string; line: number }): EndpointSite {
   return { file: call.file, line: call.line };
 }
 

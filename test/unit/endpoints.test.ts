@@ -113,6 +113,7 @@ test('listEndpoints joins documents and code, resolves handlers, and reads tests
 
   assert.deepEqual(report.totals, {
     endpoints: 4,
+    byProtocol: { http: 4, grpc: 0, graphql: 0 },
     documentedOnly: 1,
     untested: 1,
     guarded: 1,

@@ -196,6 +196,21 @@ registers in code, one entry per route, with what is recorded about it:
 - **Callers** — literal calls to the route from non-test source, matched against the route's
   path template (`/users/{id}` reads `fetch('/users/42')`).
 
+**gRPC and GraphQL** are read as endpoints too. Each `rpc` of a `.proto` `service` is
+`RPC /package.Service/Method` (the path gRPC puts on the wire) with its request and response
+messages' fields and its streaming kind, and a `google.api.http` option on it is also an HTTP
+endpoint (the gRPC-gateway route). Each field of the root `Query`, `Mutation`, and
+`Subscription` types (and their `extend type`s) is `QUERY users`, with its arguments as
+parameters and its return type's fields as the response, read from `.graphql`/`.gql`/`.graphqls`
+files and from SDL in a `gql`/`graphql` tagged template or a `typeDefs` string. The handler is
+the file that implements the service or resolves the field by convention (`UserServiceImplBase`,
+`UserServiceServicer`, `UserService.UserServiceBase`, tonic `impl … for`, `@GrpcMethod`;
+`resolve_users`, `@Query(...) users(`, an Apollo `Query: { users … }` map), and callers are calls
+of the rpc on a stub- or client-named receiver and the top-level fields an operation selects in
+a `gql` template or a `.graphql` document. Guards on these (interceptors, directives) are not
+read. The same endpoints feed the workspace service list and the HTTP API diff, so a removed
+rpc or a new required GraphQL argument is a breaking change with its callers.
+
 `GET /analysis/endpoint-passport?method=GET&path=/users/{id}` (MCP `get_endpoint_passport`) is
 one route's card: the entry above plus the declared parameters and request and response
 fields, the middleware as written, and the files and database tables within three import hops

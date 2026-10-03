@@ -21,6 +21,10 @@
   `get_endpoints`), with a per-route passport that adds declared parameters, bodies, and the
   tables near the handler (`GET /analysis/endpoint-passport`, MCP `get_endpoint_passport`), and
   an **HTTP endpoints** review overlay that rings files with an untested or unguarded route.
+- Read gRPC services (`.proto` rpcs, streaming kind, message fields, gRPC-gateway routes) and
+  GraphQL root fields (schema files and SDL in source) as endpoints, with their implementing
+  files and their callers (stub calls, GraphQL selections), in the endpoint list, the
+  passport, the workspace service list, and the API diff.
 
 ## 0.1.1
 

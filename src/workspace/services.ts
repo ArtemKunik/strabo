@@ -6,6 +6,7 @@ import { collectSourceFiles, isSourceExtension } from '../scan/scan.ts';
 import type { ApiParameter, ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
 import { findContractFiles, resolveSchemaRef } from './contracts.ts';
 import { extractRoutesFromContent } from './routes.ts';
+import { extractGraphqlEndpoints, extractGrpcEndpoints, graphqlEndpointsFromContent } from './rpc.ts';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 
@@ -28,17 +29,32 @@ const OKHTTP_URL = /\.url\s*\(\s*"([^"\n]+)"/g;
 const URI_CREATE = /\bURI\.create\s*\(\s*"([^"\n]+)"/g;
 
 /**
- * Extract the HTTP endpoints a repository declares: its OpenAPI operations and the routes its
- * source registers with a web framework (`./routes.ts`).
+ * Extract the endpoints a repository declares: its OpenAPI operations, the routes its source
+ * registers with a web framework (`./routes.ts`), and its gRPC services and GraphQL root
+ * fields (`./rpc.ts`), including GraphQL SDL held in source.
  *
  * A code-declared endpoint has no host, so it joins a same-repository route edge but never a
  * cross-repo flow, which needs a host on both sides.
  */
 export function extractServiceEndpoints(root: string, repository: string): ServiceEndpoint[] {
-  return sortEndpoints([
+  const endpoints = [
     ...extractOpenApiEndpoints(root, repository),
-    ...extractCodeEndpoints(root, repository),
-  ]);
+    ...extractGrpcEndpoints(root, repository),
+    ...extractGraphqlEndpoints(root, repository),
+  ];
+  for (const file of collectSourceFiles(root, [], [])) {
+    if (!isSourceExtension(file)) {
+      continue;
+    }
+    const content = readText(root, file);
+    if (content !== null) {
+      endpoints.push(
+        ...codeEndpointsFromContent(repository, file, content),
+        ...graphqlEndpointsFromContent(repository, file, content),
+      );
+    }
+  }
+  return sortEndpoints(endpoints);
 }
 
 /** The routes a repository's source files register, as endpoints with their declaring line. */

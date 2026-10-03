@@ -48,7 +48,7 @@ record is reported as `unavailable`, never invented.
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
-| 38 | API development | In progress (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking HTTP changes, R4 endpoint passport landed; R5 pending) |
+| 38 | API development | Landed (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking API changes, R4 endpoint passport and overlay, R5 gRPC and GraphQL surfaces) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2659,6 +2659,19 @@ warning hues). The passport is served to the API and MCP; a dedicated passport p
 browser is a follow-up, and the overlay's rows select the registering file. Unit coverage is
 `test/unit/endpoints.test.ts`; the browser scenario is `test/acceptance/features/http-api.feature`
 against `test/fixtures/api-repo`.
+
+**R5 landed.** `src/workspace/rpc.ts` reads `.proto` services (`RPC /package.Service/Method`,
+streaming kind, request/response message fields, and the `google.api.http` gateway route) and
+GraphQL root fields (`.graphql`/`.gql`/`.graphqls` files and SDL in source), plus their
+candidate calls (stub- or client-named receivers; top-level selections). `ServiceEndpoint`
+gains `protocol` and the `proto`/`graphql` origins; `extractServiceEndpoints` returns them, so
+the workspace service list, the endpoint list and passport (handler by implementation
+convention), and the API diff (callers by stub call or selection) all read them, and the MCP
+tools from R4 serve them. `.graphql` files are now materialised for revision reads, and the
+workspace cache version is `strabo-workspace-7`, since earlier caches hold endpoint lists
+without code routes. Not read: gRPC interceptors and GraphQL directives as guards, Go
+servers, and code-first GraphQL schemas with no SDL. Unit coverage is
+`test/unit/rpc.test.ts`.
 
 ## Reading route (landed)
 

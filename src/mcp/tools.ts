@@ -941,7 +941,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_http_api_diff',
       description:
-        'HTTP endpoints, parameters, and request/response fields added, removed, or changed between two revisions (OpenAPI documents and routes registered in code), each classified breaking, conditional, or safe, with the recorded callers of every breaking change.',
+        'Endpoints, parameters, and request/response fields added, removed, or changed between two revisions (OpenAPI documents, routes registered in code, .proto services, GraphQL schemas), each classified breaking, conditional, or safe, with the recorded callers of every breaking change.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -990,7 +990,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_endpoints',
       description:
-        'Every HTTP endpoint the repository documents or registers in code, each with its handler and handler file, the guard read from the middleware or decorators in front of it (guarded, anonymous, or none recorded), the tests that call it or import their way to its handler, and its literal callers.',
+        'Every endpoint the repository documents or registers in code (HTTP routes, gRPC rpcs, GraphQL root fields), each with its handler and handler file, the guard read from the middleware or decorators in front of it (guarded, anonymous, or none recorded), the tests that call it or import their way to its handler, and its literal callers.',
       inputSchema: {
         type: 'object',
         properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
@@ -1001,7 +1001,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_endpoint_passport',
       description:
-        'One HTTP endpoint before you change it: its declarations, handler, middleware and guard, declared parameters and request/response fields, tests, callers, and the files and database tables within three import hops of the handler.',
+        'One endpoint before you change it (an HTTP route, `RPC /package.Service/Method`, or `QUERY field`): its declarations, handler, middleware and guard, declared parameters and request/response fields, tests, callers, and the files and database tables within three import hops of the handler.',
       inputSchema: {
         type: 'object',
         properties: {
