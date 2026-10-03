@@ -5,7 +5,11 @@ import { parse as parseYaml } from 'yaml';
 import { toPosix } from '../boundary/repository-root.ts';
 import { excludedDirectory } from '../scan/exclusions.ts';
 import type { Graph } from '../types.ts';
-import { extractCallsFromContent, extractServiceEndpoints } from '../workspace/services.ts';
+import {
+  codeEndpointsFromContent,
+  extractCallsFromContent,
+  extractOpenApiEndpoints,
+} from '../workspace/services.ts';
 import { readWorkingFile } from './git-content.ts';
 
 /**
@@ -15,7 +19,8 @@ import { readWorkingFile } from './git-content.ts';
  * A key is joined only when it is written as a string literal on both sides. A dynamic key is
  * never guessed at: it becomes a diagnostic, so an unresolvable read is visible without
  * fabricating an edge. Declarations come from a bounded walk of the repository's config files;
- * route declarations reuse the OpenAPI extractor the workspace analysis already uses.
+ * route declarations are the OpenAPI operations and the routes the scanned source registers,
+ * read by the same extractors the workspace analysis uses.
  */
 
 export type StringEdgeKind = 'env' | 'route' | 'flag';
@@ -114,6 +119,7 @@ export async function computeStringEdges(root: string, graph: Graph): Promise<St
   const envReads = new Map<string, KeyedSite[]>();
   const routeReads = new Map<string, KeyedSite[]>();
   const flagReads = new Map<string, KeyedSite[]>();
+  const routeDeclarations = new Map<string, KeyedSite[]>();
   const diagnostics: StringEdgeDiagnostic[] = [];
 
   for (const node of graph.nodes) {
@@ -122,6 +128,10 @@ export async function computeStringEdges(root: string, graph: Graph): Promise<St
       continue;
     }
     scanSource(node.id, content, envReads, routeReads, flagReads, diagnostics);
+    for (const endpoint of codeEndpointsFromContent(path.basename(root), node.id, content)) {
+      const key = `${endpoint.method} ${endpoint.path}`;
+      add(routeDeclarations, key, { file: node.id, line: endpoint.line ?? 1, key });
+    }
   }
 
   const envDeclarations = new Map<string, KeyedSite[]>();
@@ -135,12 +145,11 @@ export async function computeStringEdges(root: string, graph: Graph): Promise<St
     }
   }
 
-  const routeDeclarations = new Map<string, KeyedSite[]>();
   // Reuse the workspace OpenAPI extractor. It walks the repository itself and returns no line
   // number, so the declaration line is recovered by scanning the declaring file for the path.
   // A route is joined on the literal `METHOD /path` alone: the call's host is often relative
   // and the endpoint's host may be absent, so matching host as well would drop real edges.
-  for (const endpoint of extractServiceEndpoints(root, path.basename(root))) {
+  for (const endpoint of extractOpenApiEndpoints(root, path.basename(root))) {
     const content = readWorkingFile(root, endpoint.source);
     const line = content === null ? 1 : findPathLine(content, endpoint.path);
     const key = `${endpoint.method} ${endpoint.path}`;

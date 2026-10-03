@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Read HTTP routes declared in code, not only in OpenAPI documents: Express, Fastify, Koa,
+  Hono, NestJS, FastAPI, Flask, Spring, JAX-RS, ASP.NET (minimal and controllers), Axum, and
+  Actix registrations become endpoints with their line, framework, and handler, so route edges
+  and the Structure trace work in repositories without a spec.
+- Stop recording a route registration (`app.get('/x', h)`, `@app.get("/x")`) as an outbound
+  HTTP call.
+
 ## 0.1.1
 
 - Read Android/Kotlin local device stores (SharedPreferences, EncryptedSharedPreferences,

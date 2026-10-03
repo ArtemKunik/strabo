@@ -76,6 +76,14 @@ export interface ServiceEndpoint {
   request?: ApiSchemaRef | null;
   /** The first recorded 2xx JSON response schema, when the operation declares one. */
   response?: ApiSchemaRef | null;
+  /** Where the endpoint is declared: an OpenAPI document, or a handler registration in code. */
+  origin?: 'openapi' | 'code';
+  /** The declaring line, for a code-declared endpoint. */
+  line?: number;
+  /** The framework idiom that declared it (`express`, `fastapi`, `spring`, ...), for a code endpoint. */
+  framework?: string;
+  /** The handler the registration names, when it is readable. */
+  handler?: string | null;
 }
 
 /** A recorded call from one repository to an endpoint another repository declares. */

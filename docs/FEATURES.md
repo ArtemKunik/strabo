@@ -431,6 +431,21 @@ endpoint is evidence without a flow, and a call whose method is not recorded joi
 that host and path declares exactly one method. The `/api/strabo/workspace/services` endpoint
 returns the declared endpoints and the joined flows.
 
+Endpoints are also read from the **routes a repository registers in code** (`origin: "code"`,
+with the declaring line, the framework, and the handler when it is named): Express, Fastify,
+Koa Router, and Hono verb calls on a router receiver, `router.route('/x').get(h)` chains, and
+`fastify.route({ method, url })`; NestJS `@Controller` + `@Get(':id')`; FastAPI and Flask
+decorators with a same-file `APIRouter(prefix=)` / `Blueprint(url_prefix=)`; Spring
+`@GetMapping` / `@RequestMapping(method=)` and JAX-RS `@GET` + `@Path` under the class mapping;
+ASP.NET `MapGet` (with a same-file `MapGroup`) and `[HttpGet]` under `[Route("api/[controller]")]`;
+and Axum / Actix `.route("/x", get(h))` and `#[get("/x")]`. Path parameters are normalised to
+`{name}` (`:id`, `<int:id>`, `{id:int}`), so a code route and a spec route compare. A prefix
+applied from another file (`app.use('/api', router)`, `include_router(prefix=)`, Axum `nest`)
+is not followed, so such a route is recorded at the path its own file declares. A code route
+has no host, so it backs the in-repository route edges and the Structure trace but never joins
+a cross-repo flow. A registration is the declaring side, so it is no longer also recorded as an
+outbound call.
+
 The **Workspace** panel (the panel rail's **More** list, or `window.straboTest.workspace()`) renders the recorded
 report: each repository with its commit, dirty state, and published coordinate; the
 cross-repo flows; the service endpoints and service flows; the contracts; and the drift.

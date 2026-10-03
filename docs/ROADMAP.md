@@ -48,6 +48,7 @@ record is reported as `unavailable`, never invented.
 | 35 | Application logical structure from the tier lens | Done (Y0-Y9: structure fixture + acceptance, tierFlow aggregate, shelf and mixed counts, L0 bands, unit-by-tier grid, cell drill-down, end-to-end spine, intended-vs-observed, MCP and report surface, honesty limits) |
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
+| 38 | API development | In progress (R1 landed: routes declared in code; R2-R5 pending) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2600,6 +2601,38 @@ fixture-backed cases in `test/unit/structure.test.ts` and
 `test/unit/structure-data-flow-fixture.test.ts`, and the report section in
 `test/unit/repository-report.test.ts`; the browser scenario is
 `test/acceptance/features/structure-data-flow.feature`.
+
+## Phase 38 - API development
+
+Most of what Strabo knows about an HTTP API came from OpenAPI documents, and most repositories
+have none, or one that has drifted from the code. This phase reads the API from the handler
+registrations and then compares, diffs, and explains it.
+
+- **R1 - Routes declared in code.** `src/workspace/routes.ts` (`extractRoutesFromContent`)
+  reads route registrations per framework (Express/Fastify/Koa/Hono, NestJS, FastAPI, Flask,
+  Spring, JAX-RS, ASP.NET minimal and controller, Axum, Actix) into `METHOD /path` with the
+  declaring line, the framework, and the named handler; parameters are normalised to `{name}`.
+  `extractServiceEndpoints` now returns OpenAPI and code endpoints (`origin`), so the
+  in-repository route edges (Phase 30 H2) and the Structure trace (Phase 35) read them, and
+  `extractCallsFromContent` no longer records a registration as an outbound call.
+- **R2 - Spec ↔ code conformance.** Routes in code that the OpenAPI document does not list,
+  operations in the document with no registration, and method or parameter mismatches, as a
+  report section and `strabo check --fail-on route-drift`.
+- **R3 - Breaking HTTP changes between revisions.** The OpenAPI and code routes at `base` and
+  `head`: removed operations, new required parameters, removed response fields, and narrowed
+  types, each naming the recorded callers (in the repository and across the workspace).
+- **R4 - Endpoint passport.** One route's handler, guards, request and response shapes,
+  downstream calls to the tables it touches, the tests that reach it, and its callers, with
+  untested-endpoint and unguarded-endpoint overlays.
+- **R5 - gRPC and GraphQL surfaces.** `.proto` `service`/`rpc` declarations and GraphQL
+  `Query`/`Mutation` fields as endpoints, with their client calls, and MCP tools to ask about
+  an endpoint before changing it.
+
+Known limits, named rather than hidden: route reading is lexical, so a path built at runtime
+records nothing, and a cross-file mount prefix is not followed; Django URLconfs, Ktor nested
+`route {}` blocks, and Actix `web::resource` chains are not read yet.
+
+**R1 landed.** Unit coverage is `test/unit/routes.test.ts`.
 
 ## Reading route (landed)
 

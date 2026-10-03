@@ -489,11 +489,15 @@ export { extractContracts, computeContractDrift, findContractFiles } from './wor
 export { extractLanguageContracts, findSourceFiles } from './workspace/dto.ts';
 export {
   extractServiceEndpoints,
+  extractOpenApiEndpoints,
+  extractCodeEndpoints,
   extractServiceCalls,
   computeServiceFlows,
   locateTarget,
 } from './workspace/services.ts';
 export type { RepoServiceFact } from './workspace/services.ts';
+export { extractRoutesFromContent, normalizeRoutePath } from './workspace/routes.ts';
+export type { CodeRoute } from './workspace/routes.ts';
 export { extractSchema, buildSchema, findSqlFiles, normalizeType, constraintSignature } from './workspace/schema.ts';
 export type { SqlSource } from './workspace/schema.ts';
 export { extractDataUses, extractDataUsesFromSource } from './workspace/data-usage.ts';
