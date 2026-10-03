@@ -3,7 +3,7 @@ import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
 import { collectSourceFiles, isSourceExtension } from '../scan/scan.ts';
-import type { ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
+import type { ApiParameter, ServiceCall, ServiceEndpoint, ServiceFlow } from '../types.ts';
 import { findContractFiles, resolveSchemaRef } from './contracts.ts';
 import { extractRoutesFromContent } from './routes.ts';
 
@@ -133,6 +133,7 @@ function parseOpenApiEndpoints(
       }
       const operation = isRecord(item[method]) ? item[method] : {};
       const operationId = readOperationId(operation);
+      const parameters = readParameters(document, item.parameters, operation.parameters);
       const request = resolveSchemaRef(document, mediaSchema(operation.requestBody));
       const response = resolveSchemaRef(document, mediaSchema(firstSuccessResponse(operation.responses)));
       endpoints.push({
@@ -145,10 +146,51 @@ function parseOpenApiEndpoints(
         ...(operationId ? { operationId } : {}),
         ...(request ? { request } : {}),
         ...(response ? { response } : {}),
+        ...(parameters.length > 0 ? { parameters } : {}),
       });
     }
   }
   return endpoints;
+}
+
+/**
+ * The parameters an operation declares, its own overriding the path item's by `in` + `name`.
+ * A `$ref` to `components.parameters` is followed in the same document; one that does not
+ * resolve is left out rather than guessed at.
+ */
+function readParameters(document: Record<string, unknown>, ...lists: unknown[]): ApiParameter[] {
+  const components = isRecord(document.components) ? document.components : {};
+  const shared = isRecord(components.parameters) ? components.parameters : {};
+  const byKey = new Map<string, ApiParameter>();
+  for (const list of lists) {
+    for (const entry of Array.isArray(list) ? list : []) {
+      let parameter: unknown = entry;
+      if (isRecord(entry) && typeof entry.$ref === 'string') {
+        parameter = shared[entry.$ref.split('/').pop() ?? ''];
+      }
+      if (!isRecord(parameter) || typeof parameter.name !== 'string' || typeof parameter.in !== 'string') {
+        continue;
+      }
+      const schema = isRecord(parameter.schema) ? parameter.schema : parameter;
+      byKey.set(`${parameter.in}\u0000${parameter.name}`, {
+        name: parameter.name,
+        in: parameter.in,
+        required: parameter.required === true || parameter.in === 'path',
+        type: parameterType(schema),
+      });
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.in.localeCompare(b.in) || a.name.localeCompare(b.name));
+}
+
+function parameterType(schema: Record<string, unknown>): string {
+  if (schema.type === 'array') {
+    return `array<${isRecord(schema.items) ? parameterType(schema.items) : 'unknown'}>`;
+  }
+  if (typeof schema.type === 'string') {
+    return typeof schema.format === 'string' ? `${schema.type}(${schema.format})` : schema.type;
+  }
+  return typeof schema.$ref === 'string' ? (schema.$ref.split('/').pop() ?? 'unknown') : 'unknown';
 }
 
 /** The `operationId` an operation names, or null when it is absent or blank. */

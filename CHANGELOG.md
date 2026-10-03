@@ -11,6 +11,11 @@
 - Compare the OpenAPI document with the routes the code registers: undocumented routes and
   unimplemented operations in `GET /analysis/routes/conformance`, the MCP tool
   `get_route_conformance`, a new HTTP API report section, and `strabo check --fail-on=route-drift`.
+- Classify HTTP API changes between two revisions as breaking, conditional, or safe (removed
+  endpoints, new required parameters and request fields, removed or now-optional response
+  fields, incompatible types), naming the recorded callers of each breaking change. It is in
+  the change report, `GET /analysis/http-api-diff`, the MCP tool `get_http_api_diff`, and
+  `strabo report --base=<ref> --fail-on=http-breaking`.
 
 ## 0.1.1
 

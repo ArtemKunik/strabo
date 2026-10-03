@@ -58,6 +58,15 @@ export interface ApiSchemaRef {
   fields: ContractField[];
 }
 
+/** A query, header, cookie, or path parameter an OpenAPI operation declares. */
+export interface ApiParameter {
+  name: string;
+  in: string;
+  required: boolean;
+  /** `string`, `integer(int64)`, `array<string>`, or `unknown`, like a contract field. */
+  type: string;
+}
+
 /** An HTTP endpoint a repository declares in an OpenAPI document. */
 export interface ServiceEndpoint {
   /** Repository name. */
@@ -76,6 +85,8 @@ export interface ServiceEndpoint {
   request?: ApiSchemaRef | null;
   /** The first recorded 2xx JSON response schema, when the operation declares one. */
   response?: ApiSchemaRef | null;
+  /** The parameters the operation and its path item declare, when any. */
+  parameters?: ApiParameter[];
   /** Where the endpoint is declared: an OpenAPI document, or a handler registration in code. */
   origin?: 'openapi' | 'code';
   /** The declaring line, for a code-declared endpoint. */

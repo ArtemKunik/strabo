@@ -939,6 +939,28 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         }),
     },
     {
+      name: 'get_http_api_diff',
+      description:
+        'HTTP endpoints, parameters, and request/response fields added, removed, or changed between two revisions (OpenAPI documents and routes registered in code), each classified breaking, conditional, or safe, with the recorded callers of every breaking change.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          base: { type: 'string' },
+          head: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['base'],
+        additionalProperties: false,
+      },
+      call: (args) =>
+        get(dispatch, '/analysis/http-api-diff', args, {
+          base: requiredArg(args, 'base'),
+          head: stringArg(args, 'head'),
+        }),
+    },
+    {
       name: 'get_clones',
       description:
         'Functions whose normalised bodies hash the same, grouped into clone clusters with their files, lines, and shared token count.',

@@ -82,7 +82,9 @@ contract governs, and the honesty diagnostics), `get_dead_code`, `get_scope_fenc
 paths outside a declared zone, plus
 inside changes imported from outside), `get_uncovered_changes` (changed-line coverage:
 git-diff additions intersected with the repository's measured coverage report, with
-uncovered modified functions, public-surface functions first), `get_public_api_diff`
+uncovered modified functions, public-surface functions first), `get_http_api_diff` (HTTP
+endpoints, parameters, and body fields changed between two revisions, classified breaking,
+conditional, or safe, with the recorded callers of each breaking change), `get_public_api_diff`
 (exported symbols added, removed, or re-signed between two revisions, with their recorded
 consumers), `get_clones` (functions whose normalised bodies hash the same), `get_string_edges`
 (environment variables, HTTP routes, and feature flags, with dynamic keys reported as not

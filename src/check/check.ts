@@ -34,7 +34,8 @@ export type CheckRule =
   | 'contract-drift-detected'
   | 'uncovered-change'
   | 'coverage-stale'
-  | 'route-drift';
+  | 'route-drift'
+  | 'http-breaking';
 
 export const CHECK_RULES: readonly CheckRule[] = [
   'cycles',
@@ -49,6 +50,7 @@ export const CHECK_RULES: readonly CheckRule[] = [
   'uncovered-change',
   'coverage-stale',
   'route-drift',
+  'http-breaking',
 ];
 
 /**
@@ -89,6 +91,9 @@ export const FAIL_ON_ALIASES: Readonly<Record<string, CheckRule>> = {
   routes: 'route-drift',
   'api-drift': 'route-drift',
   'route-drift': 'route-drift',
+  'http-breaking': 'http-breaking',
+  'api-breaking': 'http-breaking',
+  'breaking-api': 'http-breaking',
 };
 
 /**
@@ -526,6 +531,13 @@ export async function runCheck(options: CheckOptions): Promise<CheckResult> {
         }
       }
     }
+  }
+
+  if (rules.includes('http-breaking')) {
+    warnings.push({
+      rule: 'http-breaking',
+      detail: 'http-breaking compares two revisions; run strabo report --base=<ref> --fail-on=http-breaking',
+    });
   }
 
   const healthScore = computeArchitectureHealth(graph).score;
