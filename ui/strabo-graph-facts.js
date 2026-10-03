@@ -98,6 +98,67 @@ export function passportFor(model, id) {
   };
 }
 
+/**
+ * One Structure edge as a recorded phrase: its count, direction, and how much is types only.
+ *
+ * Shared by the tier delegation facts and the narrator's tier evidence so the two cannot
+ * describe the same edge differently.
+ */
+export function tierEdgePhrase(model, edge, otherId) {
+  const other = (model?.nodes ?? []).find((candidate) => candidate.id === otherId);
+  const label = other?.label ?? otherId;
+  const detail = [];
+  if (typeof edge.weight === 'number' && edge.weight > 0) {
+    detail.push(`${edge.weight} ${edge.weight === 1 ? 'import' : 'imports'}`);
+  }
+  if (edge.tierKind && edge.tierKind !== 'down') {
+    detail.push(edge.tierKind);
+  }
+  if (typeof edge.typeOnlyCount === 'number' && edge.typeOnlyCount > 0) {
+    detail.push(`${edge.typeOnlyCount} type-only`);
+  }
+  if (edge.intended === true) {
+    detail.push('allowed by a declared rule');
+  }
+  return detail.length > 0 ? `${label} (${detail.join(', ')})` : label;
+}
+
+/**
+ * The recorded facts for one Structure roll-up card (a tier band or the support shelf), as
+ * short lines a delegation prompt or the narrator can carry.
+ *
+ * A roll-up card is not a file, so it is described by the tier edges the scan recorded — what
+ * it imports and what imports it — rather than a file passport, whose reach counts are not
+ * recorded for a card the ranked flow never draws. Returns null for an unknown id so a caller
+ * stays silent rather than inventing a tier; a value the scan did not record is named as such.
+ */
+export function tierEvidenceFor(model, id) {
+  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return null;
+  }
+  const edges = model?.edges ?? [];
+  const outgoing = edges
+    .filter((edge) => edge.source === id)
+    .map((edge) => tierEdgePhrase(model, edge, edge.target));
+  const incoming = edges
+    .filter((edge) => edge.target === id)
+    .map((edge) => tierEdgePhrase(model, edge, edge.source));
+  const share =
+    typeof node.fileShare === 'number'
+      ? `${Math.round(node.fileShare * 100)}% of the repository's files`
+      : 'share not recorded';
+  return [
+    `${node.kind === 'shelf' ? 'Support shelf entry' : 'Tier'}: ${node.label ?? id}`,
+    `Folders most of its files live in: ${node.why ?? 'not recorded'}`,
+    `Files: ${node.files ?? 'not recorded'} (${share})`,
+    `Lines: ${node.lines ?? 'not recorded'}`,
+    `Imports between its own files: ${node.internalImports ?? 'not recorded'}`,
+    `Recorded imports into other tiers: ${outgoing.length > 0 ? outgoing.join('; ') : 'none recorded'}`,
+    `Recorded imports from other tiers: ${incoming.length > 0 ? incoming.join('; ') : 'none recorded'}`,
+  ];
+}
+
 /** One dependency row: the neighbour file plus the edge's recorded evidence. */
 function edgeEntry(id, edge) {
   return {

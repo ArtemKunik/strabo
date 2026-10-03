@@ -222,6 +222,43 @@ function passportFor(model, id) {
     usedBy
   };
 }
+function tierEdgePhrase(model, edge, otherId) {
+  const other = (model?.nodes ?? []).find((candidate) => candidate.id === otherId);
+  const label = other?.label ?? otherId;
+  const detail = [];
+  if (typeof edge.weight === "number" && edge.weight > 0) {
+    detail.push(`${edge.weight} ${edge.weight === 1 ? "import" : "imports"}`);
+  }
+  if (edge.tierKind && edge.tierKind !== "down") {
+    detail.push(edge.tierKind);
+  }
+  if (typeof edge.typeOnlyCount === "number" && edge.typeOnlyCount > 0) {
+    detail.push(`${edge.typeOnlyCount} type-only`);
+  }
+  if (edge.intended === true) {
+    detail.push("allowed by a declared rule");
+  }
+  return detail.length > 0 ? `${label} (${detail.join(", ")})` : label;
+}
+function tierEvidenceFor(model, id) {
+  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
+  if (!node) {
+    return null;
+  }
+  const edges = model?.edges ?? [];
+  const outgoing = edges.filter((edge) => edge.source === id).map((edge) => tierEdgePhrase(model, edge, edge.target));
+  const incoming = edges.filter((edge) => edge.target === id).map((edge) => tierEdgePhrase(model, edge, edge.source));
+  const share = typeof node.fileShare === "number" ? `${Math.round(node.fileShare * 100)}% of the repository's files` : "share not recorded";
+  return [
+    `${node.kind === "shelf" ? "Support shelf entry" : "Tier"}: ${node.label ?? id}`,
+    `Folders most of its files live in: ${node.why ?? "not recorded"}`,
+    `Files: ${node.files ?? "not recorded"} (${share})`,
+    `Lines: ${node.lines ?? "not recorded"}`,
+    `Imports between its own files: ${node.internalImports ?? "not recorded"}`,
+    `Recorded imports into other tiers: ${outgoing.length > 0 ? outgoing.join("; ") : "none recorded"}`,
+    `Recorded imports from other tiers: ${incoming.length > 0 ? incoming.join("; ") : "none recorded"}`
+  ];
+}
 function edgeEntry(id, edge) {
   return {
     id,
@@ -2834,6 +2871,7 @@ var DELEGATE_AGENTS = ["opencode", "claude"];
 var MAX_DELEGATE_PROMPT = 2e4;
 var DELEGATE_TASKS = {
   node: "Assess this file: its role in the repository, its blast radius, and the risk of changing it.",
+  tier: "Assess this architecture tier: what it is for, what it leans on, what leans on it, and the risk of changing what lives in it.",
   edge: "Explain this dependency: why it exists (from the evidence) and the impact of changing it.",
   diagnostic: "Resolve this diagnostic: explain the cause and propose the smallest safe fix.",
   commit: "Summarise what this change did and what it may still affect in the working tree.",
@@ -5191,43 +5229,9 @@ function narratorReplyLabel(reply) {
 }
 var GROUP_NAMING_INSTRUCTION = "Propose one short name and a one-line purpose for this build unit, using only the recorded evidence. Do not create, merge, or split groups, and do not claim relationships the evidence does not show.";
 var TIER_NARRATION_INSTRUCTION = 'In three to five sentences of plain prose, say what this architecture tier appears to be for, what it leans on, what leans on it, and anything a reviewer should know about its wrong-way imports. Do not use lists, headings, or markdown, and do not repeat counts the reader can already see. The tier name, folders, and import relationships are recorded and may be read for meaning; word that as a reading ("appears to"), not as fact. Use only the recorded evidence: never invent behaviour, and say so briefly when something is not recorded.';
-function tierEdgePhrase(model, edge, otherId) {
-  const other = (model.nodes ?? []).find((candidate) => candidate.id === otherId);
-  const parts = [`${other?.label ?? otherId}`];
-  const detail = [];
-  if (typeof edge.weight === "number" && edge.weight > 0) {
-    detail.push(`${edge.weight} ${edge.weight === 1 ? "import" : "imports"}`);
-  }
-  if (edge.tierKind && edge.tierKind !== "down") {
-    detail.push(edge.tierKind);
-  }
-  if (typeof edge.typeOnlyCount === "number" && edge.typeOnlyCount > 0) {
-    detail.push(`${edge.typeOnlyCount} type-only`);
-  }
-  if (edge.intended === true) {
-    detail.push("allowed by a declared rule");
-  }
-  return detail.length > 0 ? `${parts[0]} (${detail.join(", ")})` : parts[0];
-}
 function buildTierNarratorEvidence(model, id) {
-  const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
-  if (!node) {
-    return "No tier is recorded for this selection.";
-  }
-  const edges = model?.edges ?? [];
-  const outgoing = edges.filter((edge) => edge.source === id).map((edge) => tierEdgePhrase(model, edge, edge.target));
-  const incoming = edges.filter((edge) => edge.target === id).map((edge) => tierEdgePhrase(model, edge, edge.source));
-  const share = typeof node.fileShare === "number" ? `${Math.round(node.fileShare * 100)}% of the repository's files` : "share not recorded";
-  const lines = [
-    `${node.kind === "shelf" ? "Support shelf entry" : "Tier"}: ${node.label ?? id}`,
-    `Folders most of its files live in: ${node.why ?? "not recorded"}`,
-    `Files: ${node.files ?? "not recorded"} (${share})`,
-    `Lines: ${node.lines ?? "not recorded"}`,
-    `Imports between its own files: ${node.internalImports ?? "not recorded"}`,
-    `Recorded imports into other tiers: ${outgoing.length > 0 ? outgoing.join("; ") : "none recorded"}`,
-    `Recorded imports from other tiers: ${incoming.length > 0 ? incoming.join("; ") : "none recorded"}`
-  ];
-  return lines.join("\n");
+  const lines = tierEvidenceFor(model, id);
+  return lines ? lines.join("\n") : "No tier is recorded for this selection.";
 }
 function buildGroupNamingEvidence(model, id) {
   const node = (model?.nodes ?? []).find((candidate) => candidate.id === id);
@@ -29483,22 +29487,41 @@ function createChromeMenus(app2) {
 // ui/strabo-delegation.js
 function createDelegation(app2) {
   const { state: state2, view: view2, elements: elements2 } = app2;
-  function nodeDelegateTarget(id) {
-    const passport = app2.current ? passportFor(app2.current, id) : null;
-    const node = app2.current?.nodes.find((candidate) => candidate.id === id);
-    const wrongWay = app2.current ? wrongWayFlowsFor(app2.current, id) : null;
+  function wrongWayEvidence(wrongWay) {
     const evidence = [];
-    if (wrongWay) {
-      evidence.push(
-        `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ""}`
-      );
-      for (const group of wrongWay.groups) {
-        evidence.push(`${group.kind} \u2192 ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ""}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ""}`);
-        for (const entry of group.imports.slice(0, 20)) {
-          evidence.push(`${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
-        }
+    if (!wrongWay) {
+      return evidence;
+    }
+    evidence.push(
+      `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ""}`
+    );
+    for (const group of wrongWay.groups) {
+      evidence.push(`${group.kind} \u2192 ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ""}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ""}`);
+      for (const entry of group.imports.slice(0, 20)) {
+        evidence.push(`${entry.source}:${entry.line} \u2192 ${entry.target}${entry.typeOnly ? " (type-only)" : ""}`);
       }
     }
+    return evidence;
+  }
+  function wrongWayMeta(target, wrongWay) {
+    if (wrongWay) {
+      const count = wrongWay.valueCount;
+      target.summary = count > 0 ? `${count} wrong-way ${count === 1 ? "import" : "imports"} out` : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? "import" : "imports"} out`;
+      target.flowGroups = wrongWay.groups;
+      target.flows = wrongWay.flows;
+      target.flowCount = count;
+    }
+    return target;
+  }
+  function nodeDelegateTarget(id) {
+    const node = app2.current?.nodes.find((candidate) => candidate.id === id);
+    const wrongWay = app2.current ? wrongWayFlowsFor(app2.current, id) : null;
+    if (node && (node.kind === "tier" || node.kind === "shelf")) {
+      const evidence2 = [...tierEvidenceFor(app2.current, id) ?? [], ...wrongWayEvidence(wrongWay)];
+      return wrongWayMeta({ kind: "tier", id, label: node.label ?? id, evidence: evidence2 }, wrongWay);
+    }
+    const passport = app2.current ? passportFor(app2.current, id) : null;
+    const evidence = wrongWayEvidence(wrongWay);
     if (passport) {
       for (const metric of passport.metrics) {
         evidence.push(`${metric.label}: ${metric.value}`);
@@ -29512,15 +29535,7 @@ function createDelegation(app2) {
     } else if (!wrongWay) {
       evidence.push("Node is not in the current graph (it may be filtered out).");
     }
-    const target = { kind: "node", id, label: node?.label ?? id, evidence };
-    if (wrongWay) {
-      const count = wrongWay.valueCount;
-      target.summary = count > 0 ? `${count} wrong-way ${count === 1 ? "import" : "imports"} out` : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? "import" : "imports"} out`;
-      target.flowGroups = wrongWay.groups;
-      target.flows = wrongWay.flows;
-      target.flowCount = count;
-    }
-    return target;
+    return wrongWayMeta({ kind: "node", id, label: node?.label ?? id, evidence }, wrongWay);
   }
   function groupDelegateTarget() {
     const items = app2.groupSelection.map((id) => nodeDelegateTarget(id));
