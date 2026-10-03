@@ -31,7 +31,13 @@ export type HostRequest =
   | { id: number; method: 'auth'; token: string; version: number }
   | { id: number; method: 'ping' }
   | { id: number; method: 'list' }
-  | { id: number; method: 'create'; options: CreateSessionOptions }
+  | {
+      id: number;
+      method: 'create';
+      options: CreateSessionOptions;
+      /** The server's scan ceiling now, so a ceiling changed in Settings reaches the daemon. */
+      scanCeiling?: string;
+    }
   | { id: number; method: 'rename'; sessionId: string; title: string }
   | { id: number; method: 'kill'; sessionId: string }
   | { id: number; method: 'backlog'; sessionId: string; fromSeq: number }
@@ -166,8 +172,15 @@ export function parseHostRequest(line: string): HostRequest | null {
       return { id, method: 'ping' };
     case 'list':
       return { id, method: 'list' };
-    case 'create':
-      return { id, method: 'create', options: parseCreateOptions(message.options) };
+    case 'create': {
+      const scanCeiling = asString(message.scanCeiling);
+      return {
+        id,
+        method: 'create',
+        options: parseCreateOptions(message.options),
+        ...(scanCeiling ? { scanCeiling } : {}),
+      };
+    }
     case 'rename': {
       const sessionId = asString(message.sessionId);
       const title = asString(message.title);

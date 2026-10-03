@@ -6,6 +6,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { StraboScopeError } from '../../src/boundary/repository-root.ts';
+import { parseHostRequest } from '../../src/terminal/host-protocol.ts';
 import { TERMINAL_LIMITS } from '../../src/terminal/protocol.ts';
 import { createSessionManager } from '../../src/terminal/registry.ts';
 import type { PtyProcess, PtySpawnOptions, PtySpawner } from '../../src/terminal/session.ts';
@@ -216,6 +217,24 @@ test('registry rejects a repo outside the scan ceiling', async () => {
     () => manager.create({ repo: path.resolve(fixture, '..') }),
     StraboScopeError,
   );
+});
+
+test('registry applies a scan ceiling changed on the live config after it was built', async () => {
+  // Settings widens `config.scanCeiling` in place; a registry built before that must follow it.
+  const config = { workspaceRoot: fixture, scanCeiling: path.resolve(fixture, '..', 'solo-repo') };
+  const manager = createSessionManager(config, { spawn: (file, args, options) => new FakePty(file, args, options, 1) });
+  await assert.rejects(() => manager.create({ repo: fixture }), StraboScopeError);
+
+  config.scanCeiling = path.resolve(fixture, '..');
+  const session = await manager.create({ repo: fixture });
+  assert.equal(session.meta.repo, fixture);
+});
+
+test('the daemon protocol carries the live scan ceiling on create', () => {
+  const request = parseHostRequest(JSON.stringify({ id: 1, method: 'create', options: {}, scanCeiling: 'D:\source' }));
+  assert.deepEqual(request, { id: 1, method: 'create', options: {}, scanCeiling: 'D:\source' });
+  const without = parseHostRequest(JSON.stringify({ id: 2, method: 'create', options: {} }));
+  assert.deepEqual(without, { id: 2, method: 'create', options: {} });
 });
 
 test('a session exit marks the meta and fires exit listeners', async () => {

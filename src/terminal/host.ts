@@ -352,6 +352,11 @@ export async function startTerminalHost(options: TerminalHostOptions): Promise<T
         return;
       case 'create': {
         try {
+          // Only the token-authenticated server reaches this point, and it sends its live
+          // ceiling, which the registry reads from this config on every check.
+          if (request.scanCeiling) {
+            config.scanCeiling = request.scanCeiling;
+          }
           const session = await manager.create(request.options);
           watch(session);
           reconcile();

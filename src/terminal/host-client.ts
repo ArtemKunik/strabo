@@ -295,7 +295,10 @@ class HostClient implements SessionManager, SessionTransport {
     if (this.local) {
       return this.local.create(options);
     }
-    const result = await this.request((id) => ({ id, method: 'create', options }));
+    // The daemon was started with the ceiling of that moment; send the live one with each
+    // create so a ceiling changed in Settings applies to the next session.
+    const scanCeiling = this.config.scanCeiling ?? this.config.workspaceRoot;
+    const result = await this.request((id) => ({ id, method: 'create', options, scanCeiling }));
     if (result.method !== 'create') {
       throw new Error('terminal daemon returned an unexpected create response');
     }
