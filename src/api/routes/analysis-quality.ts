@@ -22,7 +22,7 @@ import { assertReadable } from '../../boundary/repository-root.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
 import { symbolExtractorFor } from '../../scan/languages/registry.ts';
 import type { CodeSymbol, MemberAccess } from '../../scan/languages/symbols.ts';
-import { isSameOriginRequest, parsePositiveInt, sendError } from '../http.ts';
+import { parsePositiveInt, sendError } from '../http.ts';
 import type { AnalysisContext } from './analysis-context.ts';
 import { diffFile } from '../../analysis/diff.ts';
 import { computeChangedLineCoverage, summariseChangedCoverage, type ChangedLineCoverage } from '../../analysis/changed-coverage.ts';
@@ -233,10 +233,6 @@ export function createQualityRouter(context: AnalysisContext): Router {
           error:
             'coverage refresh is off; set STRABO_ALLOW_COVERAGE_REFRESH=1 to let the server run the repository script',
         });
-        return;
-      }
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: "coverage refresh is only accepted from this server's own origin" });
         return;
       }
       const repository = resolve(request);

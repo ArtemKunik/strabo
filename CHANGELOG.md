@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 - Read HTTP routes declared in code, not only in OpenAPI documents: Express, Fastify, Koa,
   Hono, NestJS, FastAPI, Flask, Spring, JAX-RS, ASP.NET (minimal and controllers), Axum, and
@@ -25,6 +25,22 @@
   GraphQL root fields (schema files and SDL in source) as endpoints, with their implementing
   files and their callers (stub calls, GraphQL selections), in the endpoint list, the
   passport, the workspace service list, and the API diff.
+- Notice a second edit to a file that is already modified: the graph cache and the freshness
+  badge now fingerprint each changed file's size and mtime, not just the `git status` lines,
+  and the on-disk cache is keyed by the package version so an upgrade never serves an old graph.
+- The Commit action keeps a staged selection: with something already staged it commits that
+  index as it stands, and only stages the whole working tree when nothing is staged.
+- Find cytoscape wherever npm installed it, so a host that embeds `strabo-map/server` (where
+  it is hoisted) no longer loads the map without its renderer. `@xterm/*` moves to
+  `devDependencies`, since it is bundled into the UI at build time.
+- Refuse every cross-origin state-changing request with one router-wide guard. The narrator,
+  tour, coverage-plan, coverage-weekly, repository add/remove, and terminal-close routes had
+  no check of their own.
+- Keep the terminal and delegation on this machine: binding `--host 0.0.0.0` shares the map,
+  not a shell. `--allow-remote-terminal` (`STRABO_ALLOW_REMOTE_TERMINAL=1`) opts in.
+- CLI: a flag's value is no longer read as the repository path (`strabo report --base main`
+  failed), `--port` and `--version` are new, a missing path or mistyped command fails with a
+  message, and a port already in use is reported in one line instead of a stack trace.
 
 ## 0.1.1
 

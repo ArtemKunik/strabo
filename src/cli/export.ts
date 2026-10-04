@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { resolveRepositoryRoot } from '../boundary/repository-root.ts';
 import { getCachedGraph } from '../scan/graph.ts';
-import { readEnv } from '../config.ts';
+import { positionals, readEnv } from '../config.ts';
 import { exportGraph, type GraphExportFormat } from '../export/graph-export.ts';
 import { selectViewModel } from '../export/select-view.ts';
 import { exportSite } from '../export/site.ts';
@@ -84,12 +84,12 @@ async function runSiteExport(
   const out = flagValue(argv, 'out') ?? 'strabo-site';
   const workspaceRoot = path.resolve(process.env.STRABO_ROOT?.trim() || process.cwd());
   const scanCeiling = path.resolve(process.env.STRABO_SCAN_CEILING?.trim() || workspaceRoot);
-  const positionals = argv.filter((arg) => !arg.startsWith('-'));
+  const repositories = positionals(argv);
   const pages = await exportSite({
     workspaceRoot,
     scanCeiling,
     outDir: out,
-    repositories: positionals.length > 0 ? positionals : [workspaceRoot],
+    repositories: repositories.length > 0 ? repositories : [workspaceRoot],
   });
   writeError(`strabo export: wrote ${pages.length} map(s) to ${path.resolve(out)}\n`);
   return 0;

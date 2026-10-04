@@ -12,6 +12,7 @@ import { createStraboRouter, type NarratorClient, type StraboConfig } from '../.
 import { createNarratorRouter } from '../../src/api/routes/narrator.ts';
 import { createNarratorKeyStore } from '../../src/narrator/key-store.ts';
 import { createSettingsStore } from '../../src/state/settings-store.ts';
+import { requireSameOrigin } from '../../src/api/http.ts';
 
 const servers: Array<ReturnType<typeof express.application.listen>> = [];
 const tempDirs: string[] = [];
@@ -93,6 +94,7 @@ async function mountNarrator(root: string, client: NarratorClient): Promise<stri
   const config: StraboConfig = { workspaceRoot: root, scanCeiling: root };
   const host = express();
   host.use(express.json());
+  host.use(requireSameOrigin);
   host.use('/api/strabo', createNarratorRouter(config, client));
   return new Promise((resolve) => {
     const server = host.listen(0, '127.0.0.1', () => {

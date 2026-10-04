@@ -22,7 +22,7 @@ import { createTerminalRouter } from './routes/terminal.ts';
 import { createVulnerabilityRouter } from './routes/vulnerabilities.ts';
 import { createWorkspaceRouter } from './routes/workspace.ts';
 import type { StraboConfig } from '../types.ts';
-import { sendError } from './http.ts';
+import { mayUseShell, requireSameOrigin, sendError } from './http.ts';
 
 /**
  * Compose routes; focused routers own lineage and depth endpoints.
@@ -42,6 +42,21 @@ export function createStraboRouter(
   const effectiveSettingsStore = settingsStore ?? createSettingsStore();
   const narratorKeyStore = narratorStores?.keyStore ?? createNarratorKeyStore();
   const narratorEnv = narratorStores?.env;
+
+  // One guard for every state-changing route, so a new route cannot forget it.
+  router.use(requireSameOrigin);
+
+  // Terminal sessions and delegation run arbitrary commands, and Strabo has no login, so a
+  // peer on another machine reaches them only when the operator opted in at startup.
+  router.use(['/terminal', '/delegate'], (request, response, next) => {
+    if (!mayUseShell(request.socket.remoteAddress, config.allowRemoteTerminal)) {
+      response.status(403).json({
+        error: 'the terminal answers only on this machine; start Strabo with --allow-remote-terminal to share it.',
+      });
+      return;
+    }
+    next();
+  });
 
   router.get('/health', (_request, response) => {
     response.json({ ok: true });

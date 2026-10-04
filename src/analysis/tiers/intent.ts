@@ -304,7 +304,7 @@ function markAllowedImports(
     );
     const ruleId = rule?.id ?? null;
     const typeOnly = edge.typeOnly === true;
-    const flowKey = `${sourceTier} ${targetTier}`;
+    const flowKey = `${sourceTier}\0${targetTier}`;
     tally(flowTally, flowKey, ruleId, typeOnly);
     const list = flowImports.get(flowKey) ?? [];
     list.push({
@@ -318,7 +318,7 @@ function markAllowedImports(
     flowImports.set(flowKey, list);
     const sourceUnit = assignment.get(edge.source) ?? '.';
     const targetUnit = assignment.get(edge.target) ?? '.';
-    tally(gridTally, `${sourceUnit} ${targetUnit} ${sourceTier} ${targetTier}`, ruleId, typeOnly);
+    tally(gridTally, `${sourceUnit}\0${targetUnit}\0${sourceTier}\0${targetTier}`, ruleId, typeOnly);
   }
 
   const apply = (
@@ -341,7 +341,7 @@ function markAllowedImports(
   };
 
   for (const edge of tierFlow.edges) {
-    const key = `${edge.source} ${edge.target}`;
+    const key = `${edge.source}\0${edge.target}`;
     apply(edge, flowTally.get(key));
     const all = flowImports.get(key);
     if (all && edge.imports) {
@@ -355,15 +355,15 @@ function markAllowedImports(
   }
   if (grid) {
     for (const edge of grid.edges) {
-      apply(edge, gridTally.get(`${edge.sourceUnit} ${edge.targetUnit} ${edge.sourceTier} ${edge.targetTier}`));
+      apply(edge, gridTally.get(`${edge.sourceUnit}\0${edge.targetUnit}\0${edge.sourceTier}\0${edge.targetTier}`));
       if (edge.imports) {
         const allowedKeys = new Set(
-          (flowImports.get(`${edge.sourceTier} ${edge.targetTier}`) ?? [])
+          (flowImports.get(`${edge.sourceTier}\0${edge.targetTier}`) ?? [])
             .filter((entry) => entry.allowed === true)
-            .map((entry) => `${entry.source} ${entry.line} ${entry.target}`),
+            .map((entry) => `${entry.source}\0${entry.line}\0${entry.target}`),
         );
         edge.imports = edge.imports.map((entry) =>
-          allowedKeys.has(`${entry.source} ${entry.line} ${entry.target}`) ? { ...entry, allowed: true } : entry,
+          allowedKeys.has(`${entry.source}\0${entry.line}\0${entry.target}`) ? { ...entry, allowed: true } : entry,
         );
       }
     }

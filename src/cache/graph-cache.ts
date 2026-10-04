@@ -6,8 +6,21 @@ import path from 'node:path';
 import type { ScanReport } from '../types.ts';
 import { run } from '../process.ts';
 
-/** Bump when the on-disk artifact shape changes. */
-export const CACHE_ARTIFACT_VERSION = 'strabo-cache-6';
+/**
+ * Bump the number when the on-disk artifact shape changes. The package version is part of
+ * the key as well, so an upgrade never serves a graph that older scanners or resolvers
+ * produced just because nobody remembered to bump the number.
+ */
+export const CACHE_ARTIFACT_VERSION = `strabo-cache-6+${packageVersion()}`;
+
+function packageVersion(): string {
+  try {
+    const manifest = new URL('../../package.json', import.meta.url);
+    return (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { version?: string }).version ?? 'dev';
+  } catch {
+    return 'dev';
+  }
+}
 export const MEMORY_TTL_MS = 60_000;
 
 export type ScanFn = (root: string) => Promise<ScanReport>;
@@ -66,23 +79,56 @@ export function cacheArtifactPath(root: string): string {
   return artifactPath(root);
 }
 
+/** Past this many changed paths the per-file stat is skipped; Refresh remains the remedy. */
+const MAX_STATTED_CHANGES = 5_000;
+
 /**
- * HEAD plus `git status --porcelain`.
+ * HEAD, `git status --porcelain`, and the size and mtime of every changed path.
  *
- * The full status content is hashed, not its length, so two different working-tree
- * states cannot collide. This still cannot detect an edit to a file that is already
- * listed as modified; explicit Refresh is the documented remedy.
+ * Status alone cannot see a second edit to a file that is already listed as modified — the
+ * status line does not change, so the map and the freshness badge kept claiming a graph that
+ * was out of date. Statting each listed path closes that: saving the file moves its mtime.
+ * Untracked files are listed one by one (`-uall`) so an edit inside a new directory counts too.
  */
 export async function fingerprint(root: string): Promise<string | null> {
   try {
-    const [{ stdout: head }, { stdout: status }] = await Promise.all([
-      run('git', ['rev-parse', 'HEAD'], { cwd: root }),
-      run('git', ['status', '--porcelain'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }),
+    const [{ stdout: revParse }, { stdout: status }] = await Promise.all([
+      run('git', ['rev-parse', 'HEAD', '--show-toplevel'], { cwd: root }),
+      run('git', ['status', '--porcelain', '-uall'], { cwd: root, maxBuffer: 64 * 1024 * 1024 }),
     ]);
-    return `${head.trim()}:${hash(status.trim())}`;
+    const [head = '', topLevel = root] = revParse.split('\n').map((line) => line.trim());
+    const changed = await statChangedPaths(topLevel, status);
+    return `${head}:${hash(`${status.trim()}\n${changed}`)}`;
   } catch {
     return null;
   }
+}
+
+/** `size:mtime` for each path in porcelain output (paths are relative to the top level). */
+async function statChangedPaths(topLevel: string, status: string): Promise<string> {
+  const paths = status
+    .split('\n')
+    .filter((line) => line.length > 3)
+    .map((line) => {
+      const entry = line.slice(3);
+      const renamed = entry.lastIndexOf(' -> ');
+      const target = renamed === -1 ? entry : entry.slice(renamed + 4);
+      return target.startsWith('"') ? target.slice(1, -1) : target;
+    });
+  if (paths.length > MAX_STATTED_CHANGES) {
+    return '';
+  }
+  const stamps = await Promise.all(
+    paths.map(async (relative) => {
+      try {
+        const stat = await fs.promises.stat(path.join(topLevel, relative));
+        return `${stat.size}:${stat.mtimeMs}`;
+      } catch {
+        return '-';
+      }
+    }),
+  );
+  return stamps.join('\n');
 }
 
 /**

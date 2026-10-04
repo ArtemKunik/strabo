@@ -74,6 +74,13 @@ export interface StraboConfig {
    * in-process sessions rather than failing.
    */
   terminalDaemon?: boolean;
+  /**
+   * Let a client on another machine open terminal sessions and delegate to an agent. Both
+   * run arbitrary commands as the operator and Strabo has no login, so they answer only to a
+   * loopback peer unless this is set — binding `--host 0.0.0.0` shares the map, not a shell.
+   * `STRABO_ALLOW_REMOTE_TERMINAL=1` or `--allow-remote-terminal` turns it on.
+   */
+  allowRemoteTerminal?: boolean;
   integrations?: StraboIntegrations;
   /**
    * Explicit coverage report paths (relative to the repository root, or absolute inside the

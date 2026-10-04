@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 import { runCheckCommand } from './cli/check.ts';
@@ -15,6 +16,12 @@ const USAGE = `strabo — map a repository's files, dependencies, and change imp
 Usage:
   strabo [path]                       start the standalone server
   strabo serve [path]                 same, with an explicit subcommand
+  strabo --version                    print the installed version
+
+Server options:
+  --port=<n>                      port to listen on (default 3000, or PORT)
+  --host=<addr>                   interface to bind (default 127.0.0.1, or STRABO_HOST)
+  --allow-remote-terminal         serve the terminal and delegation to non-loopback peers
   strabo export [path] --format=<fmt> write a portable graph (json, dot, mermaid, svg)
   strabo check [path] [rules]         run headless checks for CI
   strabo report [path] --base <ref>   report a change against a base revision
@@ -59,7 +66,8 @@ Check rules (only the ones named can fail the build):
   --format=json                   machine-readable result
 
 Environment: STRABO_ROOT, STRABO_CONFIG, STRABO_SCAN_CEILING, STRABO_STATE_DIR,
-STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, STRABO_ALLOW_COVERAGE_REFRESH, PORT, STRABO_HOST
+STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, STRABO_ALLOW_COVERAGE_REFRESH,
+STRABO_ALLOW_REMOTE_TERMINAL, PORT, STRABO_HOST
 `;
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -79,6 +87,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       return runMcp(rest);
     case 'serve':
       return startServer(rest);
+    case 'version':
+    case '--version':
+    case '-v':
+      process.stdout.write(`${readVersion()}\n`);
+      return 0;
     case 'help':
     case '--help':
     case '-h':
@@ -97,22 +110,64 @@ function runMcp(argv: readonly string[]): number {
 
 function startServer(argv: readonly string[]): number {
   const env = readEnv(process.env, argv);
+  // Fail before binding: a mistyped subcommand (`strabo exprot`) or path would otherwise
+  // start a server whose every request errors.
+  if (!isDirectory(env.root)) {
+    process.stderr.write(`[strabo] "${env.root}" is not a directory. Run \`strabo --help\` for commands.\n`);
+    return 1;
+  }
+  if (!Number.isInteger(env.port) || env.port < 0 || env.port > 65535) {
+    process.stderr.write('[strabo] --port (or PORT) must be a whole number from 0 to 65535.\n');
+    return 1;
+  }
   const config = configFromEnv(process.env, argv);
   const app = createStraboServer(config);
-  const httpServer = app.listen(env.port, env.host, () => {
+  // Express 5 calls this on a failed bind too; the `error` handler below reports that case.
+  const httpServer = app.listen(env.port, env.host, (error?: Error) => {
+    if (error) {
+      return;
+    }
     config.serverLog?.(`serving ${env.root} on http://${env.host}:${env.port}`);
     config.serverLog?.(`scan ceiling: ${env.scanCeiling}`);
     if (env.host === '0.0.0.0' || env.host === '::') {
       config.serverLog?.(
         'listening on every interface: anyone on the network can browse and read inside the scan ceiling',
       );
+      config.serverLog?.(
+        config.allowRemoteTerminal
+          ? 'remote terminal is ON: anyone who can reach this port can run commands as you'
+          : 'terminal and delegation stay local to this machine (--allow-remote-terminal to share them)',
+      );
     }
+  });
+  httpServer.on('error', (error: NodeJS.ErrnoException) => {
+    const reason =
+      error.code === 'EADDRINUSE'
+        ? `port ${env.port} is already in use; pass --port <n> (or PORT=<n>) to pick another.`
+        : error.code === 'EACCES'
+          ? `not permitted to listen on ${env.host}:${env.port}.`
+          : error.message;
+    process.stderr.write(`[strabo] ${reason}\n`);
+    process.exit(1);
   });
   // The standalone server owns its process, so Settings can relaunch it. An embedded host
   // never sets this, and `POST /settings/restart` then answers 501.
   config.restart = createRestart(httpServer);
   attachTerminal(httpServer, config);
   return 0;
+}
+
+function readVersion(): string {
+  const manifest = new URL('../package.json', import.meta.url);
+  return (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { version: string }).version;
+}
+
+function isDirectory(target: string): boolean {
+  try {
+    return fs.statSync(target).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 const entry = process.argv[1];

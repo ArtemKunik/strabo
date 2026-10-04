@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 
 import { StraboScopeError } from '../boundary/repository-root.ts';
 
@@ -30,8 +30,9 @@ export function parseBoolean(value: unknown): boolean {
 /**
  * Reject a state-changing request that arrives from another origin.
  *
- * The Settings and narrator-key writes are accepted only from the page's own origin,
- * so a third-party page cannot repoint the narrator or its key. Browser `fetch` sends
+ * Every state-changing route is accepted only from the page's own origin (see
+ * {@link requireSameOrigin}), so a third-party page cannot push a branch, open a terminal,
+ * spend the narrator budget, or repoint the narrator or its key. Browser `fetch` sends
  * `Origin` (and usually `Referer`) for these POST/PUT calls; non-browser clients such as
  * `curl` and the test suite send neither and are allowed through. A present header that
  * does not match the request host is rejected with `false`.
@@ -62,6 +63,41 @@ export function isSameOriginRequest(request: Request): boolean {
     }
   }
   return true;
+}
+
+/** Whether a socket peer is this machine: 127.0.0.0/8, `::1`, or their IPv4-mapped form. */
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) {
+    return false;
+  }
+  const plain = address.startsWith('::ffff:') ? address.slice('::ffff:'.length) : address;
+  return plain === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(plain);
+}
+
+/**
+ * Whether a peer may reach the shell-capable surface (terminal sessions, delegation).
+ *
+ * Decided on the socket's peer address, not the Host header: a client on the network can
+ * send any Host it likes, but it cannot fake a loopback peer.
+ */
+export function mayUseShell(remoteAddress: string | undefined, allowRemote?: boolean): boolean {
+  return allowRemote === true || isLoopbackAddress(remoteAddress);
+}
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Middleware: refuse any non-read request that {@link isSameOriginRequest} rejects.
+ *
+ * Mounted once on the Strabo router, ahead of every route, so a new POST/PUT/DELETE is
+ * guarded without having to remember a per-route check.
+ */
+export function requireSameOrigin(request: Request, response: Response, next: NextFunction): void {
+  if (!SAFE_METHODS.has(request.method) && !isSameOriginRequest(request)) {
+    response.status(403).json({ error: 'state-changing requests are accepted only from the Strabo page.' });
+    return;
+  }
+  next();
 }
 
 /**

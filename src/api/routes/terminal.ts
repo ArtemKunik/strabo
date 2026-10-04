@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import { StraboScopeError, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import type { StraboConfig } from '../../types.ts';
-import { isSameOriginRequest, parsePositiveInt, sendError } from '../http.ts';
+import { parsePositiveInt, sendError } from '../http.ts';
 import { findCitations } from '../../terminal/citations.ts';
 import { listPresets } from '../../terminal/presets.ts';
 import type { CreateSessionOptions, SessionKind, SessionOrigin } from '../../terminal/protocol.ts';
@@ -106,10 +106,6 @@ export function createTerminalRouter(config: StraboConfig): Router {
 
   router.post('/terminal/sessions', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'terminal sessions are created only from the Strabo page.' });
-        return;
-      }
       const options = parseCreateOptions(request.body);
       if (!options) {
         response.status(400).json({ error: 'invalid session options.' });
@@ -167,10 +163,6 @@ export function createTerminalRouter(config: StraboConfig): Router {
 
   router.post('/terminal/sessions/:id/rename', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'terminal sessions are renamed only from the Strabo page.' });
-        return;
-      }
       const title = request.body?.title;
       if (typeof title !== 'string' || title.trim() === '') {
         response.status(400).json({ error: 'title is required.' });
@@ -198,10 +190,6 @@ export function createTerminalRouter(config: StraboConfig): Router {
 
   router.delete('/terminal/sessions/:id', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'terminal sessions are killed only from the Strabo page.' });
-        return;
-      }
       if (!getSessionManager(config).kill(request.params.id)) {
         response.status(404).json({ error: 'unknown session.' });
         return;

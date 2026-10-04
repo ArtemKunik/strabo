@@ -7,7 +7,7 @@ import { Router } from 'express';
 import { resolveRepositoryRoot } from '../../boundary/repository-root.ts';
 import { getSessionManager } from '../../terminal/registry.ts';
 import type { StraboConfig } from '../../types.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 
 /** Agents the delegate endpoint may launch. Anything else is rejected, never executed. */
 const ALLOWED_AGENTS = ['opencode', 'claude'] as const;
@@ -94,10 +94,6 @@ export function createDelegateRouter(config: StraboConfig): Router {
 
   router.post('/delegate', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'delegation is accepted only from the Strabo page.' });
-        return;
-      }
       const agent = request.body?.agent;
       if (!ALLOWED_AGENTS.includes(agent)) {
         response.status(400).json({ error: 'agent must be one of: opencode, claude.' });

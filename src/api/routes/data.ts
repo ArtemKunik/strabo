@@ -7,7 +7,7 @@ import { buildOpenLineage } from '../../export/openlineage.ts';
 import type { DataReport, StraboConfig } from '../../types.ts';
 import { analyzeWorkspace } from '../../workspace/analyze.ts';
 import { readWorkspaceConfig, resolveWorkspaceRepositories } from '../../workspace/config.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 
 export interface DataRouterOptions {
   /** Fact cache; defaults to the persisted one. */
@@ -144,10 +144,6 @@ export function createDataRouter(config: StraboConfig, options: DataRouterOption
    */
   router.post('/analysis/data/impact', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'Data impact is computed only for the Strabo page.' });
-        return;
-      }
       const body = isRecord(request.body) ? request.body : {};
       const changedFiles = Array.isArray(body.files)
         ? body.files.filter((entry): entry is string => typeof entry === 'string')

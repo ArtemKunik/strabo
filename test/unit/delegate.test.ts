@@ -8,6 +8,7 @@ import express from 'express';
 
 import { createDelegateRouter } from '../../src/api/routes/delegate.ts';
 import type { StraboConfig } from '../../src/index.ts';
+import { requireSameOrigin } from '../../src/api/http.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.resolve(here, '..', 'fixtures');
@@ -37,6 +38,7 @@ function listen(app: express.Express): Promise<string> {
 function app(): express.Express {
   const instance = express();
   instance.use(express.json());
+  instance.use(requireSameOrigin);
   instance.use(createDelegateRouter(config));
   return instance;
 }

@@ -715,7 +715,7 @@ export {
 export { createStraboRouter } from './api/router.ts';
 export { createApiDispatch } from './api/dispatch.ts';
 export type { ApiDispatch, DispatchResult } from './api/dispatch.ts';
-export { isAllowedHost, isSameOriginRequest } from './api/http.ts';
+export { isAllowedHost, isSameOriginRequest, requireSameOrigin } from './api/http.ts';
 
 export { exportGraph, GRAPH_EXPORT_VERSION } from './export/graph-export.ts';
 export type { GraphExportEnvelope, GraphExportFormat, GraphExportOptions } from './export/graph-export.ts';

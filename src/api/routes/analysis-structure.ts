@@ -19,7 +19,7 @@ import { parseDeniedLicenses } from '../../risk/licenses.ts';
 import { getCachedGraph } from '../../scan/graph.ts';
 import { analyzeRepository } from '../../workspace/analyze.ts';
 import { readWorkspaceConfig } from '../../workspace/config.ts';
-import { isSameOriginRequest, parseBoolean, parsePositiveInt, sendError } from '../http.ts';
+import { parseBoolean, parsePositiveInt, sendError } from '../http.ts';
 import { graphProvenance, type AnalysisContext } from './analysis-context.ts';
 
 /** The repository overview, structure, and history endpoints. */
@@ -219,10 +219,6 @@ export function createStructureRouter(context: AnalysisContext): Router {
    */
   router.post('/analysis/tiers/assign', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'tier assignments are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const tier = typeof request.body?.tier === 'string' ? request.body.tier : '';
       const glob = typeof request.body?.glob === 'string' ? request.body.glob : '';

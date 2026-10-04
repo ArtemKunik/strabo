@@ -13,6 +13,8 @@ export interface CliEnv {
   autoRebuild: boolean;
   /** Detached terminal daemon, on by default; see `StraboConfig.terminalDaemon`. */
   terminalDaemon: boolean;
+  /** Terminal and delegation for non-loopback peers; see `StraboConfig.allowRemoteTerminal`. */
+  allowRemoteTerminal: boolean;
   deniedLicenses?: string[];
   /** Explicit coverage report paths, overriding the conventional auto-detected locations. */
   coverageReports?: string[];
@@ -49,7 +51,7 @@ export function readEnv(
     // binds loopback by default and only leaves it when the operator says so twice:
     // once here, and once past the Host-header check with a matching Host.
     host: flagValue(argv, 'host') || env.STRABO_HOST?.trim() || '127.0.0.1',
-    port: Number.parseInt(env.PORT ?? '3000', 10),
+    port: Number.parseInt(flagValue(argv, 'port') ?? env.PORT ?? '3000', 10),
     // Online risk lookup is opt-in: it is the only feature that contacts a third party.
     riskOnline: isEnabled(env.STRABO_RISK),
     // Runtime ceiling widening is a startup-only opt-in. It is never accepted from a
@@ -62,6 +64,10 @@ export function readEnv(
     // operator turns it off: it owns the PTYs so a server restart cannot take them with it.
     // `STRABO_TERMINAL_DAEMON=0` or `--no-terminal-daemon` restores the in-process registry.
     terminalDaemon: !isDisabled(env.STRABO_TERMINAL_DAEMON) && !hasFlag(argv, 'no-terminal-daemon'),
+    // A shell is never served to the network by accident: leaving loopback for the map does
+    // not also hand out a terminal. Docker-style setups opt in explicitly.
+    allowRemoteTerminal:
+      isEnabled(env.STRABO_ALLOW_REMOTE_TERMINAL) || hasFlag(argv, 'allow-remote-terminal'),
     deniedLicenses: env.STRABO_RISK_DENY?.split(',').map((entry) => entry.trim()).filter(Boolean),
     // An explicit report path (or a comma-separated list) overrides auto-detection; it is
     // still read only inside the scan ceiling.
@@ -84,9 +90,46 @@ function positiveInt(value: string | undefined): number | undefined {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-/** First non-flag argument, so `strabo /path/to/repo` works and `strabo --help` is ignored. */
+/**
+ * Flags that take a value, across every subcommand. A `--name value` pair is one option, so
+ * its value is never mistaken for the repository path (`strabo report --base main`).
+ */
+const VALUE_FLAGS = new Set([
+  'base',
+  'baseline',
+  'block-prefix',
+  'expect',
+  'fail-on',
+  'file',
+  'folder',
+  'format',
+  'host',
+  'out',
+  'port',
+  'repository',
+  'threshold',
+  'view',
+]);
+
+/** The arguments that are neither flags nor the value of a `--name value` flag. */
+export function positionals(argv: readonly string[]): string[] {
+  const found: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg.startsWith('-')) {
+      if (VALUE_FLAGS.has(arg.slice(2)) && !(argv[index + 1] ?? '-').startsWith('-')) {
+        index += 1;
+      }
+      continue;
+    }
+    found.push(arg);
+  }
+  return found;
+}
+
+/** First positional argument, so `strabo /path/to/repo` works and `strabo --help` is ignored. */
 function firstPositional(argv: readonly string[]): string | undefined {
-  const value = argv.find((arg) => !arg.startsWith('-'))?.trim();
+  const value = positionals(argv)[0]?.trim();
   return value || undefined;
 }
 
@@ -135,6 +178,7 @@ export function configFromEnv(
     allowCeilingWidening,
     autoRebuild,
     terminalDaemon,
+    allowRemoteTerminal,
     deniedLicenses,
     coverageReports,
     allowCoverageRefresh,
@@ -162,6 +206,7 @@ export function configFromEnv(
     allowCeilingWidening,
     autoRebuild,
     terminalDaemon,
+    allowRemoteTerminal,
     risk: {
       online: riskOnline,
       ...(deniedLicenses && deniedLicenses.length > 0 ? { deniedLicenses } : {}),

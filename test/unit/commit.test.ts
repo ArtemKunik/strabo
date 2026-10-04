@@ -147,6 +147,20 @@ test('commitWorkingTree leaves the commit in place when the push is refused', as
   assert.equal(git(root, 'log', '-1', '--pretty=%s').trim(), 'chore: update');
 });
 
+test('commitWorkingTree commits only the staged selection when one exists', async () => {
+  const { root } = makeFixture();
+  fs.writeFileSync(path.join(root, 'file.txt'), 'staged\n');
+  fs.writeFileSync(path.join(root, 'scratch.txt'), 'not for this commit\n');
+  git(root, 'add', 'file.txt');
+
+  const result = await commitWorkingTree(root, 'fix: staged only', { push: false });
+  assert.equal(result.available, true);
+  if (!result.available) return;
+  assert.equal(result.files, 1);
+  // The untracked file the operator did not stage is still waiting in the working tree.
+  assert.equal(git(root, 'status', '--porcelain').trim(), '?? scratch.txt');
+});
+
 test('commitWorkingTree reports nothing to commit and an empty message', async () => {
   const { root } = makeFixture();
   const clean = await commitWorkingTree(root, 'noop');
