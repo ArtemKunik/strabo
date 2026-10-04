@@ -25,6 +25,9 @@
   GraphQL root fields (schema files and SDL in source) as endpoints, with their implementing
   files and their callers (stub calls, GraphQL selections), in the endpoint list, the
   passport, the workspace service list, and the API diff.
+- Notice a second edit to a file that is already modified: the graph cache and the freshness
+  badge now fingerprint each changed file's size and mtime, not just the `git status` lines,
+  and the on-disk cache is keyed by the package version so an upgrade never serves an old graph.
 
 ## 0.1.1
 

@@ -167,6 +167,28 @@ test('fingerprint changes when the working tree changes', async () => {
   assert.notEqual(before, afterFingerprint);
 });
 
+test('fingerprint changes on a second edit to a file that is already modified', async () => {
+  const root = makeGitRepo();
+  const file = path.join(root, 'a.ts');
+  fs.appendFileSync(file, '// first edit\n');
+  const firstEdit = await fingerprint(root);
+  fs.appendFileSync(file, '// second edit\n');
+  const secondEdit = await fingerprint(root);
+
+  assert.ok(firstEdit);
+  assert.notEqual(firstEdit, secondEdit);
+});
+
+test('fingerprint changes on an edit inside a new untracked directory', async () => {
+  const root = makeGitRepo();
+  fs.mkdirSync(path.join(root, 'fresh'));
+  fs.writeFileSync(path.join(root, 'fresh', 'b.ts'), 'export const b = 1;\n');
+  const created = await fingerprint(root);
+  fs.appendFileSync(path.join(root, 'fresh', 'b.ts'), 'export const c = 2;\n');
+
+  assert.notEqual(created, await fingerprint(root));
+});
+
 test('a changed working tree invalidates the cached graph', async () => {
   const root = makeGitRepo();
   clearMemoryCache(root);
