@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 - Read HTTP routes declared in code, not only in OpenAPI documents: Express, Fastify, Koa,
   Hono, NestJS, FastAPI, Flask, Spring, JAX-RS, ASP.NET (minimal and controllers), Axum, and
