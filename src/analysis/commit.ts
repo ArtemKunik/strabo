@@ -110,11 +110,13 @@ export function buildCommitEvidence(review: ReviewResult): string {
 }
 
 /**
- * Create one commit over the whole working tree, then push the current branch.
+ * Create one commit, then push the current branch.
  *
- * `git add -A` is deliberate: the action commits what the operator can see on the map,
- * including untracked files. `push` defaults on; a failed push still leaves the commit in
- * place and is reported, never rolled back.
+ * When nothing is staged, `git add -A` takes the whole working tree: the action commits what
+ * the operator can see on the map, including untracked files. When the operator has already
+ * staged a selection (`git add -p`), that index is committed as it stands, so a deliberate
+ * partial commit is never widened behind their back. `push` defaults on; a failed push
+ * still leaves the commit in place and is reported, never rolled back.
  */
 export async function commitWorkingTree(
   root: string,
@@ -140,7 +142,11 @@ export async function commitWorkingTree(
         detail: 'There are no working-tree changes to commit.',
       };
     }
-    await git(root, ['add', '-A']);
+    // Porcelain column one is the index; anything but space or `?` there is staged.
+    const staged = status.split('\n').some((line) => line.length > 0 && line[0] !== ' ' && line[0] !== '?');
+    if (!staged) {
+      await git(root, ['add', '-A']);
+    }
     await git(root, ['commit', '-m', normalized]);
     const commit = (await git(root, ['rev-parse', '--short', 'HEAD'])).trim();
     const subject = (await git(root, ['log', '-1', '--pretty=%s'])).trim();

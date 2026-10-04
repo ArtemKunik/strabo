@@ -28,6 +28,8 @@
 - Notice a second edit to a file that is already modified: the graph cache and the freshness
   badge now fingerprint each changed file's size and mtime, not just the `git status` lines,
   and the on-disk cache is keyed by the package version so an upgrade never serves an old graph.
+- The Commit action keeps a staged selection: with something already staged it commits that
+  index as it stands, and only stages the whole working tree when nothing is staged.
 
 ## 0.1.1
 

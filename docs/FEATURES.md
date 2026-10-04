@@ -420,8 +420,9 @@ actions are the only place Strabo writes to Git:
 
 An opt-in **Commit** action (Settings → Commit) appears on the Change impact panel: it asks
 the narrator for a message built server-side from the recorded change set, shows it for the
-operator to edit, and only on confirmation commits the whole working tree (`git add -A`) and
-pushes the current branch. The message reaches Git as an argument, never a shell, and a failed
+operator to edit, and only on confirmation commits and pushes the current branch. With nothing
+staged it commits the whole working tree (`git add -A`); when the operator has staged a
+selection, only that index is committed. The message reaches Git as an argument, never a shell, and a failed
 push leaves the commit in place and is reported rather than rolled back.
 
 Every action is state-changing, so it is accepted only from the page's own origin
