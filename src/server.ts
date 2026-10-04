@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +14,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 function publicDirectory(): string {
   const candidates = [path.join(here, '..', 'public'), path.join(here, '..', '..', 'public')];
   return candidates.find((candidate) => fs.existsSync(candidate)) ?? path.join(here, '..', 'public');
+}
+
+/**
+ * Cytoscape's `dist/` directory, found the way Node finds the package. A fixed
+ * `../node_modules/cytoscape` breaks whenever npm hoists it — the usual case when a host
+ * embeds `strabo-map/server` — and the map then loads without its renderer.
+ */
+function cytoscapeDirectory(): string {
+  try {
+    return path.dirname(createRequire(import.meta.url).resolve('cytoscape/dist/cytoscape.min.js'));
+  } catch {
+    return path.join(here, '..', 'node_modules', 'cytoscape', 'dist');
+  }
 }
 
 /**
@@ -38,7 +52,7 @@ export function createStraboServer(config: StraboConfig): Express {
 
   const assets = publicDirectory();
   app.use('/', express.static(assets));
-  app.use('/vendor/cytoscape', express.static(path.join(here, '..', 'node_modules', 'cytoscape', 'dist')));
+  app.use('/vendor/cytoscape', express.static(cytoscapeDirectory()));
 
   app.use('/api/strabo', createStraboRouter(config));
 

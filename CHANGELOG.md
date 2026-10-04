@@ -30,6 +30,9 @@
   and the on-disk cache is keyed by the package version so an upgrade never serves an old graph.
 - The Commit action keeps a staged selection: with something already staged it commits that
   index as it stands, and only stages the whole working tree when nothing is staged.
+- Find cytoscape wherever npm installed it, so a host that embeds `strabo-map/server` (where
+  it is hoisted) no longer loads the map without its renderer. `@xterm/*` moves to
+  `devDependencies`, since it is bundled into the UI at build time.
 
 ## 0.1.1
 
