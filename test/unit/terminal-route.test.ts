@@ -9,6 +9,7 @@ import express from 'express';
 
 import { createTerminalRouter } from '../../src/api/routes/terminal.ts';
 import type { StraboConfig } from '../../src/types.ts';
+import { requireSameOrigin } from '../../src/api/http.ts';
 
 const servers: Array<ReturnType<typeof express.application.listen>> = [];
 const created: string[] = [];
@@ -36,6 +37,7 @@ function makeRepo(files: Record<string, string>): string {
 async function mount(config: StraboConfig): Promise<string> {
   const host = express();
   host.use(express.json());
+  host.use(requireSameOrigin);
   host.use('/api/strabo', createTerminalRouter(config));
   return new Promise((resolve) => {
     const server = host.listen(0, '127.0.0.1', () => {

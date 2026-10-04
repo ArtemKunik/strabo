@@ -22,7 +22,7 @@ import {
   scrub,
   type DatabaseDriver,
 } from '../../workspace/probe.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 
 export interface WorkspaceRouterOptions {
   /** Environment the probe reads connection strings from; defaults to the process. */
@@ -194,10 +194,6 @@ export function createWorkspaceRouter(config: StraboConfig, options: WorkspaceRo
     const body = bodyOf(request);
     const database = declaredDatabase(config, body.database);
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'A database is probed only from the Strabo page.' });
-        return;
-      }
       if (!database) {
         response.status(404).json({ error: 'That database is not declared in the workspace config.' });
         return;
@@ -234,10 +230,6 @@ export function createWorkspaceRouter(config: StraboConfig, options: WorkspaceRo
     const body = bodyOf(request);
     const database = declaredDatabase(config, body.database);
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'A database is probed only from the Strabo page.' });
-        return;
-      }
       if (!database) {
         response.status(404).json({ error: 'That database is not declared in the workspace config.' });
         return;

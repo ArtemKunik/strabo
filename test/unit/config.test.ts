@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { configFromEnv, readEnv } from '../../src/index.ts';
+import { positionals } from '../../src/config.ts';
 
 test('readEnv falls back to the working directory when no root is given', () => {
   const env = readEnv({});
@@ -77,4 +78,21 @@ test('configFromEnv threads the path argument through to the workspace root', ()
 
   assert.equal(config.workspaceRoot, path.resolve('from-argv'));
   assert.equal(config.scanCeiling, path.resolve('from-argv'));
+});
+
+test('readEnv never reads a flag value as the repository path', () => {
+  assert.equal(readEnv({}, ['--base', 'main']).root, path.resolve(process.cwd()));
+  assert.equal(readEnv({}, ['--host', '0.0.0.0', 'repo']).root, path.resolve('repo'));
+  assert.deepEqual(positionals(['--format', 'dot', 'a', '--out=x', '--no-smells', 'b']), ['a', 'b']);
+});
+
+test('readEnv takes --port over PORT', () => {
+  assert.equal(readEnv({ PORT: '4000' }, ['--port', '4100']).port, 4100);
+  assert.equal(readEnv({ PORT: '4000' }).port, 4000);
+});
+
+test('the terminal stays local unless remote use is opted into', () => {
+  assert.equal(configFromEnv({}).allowRemoteTerminal, false);
+  assert.equal(configFromEnv({ STRABO_ALLOW_REMOTE_TERMINAL: '1' }).allowRemoteTerminal, true);
+  assert.equal(configFromEnv({}, ['--allow-remote-terminal']).allowRemoteTerminal, true);
 });

@@ -33,6 +33,14 @@
 - Find cytoscape wherever npm installed it, so a host that embeds `strabo-map/server` (where
   it is hoisted) no longer loads the map without its renderer. `@xterm/*` moves to
   `devDependencies`, since it is bundled into the UI at build time.
+- Refuse every cross-origin state-changing request with one router-wide guard. The narrator,
+  tour, coverage-plan, coverage-weekly, repository add/remove, and terminal-close routes had
+  no check of their own.
+- Keep the terminal and delegation on this machine: binding `--host 0.0.0.0` shares the map,
+  not a shell. `--allow-remote-terminal` (`STRABO_ALLOW_REMOTE_TERMINAL=1`) opts in.
+- CLI: a flag's value is no longer read as the repository path (`strabo report --base main`
+  failed), `--port` and `--version` are new, a missing path or mistyped command fails with a
+  message, and a port already in use is reported in one line instead of a stack trace.
 
 ## 0.1.1
 

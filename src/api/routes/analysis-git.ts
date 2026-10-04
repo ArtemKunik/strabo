@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { dropBranches, fetchBranches, mergeRequest, pullBranch, pushBranch, syncBranch } from '../../analysis/branch-actions.ts';
 import { listBranches } from '../../analysis/branches.ts';
 import { commitWorkingTree } from '../../analysis/commit.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 import type { AnalysisContext } from './analysis-context.ts';
 
 /**
@@ -58,10 +58,6 @@ export function createGitRouter(context: AnalysisContext): Router {
    */
   router.post('/analysis/branches/fetch', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const remote = typeof request.body?.remote === 'string' && request.body.remote ? request.body.remote : undefined;
       response.json(await fetchBranches(repository.root, remote));
@@ -73,10 +69,6 @@ export function createGitRouter(context: AnalysisContext): Router {
   /** Push one local branch to its upstream, publishing it when none is set. Never forced. */
   router.post('/analysis/branches/push', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
       if (!branch) {
@@ -95,10 +87,6 @@ export function createGitRouter(context: AnalysisContext): Router {
    */
   router.post('/analysis/branches/pull', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
       if (!branch) {
@@ -114,10 +102,6 @@ export function createGitRouter(context: AnalysisContext): Router {
   /** Sync the checked-out branch: fetch, fast-forward when behind, then push when ahead. */
   router.post('/analysis/branches/sync', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const branch = typeof request.body?.branch === 'string' ? request.body.branch : '';
       if (!branch) {
@@ -136,10 +120,6 @@ export function createGitRouter(context: AnalysisContext): Router {
    */
   router.post('/analysis/branches/drop', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'branch actions are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const branches = Array.isArray(request.body?.branches)
         ? request.body.branches.filter((name: unknown): name is string => typeof name === 'string')
@@ -162,10 +142,6 @@ export function createGitRouter(context: AnalysisContext): Router {
    */
   router.post('/analysis/commit', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'commits are accepted only from the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const message = typeof request.body?.message === 'string' ? request.body.message : '';
       const push = request.body?.push !== false;

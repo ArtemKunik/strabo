@@ -13,7 +13,7 @@ import { createNarratorKeyStore, type NarratorKeyStore } from '../../narrator/ke
 import { resolveNarratorConfig } from '../../narrator/config.ts';
 import { createSettingsStore, type SettingsStore } from '../../state/settings-store.ts';
 import type { NarratorConfig, StraboConfig } from '../../types.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 
 /**
  * The server settings the operator can read and change at runtime.
@@ -255,10 +255,6 @@ export function createSettingsRouter(
 
   router.put('/settings', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'settings writes are accepted only from the Strabo page.' });
-        return;
-      }
       const body = request.body ?? {};
 
       // The widening permission is startup-only (env/CLI). A body carrying it is
@@ -472,10 +468,6 @@ export function createSettingsRouter(
    * caller can poll for the server to come back instead of seeing a dropped connection.
    */
   router.post('/settings/restart', (request, response) => {
-    if (!isSameOriginRequest(request)) {
-      response.status(403).json({ error: 'restart is accepted only from the Strabo page.' });
-      return;
-    }
     const restart = config.restart;
     if (typeof restart !== 'function') {
       response.status(501).json({ error: 'This host does not support restarting the server.' });

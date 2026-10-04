@@ -12,7 +12,7 @@ import { openWorkspaceCache, type WorkspaceCache } from '../../cache/workspace-c
 import type { DataReport, Graph, StraboConfig } from '../../types.ts';
 import { analyzeWorkspace } from '../../workspace/analyze.ts';
 import { readWorkspaceConfig, resolveWorkspaceRepositories } from '../../workspace/config.ts';
-import { isSameOriginRequest, sendError } from '../http.ts';
+import { sendError } from '../http.ts';
 
 export interface ContractsRouterOptions {
   /** Fact cache; defaults to the persisted one. */
@@ -190,10 +190,6 @@ export function createContractsRouter(config: StraboConfig, options: ContractsRo
    */
   router.post('/analysis/contracts/impact', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'Contract impact is computed only for the Strabo page.' });
-        return;
-      }
       const body = isRecord(request.body) ? request.body : {};
       const { name, boundary, data } = await analyze();
       const downstreamOf = (dataset: string): string[] => {

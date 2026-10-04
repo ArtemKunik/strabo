@@ -3,7 +3,7 @@ import type { Socket } from 'node:net';
 
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { isAllowedHostHeader, isSameOriginHeader } from '../api/http.ts';
+import { isAllowedHostHeader, isSameOriginHeader, mayUseShell } from '../api/http.ts';
 import type { StraboConfig } from '../types.ts';
 import type { ClientMessage, ServerMessage, TerminalSession } from './protocol.ts';
 import { encodeServerMessage, parseClientMessage } from './protocol.ts';
@@ -37,7 +37,8 @@ export function attachTerminal(httpServer: HttpServer, config: StraboConfig): vo
     }
     if (
       !isAllowedHostHeader(request.headers.host, config.host) ||
-      !isSameOriginHeader(request.headers.host, request.headers.origin)
+      !isSameOriginHeader(request.headers.host, request.headers.origin) ||
+      !mayUseShell(socket.remoteAddress, config.allowRemoteTerminal)
     ) {
       socket.destroy();
       return;

@@ -11,6 +11,7 @@ import express from 'express';
 import { createContractsRouter } from '../../src/api/routes/contracts.ts';
 import { openWorkspaceCache } from '../../src/cache/workspace-cache.ts';
 import type { StraboConfig } from '../../src/types.ts';
+import { requireSameOrigin } from '../../src/api/http.ts';
 
 const created: string[] = [];
 const servers: Server[] = [];
@@ -82,6 +83,7 @@ before(async () => {
   const cacheFile = path.join(ceiling, 'workspace-cache.json');
   const app = express();
   app.use(express.json());
+  app.use(requireSameOrigin);
   app.use('/api', createContractsRouter(config, { cache: openWorkspaceCache({ file: cacheFile }) }));
   const server = await new Promise<Server>((resolve) => {
     const listening = app.listen(0, '127.0.0.1', () => resolve(listening));

@@ -29,7 +29,7 @@ import { NARRATOR_PRESETS } from '../../narrator/presets.ts';
 import type { SettingsStore } from '../../state/settings-store.ts';
 import { createSettingsStore } from '../../state/settings-store.ts';
 import type { NarratorConfig, StraboConfig } from '../../types.ts';
-import { isSameOriginRequest, narratorTestHint, sendError } from '../http.ts';
+import { narratorTestHint, sendError } from '../http.ts';
 
 export interface NarratorRouterOptions {
   settingsStore?: SettingsStore;
@@ -262,10 +262,6 @@ export function createNarratorRouter(
    */
   router.post('/narrator/commit-message', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'commit messages are generated only for the Strabo page.' });
-        return;
-      }
       const repository = resolve(request);
       const cached = await getCachedGraph(repository.root);
       const review = await reviewWorkingTree(repository.root, cached.report.graph);
@@ -302,10 +298,6 @@ export function createNarratorRouter(
    */
   router.get('/narrator/models', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'model listing is accepted only from the Strabo page.' });
-        return;
-      }
       const effective = readEffective();
       const locks = narratorLocks(env);
       // A locked endpoint always wins; otherwise an unsaved form value is used so Fetch
@@ -423,10 +415,6 @@ export function createNarratorRouter(
    */
   router.post('/narrator/test', async (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'test connection is accepted only from the Strabo page.' });
-        return;
-      }
       const body = (request.body ?? {}) as Record<string, unknown>;
       const effective = readEffective();
       const locks = narratorLocks(env);
@@ -559,10 +547,6 @@ export function createNarratorRouter(
    */
   router.post('/narrator/key', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'key storage is accepted only from the Strabo page.' });
-        return;
-      }
       const effective = readEffective();
       const host = endpointHostOf(effective?.endpoint);
       if (!host) {
@@ -589,10 +573,6 @@ export function createNarratorRouter(
 
   router.delete('/narrator/key', (request, response) => {
     try {
-      if (!isSameOriginRequest(request)) {
-        response.status(403).json({ error: 'key removal is accepted only from the Strabo page.' });
-        return;
-      }
       keyStore.clear();
       response.json({ stored: false });
     } catch (error) {

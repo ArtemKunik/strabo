@@ -64,6 +64,7 @@ See [Install and run](#install-and-run) to start the server.
 | `STRABO_SCAN_CEILING`| Filesystem boundary Strabo may read from. Defaults to root; narrowing it is editable at runtime from **Settings**. |
 | `STRABO_ALLOW_CEILING_WIDENING` | Startup-only `1`/`true` (or `--allow-ceiling-widening`) permits **Settings** to widen `scanCeiling` beyond its startup value. Off by default; never accepted from a request and never persisted, so a request cannot grant itself a wider boundary. |
 | `STRABO_HOST` | Interface the server binds (`--host` overrides it). Defaults to `127.0.0.1`; set `0.0.0.0` only to expose the server deliberately. |
+| `STRABO_ALLOW_REMOTE_TERMINAL` | `1`/`true` (or `--allow-remote-terminal`) lets a client on another machine open terminal sessions and delegate to an agent. Off by default: both run commands as you and Strabo has no login, so they answer only on this machine. |
 | `STRABO_CACHE_DIR`   | Where scan artifacts are persisted. Defaults to an OS temp dir. |
 | `STRABO_STATE_DIR`   | Where known repositories, settings, and check baselines are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_AUTO_REBUILD`| `0`/`false`/`off` stops the server from rebuilding a stale graph in the background when a request observes `HEAD` moving. On by default. |
@@ -76,7 +77,7 @@ See [Install and run](#install-and-run) to start the server.
 | `STRABO_NARRATOR_KEY_ENV` | Environment variable holding the narrator API key. Defaults to `STRABO_NARRATOR_API_KEY`. |
 | `STRABO_NARRATOR_BUDGET` | Maximum narrator requests per server session. Defaults to 20. |
 | `STRABO_NARRATOR_SEND_SOURCE` | `1`/`true` also sends recorded source snippets, not just evidence. Off by default. |
-| `PORT`               | HTTP port for the standalone server.                           |
+| `PORT`               | HTTP port for the standalone server (`--port` overrides it). Defaults to `3000`. |
 
 The narrator variables back the opt-in setup described under
 [LLM narrator](./FEATURES.md#llm-narrator-opt-in).
@@ -165,6 +166,12 @@ refuse a `Host` header that names anything other than the server itself (loopbac
 configured interface), so a malicious page cannot reach the server through DNS rebinding:
 a rebinding domain resolves to 127.0.0.1 but arrives with the attacker's Host, which never
 matches.
+
+Every state-changing request (POST, PUT, DELETE) is also refused when its `Origin` or
+`Referer` names another site, so a page open in the same browser cannot push a branch, open a
+terminal, or spend the narrator budget. Terminal sessions and delegation go further: they
+answer only to a peer on this machine, judged by the socket address rather than any header,
+unless the server was started with `--allow-remote-terminal`.
 
 ## Terminal
 
