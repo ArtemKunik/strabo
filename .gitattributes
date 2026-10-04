@@ -1,0 +1,7 @@
+# Text is LF in the repository and in every checkout, whatever core.autocrlf says, so tools
+# that write LF never leave a file with mixed endings.
+* text=auto eol=lf
+
+*.png binary
+*.wasm binary
+*.pdf binary
