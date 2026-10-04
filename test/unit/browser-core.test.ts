@@ -49,6 +49,7 @@ import {
   summarizeDiagnostics,
   tierClass,
   tierColorVar,
+  tierEvidenceFor,
   tierFilterIds,
   tierOfFile,
   tierSummaryLabel,
@@ -911,6 +912,28 @@ test('buildTierNarratorEvidence reports only the recorded tier facts and edges',
   assert.match(TIER_NARRATION_INSTRUCTION, /never invent behaviour/);
 });
 
+test('tierEvidenceFor describes a shelf card and stays silent for an unknown id', () => {
+  const model = {
+    structure: true,
+    nodes: [
+      { id: 'unclassified', kind: 'shelf', label: 'Unclassified', files: 20, lines: 1673, fileShare: 0.27, why: 'scripts, docs' },
+      { id: 'infra', kind: 'shelf', label: 'Infra/config' },
+    ],
+    edges: [],
+  };
+  const lines = tierEvidenceFor(model, 'unclassified');
+  assert.deepEqual(lines, [
+    'Support shelf entry: Unclassified',
+    'Folders most of its files live in: scripts, docs',
+    "Files: 20 (27% of the repository's files)",
+    'Lines: 1673',
+    'Imports between its own files: not recorded',
+    'Recorded imports into other tiers: none recorded',
+    'Recorded imports from other tiers: none recorded',
+  ]);
+  assert.equal(tierEvidenceFor(model, 'missing'), null);
+});
+
 test('the tier helpers map a report to classes, colours, and a filter set', () => {
   const report = {
     files: [
@@ -1376,6 +1399,24 @@ test('buildAgentPrompt renders recorded evidence and a kind-aware task', () => {
   assert.match(prompt, /Blast radius: 4/);
   assert.match(prompt, /do not invent links/);
   assert.match(prompt, /Assess this file/);
+});
+
+test('buildAgentPrompt frames a tier target as a structure roll-up, not a file', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'opencode',
+    repository: { name: 'Glimword', root: 'D:\\source\\Glimword' },
+    target: {
+      kind: 'tier',
+      id: 'unclassified',
+      label: 'Unclassified',
+      evidence: ['Support shelf entry: Unclassified', "Files: 20 (27% of the repository's files)", 'Lines: 1673'],
+    },
+  });
+  assert.match(prompt, /# Strabo task — Unclassified/);
+  assert.match(prompt, /Target: tier `unclassified`/);
+  assert.match(prompt, /Support shelf entry: Unclassified/);
+  assert.match(prompt, /Assess this architecture tier/);
+  assert.doesNotMatch(prompt, /Assess this file/);
 });
 
 test('buildAgentPrompt frames a review target around functional effect', () => {

@@ -17,8 +17,14 @@
  */
 import type { BacklogSlice, CreateSessionOptions, SessionMeta } from './protocol.ts';
 
-/** Bumped when the message shapes change incompatibly; the daemon refuses a mismatch. */
-export const HOST_PROTOCOL_VERSION = 1;
+/**
+ * Bumped when the message shapes change incompatibly; the daemon refuses a mismatch.
+ *
+ * 2: `create` carries the server's live scan ceiling. A version-1 daemon ignores it and keeps
+ * the ceiling it was started with, so it must not be reused; the server falls back to local
+ * sessions until that daemon exits.
+ */
+export const HOST_PROTOCOL_VERSION = 2;
 
 /** A connection must authenticate within this window or the daemon closes it. */
 export const HOST_AUTH_TIMEOUT_MS = 5000;

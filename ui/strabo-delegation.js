@@ -1,5 +1,5 @@
 /**
- * Delegating to an agent from a right-click: the recorded facts for a node, edge, group,
+ * Delegating to an agent from a right-click: the recorded facts for a node, tier, edge, group,
  * diagnostic, commit, review, member, or view, and the context menu that launches an agent
  * session on them or copies the prompt. Targets carry recorded evidence only.
  */
@@ -10,6 +10,7 @@ import {
   graphSummary,
   passportFor,
   structureWrongWayEvidence,
+  tierEvidenceFor,
   wrongWayFlowsFor,
 } from './strabo-core.js';
 import {
@@ -26,26 +27,56 @@ export function createDelegation(app) {
   const { state, view, elements } = app;
 
   /**
-   * Recorded facts for a node, from the passport the scan computed. A Structure roll-up card
-   * additionally carries the wrong-way reads it starts — the same count its canvas label
-   * states — so the menu can list and act on the imports the card only summarizes.
+   * The wrong-way reads a Structure card starts, as recorded facts — the same count its canvas
+   * label states — so the menu can list and act on the imports the card only summarizes.
    */
-  function nodeDelegateTarget(id) {
-    const passport = app.current ? passportFor(app.current, id) : null;
-    const node = app.current?.nodes.find((candidate) => candidate.id === id);
-    const wrongWay = app.current ? wrongWayFlowsFor(app.current, id) : null;
+  function wrongWayEvidence(wrongWay) {
     const evidence = [];
-    if (wrongWay) {
-      evidence.push(
-        `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ''}`,
-      );
-      for (const group of wrongWay.groups) {
-        evidence.push(`${group.kind} → ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ''}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ''}`);
-        for (const entry of group.imports.slice(0, 20)) {
-          evidence.push(`${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`);
-        }
+    if (!wrongWay) {
+      return evidence;
+    }
+    evidence.push(
+      `wrong-way reads started by ${wrongWay.label}: ${wrongWay.valueCount} value import(s)${wrongWay.typeOnlyCount ? `, ${wrongWay.typeOnlyCount} type-only` : ''}`,
+    );
+    for (const group of wrongWay.groups) {
+      evidence.push(`${group.kind} → ${group.targetLabel}: ${group.weight} import(s)${group.typeOnlyCount ? ` (${group.typeOnlyCount} type-only)` : ''}${group.allowedCount ? `, plus ${group.allowedCount} allowed by a declared rule (not listed)` : ''}`);
+      for (const entry of group.imports.slice(0, 20)) {
+        evidence.push(`${entry.source}:${entry.line} → ${entry.target}${entry.typeOnly ? ' (type-only)' : ''}`);
       }
     }
+    return evidence;
+  }
+
+  /** The summary and flow metadata a wrong-way card carries into the menu. */
+  function wrongWayMeta(target, wrongWay) {
+    if (wrongWay) {
+      const count = wrongWay.valueCount;
+      target.summary = count > 0
+        ? `${count} wrong-way ${count === 1 ? 'import' : 'imports'} out`
+        : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? 'import' : 'imports'} out`;
+      target.flowGroups = wrongWay.groups;
+      target.flows = wrongWay.flows;
+      target.flowCount = count;
+    }
+    return target;
+  }
+
+  /**
+   * Recorded facts for a node. A Structure roll-up card (a tier band or the support shelf) is
+   * not a file: it is described by the tier edges the scan recorded, so it gets the tier task
+   * and tier facts rather than the file-shaped passport, whose reach counts are not recorded
+   * for a card the ranked flow never draws. A file gets the passport the scan computed, and a
+   * roll-up card also carries the wrong-way reads it starts.
+   */
+  function nodeDelegateTarget(id) {
+    const node = app.current?.nodes.find((candidate) => candidate.id === id);
+    const wrongWay = app.current ? wrongWayFlowsFor(app.current, id) : null;
+    if (node && (node.kind === 'tier' || node.kind === 'shelf')) {
+      const evidence = [...(tierEvidenceFor(app.current, id) ?? []), ...wrongWayEvidence(wrongWay)];
+      return wrongWayMeta({ kind: 'tier', id, label: node.label ?? id, evidence }, wrongWay);
+    }
+    const passport = app.current ? passportFor(app.current, id) : null;
+    const evidence = wrongWayEvidence(wrongWay);
     if (passport) {
       for (const metric of passport.metrics) {
         evidence.push(`${metric.label}: ${metric.value}`);
@@ -59,17 +90,7 @@ export function createDelegation(app) {
     } else if (!wrongWay) {
       evidence.push('Node is not in the current graph (it may be filtered out).');
     }
-    const target = { kind: 'node', id, label: node?.label ?? id, evidence };
-    if (wrongWay) {
-      const count = wrongWay.valueCount;
-      target.summary = count > 0
-        ? `${count} wrong-way ${count === 1 ? 'import' : 'imports'} out`
-        : `${wrongWay.typeOnlyCount} type-only wrong-way ${wrongWay.typeOnlyCount === 1 ? 'import' : 'imports'} out`;
-      target.flowGroups = wrongWay.groups;
-      target.flows = wrongWay.flows;
-      target.flowCount = count;
-    }
-    return target;
+    return wrongWayMeta({ kind: 'node', id, label: node?.label ?? id, evidence }, wrongWay);
   }
 
   /** Combine every selected node's passport into one delegation target. */

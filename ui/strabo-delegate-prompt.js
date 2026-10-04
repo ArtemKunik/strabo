@@ -13,6 +13,7 @@ export const MAX_DELEGATE_PROMPT = 20000;
 
 const DELEGATE_TASKS = {
   node: 'Assess this file: its role in the repository, its blast radius, and the risk of changing it.',
+  tier: 'Assess this architecture tier: what it is for, what it leans on, what leans on it, and the risk of changing what lives in it.',
   edge: 'Explain this dependency: why it exists (from the evidence) and the impact of changing it.',
   diagnostic: 'Resolve this diagnostic: explain the cause and propose the smallest safe fix.',
   commit: 'Summarise what this change did and what it may still affect in the working tree.',
@@ -56,7 +57,7 @@ function renderFacts(lines, facts, cap) {
  *
  * Pure function: only the recorded facts in `target` are rendered, nothing is
  * inferred. `target` is `{ kind, id?, label?, detail?, evidence? }` where kind is
- * one of node | edge | diagnostic | commit | member | review | view | group | selection,
+ * one of node | tier | edge | diagnostic | commit | member | review | view | group | selection,
  * an optional `selection` is text the user highlighted, and `evidence` is
  * an array of short fact strings. A `group` target additionally carries `items`, one
  * `{ id?, label?, evidence? }` per selected file, each rendered as its own subsection —
