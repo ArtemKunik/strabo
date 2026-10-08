@@ -22,7 +22,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url: it writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
+          # into .npmrc, and with no NODE_AUTH_TOKEN (an OIDC flow) the empty token makes
+          # npm skip the trusted-publishing exchange and fail the PUT.
+          package-manager-cache: false
       - name: Tag matches package version
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - name: Install
