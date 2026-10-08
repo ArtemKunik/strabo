@@ -26,6 +26,8 @@ jobs:
           # into .npmrc, and with no NODE_AUTH_TOKEN (an OIDC flow) the empty token makes
           # npm skip the trusted-publishing exchange and fail the PUT.
           package-manager-cache: false
+      - name: Ensure a trusted-publishing capable npm
+        run: npm install -g npm@latest
       - name: Tag matches package version
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
       - name: Install
