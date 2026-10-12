@@ -917,6 +917,61 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         }),
     },
     {
+      name: 'plan_extraction',
+      description:
+        'What extracting a file set into its own package would cost: the outside files it imports (cut each, or take it along; with how many further files each drags in and how many others share it), the inside files the remaining code imports, the transitive take-everything closure, cycles across the boundary, env/route/flag keys used on both sides, and the external packages it imports.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          include: {
+            type: 'string',
+            description: 'Comma-separated globs; a bare directory means everything under it, e.g. src/words',
+          },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['include'],
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/extraction', args, { include: requiredArg(args, 'include') }),
+    },
+    {
+      name: 'simulate_change',
+      description:
+        'Apply hypothetical edits to a copy of the recorded graph and report what would change: cycles introduced or resolved, wrong-way tier edges, declared-rule violations, files tests would stop reaching, and the blast radius of each touched file. Nothing is written. Edits: {op:"cut",source,target} removes the recorded edges between two files, {op:"add",source,target} draws an import, {op:"move",from,to} rewrites a file or directory path prefix.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          operations: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                op: { type: 'string', enum: ['cut', 'add', 'move'] },
+                source: { type: 'string' },
+                target: { type: 'string' },
+                from: { type: 'string' },
+                to: { type: 'string' },
+              },
+              required: ['op'],
+            },
+          },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
+        required: ['operations'],
+        additionalProperties: false,
+      },
+      call: (args) => {
+        if (!Array.isArray(args.operations)) {
+          throw new Error('"operations" is required.');
+        }
+        return get(dispatch, '/analysis/what-if', args, { ops: JSON.stringify(args.operations) });
+      },
+    },
+    {
       name: 'get_public_api_diff',
       description:
         'Exported and pub symbols added, removed, or re-signed between two revisions, per language, with the recorded consumers that still name a removed or changed symbol.',

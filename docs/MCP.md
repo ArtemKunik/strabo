@@ -80,7 +80,11 @@ ratio), `get_structure_data_flow` (the data-flow reading of the Structure view: 
 reads and writes routed through data hubs between role tiers, dataset lineage, which hubs a
 contract governs, and the honesty diagnostics), `get_dead_code`, `get_scope_fence` (changed
 paths outside a declared zone, plus
-inside changes imported from outside), `get_uncovered_changes` (changed-line coverage:
+inside changes imported from outside), `plan_extraction` (what extracting a file set would
+cost: outside files it imports to cut or take along, inside files the rest imports, the
+transitive closure, boundary cycles, string-edge crossings, and external packages),
+`simulate_change` (hypothetical `cut`, `add`, and `move` edits applied to a copy of the graph,
+with the cycles, wrong-way tier edges, rule violations, and blast radius they would change), `get_uncovered_changes` (changed-line coverage:
 git-diff additions intersected with the repository's measured coverage report, with
 uncovered modified functions, public-surface functions first), `get_http_api_diff` (HTTP
 endpoints, parameters, and body fields changed between two revisions, classified breaking,

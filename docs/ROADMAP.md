@@ -49,6 +49,7 @@ record is reported as `unavailable`, never invented.
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
 | 38 | API development | Landed (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking API changes, R4 endpoint passport and overlay, R5 gRPC and GraphQL surfaces) |
+| 39 | Refactor sandbox: what-if and extraction | In progress (S1-S3 landed: extraction planner, what-if sandbox, HTTP and MCP; S4 panel and S5 acceptance open) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2672,6 +2673,55 @@ workspace cache version is `strabo-workspace-7`, since earlier caches hold endpo
 without code routes. Not read: gRPC interceptors and GraphQL directives as guards, Go
 servers, and code-first GraphQL schemas with no SDL. Unit coverage is
 `test/unit/rpc.test.ts`.
+
+## Phase 39 - Refactor sandbox: what-if and extraction
+
+Every other surface answers "what is". This one answers "what if": try an architecture change
+on a copy of the recorded graph before writing it, and price an extraction before starting it.
+Both read only recorded facts and label every answer hypothetical; nothing is written to the
+repository or the cache.
+
+- **S1 - Extraction planner (done).** `planExtraction(graph, include)` in
+  `src/analysis/extraction.ts`, pure. Given the files a set of globs selects (a bare directory
+  means everything under it), it lists: the **dependencies** outside the selection it imports,
+  most-used first, each with the selected files that import it, how many further files taking
+  it along would drag in (`pulls`), how many outside files share it (`usedOutside`), and whether
+  every import of it is type-only (`typeOnly`, cheap to cut); the
+  **dependents** inside it that remaining code imports, each an import to repoint; the
+  transitive **closure** (the take-everything cost); **boundary cycles** with members on both
+  sides, which no single cut separates; env/route/flag keys with sites on both sides; and the
+  **external packages** it imports, i.e. what its own manifest would declare. It names the cost
+  of each choice and does not choose. Patterns that match nothing are reported as `unmatched`.
+- **S2 - What-if sandbox (done).** `simulateWhatIf(graph, operations, context)` in
+  `src/analysis/what-if.ts`, pure. Three edits: `cut` (remove the recorded edges from one file
+  to another), `add` (draw an import, evidence specifier `(what-if)`, line 0), and `move`
+  (rewrite a file or directory path prefix). The baseline is the recorded graph with only the
+  renames applied, so a move reports what it changes rather than every edge it renamed. It
+  reports edges added and removed, cycles introduced and resolved, wrong-way tier edges
+  introduced and resolved (`tierDirections`, lifted out of the tier report so both sides read
+  the same rule), declared-rule violations introduced and resolved, files tests would stop
+  reaching, and the blast radius before and after of each touched file. A moved file keeps the
+  tier its content was classified as; only its unit is re-read from the new path. An edit that
+  cannot apply (unknown file, no edge to cut, edge already present, move collision) is returned
+  in `rejected` with its reason and never guessed.
+- **S3 - HTTP and MCP (done).** `GET /analysis/extraction?include=` and
+  `GET /analysis/what-if?ops=<JSON array>` (`src/api/routes/analysis-sandbox.ts`; a GET because
+  nothing is written). MCP gains `plan_extraction` and `simulate_change`.
+- **S4 - Sandbox panel (open).** Right-click an edge to cut it, a file to move it, drag between
+  two files to add an import; the map draws hypothetical edges dashed and the panel lists the
+  result. Select a directory and "Plan extraction" shows the planner's lists with the boundary
+  drawn on the map. "Delegate" hands the edit list and the result to an agent as the task.
+- **S5 - Acceptance (open).** On the sample fixture, cutting one edge of the recorded cycle
+  lists it as resolved; planning one side of it names the cycle as a boundary blocker.
+
+Known limits, named rather than hidden: the sandbox edits the graph, not the code, so a move
+does not rewrite import specifiers or re-resolve aliases; tiers are carried with a moved file,
+not re-classified; the planner reads imports, string edges, and external packages, and does not
+cover data contracts, runtime coupling (reflection, dependency injection, computed imports), or
+files outside the scan.
+
+Unit coverage: `test/unit/what-if.test.ts`, `test/unit/extraction.test.ts`, and
+`test/unit/sandbox-api.test.ts` (HTTP and MCP agree on the sample fixture).
 
 ## Reading route (landed)
 

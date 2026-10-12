@@ -184,52 +184,7 @@ export function buildTierReport(
     }));
 
   const tierOfFile = new Map(files.map((entry) => [entry.file, entry.tier]));
-  const directions: TierDirection[] = [];
-  for (const edge of graph.edges ?? []) {
-    // A call edge parallels an import edge, so counting it would double a wrong-way pair.
-    if (edge.kind === 'call') {
-      continue;
-    }
-    const sourceTier = tierOfFile.get(edge.source);
-    const targetTier = tierOfFile.get(edge.target);
-    if (!sourceTier || !targetTier) {
-      continue;
-    }
-    const unit = assignment.get(edge.source) ?? '.';
-    if ((assignment.get(edge.target) ?? '.') !== unit) {
-      continue;
-    }
-    const sourceRank = TIER_RANK[sourceTier];
-    const targetRank = TIER_RANK[targetTier];
-    if (sourceRank === undefined || targetRank === undefined) {
-      continue;
-    }
-    const base = {
-      unit,
-      source: edge.source,
-      target: edge.target,
-      sourceTier,
-      targetTier,
-      line: edge.evidence?.line ?? 0,
-      specifier: edge.evidence?.specifier ?? '',
-    };
-    if (sourceRank < targetRank) {
-      // A lower tier depends on an upper one: the arrow runs the wrong way.
-      directions.push({ ...base, kind: 'upward' });
-    } else if (sourceRank - targetRank > 1) {
-      const intermediate = [...(unitTiers.get(unit) ?? [])].some((tier) => {
-        const rank = TIER_RANK[tier];
-        return rank !== undefined && rank < sourceRank && rank > targetRank;
-      });
-      // A skip is only a violation when the unit actually has a tier in between to use.
-      if (intermediate) {
-        directions.push({ ...base, kind: 'skip-layer' });
-      }
-    }
-  }
-  directions.sort(
-    (a, b) => a.unit.localeCompare(b.unit) || a.line - b.line || a.source.localeCompare(b.source),
-  );
+  const directions = tierDirections(graph.edges ?? [], tierOfFile, (file) => assignment.get(file) ?? '.');
 
   // The structure the tier classification becomes: every recorded import collapsed across the
   // tiers, with the wrong-way reads kept as their own edges. Cross-unit edges are included —
@@ -850,4 +805,76 @@ function tableLineageOf(entry: TableTraceEntry, matched: boolean): TierTableLine
 
 function sameTable(a: { table: string; file: string; line: number }, b: { table: string; file: string; line: number }): boolean {
   return a.table === b.table && a.file === b.file && a.line === b.line;
+}
+
+/**
+ * The wrong-way tier edges among recorded imports: an `upward` edge from a lower tier into
+ * an upper one, and a `skip-layer` edge that jumps a tier its unit actually has. Only edges
+ * inside one unit count. Pure over its inputs, so a caller holding tiers and units (the
+ * what-if sandbox) can re-read directions over an edited edge list without re-classifying.
+ */
+export function tierDirections(
+  edges: ReadonlyArray<{
+    source: string;
+    target: string;
+    kind?: string;
+    evidence?: { line: number; specifier: string };
+  }>,
+  tierOfFile: ReadonlyMap<string, Tier>,
+  unitOf: (file: string) => string,
+): TierDirection[] {
+  const unitTiers = new Map<string, Set<Tier>>();
+  for (const [file, tier] of tierOfFile) {
+    const unit = unitOf(file);
+    const tiers = unitTiers.get(unit) ?? new Set<Tier>();
+    tiers.add(tier);
+    unitTiers.set(unit, tiers);
+  }
+  const directions: TierDirection[] = [];
+  for (const edge of edges) {
+    // A call edge parallels an import edge, so counting it would double a wrong-way pair.
+    if (edge.kind === 'call') {
+      continue;
+    }
+    const sourceTier = tierOfFile.get(edge.source);
+    const targetTier = tierOfFile.get(edge.target);
+    if (!sourceTier || !targetTier) {
+      continue;
+    }
+    const unit = unitOf(edge.source);
+    if (unitOf(edge.target) !== unit) {
+      continue;
+    }
+    const sourceRank = TIER_RANK[sourceTier];
+    const targetRank = TIER_RANK[targetTier];
+    if (sourceRank === undefined || targetRank === undefined) {
+      continue;
+    }
+    const base = {
+      unit,
+      source: edge.source,
+      target: edge.target,
+      sourceTier,
+      targetTier,
+      line: edge.evidence?.line ?? 0,
+      specifier: edge.evidence?.specifier ?? '',
+    };
+    if (sourceRank < targetRank) {
+      // A lower tier depends on an upper one: the arrow runs the wrong way.
+      directions.push({ ...base, kind: 'upward' });
+    } else if (sourceRank - targetRank > 1) {
+      const intermediate = [...(unitTiers.get(unit) ?? [])].some((tier) => {
+        const rank = TIER_RANK[tier];
+        return rank !== undefined && rank < sourceRank && rank > targetRank;
+      });
+      // A skip is only a violation when the unit actually has a tier in between to use.
+      if (intermediate) {
+        directions.push({ ...base, kind: 'skip-layer' });
+      }
+    }
+  }
+  directions.sort(
+    (a, b) => a.unit.localeCompare(b.unit) || a.line - b.line || a.source.localeCompare(b.source),
+  );
+  return directions;
 }

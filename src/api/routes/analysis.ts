@@ -5,6 +5,7 @@ import { createGitRouter } from './analysis-git.ts';
 import { createHistoryRouter } from './analysis-history.ts';
 import { createQualityRouter } from './analysis-quality.ts';
 import { createReviewRouter } from './analysis-review.ts';
+import { createSandboxRouter } from './analysis-sandbox.ts';
 import { createStructureRouter } from './analysis-structure.ts';
 import type { StraboConfig } from '../../types.ts';
 
@@ -26,5 +27,6 @@ export function createAnalysisRouter(config: StraboConfig): Router {
   router.use(createGitRouter(context));
   router.use(createQualityRouter(context));
   router.use(createHistoryRouter(context));
+  router.use(createSandboxRouter(context));
   return router;
 }
