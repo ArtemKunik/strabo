@@ -49,7 +49,7 @@ record is reported as `unavailable`, never invented.
 | 36 | Data contracts lens and governed boundaries | Done (K0-K7: contract boundary aggregate `GET /analysis/contracts/graph`, Data contracts canvas overlay, governed edge badges with edge evidence, contract change blast radius with Contract Impact review section, boundary plate view, MCP `get_data_contracts`/`get_contract_consumers`/`check_contract_conformance` + `strabo check` rules + report Contracts & Boundaries section, honesty limits) |
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
 | 38 | API development | Landed (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking API changes, R4 endpoint passport and overlay, R5 gRPC and GraphQL surfaces) |
-| 39 | Refactor sandbox: what-if and extraction | In progress (S1-S3 landed: extraction planner, what-if sandbox, HTTP and MCP; S4 panel and S5 acceptance open) |
+| 39 | Refactor sandbox: what-if and extraction | Landed (S1-S5: extraction planner, what-if sandbox, HTTP and MCP, Sandbox window with map rings and delegation, browser acceptance) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2707,12 +2707,18 @@ repository or the cache.
 - **S3 - HTTP and MCP (done).** `GET /analysis/extraction?include=` and
   `GET /analysis/what-if?ops=<JSON array>` (`src/api/routes/analysis-sandbox.ts`; a GET because
   nothing is written). MCP gains `plan_extraction` and `simulate_change`.
-- **S4 - Sandbox panel (open).** Right-click an edge to cut it, a file to move it, drag between
-  two files to add an import; the map draws hypothetical edges dashed and the panel lists the
-  result. Select a directory and "Plan extraction" shows the planner's lists with the boundary
-  drawn on the map. "Delegate" hands the edit list and the result to an agent as the task.
-- **S5 - Acceptance (open).** On the sample fixture, cutting one edge of the recorded cycle
-  lists it as resolved; planning one side of it names the cycle as a boundary blocker.
+- **S4 - Sandbox window (done).** `ui/strabo-sandbox.js` (pure helpers and the render) and
+  `ui/strabo-sandbox-controller.js`. The right-click menu gains *Cut this import in sandbox*
+  on a file edge, *Start an import from here* / *Add import … → here* and *Move in sandbox…*
+  on a file, and *Plan extraction* on a directory, a file, or a group selection. The map rings
+  the answer with the existing review overlay classes (changed, affected, cycle, declared
+  rule, unreached), so the sandbox spends no new colour. *Delegate to an agent…* hands the
+  edits and their outcome, or the plan, to an agent as new `sandbox` and `extraction` tasks.
+  Hypothetical edges are not drawn on the canvas; the window lists them.
+- **S5 - Acceptance (done).** `test/acceptance/features/refactor-sandbox.feature`: on the
+  block fixture, adding `src/util.ts → src/index.ts` from the right-click menu reports a
+  hypothetical cycle and rings it on the map; planning `src` names `lib/index.ts` as an
+  outside import and `src/index.ts` as imported from outside.
 
 Known limits, named rather than hidden: the sandbox edits the graph, not the code, so a move
 does not rewrite import specifiers or re-resolve aliases; tiers are carried with a moved file,
@@ -2720,8 +2726,9 @@ not re-classified; the planner reads imports, string edges, and external package
 cover data contracts, runtime coupling (reflection, dependency injection, computed imports), or
 files outside the scan.
 
-Unit coverage: `test/unit/what-if.test.ts`, `test/unit/extraction.test.ts`, and
-`test/unit/sandbox-api.test.ts` (HTTP and MCP agree on the sample fixture).
+Unit coverage: `test/unit/what-if.test.ts`, `test/unit/extraction.test.ts`,
+`test/unit/sandbox-api.test.ts` (HTTP and MCP agree on the sample fixture), and
+`test/unit/sandbox-panel.test.ts` (the window under JSDOM).
 
 ## Reading route (landed)
 

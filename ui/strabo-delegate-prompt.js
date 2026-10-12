@@ -20,6 +20,8 @@ const DELEGATE_TASKS = {
   member: 'Explain this member: what it does and how it is wired to state.',
   review: 'Explain this change set as a function of the app: what capability or behaviour it adds, changes, or removes for a user of the app — not just which files and lines moved. Read the actual diff for the listed files to ground the explanation.',
   view: 'Give an architectural overview of this view: hotspots, coupling, and where to look first.',
+  sandbox: 'Carry out these planned structural edits in the code: move the listed paths and update every import specifier that names them, remove the listed imports and add the listed ones, without changing behaviour. The hypothetical outcome below is what the dependency graph should record afterwards; confirm it, and stop and report if a step would break the build.',
+  extraction: 'Extract the listed files into their own package. For each outside import, either take the file along or cut the dependency behind an interface, using the recorded counts to choose; repoint every listed importer from outside; declare the listed external packages in the new manifest; and resolve each cycle across the boundary first. Do not change behaviour.',
   group: 'Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.',
   selection: 'Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in.',
 };
@@ -57,7 +59,8 @@ function renderFacts(lines, facts, cap) {
  *
  * Pure function: only the recorded facts in `target` are rendered, nothing is
  * inferred. `target` is `{ kind, id?, label?, detail?, evidence? }` where kind is
- * one of node | tier | edge | diagnostic | commit | member | review | view | group | selection,
+ * one of node | tier | edge | diagnostic | commit | member | review | view | group | selection |
+ * sandbox | extraction,
  * an optional `selection` is text the user highlighted, and `evidence` is
  * an array of short fact strings. A `group` target additionally carries `items`, one
  * `{ id?, label?, evidence? }` per selected file, each rendered as its own subsection —

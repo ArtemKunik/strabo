@@ -505,6 +505,7 @@ export function createDelegation(app) {
         ...flowMenuItems(target),
         ...app.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
+        ...(app.sandbox?.menuItems(target) ?? []),
         { label: '▶ Delegate to OpenCode', hint: 'opens agent session', action: () => delegateToAgent('opencode', target) },
         { label: '▶ Delegate to Claude', hint: 'opens agent session', action: () => delegateToAgent('claude', target) },
         { separator: true },
@@ -616,5 +617,6 @@ export function createDelegation(app) {
 
   return {
     resetMapLayout,
+    openDelegateMenu,
   };
 }

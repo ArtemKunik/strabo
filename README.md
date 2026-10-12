@@ -76,6 +76,11 @@ in [docs/USAGE.md](docs/USAGE.md).
   declared zone and inside changes imported from outside, a public API diff between two
   revisions, and clone clusters from normalised function bodies.
   See [docs/CLI.md](docs/CLI.md#change-report-scope-fence-and-public-api).
+- **Refactor sandbox** — try a change on a copy of the graph before writing it: cut an import,
+  add one, or move a path, and read the cycles, wrong-way tier edges, rule violations, and
+  blast radius it would change. Plan an extraction: what the files import from outside, who
+  imports them, the cycles across the boundary, and the packages a new manifest would declare.
+  See [docs/FEATURES.md](docs/FEATURES.md#refactor-sandbox).
 - **Hidden connections and declared architecture** — environment variables, HTTP routes
   declared and called, and feature flags as edges, plus `strabo.rules` intent that
   `strabo check --fail-on` enforces.

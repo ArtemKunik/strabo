@@ -300,6 +300,17 @@ export function createFloatingPanels(app) {
         },
       },
       {
+        key: 'sandbox',
+        element: elements.sandboxPanel,
+        title: 'Refactor sandbox',
+        dockLabel: 'Sandbox',
+        glyph: '⚗',
+        width: 480,
+        height: 640,
+        onOpen: () => app.sandbox.open(),
+        onClose: () => app.sandbox.close(),
+      },
+      {
         key: 'coverage',
         element: elements.coveragePanel,
         title: 'Coverage',

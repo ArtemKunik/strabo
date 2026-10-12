@@ -85,6 +85,7 @@ export function queryElements(doc = document) {
     passportPanel: doc.getElementById('passport-panel'),
     routePanel: doc.getElementById('route-panel'),
     blocksPanel: doc.getElementById('blocks-panel'),
+    sandboxPanel: doc.getElementById('sandbox-panel'),
     coveragePanel: doc.getElementById('coverage-panel'),
     productsPanel: doc.getElementById('products-panel'),
     sourcePanel: doc.getElementById('source-panel'),

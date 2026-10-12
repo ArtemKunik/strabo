@@ -715,6 +715,39 @@ evidence-based prompt is unchanged (see [Delegate to an agent](#delegate-to-an-a
 its destination moved into the app. When the request fails the **Copy prompt** fallback still
 offers the same text, and a `dryRun` returns the command without opening a session.
 
+## Refactor sandbox
+
+The **Sandbox** window (dock glyph ⚗) answers "what if" on a copy of the recorded graph.
+Nothing is written to the repository or the cache, and every answer is labelled hypothetical.
+
+**What-if.** Right-click an import edge on the file map and choose *Cut this import in
+sandbox*; right-click a file, *Start an import from here*, then right-click its target and
+*Add import … → here*; or *Move in sandbox…* to rewrite a file or directory path. The form at
+the top of the window takes the same three edits. After each edit the window lists cycles
+introduced and resolved, wrong-way tier edges introduced and resolved, declared-rule
+violations introduced and resolved, files tests would stop reaching, and the blast radius of
+every touched file before and after. The map rings the result with the review overlay's
+classes: edited files as changed, members of a new cycle as cycle, ends of a new violation as
+declared rule. An edit that cannot apply (an unknown file, no edge to cut, a move onto an
+existing file) is listed under *Not applied* with its reason.
+
+A move edits the graph, not the code: import specifiers are not rewritten, and a moved file
+keeps the tier its content was classified as; only its unit is re-read from the new path.
+
+**Extraction.** Right-click a directory in the Directories view (or a file, or a group
+selection) and choose *Plan extraction*, or type globs into the Extraction tab. The plan lists
+the outside files the selection imports, most-used first, each with how many further files
+taking it along would pull in, how many outside files share it, and whether every import of it
+is type-only; the selected files that outside code imports; cycles across the boundary; env,
+route, and flag keys used on both sides; and the external packages it imports. The plan names
+the cost of each choice and does not choose. Data contracts and runtime coupling are not
+covered, and the window says so.
+
+Both tabs offer *Delegate to an agent…*, which hands the edits and their hypothetical outcome,
+or the extraction plan, to `claude` or `opencode` as the task. The same answers are
+`GET /analysis/what-if?ops=` and `GET /analysis/extraction?include=`, and the MCP tools
+`simulate_change` and `plan_extraction`.
+
 ## Delegate to an agent
 
 Right-clicking a node, edge, diagnostic, commit, overlay item, the Git review panel, or

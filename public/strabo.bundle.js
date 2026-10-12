@@ -981,19 +981,19 @@ function positionOf(position) {
 
 // ui/strabo-graph-diff.js
 function diffElements(previous = [], next = []) {
-  const before = new Map(previous.map((element3) => [element3.data.id, element3]));
+  const before = new Map(previous.map((element4) => [element4.data.id, element4]));
   const added = [];
   const updated = [];
-  for (const element3 of next) {
-    const id = element3.data.id;
+  for (const element4 of next) {
+    const id = element4.data.id;
     const prior = before.get(id);
     if (!prior) {
-      added.push(element3);
+      added.push(element4);
       continue;
     }
     before.delete(id);
-    if (elementSignature(prior) !== elementSignature(element3)) {
-      updated.push({ before: prior, after: element3 });
+    if (elementSignature(prior) !== elementSignature(element4)) {
+      updated.push({ before: prior, after: element4 });
     }
   }
   return { added, removed: [...before.keys()], updated };
@@ -1004,11 +1004,11 @@ function diffGraph(previous = { nodes: [], edges: [] }, next = { nodes: [], edge
     edges: diffElements(previous.edges, next.edges)
   };
 }
-function elementSignature(element3) {
+function elementSignature(element4) {
   return JSON.stringify({
-    classes: element3.classes ?? "",
-    data: element3.data,
-    position: element3.position ?? null
+    classes: element4.classes ?? "",
+    data: element4.data,
+    position: element4.position ?? null
   });
 }
 
@@ -2878,6 +2878,8 @@ var DELEGATE_TASKS = {
   member: "Explain this member: what it does and how it is wired to state.",
   review: "Explain this change set as a function of the app: what capability or behaviour it adds, changes, or removes for a user of the app \u2014 not just which files and lines moved. Read the actual diff for the listed files to ground the explanation.",
   view: "Give an architectural overview of this view: hotspots, coupling, and where to look first.",
+  sandbox: "Carry out these planned structural edits in the code: move the listed paths and update every import specifier that names them, remove the listed imports and add the listed ones, without changing behaviour. The hypothetical outcome below is what the dependency graph should record afterwards; confirm it, and stop and report if a step would break the build.",
+  extraction: "Extract the listed files into their own package. For each outside import, either take the file along or cut the dependency behind an interface, using the recorded counts to choose; repoint every listed importer from outside; declare the listed external packages in the new manifest; and resolve each cycle across the boundary first. Do not change behaviour.",
   group: "Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.",
   selection: "Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in."
 };
@@ -4067,19 +4069,19 @@ function createUnitCardLayer(container, cy, onOpen) {
       if (signatures.get(card.id) === signature) {
         continue;
       }
-      const element3 = unitCardElement(card, { onOpen });
+      const element4 = unitCardElement(card, { onOpen });
       const existing = elements2.get(card.id);
       if (existing) {
-        existing.replaceWith(element3);
+        existing.replaceWith(element4);
       } else {
-        layer.append(element3);
+        layer.append(element4);
       }
-      elements2.set(card.id, element3);
+      elements2.set(card.id, element4);
       signatures.set(card.id, signature);
     }
-    for (const [id, element3] of [...elements2]) {
+    for (const [id, element4] of [...elements2]) {
       if (!seen.has(id)) {
-        element3.remove();
+        element4.remove();
         elements2.delete(id);
         signatures.delete(id);
       }
@@ -4673,12 +4675,12 @@ function createView(container) {
     const members = new Set(ids);
     cy.batch(() => {
       for (const id of ids) {
-        const element3 = cy.getElementById(id);
-        if (element3.empty()) {
+        const element4 = cy.getElementById(id);
+        if (element4.empty()) {
           continue;
         }
-        const position = element3.position();
-        element3.position({ x: position.x + dx, y: position.y + dy });
+        const position = element4.position();
+        element4.position({ x: position.x + dx, y: position.y + dy });
       }
     });
     islandModel = {
@@ -5069,8 +5071,8 @@ function writeIslandLayout(repository, offsets, storage = globalThis.localStorag
 }
 
 // ui/strabo-freshness.js
-function createFreshnessBadge(element3, options = {}) {
-  if (!element3) {
+function createFreshnessBadge(element4, options = {}) {
+  if (!element4) {
     return { refresh: async () => null, render: () => {
     }, status: () => null };
   }
@@ -5083,16 +5085,16 @@ function createFreshnessBadge(element3, options = {}) {
     last = status;
     const revision = status?.indexed?.revision;
     if (!revision) {
-      element3.hidden = true;
-      element3.textContent = "";
+      element4.hidden = true;
+      element4.textContent = "";
       return;
     }
     const behind = typeof status.behind === "number" ? status.behind : null;
     const stale = Boolean(status.stale);
-    element3.hidden = false;
-    element3.classList.toggle("is-stale", stale);
-    element3.textContent = stale ? `indexed at ${short(revision)}${behind ? ` (${behind} behind)` : ""} \xB7 Rebuild` : `indexed at ${short(revision)}`;
-    element3.title = stale ? "HEAD moved since this map was indexed; click to rebuild." : "The map matches the indexed revision.";
+    element4.hidden = false;
+    element4.classList.toggle("is-stale", stale);
+    element4.textContent = stale ? `indexed at ${short(revision)}${behind ? ` (${behind} behind)` : ""} \xB7 Rebuild` : `indexed at ${short(revision)}`;
+    element4.title = stale ? "HEAD moved since this map was indexed; click to rebuild." : "The map matches the indexed revision.";
   }
   async function refresh({ repository } = {}) {
     if (typeof request2 !== "function") {
@@ -5102,21 +5104,21 @@ function createFreshnessBadge(element3, options = {}) {
       const query = repository ? `?repository=${encodeURIComponent(repository)}` : "";
       render(await request2(`/status${query}`));
     } catch {
-      element3.hidden = true;
+      element4.hidden = true;
     }
     return last;
   }
-  element3.addEventListener("click", async () => {
-    if (!element3.classList.contains("is-stale")) {
+  element4.addEventListener("click", async () => {
+    if (!element4.classList.contains("is-stale")) {
       return;
     }
-    element3.disabled = true;
-    element3.textContent = "Rebuilding\u2026";
+    element4.disabled = true;
+    element4.textContent = "Rebuilding\u2026";
     try {
       await options.onRebuild?.();
       await refresh({ repository: options.repository?.() });
     } finally {
-      element3.disabled = false;
+      element4.disabled = false;
     }
   });
   return { refresh, render, status: () => last };
@@ -5153,11 +5155,11 @@ function matches(name, needle) {
   return !needle || name.toLowerCase().includes(needle);
 }
 function svgElement(name, attributes) {
-  const element3 = document.createElementNS("http://www.w3.org/2000/svg", name);
+  const element4 = document.createElementNS("http://www.w3.org/2000/svg", name);
   for (const [key, value] of Object.entries(attributes)) {
-    element3.setAttribute(key, value);
+    element4.setAttribute(key, value);
   }
-  return element3;
+  return element4;
 }
 
 // ui/strabo-narrator.js
@@ -5514,9 +5516,9 @@ function renderNarrativeReply(target, reply) {
       if (!run.code && !run.strong) {
         return document.createTextNode(run.text);
       }
-      const element3 = document.createElement(run.code ? "code" : "strong");
-      element3.textContent = run.text;
-      return element3;
+      const element4 = document.createElement(run.code ? "code" : "strong");
+      element4.textContent = run.text;
+      return element4;
     });
     if (block.type === "p") {
       const paragraph = document.createElement("p");
@@ -5933,14 +5935,14 @@ function renderInspector(container, model, id, handlers = {}) {
       button3.setAttribute("aria-selected", selected ? "true" : "false");
       button3.tabIndex = selected ? 0 : -1;
     });
-    tabSections.forEach((section2, position) => {
-      section2.hidden = position !== index;
+    tabSections.forEach((section3, position) => {
+      section3.hidden = position !== index;
     });
     if (focus2) {
       tabButtons[index].focus();
     }
   };
-  for (const [key, label2, section2] of tabDefs) {
+  for (const [key, label2, section3] of tabDefs) {
     const tab = document.createElement("button");
     tab.type = "button";
     tab.className = "inspector-tab";
@@ -5952,10 +5954,10 @@ function renderInspector(container, model, id, handlers = {}) {
     }
     tab.id = `${base}-tab-${key}`;
     tab.setAttribute("aria-controls", `${base}-panel-${key}`);
-    section2.id = `${base}-panel-${key}`;
-    section2.setAttribute("role", "tabpanel");
-    section2.setAttribute("aria-labelledby", tab.id);
-    section2.tabIndex = 0;
+    section3.id = `${base}-panel-${key}`;
+    section3.setAttribute("role", "tabpanel");
+    section3.setAttribute("aria-labelledby", tab.id);
+    section3.tabIndex = 0;
     tab.addEventListener("click", () => selectTab(tabButtons.indexOf(tab)));
     tab.addEventListener("keydown", (event) => {
       const next = rovingIndex(tabButtons.indexOf(tab), tabButtons.length, event.key);
@@ -5967,8 +5969,8 @@ function renderInspector(container, model, id, handlers = {}) {
     });
     tabs.append(tab);
     tabButtons.push(tab);
-    tabSections.push(section2);
-    panels.append(section2);
+    tabSections.push(section3);
+    panels.append(section3);
   }
   selectTab(0);
   container.append(tabs, panels);
@@ -5990,10 +5992,10 @@ function renderInspector(container, model, id, handlers = {}) {
   container.append(trace);
 }
 function listSection(heading3, from, entries, handlers) {
-  const section2 = document.createElement("section");
+  const section3 = document.createElement("section");
   const title = document.createElement("h3");
   title.textContent = `${heading3} (${entries.length} file(s))`;
-  section2.append(title);
+  section3.append(title);
   const list2 = document.createElement("ul");
   for (const entry of entries.slice(0, 100)) {
     const item = document.createElement("li");
@@ -6020,8 +6022,8 @@ function listSection(heading3, from, entries, handlers) {
     }
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function renderChangesWith(container, result, handlers = {}) {
   container.replaceChildren();
@@ -6129,20 +6131,20 @@ function appendApiContracts(container, model, id, node) {
   if (list2.length === 0) {
     return;
   }
-  const section2 = document.createElement("section");
-  section2.className = "api-contracts-section";
-  section2.dataset.role = "api-contracts";
+  const section3 = document.createElement("section");
+  section3.className = "api-contracts-section";
+  section3.dataset.role = "api-contracts";
   const heading3 = document.createElement("h3");
   heading3.textContent = "API contract";
-  section2.append(heading3);
+  section3.append(heading3);
   const intro = document.createElement("p");
   intro.className = "passport-why";
   intro.textContent = "Request and response shapes declared by the OpenAPI operation, with its source.";
-  section2.append(intro);
+  section3.append(intro);
   for (const endpoint of list2) {
-    section2.append(apiContractCard(endpoint));
+    section3.append(apiContractCard(endpoint));
   }
-  container.append(section2);
+  container.append(section3);
 }
 function apiContractCard(endpoint) {
   const card = document.createElement("div");
@@ -6214,18 +6216,18 @@ function appendStructureSpines(container, model, id, node, handlers) {
   const tier = node?.tier ?? id;
   const unit = node?.unit;
   const allSpines = model.structureSpines ?? [];
-  const section2 = document.createElement("section");
-  section2.className = "structure-spines-section";
-  section2.dataset.role = "tier-spines";
+  const section3 = document.createElement("section");
+  section3.className = "structure-spines-section";
+  section3.dataset.role = "tier-spines";
   const heading3 = document.createElement("h3");
   heading3.textContent = "Behavioral spines";
-  section2.append(heading3);
+  section3.append(heading3);
   const intro = document.createElement("p");
   intro.className = "passport-why";
   intro.textContent = "End-to-end behavioral trace: call site \u2192 declared endpoint \u2192 handler \u2192 table.";
-  section2.append(intro);
+  section3.append(intro);
   if (handlers.activeSpine) {
-    renderSpineView(section2, handlers.activeSpine, handlers);
+    renderSpineView(section3, handlers.activeSpine, handlers);
   }
   const originating = allSpines.filter(
     (s15) => s15.call.tier === tier || unit && s15.call.unit === unit
@@ -6239,8 +6241,8 @@ function appendStructureSpines(container, model, id, node, handlers) {
     empty.className = "unavailable";
     empty.dataset.role = "spines-empty";
     empty.textContent = "No recorded outbound calls or behavioral spines found for this tier.";
-    section2.append(empty);
-    container.append(section2);
+    section3.append(empty);
+    container.append(section3);
     return;
   }
   const list2 = document.createElement("div");
@@ -6269,15 +6271,15 @@ function appendStructureSpines(container, model, id, node, handlers) {
     openBtn.dataset.spineId = spine.id;
     openBtn.textContent = handlers.activeSpine?.id === spine.id ? "Spine active" : "View spine";
     openBtn.addEventListener("click", () => {
-      renderSpineView(section2, spine, handlers);
+      renderSpineView(section3, spine, handlers);
       handlers.onOpenSpine?.(spine);
     });
     buttonRow.append(openBtn);
     card.append(buttonRow);
     list2.append(card);
   }
-  section2.append(list2);
-  container.append(section2);
+  section3.append(list2);
+  container.append(section3);
 }
 function renderSpineView(container, spine, handlers = {}) {
   const existing = container.querySelector('[data-role="spine-view"]');
@@ -6974,12 +6976,12 @@ function renderCoverageReport(container, report, handlers = {}) {
   }
 }
 function coverageRisk(risk) {
-  const section2 = element2("section", "coverage-risk");
-  section2.dataset.role = "coverage-risk";
-  section2.append(element2("h4", null, "Risky and untested"));
+  const section3 = element2("section", "coverage-risk");
+  section3.dataset.role = "coverage-risk";
+  section3.append(element2("h4", null, "Risky and untested"));
   if (!risk || risk.available === false) {
-    section2.append(note("Risky and untested functions are unavailable."));
-    return section2;
+    section3.append(note("Risky and untested functions are unavailable."));
+    return section3;
   }
   const rows = risk.rows ?? [];
   const used = [
@@ -6987,13 +6989,13 @@ function coverageRisk(risk) {
     risk.inputs?.churn ? "churn" : null,
     risk.inputs?.coverage ? "uncovered share" : null
   ].filter(Boolean);
-  section2.append(
+  section3.append(
     note(
       rows.length === 0 ? "No function has a recorded complexity, churn, or uncovered share to rank." : `${rows.length} function(s) ranked by ${used.join(" \xD7 ") || "a single input"}` + (risk.unranked > 0 ? ` \xB7 ${risk.unranked} unranked` : "")
     )
   );
   if (rows.length === 0) {
-    return section2;
+    return section3;
   }
   const list2 = element2("ul", "coverage-risk-list");
   for (const row of rows.slice(0, 50)) {
@@ -7014,8 +7016,8 @@ function coverageRisk(risk) {
     item.append(element2("span", "coverage-risk-inputs", inputs.join(" \xB7 ")));
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function provenanceLine(provenance) {
   const line = element2("p", "evidence coverage-provenance", coverageProvenanceText(provenance));
@@ -7085,11 +7087,11 @@ function coverageTotals(totals, threshold) {
   return cards;
 }
 function coverageFolders(folders, handlers) {
-  const section2 = element2("section", "coverage-folders");
-  section2.append(element2("h4", null, `Folders (${folders.length})`));
+  const section3 = element2("section", "coverage-folders");
+  section3.append(element2("h4", null, `Folders (${folders.length})`));
   if (folders.length === 0) {
-    section2.append(note("No subfolders recorded at this scope."));
-    return section2;
+    section3.append(note("No subfolders recorded at this scope."));
+    return section3;
   }
   const table = element2("table", "coverage-table");
   const head = element2("thead");
@@ -7121,15 +7123,15 @@ function coverageFolders(folders, handlers) {
     body.append(row);
   }
   table.append(head, body);
-  section2.append(table);
-  return section2;
+  section3.append(table);
+  return section3;
 }
 function coverageFiles(files, handlers) {
-  const section2 = element2("section", "coverage-files-section");
-  section2.append(element2("h4", null, `Files (${files.length})`));
+  const section3 = element2("section", "coverage-files-section");
+  section3.append(element2("h4", null, `Files (${files.length})`));
   if (files.length === 0) {
-    section2.append(note("No files sit directly in this folder."));
-    return section2;
+    section3.append(note("No files sit directly in this folder."));
+    return section3;
   }
   const list2 = element2("ul", "passport-list coverage-files");
   for (const file of files) {
@@ -7159,8 +7161,8 @@ function coverageFiles(files, handlers) {
     }
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function renderCoverageFile(container, report, handlers = {}) {
   container.replaceChildren();
@@ -7242,11 +7244,11 @@ function renderCoverageFile(container, report, handlers = {}) {
   );
 }
 function fileLinkList(title, files, handlers, emptyText) {
-  const section2 = element2("section", "coverage-link-list");
-  section2.append(element2("h4", null, `${title} (${files.length})`));
+  const section3 = element2("section", "coverage-link-list");
+  section3.append(element2("h4", null, `${title} (${files.length})`));
   if (files.length === 0) {
-    section2.append(note(emptyText));
-    return section2;
+    section3.append(note(emptyText));
+    return section3;
   }
   const list2 = element2("ul", "passport-list");
   for (const file of files) {
@@ -7258,8 +7260,8 @@ function fileLinkList(title, files, handlers, emptyText) {
     item.append(open);
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 
 // ui/strabo-workspace.js
@@ -7702,12 +7704,12 @@ function workspaceLine(className, text) {
 }
 function renderWorkspaceTools(container, tools, handlers = {}) {
   const busy = Boolean(tools.busy);
-  const section2 = document.createElement("section");
-  section2.className = "workspace-tools";
-  container.append(section2);
+  const section3 = document.createElement("section");
+  section3.className = "workspace-tools";
+  container.append(section3);
   const heading3 = document.createElement("h4");
   heading3.textContent = "Compatibility and migrations";
-  section2.append(heading3);
+  section3.append(heading3);
   const form = document.createElement("div");
   form.className = "workspace-tools-form";
   const label = document.createElement("label");
@@ -7736,20 +7738,20 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
     link.className = "workspace-script-link";
     form.append(link);
   }
-  section2.append(form);
+  section3.append(form);
   if (tools.busy) {
-    section2.append(workspaceNote(`Working: ${tools.busy}\u2026`));
+    section3.append(workspaceNote(`Working: ${tools.busy}\u2026`));
   }
   if (tools.error) {
     const error = workspaceNote(tools.error);
     error.classList.add("workspace-error");
-    section2.append(error);
+    section3.append(error);
   }
   for (const group of compatRows(tools.compat)) {
-    section2.append(workspaceLine("workspace-group", group.repository));
-    section2.append(workspaceNote(group.caption));
+    section3.append(workspaceLine("workspace-group", group.repository));
+    section3.append(workspaceNote(group.caption));
     if (group.rows.length > 0) {
-      section2.append(
+      section3.append(
         workspaceList("workspace-compat", group.rows, (item, row) => {
           const badge = document.createElement("span");
           badge.className = `compat-badge compat-${row.compatibility}`;
@@ -7765,10 +7767,10 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   }
   const preflightGroups = preflightRows(tools.preflight);
   for (const group of preflightGroups) {
-    section2.append(workspaceLine("workspace-group", `${group.repository} \xB7 preflight`));
-    section2.append(workspaceNote(group.caption));
+    section3.append(workspaceLine("workspace-group", `${group.repository} \xB7 preflight`));
+    section3.append(workspaceNote(group.caption));
     if (group.checks.length > 0) {
-      section2.append(
+      section3.append(
         workspaceList("workspace-preflight", group.checks, (item, check) => {
           const details = document.createElement("details");
           const summary = document.createElement("summary");
@@ -7793,7 +7795,7 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
       );
     }
     if (group.skipped.length > 0) {
-      section2.append(
+      section3.append(
         workspaceList("workspace-preflight-skipped", group.skipped, (item, entry) => {
           item.textContent = `not checked: ${entry.label}`;
           item.append(workspaceLine("workspace-detail", entry.reason));
@@ -7804,9 +7806,9 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   const databases = databaseRows(tools.databases);
   const liveHeading = document.createElement("h4");
   liveHeading.textContent = `Live database (${databases.length})`;
-  section2.append(liveHeading);
+  section3.append(liveHeading);
   if (databases.length === 0) {
-    section2.append(
+    section3.append(
       workspaceNote("No database is declared. Add databases to the workspace config, naming an environment variable, to probe one read-only.")
     );
   }
@@ -7844,18 +7846,18 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
       consent.append(buttons);
       row.append(consent);
     }
-    section2.append(row);
+    section3.append(row);
   }
   if (tools.live) {
     const drift = liveDriftRows(tools.live);
     const tableCount = tools.live.tables;
-    section2.append(
+    section3.append(
       workspaceLine(
         "workspace-group",
         `${tools.live.database} \xB7 live schema (${tableCount} table${tableCount === 1 ? "" : "s"}, read ${tools.live.capturedAt})`
       )
     );
-    section2.append(
+    section3.append(
       drift.length === 0 ? workspaceNote("The live database and the migrations agree.") : workspaceList("workspace-live-drift", drift, (item, entry) => {
         item.textContent = entry.label;
         item.append(workspaceLine("workspace-detail", entry.text));
@@ -7864,8 +7866,8 @@ function renderWorkspaceTools(container, tools, handlers = {}) {
   }
   const runs = tools.databases?.runs ?? [];
   if (runs.length > 0) {
-    section2.append(workspaceLine("workspace-group", "Recent probe runs"));
-    section2.append(
+    section3.append(workspaceLine("workspace-group", "Recent probe runs"));
+    section3.append(
       workspaceList("workspace-runs", runs, (item, run) => {
         item.textContent = `${run.at} \xB7 ${run.database} \xB7 ${run.kind}` + (run.error ? ` \xB7 refused: ${run.error}` : run.kind === "preflight" ? ` \xB7 ${run.checks} checks, ${run.violations} with violations, ${run.errors} errors` : ` \xB7 ${run.checks} tables`);
       })
@@ -8451,10 +8453,10 @@ function memberFind(container) {
   return input;
 }
 function renderMemberType(type, context2, open) {
-  const section2 = document.createElement("details");
-  section2.className = "member-type";
-  section2.dataset.type = type.name;
-  section2.open = open;
+  const section3 = document.createElement("details");
+  section3.className = "member-type";
+  section3.dataset.type = type.name;
+  section3.open = open;
   const summary = document.createElement("summary");
   const name = document.createElement("span");
   name.className = "member-type-name";
@@ -8478,7 +8480,7 @@ function renderMemberType(type, context2, open) {
   if (Number.isFinite(type.line)) {
     summary.title = `${type.name}, line ${type.line}`;
   }
-  section2.append(summary);
+  section3.append(summary);
   const superTypes = type.superTypes ?? [];
   if (superTypes.length > 0) {
     const line = document.createElement("p");
@@ -8493,30 +8495,30 @@ function renderMemberType(type, context2, open) {
       });
       line.append(" ");
     }
-    section2.append(line);
+    section3.append(line);
   }
   if (type.fields.length > 0) {
-    section2.append(memberHeading(`Fields (${type.fields.length})`));
+    section3.append(memberHeading(`Fields (${type.fields.length})`));
     const list2 = document.createElement("ul");
     list2.className = "member-fields member-grid";
     for (const field2 of type.fields) {
       list2.append(fieldRow(field2, context2));
     }
-    section2.append(list2);
+    section3.append(list2);
   }
   if (type.methods.length > 0) {
-    section2.append(memberHeading(`Methods (${type.methods.length})`));
+    section3.append(memberHeading(`Methods (${type.methods.length})`));
     const list2 = document.createElement("ul");
     list2.className = "member-methods member-grid";
     for (const method of type.methods) {
       list2.append(methodRow(method, context2));
     }
-    section2.append(list2);
+    section3.append(list2);
   }
   if (type.fields.length === 0 && type.methods.length === 0) {
-    section2.append(unavailableNote("No members declared."));
+    section3.append(unavailableNote("No members declared."));
   }
-  return section2;
+  return section3;
 }
 function memberHeading(text) {
   const heading3 = document.createElement("h5");
@@ -8659,18 +8661,18 @@ var DATA_FLOW_PANELS = [
   ["sinks", "Sinks / outputs"]
 ];
 function renderDataFlow(dataFlow) {
-  const section2 = document.createElement("section");
-  section2.className = "data-flow";
+  const section3 = document.createElement("section");
+  section3.className = "data-flow";
   const title = document.createElement("h4");
   title.textContent = "Data flow";
-  section2.append(title);
+  section3.append(title);
   if (!dataFlow || dataFlow.available === false) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
     note4.dataset.role = "flow-unavailable";
     note4.textContent = `Wiring not recorded: ${dataFlow?.detail ?? "not recorded by the scan."}`;
-    section2.append(note4);
-    return section2;
+    section3.append(note4);
+    return section3;
   }
   for (const [key, label] of DATA_FLOW_PANELS) {
     const panel = document.createElement("div");
@@ -8694,13 +8696,13 @@ function renderDataFlow(dataFlow) {
       }
     }
     panel.append(list2);
-    section2.append(panel);
+    section3.append(panel);
   }
   const caveat = document.createElement("p");
   caveat.className = "caveat";
   caveat.textContent = dataFlow.caveat ?? "";
-  section2.append(caveat);
-  return section2;
+  section3.append(caveat);
+  return section3;
 }
 var MEMBER_ORDER_OPTIONS = [
   ["source", "Source order"],
@@ -8811,9 +8813,9 @@ function buildMemberMain(memberMap, view2, data) {
   return main;
 }
 function buildReExportSection(reExports) {
-  const section2 = document.createElement("section");
-  section2.className = "member-type member-reexports";
-  section2.dataset.role = "re-exports";
+  const section3 = document.createElement("section");
+  section3.className = "member-type member-reexports";
+  section3.dataset.role = "re-exports";
   const heading3 = document.createElement("h3");
   heading3.className = "member-type-name";
   heading3.textContent = "Public surface";
@@ -8821,7 +8823,7 @@ function buildReExportSection(reExports) {
   count.className = "member-count";
   count.textContent = `${reExports.length} re-export(s)`;
   heading3.append(count);
-  section2.append(heading3);
+  section3.append(heading3);
   const list2 = document.createElement("ul");
   list2.className = "member-reexports-list";
   for (const entry of reExports) {
@@ -8832,8 +8834,8 @@ function buildReExportSection(reExports) {
     item.textContent = `export ${kind}${name} from '${entry.from}'`;
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function buildMemberInsights(data, memberMap) {
   const insights = document.createElement("aside");
@@ -8973,8 +8975,8 @@ function memberButton(id, text, handler, className = "") {
   return h("button", { key: id, type: "button", id, className: className || void 0, onClick: handler }, text);
 }
 function buildTypeSection(type, view2, clusters, handlers) {
-  const section2 = document.createElement("section");
-  section2.className = "member-type";
+  const section3 = document.createElement("section");
+  section3.className = "member-type";
   const heading3 = document.createElement("h3");
   heading3.className = "member-type-name";
   heading3.textContent = type.name;
@@ -8982,10 +8984,10 @@ function buildTypeSection(type, view2, clusters, handlers) {
   count.className = "member-count";
   count.textContent = `${type.fields.length + type.methods.length} members`;
   heading3.append(count);
-  section2.append(heading3);
+  section3.append(heading3);
   const superTypeLine = buildSuperTypeLine(type);
   if (superTypeLine) {
-    section2.append(superTypeLine);
+    section3.append(superTypeLine);
   }
   const legend = document.createElement("div");
   legend.className = "member-clusters";
@@ -8996,7 +8998,7 @@ function buildTypeSection(type, view2, clusters, handlers) {
     chip.textContent = `cluster ${cluster.index}`;
     legend.append(chip);
   }
-  section2.append(legend);
+  section3.append(legend);
   const find = (view2.find ?? "").trim().toLowerCase();
   let fields = orderMembers(
     type.fields.filter((field2) => matches(field2.name, find) && (!view2.onlyFlow || isWiredField(field2))),
@@ -9007,20 +9009,20 @@ function buildTypeSection(type, view2, clusters, handlers) {
     view2.order
   );
   const relations = memberRelations(type);
-  section2.addEventListener("pointerover", (event) => {
+  section3.addEventListener("pointerover", (event) => {
     const card = event.target.closest?.(".member-card");
-    if (card) traceMember(section2, card);
+    if (card) traceMember(section3, card);
   });
-  section2.addEventListener("pointerout", (event) => {
+  section3.addEventListener("pointerout", (event) => {
     const card = event.target.closest?.(".member-card");
     if (!card) return;
     const next = event.relatedTarget?.closest?.(".member-card");
-    if (next && section2.contains(next)) return;
-    clearTrace(section2);
+    if (next && section3.contains(next)) return;
+    clearTrace(section3);
   });
   const fieldHeading = document.createElement("h4");
   fieldHeading.textContent = `Fields / data (${fields.length})`;
-  section2.append(fieldHeading);
+  section3.append(fieldHeading);
   const fieldList = document.createElement("div");
   fieldList.className = "member-cards";
   fieldList.dataset.role = "fields";
@@ -9030,10 +9032,10 @@ function buildTypeSection(type, view2, clusters, handlers) {
   if (fields.length === 0) {
     fieldList.append(unavailableNote("No fields recorded."));
   }
-  section2.append(fieldList);
+  section3.append(fieldList);
   const methodHeading = document.createElement("h4");
   methodHeading.textContent = `Methods (${methods.length})`;
-  section2.append(methodHeading);
+  section3.append(methodHeading);
   const methodList = document.createElement("div");
   methodList.className = "member-cards";
   methodList.dataset.role = "methods";
@@ -9043,8 +9045,8 @@ function buildTypeSection(type, view2, clusters, handlers) {
   if (methods.length === 0) {
     methodList.append(unavailableNote("No methods recorded."));
   }
-  section2.append(methodList);
-  return section2;
+  section3.append(methodList);
+  return section3;
 }
 function memberRelations(type) {
   const relations = /* @__PURE__ */ new Map();
@@ -9060,11 +9062,11 @@ function memberRelations(type) {
   }
   return relations;
 }
-function traceMember(section2, card) {
+function traceMember(section3, card) {
   const name = card.dataset.member;
   const related = new Set((card.dataset.related ?? "").split(" ").filter(Boolean));
   related.add(name);
-  for (const other of section2.querySelectorAll(".member-card")) {
+  for (const other of section3.querySelectorAll(".member-card")) {
     const member = other.dataset.member;
     other.classList.toggle("trace-unrelated", !related.has(member));
     other.classList.toggle("trace-hit", related.has(member) && member !== name);
@@ -9072,8 +9074,8 @@ function traceMember(section2, card) {
   card.classList.remove("trace-unrelated");
   card.classList.add("trace-source");
 }
-function clearTrace(section2) {
-  for (const card of section2.querySelectorAll(".member-card")) {
+function clearTrace(section3) {
+  for (const card of section3.querySelectorAll(".member-card")) {
     card.classList.remove("trace-unrelated", "trace-hit", "trace-source");
   }
 }
@@ -9082,39 +9084,39 @@ function staggerFor(clusterIndex) {
 }
 function buildFieldCard(field2, clusterIndex, related) {
   const card = fieldCard(field2);
-  const element3 = document.createElement("article");
-  element3.className = "member-card field-card";
-  element3.dataset.member = field2.name;
-  element3.dataset.cluster = String(clusterIndex ?? 0);
-  element3.dataset.related = related ? [...related].join(" ") : "";
-  element3.setAttribute("role", "group");
-  element3.setAttribute("aria-label", card.signature);
-  element3.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element3.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element3.append(cardLine("card-signature", card.signature));
+  const element4 = document.createElement("article");
+  element4.className = "member-card field-card";
+  element4.dataset.member = field2.name;
+  element4.dataset.cluster = String(clusterIndex ?? 0);
+  element4.dataset.related = related ? [...related].join(" ") : "";
+  element4.setAttribute("role", "group");
+  element4.setAttribute("aria-label", card.signature);
+  element4.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element4.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element4.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag !== "unconnected") tag.classList.add("is-wired");
-  element3.append(tag);
-  element3.append(cardLine("card-metrics", card.metrics));
-  return element3;
+  element4.append(tag);
+  element4.append(cardLine("card-metrics", card.metrics));
+  return element4;
 }
 function buildMethodCard(method, clusterIndex, related) {
   const card = methodCard(method);
-  const element3 = document.createElement("article");
-  element3.className = "member-card method-card";
-  element3.dataset.member = method.name;
-  element3.dataset.cluster = String(clusterIndex ?? 0);
-  element3.dataset.related = related ? [...related].join(" ") : "";
-  element3.setAttribute("role", "group");
-  element3.setAttribute("aria-label", card.signature);
-  element3.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
-  element3.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
-  element3.append(cardLine("card-signature", card.signature));
+  const element4 = document.createElement("article");
+  element4.className = "member-card method-card";
+  element4.dataset.member = method.name;
+  element4.dataset.cluster = String(clusterIndex ?? 0);
+  element4.dataset.related = related ? [...related].join(" ") : "";
+  element4.setAttribute("role", "group");
+  element4.setAttribute("aria-label", card.signature);
+  element4.style.setProperty("--cluster-stagger", String(staggerFor(clusterIndex)));
+  element4.append(cardLine("card-eyebrow", `${card.eyebrow} \xB7 CLUSTER ${clusterIndex ?? "\u2014"}`));
+  element4.append(cardLine("card-signature", card.signature));
   const tag = cardLine("card-tag", card.tag);
   if (card.tag === "wired") tag.classList.add("is-wired");
-  element3.append(tag);
-  element3.append(cardLine("card-metrics", card.metrics));
-  return element3;
+  element4.append(tag);
+  element4.append(cardLine("card-metrics", card.metrics));
+  return element4;
 }
 function cardLine(className, text) {
   const span = document.createElement("span");
@@ -9325,22 +9327,22 @@ function truncateLabel(label, max) {
   return label.length > max ? `${label.slice(0, max - 1)}\u2026` : label;
 }
 function buildDataFlow(memberMap, consumerIds) {
-  const section2 = document.createElement("section");
-  section2.className = "member-dataflow";
-  section2.dataset.role = "data-flow";
+  const section3 = document.createElement("section");
+  section3.className = "member-dataflow";
+  section3.dataset.role = "data-flow";
   const title = document.createElement("h4");
   title.textContent = "Data flow";
-  section2.append(title);
+  section3.append(title);
   const flow = memberMap?.dataFlow;
   if (!flow || flow.available === false) {
     const note4 = unavailableNote(`Wiring not recorded: ${flow?.detail ?? "not recorded by the scan."}`);
     note4.dataset.role = "flow-unavailable";
-    section2.append(note4);
-    return section2;
+    section3.append(note4);
+    return section3;
   }
   const diagram = buildFlowDiagram(memberMap);
   if (diagram) {
-    section2.append(diagram);
+    section3.append(diagram);
   }
   const row = document.createElement("div");
   row.className = "flow-row";
@@ -9388,17 +9390,17 @@ function buildDataFlow(memberMap, consumerIds) {
   }
   right.append(external);
   row.append(right);
-  section2.append(row);
+  section3.append(row);
   const caveat = document.createElement("p");
   caveat.className = "caveat";
   caveat.textContent = flow.caveat ?? "";
-  section2.append(caveat);
-  return section2;
+  section3.append(caveat);
+  return section3;
 }
 function buildHealth(report, metrics) {
-  const section2 = document.createElement("section");
-  section2.className = "member-health";
-  section2.dataset.role = "health";
+  const section3 = document.createElement("section");
+  section3.className = "member-health";
+  section3.dataset.role = "health";
   const title = document.createElement("h4");
   title.textContent = "Architecture health";
   if (report?.score !== void 0 && report?.score !== null) {
@@ -9407,7 +9409,7 @@ function buildHealth(report, metrics) {
     score.textContent = `${report.score}/100`;
     title.append(score);
   }
-  section2.append(title);
+  section3.append(title);
   if (metrics) {
     const line = document.createElement("p");
     line.className = "health-metrics";
@@ -9421,11 +9423,11 @@ function buildHealth(report, metrics) {
       parts.push(`${metrics.reExports} re-exported module(s)`);
     }
     line.textContent = parts.join(" \xB7 ");
-    section2.append(line);
+    section3.append(line);
   }
   if (!report || !Array.isArray(report.axes) || report.axes.length === 0) {
-    section2.append(unavailableNote("Health was not computed for this repository."));
-    return section2;
+    section3.append(unavailableNote("Health was not computed for this repository."));
+    return section3;
   }
   const svg = svgElement("svg", { viewBox: "0 0 144 144", class: "radar" });
   const frame = svgElement("polygon", {
@@ -9441,7 +9443,7 @@ function buildHealth(report, metrics) {
   for (const point of radarPoints(report.axes)) {
     svg.append(svgElement("circle", { cx: point.x, cy: point.y, r: "2.5", class: "radar-dot" }));
   }
-  section2.append(svg);
+  section3.append(svg);
   const list2 = document.createElement("ul");
   list2.className = "health-axes";
   for (const axis of report.axes) {
@@ -9449,16 +9451,16 @@ function buildHealth(report, metrics) {
     item.textContent = axis.value === null ? `${axis.label} unavailable` : `${axis.label} ${axis.value}%`;
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function buildConstellation(memberMap, consumerIds) {
-  const section2 = document.createElement("section");
-  section2.className = "member-constellation";
-  section2.dataset.role = "constellation";
+  const section3 = document.createElement("section");
+  section3.className = "member-constellation";
+  section3.dataset.role = "constellation";
   const title = document.createElement("h4");
   title.textContent = "Dependency constellation";
-  section2.append(title);
+  section3.append(title);
   const placed = constellationLayout(
     constellationPoints(memberMap, consumerIds ? consumerIds.length : 0)
   );
@@ -9473,12 +9475,12 @@ function buildConstellation(memberMap, consumerIds) {
       })
     );
   }
-  section2.append(svg);
+  section3.append(svg);
   const caption = document.createElement("p");
   caption.className = "caveat";
   caption.textContent = "Fields, methods, and repository consumers are shown when current scan data provides them.";
-  section2.append(caption);
-  return section2;
+  section3.append(caption);
+  return section3;
 }
 
 // ui/strabo-data.js
@@ -9614,9 +9616,9 @@ function contractRows2(report) {
 
 // ui/strabo-panel-products.js
 function heading(text, count) {
-  const element3 = document.createElement("h4");
-  element3.textContent = `${text} (${count})`;
-  return element3;
+  const element4 = document.createElement("h4");
+  element4.textContent = `${text} (${count})`;
+  return element4;
 }
 function unavailable(text) {
   const note4 = document.createElement("p");
@@ -9625,15 +9627,15 @@ function unavailable(text) {
   return note4;
 }
 function list(className, rows, fill) {
-  const element3 = document.createElement("ul");
-  element3.className = className;
+  const element4 = document.createElement("ul");
+  element4.className = className;
   for (const row of rows) {
     const item = document.createElement("li");
     item.className = "data-row";
     fill(item, row);
-    element3.append(item);
+    element4.append(item);
   }
-  return element3;
+  return element4;
 }
 function renderProducts(container, report, handlers = {}) {
   container.replaceChildren();
@@ -9666,8 +9668,8 @@ function renderProductCards(container, report, handlers) {
     container.append(unavailable("No data product declared. A candidate below is evidence, not a product."));
     return;
   }
-  const element3 = document.createElement("ul");
-  element3.className = "product-cards";
+  const element4 = document.createElement("ul");
+  element4.className = "product-cards";
   for (const product of products) {
     const item = document.createElement("li");
     item.className = "product-card";
@@ -9713,9 +9715,9 @@ function renderProductCards(container, report, handlers) {
         item.append(open);
       }
     }
-    element3.append(item);
+    element4.append(item);
   }
-  container.append(element3);
+  container.append(element4);
 }
 function renderCandidates(container, report, handlers) {
   const rows = candidateRows(report);
@@ -9773,8 +9775,8 @@ function renderEr(container, report, handlers) {
     return;
   }
   const entities = entityRows(report);
-  const element3 = document.createElement("ul");
-  element3.className = "er-view";
+  const element4 = document.createElement("ul");
+  element4.className = "er-view";
   for (const dataset of datasets) {
     const item = document.createElement("li");
     item.className = "er-table";
@@ -9811,9 +9813,9 @@ function renderEr(container, report, handlers) {
       open.addEventListener("click", () => handlers.onSelect(dataset.dataset));
       item.append(open);
     }
-    element3.append(item);
+    element4.append(item);
   }
-  container.append(element3);
+  container.append(element4);
 }
 function renderContracts(container, report) {
   const rows = contractRows2(report);
@@ -10616,15 +10618,15 @@ function impactCard(card, totals, approximate = false) {
   return wrapper;
 }
 function impactList(title, entries, role) {
-  const section2 = document.createElement("div");
-  section2.className = "impact-list";
+  const section3 = document.createElement("div");
+  section3.className = "impact-list";
   const heading3 = document.createElement("h5");
   heading3.textContent = title;
-  section2.append(heading3);
+  section3.append(heading3);
   if (entries.length === 0) {
-    section2.append(unavailableNote("None recorded."));
-    section2.dataset.role = role;
-    return section2;
+    section3.append(unavailableNote("None recorded."));
+    section3.dataset.role = role;
+    return section3;
   }
   const list2 = document.createElement("ul");
   list2.dataset.role = role;
@@ -10641,8 +10643,8 @@ function impactList(title, entries, role) {
     }
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function impactFileRow(file, handlers) {
   const item = document.createElement("li");
@@ -10827,17 +10829,17 @@ function renderRisk(container, report, handlers = {}) {
 
 // ui/strabo-panel-review.js
 function renderContractImpact(container, impacts) {
-  const section2 = document.createElement("div");
-  section2.dataset.role = "contract-impact";
+  const section3 = document.createElement("div");
+  section3.dataset.role = "contract-impact";
   const heading3 = document.createElement("h4");
   heading3.textContent = "Contract Impact";
-  section2.append(heading3);
+  section3.append(heading3);
   const list2 = Array.isArray(impacts) ? impacts : [];
   if (list2.length === 0) {
     const note4 = document.createElement("p");
     note4.className = "unavailable";
     note4.textContent = "No edited file defines a recorded contract.";
-    section2.append(note4);
+    section3.append(note4);
   } else {
     const items = document.createElement("ul");
     for (const impact of list2.slice(0, 50)) {
@@ -10846,9 +10848,9 @@ function renderContractImpact(container, impacts) {
       item.textContent = `${impact.contract} \xB7 ${impact.severity} \xB7 ${(impact.changes ?? []).length} field change(s) \xB7 consumers: ${consumers}`;
       items.append(item);
     }
-    section2.append(items);
+    section3.append(items);
   }
-  container.append(section2);
+  container.append(section3);
 }
 function renderReviewLoading(container, handlers = {}) {
   container.replaceChildren();
@@ -10918,11 +10920,11 @@ function renderScopeFence(container, scopeFence) {
   if (scopeFence === void 0) {
     return;
   }
-  const section2 = document.createElement("section");
-  section2.dataset.role = "review-scope-fence";
+  const section3 = document.createElement("section");
+  section3.dataset.role = "review-scope-fence";
   const heading3 = document.createElement("h3");
   heading3.textContent = "Scope fence";
-  section2.append(heading3);
+  section3.append(heading3);
   for (const group of scopeFenceGroups(scopeFence)) {
     const list2 = document.createElement("ul");
     list2.dataset.role = `review-scope-fence-${group.key}`;
@@ -10931,9 +10933,9 @@ function renderScopeFence(container, scopeFence) {
       entry.textContent = item;
       list2.append(entry);
     }
-    section2.append(list2);
+    section3.append(list2);
   }
-  container.append(section2);
+  container.append(section3);
 }
 function renderStructuralDiff(container, structural) {
   const heading3 = document.createElement("h4");
@@ -11501,29 +11503,29 @@ function renderOverlayPanel(container, title, overlay2, options = {}) {
     const actions = document.createElement("div");
     actions.className = "overlay-actions";
     for (const action of options.actions) {
-      const actionButton = document.createElement("button");
-      actionButton.type = "button";
-      actionButton.className = "overlay-action";
-      actionButton.textContent = action.label;
+      const actionButton2 = document.createElement("button");
+      actionButton2.type = "button";
+      actionButton2.className = "overlay-action";
+      actionButton2.textContent = action.label;
       if (action.title) {
-        actionButton.title = action.title;
+        actionButton2.title = action.title;
       }
       if (action.disabled) {
-        actionButton.disabled = true;
+        actionButton2.disabled = true;
       }
-      actionButton.addEventListener("click", () => action.onClick?.());
-      actions.append(actionButton);
+      actionButton2.addEventListener("click", () => action.onClick?.());
+      actions.append(actionButton2);
     }
     container.append(actions);
   }
 }
 function renderTierImports(imports, weight, handlers) {
-  const section2 = document.createElement("div");
-  section2.className = "tier-imports";
-  section2.dataset.role = "tier-imports";
+  const section3 = document.createElement("div");
+  section3.className = "tier-imports";
+  section3.dataset.role = "tier-imports";
   const heading3 = document.createElement("h4");
   heading3.textContent = "Imports";
-  section2.append(heading3);
+  section3.append(heading3);
   const ordered = [...imports].sort((a, b2) => Number(a.typeOnly === true) - Number(b2.typeOnly === true));
   const list2 = document.createElement("ul");
   for (const entry of ordered) {
@@ -11549,14 +11551,14 @@ function renderTierImports(imports, weight, handlers) {
     }
     list2.append(item);
   }
-  section2.append(list2);
+  section3.append(list2);
   if (typeof weight === "number" && weight > imports.length) {
     const more = document.createElement("p");
     more.className = "overlay-note";
     more.textContent = `${weight - imports.length} more not listed.`;
-    section2.append(more);
+    section3.append(more);
   }
-  return section2;
+  return section3;
 }
 function flowAccessLabel(kind) {
   return {
@@ -11568,12 +11570,12 @@ function flowAccessLabel(kind) {
   }[kind] ?? kind;
 }
 function renderFlowEvidence(evidence, handlers) {
-  const section2 = document.createElement("div");
-  section2.className = "flow-evidence";
-  section2.dataset.role = "flow-evidence";
+  const section3 = document.createElement("div");
+  section3.className = "flow-evidence";
+  section3.dataset.role = "flow-evidence";
   const heading3 = document.createElement("h4");
   heading3.textContent = "Recorded access";
-  section2.append(heading3);
+  section3.append(heading3);
   const list2 = document.createElement("ul");
   for (const entry of evidence) {
     const item = document.createElement("li");
@@ -11591,8 +11593,8 @@ function renderFlowEvidence(evidence, handlers) {
     item.append(open, document.createTextNode(` \u2192 ${entry.detail}`));
     list2.append(item);
   }
-  section2.append(list2);
-  return section2;
+  section3.append(list2);
+  return section3;
 }
 function renderEdgeEvidence(container, evidence, handlers = {}) {
   if (!evidence) {
@@ -12221,13 +12223,13 @@ function isLineSymbol(symbol) {
   return LEGEND_LINE_SYMBOLS.has(symbol) || symbol.startsWith("edge");
 }
 function legendSection(title, rows) {
-  const section2 = document.createElement("section");
-  section2.className = "legend-section";
+  const section3 = document.createElement("section");
+  section3.className = "legend-section";
   const heading3 = document.createElement("h4");
   heading3.className = "legend-heading";
   heading3.textContent = title;
-  section2.append(heading3, ...rows);
-  return section2;
+  section3.append(heading3, ...rows);
+  return section3;
 }
 function legendCue(cue) {
   return legendRow(cueMark(cue.symbol, cue.text), cue.symbol, ` = ${cue.meaning}`, LEGEND_HINTS[cue.text] ?? "");
@@ -13428,11 +13430,11 @@ function button2(text, onClick) {
   return control;
 }
 function lockedNote(envVar, what) {
-  const element3 = document.createElement("span");
-  element3.className = "setting-locked";
-  element3.textContent = `set by ${envVar}`;
-  element3.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
-  return element3;
+  const element4 = document.createElement("span");
+  element4.className = "setting-locked";
+  element4.textContent = `set by ${envVar}`;
+  element4.title = `${what ?? "This value"} is set by ${envVar} and cannot be overridden here.`;
+  return element4;
 }
 function narratorSection(handlers = {}) {
   const group = section("Narrator");
@@ -14016,6 +14018,7 @@ function queryElements(doc = document) {
     passportPanel: doc.getElementById("passport-panel"),
     routePanel: doc.getElementById("route-panel"),
     blocksPanel: doc.getElementById("blocks-panel"),
+    sandboxPanel: doc.getElementById("sandbox-panel"),
     coveragePanel: doc.getElementById("coverage-panel"),
     productsPanel: doc.getElementById("products-panel"),
     sourcePanel: doc.getElementById("source-panel"),
@@ -16170,16 +16173,16 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
     )
   );
   for (const unit of route.units ?? []) {
-    const section2 = document.createElement("section");
-    section2.className = "route-unit";
-    section2.dataset.role = "route-unit";
-    section2.dataset.unit = unit.summary?.id ?? "";
+    const section3 = document.createElement("section");
+    section3.className = "route-unit";
+    section3.dataset.role = "route-unit";
+    section3.dataset.unit = unit.summary?.id ?? "";
     const unitName = unit.summary?.name ?? unit.summary?.id ?? "unit";
-    section2.append(
+    section3.append(
       heading2("h4", `${unitName} \u2014 ${unit.files.length} file(s)`)
     );
     if (unit.summary?.roleEvidence) {
-      section2.append(note3(unit.summary.roleEvidence, "route-unit-why"));
+      section3.append(note3(unit.summary.roleEvidence, "route-unit-why"));
     }
     for (const step of unit.files ?? []) {
       const row = document.createElement("button");
@@ -16192,7 +16195,7 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
       }
       row.textContent = routeStepLabel(step);
       row.addEventListener("click", () => handlers.onStep?.(routeIndexOf(route, step.file)));
-      section2.append(row);
+      section3.append(row);
     }
     if ((unit.unreached ?? []).length > 0) {
       const unreached = document.createElement("details");
@@ -16208,9 +16211,9 @@ function renderRoutePanel(container, route, state2 = {}, handlers = {}) {
         row.textContent = `${entry.file} \xB7 ${entry.fanIn} importer(s) \xB7 ${entry.tier}`;
         unreached.append(row);
       }
-      section2.append(unreached);
+      section3.append(unreached);
     }
-    container.append(section2);
+    container.append(section3);
   }
   if (handlers.onNarrateTour) {
     appendNarratorBlock(
@@ -16493,6 +16496,644 @@ function createRepositoryPanels(app2) {
   };
 }
 
+// ui/strabo-sandbox.js
+var SANDBOX_OPERATIONS = {
+  cut: { label: "Cut import", fields: ["source", "target"] },
+  add: { label: "Add import", fields: ["source", "target"] },
+  move: { label: "Move path", fields: ["from", "to"] }
+};
+var SANDBOX_LIST_LIMIT = 12;
+function trimPath(value) {
+  return String(value ?? "").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+}
+function normaliseOperation(op) {
+  const spec = SANDBOX_OPERATIONS[op?.op];
+  if (!spec) {
+    return null;
+  }
+  const [first, second] = spec.fields;
+  const a = trimPath(op[first]);
+  const b2 = trimPath(op[second]);
+  if (!a || !b2) {
+    return null;
+  }
+  return { op: op.op, [first]: a, [second]: b2 };
+}
+function operationKey(op) {
+  return JSON.stringify(op);
+}
+function addOperation(operations, op) {
+  const normalised = normaliseOperation(op);
+  if (!normalised) {
+    return operations;
+  }
+  const key = operationKey(normalised);
+  return operations.some((existing) => operationKey(existing) === key) ? operations : [...operations, normalised];
+}
+function removeOperation(operations, index) {
+  return operations.filter((_2, position) => position !== index);
+}
+function describeOperation(op) {
+  if (op?.op === "move") {
+    return `move ${op.from} \u2192 ${op.to}`;
+  }
+  return `${op?.op ?? "?"} ${op?.source ?? "?"} \u2192 ${op?.target ?? "?"}`;
+}
+function whatIfHeadline(result) {
+  const counts = result?.counts;
+  if (!counts) {
+    return [];
+  }
+  const facts = [
+    ["cycles introduced", counts.cyclesIntroduced],
+    ["cycles resolved", counts.cyclesResolved],
+    ["wrong-way tier edges introduced", counts.tierIntroduced],
+    ["wrong-way tier edges resolved", counts.tierResolved],
+    ["rule violations introduced", counts.rulesIntroduced],
+    ["rule violations resolved", counts.rulesResolved],
+    ["files tests would stop reaching", counts.newlyUnreached]
+  ];
+  return facts.map(([label, value]) => ({ label, value: value ?? 0 }));
+}
+function whatIfClasses(result) {
+  const classes = /* @__PURE__ */ new Map();
+  const original = new Map((result?.moved ?? []).map((entry) => [entry.to, entry.from]));
+  const recorded = (id) => original.get(id) ?? id;
+  for (const entry of result?.applied ?? []) {
+    const op = entry.operation;
+    if (op?.op === "move") {
+      for (const moved of result.moved ?? []) {
+        if (moved.from === op.from || moved.from.startsWith(`${op.from}/`)) classes.set(moved.from, "ov-changed");
+      }
+    } else if (op) {
+      classes.set(recorded(op.source), "ov-changed");
+      classes.set(recorded(op.target), "ov-changed");
+    }
+  }
+  for (const file of result?.newlyUnreached ?? []) classes.set(recorded(file), "ov-unreached");
+  for (const violation of result?.rules?.introduced ?? []) {
+    classes.set(recorded(violation.edge.source), "ov-declared-rule");
+    classes.set(recorded(violation.edge.target), "ov-declared-rule");
+  }
+  for (const cycle of result?.cyclesIntroduced ?? []) {
+    for (const member of cycle.members ?? []) classes.set(recorded(member), "ov-cycle");
+  }
+  return classes;
+}
+function extractionClasses(plan) {
+  const classes = /* @__PURE__ */ new Map();
+  for (const file of plan?.files ?? []) classes.set(file, "ov-changed");
+  for (const entry of plan?.dependencies ?? []) classes.set(entry.file, "ov-affected");
+  for (const cycle of plan?.boundaryCycles ?? []) {
+    for (const member of [...cycle.inside ?? [], ...cycle.outside ?? []]) classes.set(member, "ov-cycle");
+  }
+  return classes;
+}
+function whatIfEvidence(operations, result) {
+  const evidence = operations.map((op) => `planned edit: ${describeOperation(op)}`);
+  if (!result) {
+    return evidence;
+  }
+  for (const fact of whatIfHeadline(result)) {
+    evidence.push(`hypothetical ${fact.label}: ${fact.value}`);
+  }
+  for (const cycle of (result.cyclesIntroduced ?? []).slice(0, 5)) {
+    evidence.push(`cycle introduced: ${cycle.members.join(" \u2194 ")}`);
+  }
+  for (const direction of (result.tiers?.introduced ?? []).slice(0, 10)) {
+    evidence.push(`wrong-way tier edge introduced: ${direction.source} \u2192 ${direction.target} (${direction.kind})`);
+  }
+  for (const violation of (result.rules?.introduced ?? []).slice(0, 10)) {
+    evidence.push(`rule violation introduced: ${violation.detail}`);
+  }
+  for (const entry of (result.reach ?? []).filter((row) => row.before !== row.after).slice(0, 10)) {
+    evidence.push(`blast radius of ${entry.file}: ${entry.before} \u2192 ${entry.after}`);
+  }
+  for (const entry of result.rejected ?? []) {
+    evidence.push(`not applied: ${entry.reason}`);
+  }
+  return evidence;
+}
+function extractionEvidence(plan) {
+  if (!plan) {
+    return [];
+  }
+  const evidence = [`extract: ${plan.include.join(", ")} (${plan.summary.files} files)`];
+  for (const entry of plan.dependencies.slice(0, 20)) {
+    evidence.push(
+      `imports outside: ${entry.file} \u2014 used by ${entry.importedBy.length} selected file(s), would pull ${entry.pulls} more, shared with ${entry.usedOutside} outside file(s)${entry.typeOnly ? ", type-only" : ""}`
+    );
+  }
+  for (const entry of plan.dependents.slice(0, 20)) {
+    evidence.push(`imported from outside: ${entry.file} \u2014 by ${entry.importers.join(", ")}`);
+  }
+  for (const cycle of plan.boundaryCycles) {
+    evidence.push(`cycle across the boundary: ${[...cycle.inside, ...cycle.outside].join(" \u2194 ")}`);
+  }
+  for (const crossing of plan.stringCrossings.slice(0, 10)) {
+    evidence.push(`${crossing.kind} ${crossing.key} is used on both sides`);
+  }
+  if (plan.externalPackages.length > 0) {
+    evidence.push(`external packages: ${plan.externalPackages.map((entry) => entry.package).join(", ")}`);
+  }
+  evidence.push(`not covered: ${plan.notCovered.join("; ")}`);
+  return evidence;
+}
+function element3(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== void 0) node.textContent = text;
+  return node;
+}
+function actionButton(role, text, handler, disabled = false) {
+  const node = element3("button", `sandbox-${role}`, text);
+  node.type = "button";
+  node.dataset.role = `sandbox-${role}`;
+  node.disabled = disabled;
+  node.addEventListener("click", handler);
+  return node;
+}
+function section2(title, rows, render, role) {
+  const wrapper = element3("section", "sandbox-section");
+  if (role) wrapper.dataset.role = role;
+  wrapper.append(element3("h4", null, `${title} (${rows.length})`));
+  if (rows.length === 0) {
+    wrapper.append(element3("p", "overlay-note", "None."));
+    return wrapper;
+  }
+  const list2 = element3("ul", "sandbox-list");
+  for (const row of rows.slice(0, SANDBOX_LIST_LIMIT)) {
+    const item = element3("li");
+    render(item, row);
+    list2.append(item);
+  }
+  wrapper.append(list2);
+  if (rows.length > SANDBOX_LIST_LIMIT) {
+    wrapper.append(element3("p", "overlay-note", `\u2026and ${rows.length - SANDBOX_LIST_LIMIT} more.`));
+  }
+  return wrapper;
+}
+function fileLink(file, handlers) {
+  const link = element3("button", "sandbox-file", file);
+  link.type = "button";
+  link.title = `Select ${file} on the map`;
+  link.addEventListener("click", () => handlers.onFocus?.(file));
+  return link;
+}
+function renderTabs(container, model, handlers) {
+  const tabs = element3("div", "sandbox-tabs");
+  tabs.setAttribute("role", "tablist");
+  for (const [key, label] of [["what-if", "What-if"], ["extraction", "Extraction"]]) {
+    const tab = actionButton(`tab-${key}`, label, () => handlers.onTab?.(key));
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(model.tab === key));
+    tabs.append(tab);
+  }
+  container.append(tabs);
+}
+function renderEditForm(container, model, handlers) {
+  const form = element3("form", "sandbox-form");
+  form.dataset.role = "sandbox-form";
+  const select = element3("select");
+  select.name = "op";
+  select.setAttribute("aria-label", "Edit");
+  for (const [key, spec] of Object.entries(SANDBOX_OPERATIONS)) {
+    const option = element3("option", null, spec.label);
+    option.value = key;
+    option.selected = key === (model.draft?.op ?? "cut");
+    select.append(option);
+  }
+  const first = element3("input");
+  first.name = "first";
+  const second = element3("input");
+  second.name = "second";
+  const placeholders = () => {
+    const isMove = select.value === "move";
+    first.placeholder = isMove ? "from (file or directory)" : "source file";
+    second.placeholder = isMove ? "to (new path)" : "target file";
+    first.setAttribute("aria-label", first.placeholder);
+    second.setAttribute("aria-label", second.placeholder);
+  };
+  placeholders();
+  select.addEventListener("change", placeholders);
+  first.value = model.draft?.first ?? "";
+  second.value = model.draft?.second ?? "";
+  const submit2 = element3("button", "sandbox-add", "Add edit");
+  submit2.type = "submit";
+  submit2.dataset.role = "sandbox-add";
+  form.append(select, first, second, submit2);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const [a, b2] = SANDBOX_OPERATIONS[select.value].fields;
+    handlers.onAdd?.({ op: select.value, [a]: first.value, [b2]: second.value });
+  });
+  container.append(form);
+  if (model.draft?.focus === "second") {
+    queueMicrotask(() => second.focus());
+  }
+}
+function renderWhatIf(container, model, handlers) {
+  container.append(
+    element3(
+      "p",
+      "overlay-note",
+      "Edits apply to a copy of the recorded graph; nothing is written. Right-click a file or an import on the map to add one."
+    )
+  );
+  renderEditForm(container, model, handlers);
+  const edits = element3("ol", "sandbox-edits");
+  edits.dataset.role = "sandbox-edits";
+  model.operations.forEach((op, index) => {
+    const item = element3("li", null, describeOperation(op));
+    const remove = actionButton("remove", "\xD7", () => handlers.onRemove?.(index));
+    remove.title = "Remove this edit";
+    remove.setAttribute("aria-label", `Remove ${describeOperation(op)}`);
+    item.append(" ", remove);
+    edits.append(item);
+  });
+  if (model.operations.length === 0) {
+    container.append(element3("p", "overlay-note", "No edits yet."));
+  } else {
+    container.append(edits);
+  }
+  const controls = element3("div", "sandbox-controls");
+  controls.append(
+    actionButton("clear", "Clear", () => handlers.onClear?.(), model.operations.length === 0),
+    actionButton("delegate", "Delegate to an agent\u2026", (event) => handlers.onDelegate?.(event), model.operations.length === 0)
+  );
+  container.append(controls);
+  if (model.error) {
+    container.append(element3("p", "unavailable", model.error));
+    return;
+  }
+  if (model.busy) {
+    container.append(element3("p", "overlay-note", "Simulating\u2026"));
+    return;
+  }
+  const result = model.result;
+  if (!result) {
+    return;
+  }
+  const results = element3("div", "sandbox-results");
+  results.dataset.role = "sandbox-results";
+  results.append(element3("p", "sandbox-hypothetical", "Hypothetical \u2014 what the edited graph would record"));
+  const facts = element3("dl", "sandbox-facts");
+  for (const fact of whatIfHeadline(result)) {
+    const dt2 = element3("dt", null, fact.label);
+    const dd = element3("dd", fact.value > 0 ? "sandbox-nonzero" : null, String(fact.value));
+    facts.append(dt2, dd);
+  }
+  results.append(facts);
+  if ((result.rejected ?? []).length > 0) {
+    results.append(
+      section2("Not applied", result.rejected, (item, row) => {
+        item.textContent = `${row.operation ? describeOperation(row.operation) : "request"} \u2014 ${row.reason}`;
+      }, "sandbox-rejected")
+    );
+  }
+  results.append(
+    section2("Cycles introduced", result.cyclesIntroduced ?? [], (item, cycle) => {
+      item.textContent = `${cycle.members.length} files: ${cycle.members.join(" \u2194 ")}`;
+    }, "sandbox-cycles-introduced"),
+    section2("Cycles resolved", result.cyclesResolved ?? [], (item, cycle) => {
+      item.textContent = cycle.members.join(" \u2194 ");
+    }, "sandbox-cycles-resolved")
+  );
+  if (result.tiers?.available) {
+    results.append(
+      section2("Wrong-way tier edges introduced", result.tiers.introduced, (item, direction) => {
+        item.textContent = `${direction.source} \u2192 ${direction.target} (${direction.kind}, ${direction.sourceTier} \u2192 ${direction.targetTier})`;
+      }),
+      section2("Wrong-way tier edges resolved", result.tiers.resolved, (item, direction) => {
+        item.textContent = `${direction.source} \u2192 ${direction.target} (${direction.kind})`;
+      })
+    );
+  } else {
+    results.append(element3("p", "unavailable", `Tier directions unavailable: ${result.tiers?.reason ?? "not recorded"}.`));
+  }
+  if (result.rules?.available) {
+    results.append(
+      section2("Rule violations introduced", result.rules.introduced, (item, violation) => {
+        item.textContent = violation.detail;
+      }),
+      section2("Rule violations resolved", result.rules.resolved, (item, violation) => {
+        item.textContent = violation.detail;
+      })
+    );
+  } else {
+    results.append(element3("p", "overlay-note", `Declared rules: ${result.rules?.reason ?? "not recorded"}.`));
+  }
+  results.append(
+    section2("Files tests would stop reaching", result.newlyUnreached ?? [], (item, file) => {
+      item.append(fileLink(file, handlers));
+    }),
+    section2("Blast radius of touched files", result.reach ?? [], (item, row) => {
+      item.append(fileLink(row.file, handlers), ` ${row.before} \u2192 ${row.after} dependents`);
+      if (row.after > row.before) item.classList.add("sandbox-grew");
+    }, "sandbox-reach")
+  );
+  if (result.reachTruncated > 0) {
+    results.append(element3("p", "overlay-note", `${result.reachTruncated} more touched file(s) not measured.`));
+  }
+  container.append(results);
+}
+function renderExtraction(container, model, handlers) {
+  container.append(
+    element3(
+      "p",
+      "overlay-note",
+      "Name what to extract (comma-separated globs; a directory means everything under it). The plan names each cost; it does not choose."
+    )
+  );
+  const form = element3("form", "sandbox-form");
+  form.dataset.role = "sandbox-extract-form";
+  const input = element3("input");
+  input.name = "include";
+  input.placeholder = "src/words, src/shared/words-*.ts";
+  input.setAttribute("aria-label", "Files to extract");
+  input.value = model.include ?? "";
+  const submit2 = element3("button", "sandbox-plan", "Plan extraction");
+  submit2.type = "submit";
+  submit2.dataset.role = "sandbox-plan";
+  form.append(input, submit2);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handlers.onPlan?.(input.value);
+  });
+  container.append(form);
+  if (model.planError) {
+    container.append(element3("p", "unavailable", model.planError));
+    return;
+  }
+  if (model.planBusy) {
+    container.append(element3("p", "overlay-note", "Planning\u2026"));
+    return;
+  }
+  const plan = model.plan;
+  if (!plan) {
+    return;
+  }
+  const results = element3("div", "sandbox-results");
+  results.dataset.role = "sandbox-plan-results";
+  if (plan.unmatched.length > 0) {
+    results.append(element3("p", "unavailable", `Matched no scanned file: ${plan.unmatched.join(", ")}`));
+  }
+  const facts = element3("dl", "sandbox-facts");
+  for (const [label, value] of [
+    ["selected files", plan.summary.files],
+    ["outside files it imports", plan.summary.dependencies],
+    ["selected files imported from outside", plan.summary.dependents],
+    ["take-everything closure", plan.summary.closure],
+    ["cycles across the boundary", plan.summary.boundaryCycles],
+    ["env / route / flag keys on both sides", plan.summary.stringCrossings]
+  ]) {
+    facts.append(element3("dt", null, label), element3("dd", null, String(value)));
+  }
+  results.append(facts);
+  results.append(
+    element3(
+      "p",
+      plan.summary.selfContained ? "sandbox-verdict sandbox-ok" : "sandbox-verdict",
+      plan.summary.selfContained ? "Self-contained: it imports nothing outside itself." : "Not self-contained: cut or take along each outside import below."
+    )
+  );
+  results.append(
+    section2("Cycles across the boundary", plan.boundaryCycles, (item, cycle) => {
+      item.textContent = `inside ${cycle.inside.join(", ")} \u2194 outside ${cycle.outside.join(", ")}`;
+    }, "sandbox-boundary-cycles"),
+    section2("Outside files it imports \u2014 cut, or take along", plan.dependencies, (item, entry) => {
+      item.append(
+        fileLink(entry.file, handlers),
+        ` \xB7 used by ${entry.importedBy.length} \xB7 pulls ${entry.pulls} more \xB7 shared with ${entry.usedOutside}${entry.typeOnly ? " \xB7 type-only" : ""}`
+      );
+      item.title = entry.evidence.map((row) => `${row.source}:${row.line} ${row.specifier}`).join("\n");
+    }, "sandbox-dependencies"),
+    section2("Selected files imported from outside \u2014 repoint", plan.dependents, (item, entry) => {
+      item.append(fileLink(entry.file, handlers), ` \xB7 by ${entry.importers.length}: ${entry.importers.join(", ")}`);
+    }, "sandbox-dependents"),
+    section2("Keys used on both sides", plan.stringCrossings, (item, crossing) => {
+      item.textContent = `${crossing.kind} ${crossing.key}`;
+    }),
+    section2("External packages it imports", plan.externalPackages, (item, entry) => {
+      item.textContent = `${entry.package} (${entry.ecosystem}) \xB7 ${entry.files.length} file(s)`;
+    })
+  );
+  if (!plan.stringEdges.available) {
+    results.append(element3("p", "overlay-note", `String edges not read: ${plan.stringEdges.reason ?? "unavailable"}.`));
+  }
+  results.append(element3("p", "overlay-note", `Not covered: ${plan.notCovered.join("; ")}.`));
+  const controls = element3("div", "sandbox-controls");
+  controls.append(actionButton("delegate-plan", "Delegate to an agent\u2026", (event) => handlers.onDelegatePlan?.(event)));
+  results.append(controls);
+  container.append(results);
+}
+function renderSandboxPanel(container, model, handlers = {}) {
+  container.replaceChildren();
+  container.append(element3("h3", null, "Refactor sandbox"));
+  renderTabs(container, model, handlers);
+  const body = element3("div", "sandbox-body");
+  if (model.tab === "extraction") {
+    renderExtraction(body, model, handlers);
+  } else {
+    renderWhatIf(body, model, handlers);
+  }
+  container.append(body);
+}
+
+// ui/strabo-sandbox-controller.js
+function createSandbox(app2) {
+  const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
+  const model = {
+    tab: "what-if",
+    operations: [],
+    draft: null,
+    result: null,
+    busy: false,
+    error: "",
+    include: "",
+    plan: null,
+    planBusy: false,
+    planError: ""
+  };
+  let pendingSource = null;
+  let generation = 0;
+  function repositoryQuery() {
+    return state2.repository ? `&repository=${encodeURIComponent(state2.repository)}` : "";
+  }
+  function render() {
+    renderSandboxPanel(elements2.sandboxPanel, model, {
+      onTab: (tab) => {
+        model.tab = tab;
+        render();
+        paint();
+      },
+      onAdd: (op) => edit(addOperation(model.operations, op)),
+      onRemove: (index) => edit(removeOperation(model.operations, index)),
+      onClear: () => edit([]),
+      onFocus: (file) => focusFile(file),
+      onDelegate: (event) => delegate(event, whatIfTarget()),
+      onPlan: (include) => plan(include),
+      onDelegatePlan: (event) => delegate(event, extractionTarget())
+    });
+  }
+  function paint() {
+    if (elements2.sandboxPanel.hidden) {
+      return;
+    }
+    const classes = model.tab === "extraction" ? extractionClasses(model.plan) : whatIfClasses(model.result);
+    view2.overlay(classes.size > 0 ? classes : null);
+  }
+  function open() {
+    elements2.sandboxPanel.hidden = false;
+    render();
+    paint();
+    app2.windows.refreshDock();
+  }
+  function close() {
+    elements2.sandboxPanel.hidden = true;
+    pendingSource = null;
+    void app2.lenses.applyOverlay();
+    app2.windows.refreshDock();
+  }
+  async function edit(operations) {
+    model.operations = operations;
+    model.draft = null;
+    model.tab = "what-if";
+    open();
+    await simulate();
+  }
+  async function simulate() {
+    const mine = ++generation;
+    if (model.operations.length === 0) {
+      Object.assign(model, { result: null, busy: false, error: "" });
+      render();
+      paint();
+      return;
+    }
+    Object.assign(model, { busy: true, error: "" });
+    render();
+    try {
+      const ops = encodeURIComponent(JSON.stringify(model.operations));
+      const result = await request2(`/analysis/what-if?ops=${ops}${repositoryQuery()}`);
+      if (mine !== generation) return;
+      Object.assign(model, { result, busy: false });
+    } catch (error) {
+      if (mine !== generation) return;
+      Object.assign(model, { result: null, busy: false, error: `The simulation could not run: ${error.message}` });
+    }
+    render();
+    paint();
+  }
+  async function plan(include) {
+    const mine = ++generation;
+    Object.assign(model, { tab: "extraction", include, planBusy: true, planError: "", plan: null });
+    open();
+    try {
+      const result = await request2(`/analysis/extraction?include=${encodeURIComponent(include)}${repositoryQuery()}`);
+      if (mine !== generation) return;
+      Object.assign(model, { plan: result, planBusy: false });
+    } catch (error) {
+      if (mine !== generation) return;
+      Object.assign(model, { planBusy: false, planError: `The plan could not be made: ${error.message}` });
+    }
+    render();
+    paint();
+  }
+  function focusFile(file) {
+    const visible = (app2.current?.nodes ?? []).some((node) => node.id === file);
+    if (!visible) {
+      elements2.status.textContent = `${file} is not drawn in this view; switch to Files to see it.`;
+      return;
+    }
+    app2.selection.selectNode(file);
+  }
+  function whatIfTarget() {
+    return {
+      kind: "sandbox",
+      label: `${model.operations.length} planned edit(s)`,
+      evidence: whatIfEvidence(model.operations, model.result)
+    };
+  }
+  function extractionTarget() {
+    return {
+      kind: "extraction",
+      label: `Extract ${model.plan?.include?.join(", ") ?? model.include}`,
+      evidence: extractionEvidence(model.plan)
+    };
+  }
+  function delegate(event, target) {
+    const rect = event?.currentTarget?.getBoundingClientRect?.();
+    app2.delegation.openDelegateMenu(target, rect?.left ?? window.innerWidth / 2, (rect?.bottom ?? 0) + 4);
+  }
+  const ROLL_UPS = /* @__PURE__ */ new Set(["tier", "shelf", "axis", "dataset"]);
+  function nodeRole(id) {
+    const kind = (app2.current?.nodes ?? []).find((node) => node.id === id)?.kind ?? null;
+    if (ROLL_UPS.has(kind)) return "rollup";
+    if (state2.mode === "block" || kind === "unit") return id === "." ? "rollup" : "directory";
+    return "file";
+  }
+  function menuItems(target) {
+    const items = [];
+    if (target?.kind === "node" && target.id) {
+      const id = target.id;
+      const role = nodeRole(id);
+      if (role === "directory") {
+        items.push({ label: "\u2697 Plan extraction of this directory", hint: "sandbox", action: () => plan(id) });
+      }
+      if (role !== "rollup") {
+        items.push({
+          label: "\u2697 Move in sandbox\u2026",
+          hint: "hypothetical",
+          action: () => {
+            model.draft = { op: "move", first: id, second: "", focus: "second" };
+            model.tab = "what-if";
+            open();
+          }
+        });
+      }
+      if (role === "file") {
+        if (pendingSource && pendingSource !== id) {
+          const source = pendingSource;
+          items.push({
+            label: `\u2697 Add import ${source.split("/").pop()} \u2192 here`,
+            hint: "hypothetical",
+            action: () => {
+              pendingSource = null;
+              void edit(addOperation(model.operations, { op: "add", source, target: id }));
+            }
+          });
+        }
+        items.push({
+          label: "\u2697 Start an import from here",
+          hint: "then right-click its target",
+          action: () => {
+            pendingSource = id;
+            elements2.status.textContent = `Sandbox: right-click the file ${id.split("/").pop()} should import.`;
+          }
+        });
+        items.push({ label: "\u2697 Plan extraction of this file", hint: "sandbox", action: () => plan(id) });
+      }
+    } else if (target?.kind === "edge" && target.id && !Array.isArray(target.flows)) {
+      const edge = app2.current ? edgeEvidenceFor(app2.current, target.id) : null;
+      if (edge?.source && edge?.target) {
+        items.push({
+          label: "\u2697 Cut this import in sandbox",
+          hint: "hypothetical",
+          action: () => void edit(addOperation(model.operations, { op: "cut", source: edge.source, target: edge.target }))
+        });
+      }
+    } else if (target?.kind === "group" && Array.isArray(target.items) && target.items.length > 0) {
+      items.push({
+        label: `\u2697 Plan extraction of ${target.items.length} files`,
+        hint: "sandbox",
+        action: () => plan(target.items.map((entry) => entry.id).filter(Boolean).join(","))
+      });
+    }
+    return items.length > 0 ? [...items, { separator: true }] : items;
+  }
+  return { open, close, plan, menuItems };
+}
+
 // ui/strabo-coverage.js
 function createCoverage(app2) {
   const { state: state2, elements: elements2 } = app2;
@@ -16617,12 +17258,12 @@ function createCoverage(app2) {
     renderPanel();
   }
   async function loadFileCoverage(id, asFile = true) {
-    const section2 = elements2.inspector?.querySelector('[data-role="coverage"]');
-    if (!section2 || !id) {
+    const section3 = elements2.inspector?.querySelector('[data-role="coverage"]');
+    if (!section3 || !id) {
       return;
     }
     if (!asFile) {
-      renderCoverageFile(section2, {
+      renderCoverageFile(section3, {
         unsupported: "Coverage is measured per file. Open the Coverage panel, or select a file on the map."
       });
       return;
@@ -16635,12 +17276,12 @@ function createCoverage(app2) {
       if (token !== fileToken || app2.selected !== id) {
         return;
       }
-      renderCoverageFile(section2, report, { onSelect: (target) => app2.selection?.selectNode(target) });
+      renderCoverageFile(section3, report, { onSelect: (target) => app2.selection?.selectNode(target) });
     } catch (error) {
       if (token !== fileToken || app2.selected !== id) {
         return;
       }
-      renderCoverageFile(section2, { error: error.message }, {
+      renderCoverageFile(section3, { error: error.message }, {
         onRetry: () => loadFileCoverage(id)
       });
     }
@@ -16745,16 +17386,16 @@ function renderUnclassified(container, report, onAssign) {
   if (files.length === 0) {
     return;
   }
-  const section2 = document.createElement("div");
-  section2.className = "tier-unclassified";
-  section2.dataset.role = "tier-unclassified";
+  const section3 = document.createElement("div");
+  section3.className = "tier-unclassified";
+  section3.dataset.role = "tier-unclassified";
   const heading3 = document.createElement("h4");
   heading3.textContent = `Unclassified (${files.length})`;
-  section2.append(heading3);
+  section3.append(heading3);
   const note4 = document.createElement("p");
   note4.className = "overlay-note";
   note4.textContent = "Pick a tier to declare it in strabo.groups.yml; the map re-reads it at once.";
-  section2.append(note4);
+  section3.append(note4);
   let scope = "file";
   const scopes = document.createElement("div");
   scopes.className = "tier-assign-scope";
@@ -16775,7 +17416,7 @@ function renderUnclassified(container, report, onAssign) {
     });
     scopes.append(button3);
   }
-  section2.append(scopes);
+  section3.append(scopes);
   const list2 = document.createElement("ul");
   for (const entry of [...files].sort((a, b2) => a.file.localeCompare(b2.file)).slice(0, UNCLASSIFIED_LIMIT)) {
     const item = document.createElement("li");
@@ -16811,14 +17452,14 @@ function renderUnclassified(container, report, onAssign) {
     item.append(name, select, status);
     list2.append(item);
   }
-  section2.append(list2);
+  section3.append(list2);
   if (files.length > UNCLASSIFIED_LIMIT) {
     const more = document.createElement("p");
     more.className = "overlay-note";
     more.textContent = `${files.length - UNCLASSIFIED_LIMIT} more; assigning a folder covers many at once.`;
-    section2.append(more);
+    section3.append(more);
   }
-  container.append(section2);
+  container.append(section3);
 }
 function renderTierPanel(container, report, filter = "all", options = {}) {
   container.replaceChildren();
@@ -17011,10 +17652,10 @@ function ensureDialog() {
   if (dialog) {
     return dialog;
   }
-  const element3 = document.createElement("dialog");
-  element3.id = "commit-dialog";
-  element3.className = "dialog prompt-dialog commit-dialog";
-  element3.setAttribute("aria-label", "Review the commit message before committing");
+  const element4 = document.createElement("dialog");
+  element4.id = "commit-dialog";
+  element4.className = "dialog prompt-dialog commit-dialog";
+  element4.setAttribute("aria-label", "Review the commit message before committing");
   const header = document.createElement("header");
   header.className = "dialog-header";
   const heading3 = document.createElement("strong");
@@ -17025,7 +17666,7 @@ function ensureDialog() {
   close.className = "dialog-close";
   close.setAttribute("aria-label", "Close");
   close.textContent = "\xD7";
-  close.addEventListener("click", () => element3.close());
+  close.addEventListener("click", () => element4.close());
   header.append(heading3, close);
   const target = document.createElement("p");
   target.className = "dialog-path prompt-dialog-target";
@@ -17058,7 +17699,7 @@ function ensureDialog() {
   const cancel = document.createElement("button");
   cancel.type = "button";
   cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => element3.close());
+  cancel.addEventListener("click", () => element4.close());
   const confirm2 = document.createElement("button");
   confirm2.type = "button";
   confirm2.className = "primary commit-confirm";
@@ -17066,10 +17707,10 @@ function ensureDialog() {
   confirm2.addEventListener("click", () => void submit());
   actions.append(cancel, confirm2);
   footer.append(left, actions);
-  element3.append(header, target, status, text, footer);
-  document.body.append(element3);
-  dialog = element3;
-  return element3;
+  element4.append(header, target, status, text, footer);
+  document.body.append(element4);
+  dialog = element4;
+  return element4;
 }
 async function generateMessage() {
   if (!dialog || !context) {
@@ -17144,15 +17785,15 @@ async function submit() {
   }
 }
 function openCommitDialog({ repository, onCommitted } = {}) {
-  const element3 = ensureDialog();
+  const element4 = ensureDialog();
   context = { repository: repository ?? null, onCommitted };
-  element3.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
-  element3.querySelector(".commit-message").value = "";
-  const status = element3.querySelector(".commit-status");
+  element4.querySelector(".prompt-dialog-target").textContent = repository ? `Working tree \xB7 ${repository}` : "Working tree";
+  element4.querySelector(".commit-message").value = "";
+  const status = element4.querySelector(".commit-status");
   status.classList.remove("is-error");
   status.textContent = "Generating a message with the narrator\u2026";
-  if (!element3.open) {
-    element3.showModal();
+  if (!element4.open) {
+    element4.showModal();
   }
   void generateMessage();
 }
@@ -27604,7 +28245,7 @@ function tabButton(session, active, handlers, label = sessionTabLabel(session)) 
   });
   return button3;
 }
-function renderTabs(container, sessions, activeId, handlers = {}) {
+function renderTabs2(container, sessions, activeId, handlers = {}) {
   if (!container) {
     return;
   }
@@ -28341,7 +28982,7 @@ function initTerminalScreen(container, hooks = {}) {
     return orderSessions([...metas.values()], order);
   }
   function render() {
-    renderTabs(tabsEl, listSessions(), activeSessionId(), {
+    renderTabs2(tabsEl, listSessions(), activeSessionId(), {
       onSelect: openSession,
       onClose: closeSession,
       onReorder: (fromId, toId) => {
@@ -28995,11 +29636,11 @@ function ensureElement(container, id, className) {
   if (existing) {
     return existing;
   }
-  const element3 = document.createElement("div");
-  element3.id = id;
-  element3.className = className;
-  container.append(element3);
-  return element3;
+  const element4 = document.createElement("div");
+  element4.id = id;
+  element4.className = className;
+  container.append(element4);
+  return element4;
 }
 
 // ui/strabo-terminal-bridge.js
@@ -29135,33 +29776,33 @@ function writeStore(key, value) {
   } catch {
   }
 }
-function initFloatingToolbar(element3, options = {}) {
-  if (!element3) return null;
+function initFloatingToolbar(element4, options = {}) {
+  if (!element4) return null;
   const storageKey = options.storageKey ?? STORAGE_KEY;
   const minWidth = options.minWidth ?? MIN_WIDTH;
   const dock = options.dock ?? null;
   const dockReach = options.dockReach ?? DOCK_REACH;
-  const floatParent = element3.parentElement ?? document.body;
+  const floatParent = element4.parentElement ?? document.body;
   const saved = readStore(storageKey);
   const grip = document.createElement("span");
   grip.className = "tb-grip";
   grip.setAttribute("aria-hidden", "true");
   grip.title = "Drag to move the toolbar";
   grip.textContent = "\u283F";
-  element3.prepend(grip);
+  element4.prepend(grip);
   const resize = document.createElement("span");
   resize.className = "tb-resize";
   resize.setAttribute("aria-hidden", "true");
   resize.title = "Drag to resize";
-  element3.append(resize);
+  element4.append(resize);
   let width = Number.isFinite(saved.width) && saved.width >= minWidth ? saved.width : null;
-  const isDocked = () => element3.classList.contains("is-docked");
+  const isDocked = () => element4.classList.contains("is-docked");
   const applyWidth = () => {
     if (isDocked()) {
-      element3.style.width = "";
+      element4.style.width = "";
       return;
     }
-    if (width) element3.style.width = `${width}px`;
+    if (width) element4.style.width = `${width}px`;
   };
   const containerSize = () => {
     const rail = floatParent.querySelector?.(":scope > .float-dock");
@@ -29173,35 +29814,35 @@ function initFloatingToolbar(element3, options = {}) {
     };
   };
   const place = (left, top) => {
-    const rect = element3.getBoundingClientRect();
+    const rect = element4.getBoundingClientRect();
     const { boundWidth, boundHeight } = containerSize();
     const clamped = clampToolbarPosition(left, top, {
-      width: element3.offsetWidth || rect.width,
-      height: element3.offsetHeight || rect.height,
+      width: element4.offsetWidth || rect.width,
+      height: element4.offsetHeight || rect.height,
       boundWidth,
       boundHeight
     });
-    element3.style.left = `${clamped.left}px`;
-    element3.style.top = `${clamped.top}px`;
-    element3.style.bottom = "auto";
-    element3.style.right = "auto";
-    element3.style.transform = "none";
+    element4.style.left = `${clamped.left}px`;
+    element4.style.top = `${clamped.top}px`;
+    element4.style.bottom = "auto";
+    element4.style.right = "auto";
+    element4.style.transform = "none";
     updateMenuDirection();
   };
   const updateMenuDirection = () => {
     if (isDocked()) {
-      element3.classList.add("opens-up");
+      element4.classList.add("opens-up");
       return;
     }
-    const rect = element3.getBoundingClientRect();
+    const rect = element4.getBoundingClientRect();
     const parentRect = floatParent.getBoundingClientRect();
     const center = rect.top - parentRect.top + rect.height / 2;
     const { boundHeight } = containerSize();
-    element3.classList.toggle("opens-up", center > boundHeight / 2);
+    element4.classList.toggle("opens-up", center > boundHeight / 2);
   };
   function persist() {
-    const left = parseFloat(element3.style.left);
-    const top = parseFloat(element3.style.top);
+    const left = parseFloat(element4.style.left);
+    const top = parseFloat(element4.style.top);
     writeStore(storageKey, {
       docked: isDocked(),
       left: Number.isFinite(left) ? left : null,
@@ -29211,22 +29852,22 @@ function initFloatingToolbar(element3, options = {}) {
   }
   function dockElement() {
     if (!dock || isDocked()) return;
-    element3.classList.add("is-docked");
-    element3.style.left = "";
-    element3.style.top = "";
-    element3.style.bottom = "";
-    element3.style.right = "";
+    element4.classList.add("is-docked");
+    element4.style.left = "";
+    element4.style.top = "";
+    element4.style.bottom = "";
+    element4.style.right = "";
     const meta = dock.querySelector(".bottom-meta");
-    if (meta) dock.insertBefore(element3, meta);
-    else dock.append(element3);
+    if (meta) dock.insertBefore(element4, meta);
+    else dock.append(element4);
     applyWidth();
     updateMenuDirection();
     persist();
   }
   function undockElement() {
     if (!isDocked()) return;
-    element3.classList.remove("is-docked");
-    floatParent.append(element3);
+    element4.classList.remove("is-docked");
+    floatParent.append(element4);
     applyWidth();
   }
   if (saved.docked && dock) {
@@ -29239,7 +29880,7 @@ function initFloatingToolbar(element3, options = {}) {
   applyWidth();
   grip.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    const rect = element3.getBoundingClientRect();
+    const rect = element4.getBoundingClientRect();
     const grabOffsetX = event.clientX - rect.left;
     const grabOffsetY = event.clientY - rect.top;
     let overDock = false;
@@ -29284,9 +29925,9 @@ function initFloatingToolbar(element3, options = {}) {
   resize.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || isDocked()) return;
     const startX = event.clientX;
-    const startWidth = element3.getBoundingClientRect().width;
+    const startWidth = element4.getBoundingClientRect().width;
     const { boundWidth } = containerSize();
-    const left = parseFloat(element3.style.left);
+    const left = parseFloat(element4.style.left);
     const maxWidth = Math.max(minWidth, boundWidth - (Number.isFinite(left) ? left : 0) - GAP);
     resize.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
@@ -29307,13 +29948,13 @@ function initFloatingToolbar(element3, options = {}) {
   });
   window.addEventListener("resize", () => {
     if (isDocked()) return;
-    if (Number.isFinite(parseFloat(element3.style.left))) {
-      place(parseFloat(element3.style.left), parseFloat(element3.style.top));
+    if (Number.isFinite(parseFloat(element4.style.left))) {
+      place(parseFloat(element4.style.left), parseFloat(element4.style.top));
     } else {
       updateMenuDirection();
     }
   });
-  return { element: element3, grip, resize, dock, isDocked, undock: undockElement };
+  return { element: element4, grip, resize, dock, isDocked, undock: undockElement };
 }
 
 // ui/strabo-chrome-menus.js
@@ -29860,6 +30501,7 @@ function createDelegation(app2) {
         ...flowMenuItems(target),
         ...app2.narration.narrateMenuItems(target),
         ...layoutMenuItems(target),
+        ...app2.sandbox?.menuItems(target) ?? [],
         { label: "\u25B6 Delegate to OpenCode", hint: "opens agent session", action: () => delegateToAgent("opencode", target) },
         { label: "\u25B6 Delegate to Claude", hint: "opens agent session", action: () => delegateToAgent("claude", target) },
         { separator: true },
@@ -29947,7 +30589,8 @@ function createDelegation(app2) {
     };
   }
   return {
-    resetMapLayout
+    resetMapLayout,
+    openDelegateMenu
   };
 }
 
@@ -30535,7 +31178,7 @@ function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP2 } 
 
 // ui/strabo-float-chrome.js
 function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, height = null }) {
-  const element3 = config.element;
+  const element4 = config.element;
   const win = document.createElement("section");
   win.className = "float-window";
   win.dataset.panel = config.key;
@@ -30577,8 +31220,8 @@ function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, heig
   resizeHandle.title = "Drag to resize";
   header.append(grip, title, spacer, collapseButton, closeButton);
   win.append(header, body, resizeHandle);
-  element3.parentNode.insertBefore(win, element3);
-  body.append(element3);
+  element4.parentNode.insertBefore(win, element4);
+  body.append(element4);
   return { win, header, title, collapseButton, closeButton, resizeHandle };
 }
 
@@ -30710,7 +31353,7 @@ function wireWindowGestures({
 
 // ui/strabo-float-window.js
 function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
-  const element3 = config.element;
+  const element4 = config.element;
   const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
   let size = sanitizeSize(saved.size);
   const width = size.width ?? config.width ?? DEFAULT_WIDTH;
@@ -30743,10 +31386,10 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     win.style.zIndex = String(nextZ());
   };
   const sync2 = () => {
-    const hidden = element3.hidden === true;
+    const hidden = element4.hidden === true;
     win.hidden = hidden;
     if (!hidden && config.titleFrom) {
-      const heading3 = config.titleFrom(element3);
+      const heading3 = config.titleFrom(element4);
       if (heading3) {
         title.textContent = heading3;
       }
@@ -30762,7 +31405,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       }
     }
   };
-  new MutationObserver(sync2).observe(element3, {
+  new MutationObserver(sync2).observe(element4, {
     attributes: true,
     attributeFilter: ["hidden"],
     childList: true,
@@ -30776,7 +31419,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     // `pinned: 2` pins the panel second on the rail; `pinned: true` pins it after those.
     pinOrder: typeof config.pinned === "number" ? config.pinned : 1e3,
     window: win,
-    element: element3,
+    element: element4,
     isOpen: () => !win.hidden,
     isCollapsed,
     // Bring an already-open window to the top of the stack without the focus shift and
@@ -30788,7 +31431,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
         return false;
       }
       config.onOpen?.();
-      element3.hidden = false;
+      element4.hidden = false;
       win.hidden = false;
       if (!hasPosition()) {
         placeInRail();
@@ -30802,7 +31445,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     close() {
       const hadFocus = win.contains(document.activeElement);
       if (config.onClose) config.onClose();
-      element3.hidden = true;
+      element4.hidden = true;
       win.hidden = true;
       lastHidden = true;
       renderDock();
@@ -30891,7 +31534,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
   });
   win.addEventListener("pointerdown", raise, true);
   win.addEventListener("contextmenu", raise, true);
-  if (!hasPosition() && element3.hidden !== true) {
+  if (!hasPosition() && element4.hidden !== true) {
     placeInRail();
   }
   controllers.push(controller);
@@ -31261,6 +31904,17 @@ function createFloatingPanels(app2) {
         }
       },
       {
+        key: "sandbox",
+        element: elements2.sandboxPanel,
+        title: "Refactor sandbox",
+        dockLabel: "Sandbox",
+        glyph: "\u2697",
+        width: 480,
+        height: 640,
+        onOpen: () => app2.sandbox.open(),
+        onClose: () => app2.sandbox.close()
+      },
+      {
         key: "coverage",
         element: elements2.coveragePanel,
         title: "Coverage",
@@ -31561,6 +32215,7 @@ app.source = createSourceViewer(app);
 createTerminalBridge(app);
 app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
+app.sandbox = createSandbox(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
 app.structure = {
@@ -32039,6 +32694,8 @@ if (window.STRABO_TEST) {
     passport: () => app.panels.showPassport(),
     route: (file) => app.panels.showRoute(file),
     blocks: () => app.panels.showBlocks(),
+    sandbox: () => app.sandbox.open(),
+    planExtraction: (include) => app.sandbox.plan(include),
     coverage: () => app.coverage.showCoverage(),
     coverageFolder: (folder) => app.coverage.loadFolder(folder),
     products: () => app.products.showProducts(),

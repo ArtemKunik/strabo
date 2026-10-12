@@ -1,0 +1,119 @@
+/* The refactor sandbox: hypothetical edits and an extraction plan, each answer labelled. */
+.sandbox-panel {
+  max-height: 75vh;
+  overflow: auto;
+}
+
+.sandbox-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0 8px;
+}
+
+.sandbox-tabs [aria-selected='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.sandbox-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.sandbox-form input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.sandbox-edits {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.sandbox-remove {
+  padding: 0 6px;
+}
+
+.sandbox-controls {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.sandbox-hypothetical {
+  color: var(--status-warning);
+  font-size: 12px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+
+.sandbox-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.sandbox-facts dt {
+  color: var(--ink-3);
+}
+
+.sandbox-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+.sandbox-nonzero {
+  color: var(--ink-1);
+  font-weight: 600;
+}
+
+.sandbox-verdict {
+  font-size: 12px;
+  color: var(--status-warning);
+}
+
+.sandbox-verdict.sandbox-ok {
+  color: var(--status-good);
+}
+
+.sandbox-section {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  margin-top: 8px;
+}
+
+.sandbox-section h4 {
+  margin: 0 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+.sandbox-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.sandbox-file {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.sandbox-grew {
+  color: var(--status-serious);
+}

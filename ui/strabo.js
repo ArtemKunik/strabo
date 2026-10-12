@@ -34,6 +34,7 @@ import { createMemberMapController } from './strabo-member-map-controller.js';
 import { createGitController } from './strabo-git-controller.js';
 import { createSettingsController } from './strabo-settings-controller.js';
 import { createRepositoryPanels } from './strabo-repo-panels.js';
+import { createSandbox } from './strabo-sandbox-controller.js';
 import { createCoverage } from './strabo-coverage.js';
 import { createProducts } from './strabo-products.js';
 import { createLensController } from './strabo-lens-controller.js';
@@ -216,6 +217,7 @@ app.source = createSourceViewer(app);
 createTerminalBridge(app);
 app.menus = createChromeMenus(app);
 app.delegation = createDelegation(app);
+app.sandbox = createSandbox(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
 app.structure = {
@@ -774,6 +776,8 @@ if (window.STRABO_TEST) {
     passport: () => app.panels.showPassport(),
     route: (file) => app.panels.showRoute(file),
     blocks: () => app.panels.showBlocks(),
+    sandbox: () => app.sandbox.open(),
+    planExtraction: (include) => app.sandbox.plan(include),
     coverage: () => app.coverage.showCoverage(),
     coverageFolder: (folder) => app.coverage.loadFolder(folder),
     products: () => app.products.showProducts(),

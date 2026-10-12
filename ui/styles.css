@@ -38,6 +38,7 @@
 @import url("styles/settings.css"); /* Settings */
 @import url("styles/unit-cards.css"); /* System-view unit cards */
 @import url("styles/reading-route.css"); /* Reading route */
+@import url("styles/sandbox.css"); /* Refactor sandbox */
 @import url("styles/blocks.css"); /* Blocks (brick assembly) */
 @import url("styles/coverage.css"); /* Coverage panel and the Module Passport's Coverage section */
 @import url("styles/products.css"); /* Data products panel and the data-on-code overlay rows */
