@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0
+
+- Plan an extraction before moving anything: for a file set, the outside files it imports
+  (cut each, or take it along, with what each drags in), the inside files the rest imports,
+  the transitive closure, cycles across the boundary, shared env/route/flag keys, and the
+  external packages (`GET /analysis/extraction`, MCP `plan_extraction`).
+- Simulate structural edits on a copy of the graph: `cut`, `add`, and `move` report the
+  cycles introduced or resolved, wrong-way tier edges, rule violations, test reach lost, and
+  blast radius, writing nothing (`GET /analysis/what-if`, MCP `simulate_change`).
+- A **Sandbox** window collects those edits from the map's right-click menu or its own form,
+  rings the map with the result, shows the extraction plan for a directory, file, or group,
+  and can delegate either answer to an agent.
+- `strabo_review` / `get_change_risk` take `paths` (globs, files, or folders) so a dirty
+  working tree's unrelated changes stay out; totals, impact, and risk are recomputed for the
+  kept files, and `scope` names what was kept. `GET /analysis/review` accepts the same
+  `paths` query.
+- **Changed:** `strabo_review` now returns a compact summary by default, one row per changed
+  file (change and file risk, band, cycle size, top signals, edge and test counts), riskiest
+  first. Pass `detail: "full"` for the previous full body.
+- Ship two agent skills in the package, `skills/strabo-structural-coding` and
+  `skills/strabo-review`, that teach a coding agent to look, simulate, and verify with the
+  MCP tools, and to review a change by scope, triage, and new-versus-pre-existing problems.
+
 ## 0.1.2
 
 - Read HTTP routes declared in code, not only in OpenAPI documents: Express, Fastify, Koa,
