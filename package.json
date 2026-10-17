@@ -45,6 +45,7 @@
     "public",
     "!public/*.map",
     "parsers",
+    "skills",
     "README.md",
     "CHANGELOG.md"
   ],
