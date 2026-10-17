@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { Exclusion, Graph } from '../types.ts';
+import { matchesGlob } from './glob.ts';
 import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
 import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
@@ -183,6 +184,57 @@ export async function reviewWorkingTree(root: string, graph: Graph): Promise<Rev
   } catch (error) {
     return gitFailure(error);
   }
+}
+
+/** The path scope a review was narrowed to: the patterns asked for and what they kept. */
+export interface ReviewScope {
+  paths: string[];
+  /** Changed files the patterns kept. */
+  matched: number;
+  /** Changed files before narrowing. */
+  total: number;
+}
+
+/**
+ * True when a changed path falls inside a scope pattern. A pattern with a glob character is
+ * matched as a glob; a plain pattern names that exact file or every file under it as a folder.
+ */
+export function inReviewScope(file: string, pattern: string): boolean {
+  const normalised = pattern.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (/[*?]/.test(normalised)) {
+    return matchesGlob(file, normalised);
+  }
+  const folder = normalised.replace(/\/+$/, '');
+  return file === folder || file.startsWith(`${folder}/`);
+}
+
+/**
+ * Narrow an available review to the changed files inside `patterns`, so an unrelated dirty
+ * file elsewhere in the tree does not ride along. Totals and impact are recomputed from the
+ * kept files; exclusions outside the scope are dropped. An empty pattern list is a no-op.
+ */
+export function scopeReview(
+  review: ReviewResult,
+  graph: Graph,
+  patterns: readonly string[],
+): ReviewResult & { scope?: ReviewScope } {
+  if (!review.available || patterns.length === 0) {
+    return review;
+  }
+  const keep = (file: string, previous?: string): boolean =>
+    patterns.some(
+      (pattern) =>
+        inReviewScope(file, pattern) || (previous !== undefined && inReviewScope(previous, pattern)),
+    );
+  const files = review.files.filter((file) => keep(file.path, file.previousPath));
+  return {
+    ...review,
+    files,
+    totals: totalChanges(files),
+    impact: impactFor(graph, files),
+    ...(review.excluded ? { excluded: review.excluded.filter((entry) => keep(entry.path)) } : {}),
+    scope: { paths: [...patterns], matched: files.length, total: review.files.length },
+  };
 }
 
 function parseNullList(stdout: string): string[] {

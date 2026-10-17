@@ -69,7 +69,7 @@ Canonical names and aliases share one implementation, so they cannot drift.
 | `strabo_passport` | `get_overview` | repository passport: languages, size, entry points, hubs, cycles, unreached modules |
 | `strabo_file` | `get_context` | one file's change-impact passport, with its recorded import edges, their evidence, and its tier and unit |
 | `strabo_impact` | `get_impact` | reverse-dependency impact of the pending change set or a revision, each affected file with its tier and unit |
-| `strabo_review` | `get_change_risk` | the pending working-tree change set and its rolled-up risk |
+| `strabo_review` | `get_change_risk` | the pending working-tree change set and its rolled-up risk: a compact row per file (risk, band, cycle size, top signals) by default, `detail: "full"` for every passport, and `paths` to review only some files of a dirty tree |
 | `strabo_path` | `get_dependency_path` | the shortest recorded path between two files, each hop with evidence |
 | `strabo_coverage` | `get_coverage` | test coverage at the project, folder, or file scope from the repository's own measured report, with test-reach as the labelled fallback |
 

@@ -300,3 +300,80 @@ test('the impact tool names the recorded edge that reached each affected file', 
     ],
   );
 });
+
+test('strabo_review summarizes by default, forwards paths, and keeps the full body behind detail', async () => {
+  const review = {
+    available: true,
+    kind: 'working-tree',
+    files: [
+      { path: 'src/a.ts', status: 'modified', insertions: 12, deletions: 3 },
+      { path: 'src/b.ts', status: 'modified', insertions: 1, deletions: 0 },
+    ],
+    totals: { files: 2, insertions: 13, deletions: 3, uncounted: 0 },
+    impact: { affected: [{ id: 'src/c.ts', distance: 1 }], outsideGraph: [] },
+    cohesion: {
+      baseline: 'HEAD',
+      capped: false,
+      files: [
+        {
+          path: 'src/b.ts',
+          status: 'modified',
+          risk: { score: 10 },
+          edgesAdded: [],
+          edgesRemoved: [],
+          testsToRun: ['test/b.test.ts'],
+          untestedDependents: [],
+          impactPassport: { risk: { score: 20, band: 'low' }, signals: [] },
+        },
+        {
+          path: 'src/a.ts',
+          status: 'modified',
+          risk: { score: 70 },
+          edgesAdded: [{ source: 'src/a.ts', target: 'src/b.ts', kind: 'import' }],
+          edgesRemoved: [],
+          testsToRun: [],
+          untestedDependents: ['src/c.ts'],
+          functions: Array.from({ length: 40 }, (_, index) => ({ name: `f${index}` })),
+          impactPassport: {
+            risk: { score: 55, band: 'high' },
+            signals: [{ label: 'Long function' }, { label: 'Deep nesting' }, { label: 'Many params' }, { label: 'Fourth' }],
+          },
+        },
+      ],
+    },
+    impactPassport: { totals: { risk: { score: 55, band: 'high' } } },
+  };
+  const seen: string[] = [];
+  const dispatch: ApiDispatch = async (_method, path) => {
+    seen.push(path);
+    if (path.startsWith('/analysis/cycles')) {
+      return { status: 200, body: [{ id: 'c1', members: ['src/a.ts', 'src/z.ts'] }] };
+    }
+    return { status: 200, body: review };
+  };
+  const tool = createTools(dispatch).find((entry) => entry.name === 'strabo_review');
+  assert.ok(tool);
+
+  const summary = JSON.parse((await tool.call({ paths: ['src/a.ts', 'src/b.ts'] })).content[0]?.text ?? '{}') as {
+    detail: string;
+    affected: number;
+    risk: { band: string };
+    files: Array<{ path: string; changeRisk: number; band: string; cycleSize: number; signals: string[]; insertions: number }>;
+  };
+  assert.ok(seen[0]?.includes('paths=src%2Fa.ts%2Csrc%2Fb.ts'));
+  assert.equal(summary.detail, 'summary');
+  assert.equal(summary.affected, 1);
+  assert.equal(summary.risk.band, 'high');
+  assert.deepEqual(summary.files.map((row) => row.path), ['src/a.ts', 'src/b.ts']);
+  assert.equal(summary.files[0]?.cycleSize, 2);
+  assert.equal(summary.files[1]?.cycleSize, 0);
+  assert.equal(summary.files[0]?.insertions, 12);
+  assert.deepEqual(summary.files[0]?.signals, ['Long function', 'Deep nesting', 'Many params']);
+  assert.equal(JSON.stringify(summary).includes('"functions"'), false);
+
+  const full = JSON.parse((await tool.call({ detail: 'full' })).content[0]?.text ?? '{}') as {
+    cohesion: { files: unknown[] };
+  };
+  assert.equal(full.cohesion.files.length, 2);
+  assert.equal(seen.at(-1), '/analysis/review');
+});

@@ -284,3 +284,34 @@ test('getCommit rejects a revision shaped like a git flag rather than passing it
   assert.equal(await getCommit(root, `--output=${target}`), null);
   assert.equal(fs.existsSync(target), false);
 });
+
+test('scopeReview keeps only the changed files inside the requested paths', async () => {
+  const { inReviewScope, scopeReview } = await import('../../src/analysis/review.ts');
+  assert.equal(inReviewScope('src/api/v2.ts', 'src/api/v2.ts'), true);
+  assert.equal(inReviewScope('src/api/v2.ts', 'src/api'), true);
+  assert.equal(inReviewScope('src/api/v2.ts', './src/api/'), true);
+  assert.equal(inReviewScope('src/apis/v2.ts', 'src/api'), false);
+  assert.equal(inReviewScope('src/api/v2.ts', 'src/**/*.ts'), true);
+  assert.equal(inReviewScope('src/api/v2.ts', 'test/**'), false);
+
+  const graph = { nodes: [], edges: [], diagnostics: [], excluded: [] };
+  const review = {
+    available: true as const,
+    kind: 'working-tree' as const,
+    files: [
+      { path: 'src/api/v2.ts', status: 'modified' as const, group: 'unstaged' as const, insertions: 4, deletions: 1, inGraph: false },
+      { path: 'docs/notes.md', status: 'modified' as const, group: 'unstaged' as const, insertions: 9, deletions: 0, inGraph: false },
+      { path: 'src/new.ts', previousPath: 'src/api/old.ts', status: 'renamed' as const, group: 'staged' as const, insertions: 0, deletions: 0, inGraph: false },
+    ],
+    totals: { files: 3, insertions: 13, deletions: 1, uncounted: 0 },
+    impact: { affected: [], outsideGraph: [] },
+    excluded: [{ path: 'package-lock.json', reason: 'lockfile' as const }],
+  };
+  const scoped = scopeReview(review, graph, ['src/api']);
+  assert.ok(scoped.available);
+  assert.deepEqual(scoped.files.map((file) => file.path), ['src/api/v2.ts', 'src/new.ts']);
+  assert.deepEqual(scoped.totals, { files: 2, insertions: 4, deletions: 1, uncounted: 0 });
+  assert.deepEqual(scoped.excluded, []);
+  assert.deepEqual(scoped.scope, { paths: ['src/api'], matched: 2, total: 3 });
+  assert.equal(scopeReview(review, graph, []), review);
+});

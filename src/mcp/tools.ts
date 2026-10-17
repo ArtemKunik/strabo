@@ -104,6 +104,107 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** A list argument given as an array of strings or one comma-separated string. */
+function stringListArg(args: Record<string, unknown>, key: string): string[] {
+  const value = args[key];
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+  return raw
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+}
+
+/** Signals kept per row of a review summary. */
+const SUMMARY_SIGNALS = 3;
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function listLength(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+/** Each file's strongly connected component size, from the cycles body; files outside one are absent. */
+function cycleSizes(cycles: unknown): Map<string, number> {
+  const sizes = new Map<string, number>();
+  const groups = Array.isArray(cycles) ? cycles : [];
+  for (const group of groups) {
+    if (isRecord(group) && Array.isArray(group.members)) {
+      for (const member of group.members) {
+        if (typeof member === 'string') sizes.set(member, group.members.length);
+      }
+    }
+  }
+  return sizes;
+}
+
+/**
+ * The review reduced to one row per changed file, riskiest first: the numbers an agent
+ * triages on, with the detail left behind `detail: "full"`. Every value is read from the
+ * review body; a missing one is null, never a guessed zero.
+ */
+function summarizeReview(body: unknown, cycles: unknown): unknown {
+  if (!isRecord(body) || body.available !== true) {
+    return body;
+  }
+  const lines = new Map<string, Record<string, unknown>>();
+  for (const file of Array.isArray(body.files) ? body.files : []) {
+    if (isRecord(file) && typeof file.path === 'string') lines.set(file.path, file);
+  }
+  const inCycle = cycles === null ? null : cycleSizes(cycles);
+  const cohesion = isRecord(body.cohesion) ? body.cohesion : {};
+  const changes = Array.isArray(cohesion.files) ? cohesion.files.filter(isRecord) : [];
+  const rows = changes.map((change) => {
+    const path = String(change.path);
+    const passport = isRecord(change.impactPassport) ? change.impactPassport : {};
+    const fileRisk = isRecord(passport.risk) ? passport.risk : null;
+    const signals = Array.isArray(passport.signals) ? passport.signals.filter(isRecord) : [];
+    const line = lines.get(path);
+    return {
+      path,
+      status: change.status,
+      insertions: numberOrNull(line?.insertions),
+      deletions: numberOrNull(line?.deletions),
+      changeRisk: isRecord(change.risk) ? numberOrNull(change.risk.score) : null,
+      fileRisk: numberOrNull(fileRisk?.score),
+      band: typeof fileRisk?.band === 'string' ? fileRisk.band : null,
+      cycleSize: inCycle === null ? null : (inCycle.get(path) ?? 0),
+      signals: signals.slice(0, SUMMARY_SIGNALS).map((signal) => signal.label),
+      edgesAdded: listLength(change.edgesAdded),
+      edgesRemoved: listLength(change.edgesRemoved),
+      testsToRun: listLength(change.testsToRun),
+      untestedDependents: listLength(change.untestedDependents),
+    };
+  });
+  rows.sort(
+    (a, b) =>
+      (b.changeRisk ?? -1) - (a.changeRisk ?? -1) ||
+      (b.fileRisk ?? -1) - (a.fileRisk ?? -1) ||
+      a.path.localeCompare(b.path),
+  );
+  const impact = isRecord(body.impact) ? body.impact : {};
+  const passportSet = isRecord(body.impactPassport) ? body.impactPassport : {};
+  const totals = isRecord(passportSet.totals) ? passportSet.totals : {};
+  return {
+    available: true,
+    kind: body.kind,
+    detail: 'summary',
+    ...(body.scope !== undefined ? { scope: body.scope } : {}),
+    ...(body.worktree !== undefined ? { worktree: body.worktree } : {}),
+    baseline: cohesion.baseline ?? null,
+    capped: cohesion.capped === true,
+    totals: body.totals,
+    risk: totals.risk ?? null,
+    affected: listLength(impact.affected),
+    outsideGraph: listLength(impact.outsideGraph),
+    excluded: listLength(body.excluded),
+    ...(inCycle === null ? { cyclesUnavailable: 'the cycle analysis was not available' } : {}),
+    files: rows,
+    hint: 'Re-call with detail: "full" (and paths to stay small) for functions, edges, tests, and coverage.',
+  };
+}
+
 function intArg(
   args: Record<string, unknown>,
   key: string,
@@ -712,13 +813,41 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
     {
       name: 'get_change_risk',
       description:
-        'The pending working-tree change set: its files, tiered impact, and rolled-up risk passports.',
+        'The pending working-tree change set: its files, tiered impact, and rolled-up risk passports. By default a compact summary (one row per changed file: risk score and band, cycle size, top signals), riskiest first; pass `detail: "full"` for the whole passport set. Pass `paths` to review only your own files when the tree has unrelated changes.',
       inputSchema: {
         type: 'object',
-        properties: { repository: REPOSITORY_SCHEMA, limit: LIMIT_SCHEMA, offset: OFFSET_SCHEMA },
+        properties: {
+          paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Only review changed files inside these globs, files, or folders (e.g. ["src/api/v2.ts", "src/auth/**"]).',
+          },
+          detail: {
+            type: 'string',
+            enum: ['summary', 'full'],
+            description: 'summary (default): one compact row per file; full: the whole review body.',
+          },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+          offset: OFFSET_SCHEMA,
+        },
         additionalProperties: false,
       },
-      call: (args) => get(dispatch, '/analysis/review', args),
+      call: async (args) => {
+        const paths = stringListArg(args, 'paths');
+        const extra = paths.length > 0 ? { paths: paths.join(',') } : {};
+        if (args.detail === 'full') {
+          return get(dispatch, '/analysis/review', args, extra);
+        }
+        const result = await getRaw(dispatch, '/analysis/review', args, extra);
+        if (result.status < 200 || result.status >= 300) {
+          return toResult(result, args);
+        }
+        const cycles = await getRaw(dispatch, '/analysis/cycles', args);
+        const cycleBody = cycles.status >= 200 && cycles.status < 300 ? cycles.body : null;
+        return toResult({ status: result.status, body: summarizeReview(result.body, cycleBody) }, args);
+      },
     },
     {
       name: 'get_cycles',

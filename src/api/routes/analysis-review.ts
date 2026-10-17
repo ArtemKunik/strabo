@@ -14,7 +14,7 @@ import { computeImpact } from '../../analysis/impact.ts';
 import { computeFileImpactPassport, rollUpImpactPassports } from '../../analysis/impact-passport.ts';
 import { computeHttpApiDiff, type SiblingCalls } from '../../analysis/http-api-diff.ts';
 import { computePublicApiDiff } from '../../analysis/public-api-diff.ts';
-import { reviewCommit, reviewWorkingTree } from '../../analysis/review.ts';
+import { reviewCommit, reviewWorkingTree, scopeReview } from '../../analysis/review.ts';
 import { computeScopeFence } from '../../analysis/scope-fence.ts';
 import { computeStructuralDiff } from '../../analysis/structural-diff.ts';
 import { getTimeline } from '../../analysis/timeline.ts';
@@ -75,7 +75,9 @@ export function createReviewRouter(context: AnalysisContext): Router {
    * `base` reviews that revision against its first parent; `branch` reviews that branch's
    * work since it left `against` (default: the remote's default branch); neither reviews
    * the working tree, split into staged, unstaged, and untracked. Every shape carries the
-   * same reverse-dependency impact the change-impact overlay computes.
+   * same reverse-dependency impact the change-impact overlay computes. `paths` (globs, files,
+   * or folders, comma-separated or repeated) narrows any shape to the changed files inside
+   * it before the passports are computed, so unrelated dirty files neither cost nor show.
    */
   router.get('/analysis/review', async (request, response) => {
     try {
@@ -84,6 +86,7 @@ export function createReviewRouter(context: AnalysisContext): Router {
       const base = typeof request.query.base === 'string' ? request.query.base : '';
       const requestedWorktree =
         typeof request.query.worktree === 'string' ? request.query.worktree.trim() : '';
+      const scope = expectValues(request.query.paths);
       // A linked worktree is only meaningful for the working-tree review: a commit names its
       // own revision and a branch is read from the repository at `root`.
       let worktree: WorktreeSummary | null = null;
@@ -117,7 +120,11 @@ export function createReviewRouter(context: AnalysisContext): Router {
       };
       if (branch) {
         const against = typeof request.query.against === 'string' && request.query.against ? request.query.against : undefined;
-        const review = await reviewBranch(repository.root, cached.report.graph, branch, against);
+        const review = scopeReview(
+          await reviewBranch(repository.root, cached.report.graph, branch, against),
+          cached.report.graph,
+          scope,
+        );
         if (!review.available || !review.branch) {
           response.json(review);
           return;
@@ -155,9 +162,13 @@ export function createReviewRouter(context: AnalysisContext): Router {
         });
         return;
       }
-      const review = base
-        ? await reviewCommit(repository.root, cached.report.graph, base)
-        : await reviewWorkingTree(workingRoot, cached.report.graph);
+      const review = scopeReview(
+        base
+          ? await reviewCommit(repository.root, cached.report.graph, base)
+          : await reviewWorkingTree(workingRoot, cached.report.graph),
+        cached.report.graph,
+        scope,
+      );
       if (!review.available) {
         response.json(review);
         return;
