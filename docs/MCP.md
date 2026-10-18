@@ -108,6 +108,15 @@ recorded readers, downstream datasets, governing contracts, and owning data prod
 `get_data_contracts` (the governed data contracts: definitions with declared-vs-DTO origin,
 governed boundaries with conformance, uncontracted crossings, orphaned contracts, unverified
 matches), `get_contract_consumers` (downstream files and units for one contract id or field),
+`get_retention` (what one file holds: the heavy-weight resources kept in its fields — a
+model, engine, bitmap, connection, cache, or listener — the recorded release call or
+`no release path recorded`, and the retention signals (an unbounded collection, a heavy load
+reached from a validation, a whole-file read copied into a second buffer), with whatever the
+reading could not see listed in `unavailable`), `get_candidates` (the files whose recorded
+reading matches a reported symptom, ranked by the class named in `issue` — the built-in
+`crash-memory`, `slow-path`, and `breakage`, or one declared under the `issues:` key of
+`strabo.groups.yml` — each candidate carrying the signal and line that ranked it, with a
+large file the reading found nothing in listed under `notRanked` as counter-evidence),
 and `check_contract_conformance` (schema fields, access roles, and recorded deviations per
 governed edge; uncontracted pairs are reported, never conforming).
 

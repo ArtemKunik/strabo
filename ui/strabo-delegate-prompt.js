@@ -24,6 +24,7 @@ const DELEGATE_TASKS = {
   extraction: 'Extract the listed files into their own package. For each outside import, either take the file along or cut the dependency behind an interface, using the recorded counts to choose; repoint every listed importer from outside; declare the listed external packages in the new manifest; and resolve each cycle across the boundary first. Do not change behaviour.',
   group: 'Assess this set of files together: shared role, coupling between them, and the risk of changing them as a group.',
   selection: 'Address the selected text: explain what it says and, if it describes a problem, propose the smallest safe fix. The recorded evidence is the state of the view it was selected in.',
+  candidates: 'Resolve the reported symptom from the ranked candidates below, in order, stopping at the first that explains it. Each candidate carries the recorded signal and line that ranked it: read that file and those lines and verify it rather than trusting the ranking. The ranking is by recorded evidence, not a diagnosis — if none of them explains the symptom, say so and name what you checked. Whatever the "Not recorded" list names is what Strabo could not read, so establish that yourself instead of re-deriving what the recorded evidence already answers.',
 };
 
 /** Facts shown for a single item. A Structure view lists each wrong-way edge with the imports
@@ -74,8 +75,15 @@ export function buildAgentPrompt({ agent, repository, target }) {
   }
   const item = target ?? { kind: 'view' };
   const kind = DELEGATE_TASKS[item.kind] ? item.kind : 'view';
-  const items = kind === 'group' && Array.isArray(item.items) ? item.items.filter(Boolean) : null;
-  const title = item.label ?? item.id ?? (items ? `${items.length} file(s)` : 'repository view');
+  const items = (kind === 'group' || kind === 'candidates') && Array.isArray(item.items) ? item.items.filter(Boolean) : null;
+  const title =
+    item.label ??
+    item.id ??
+    (kind === 'candidates'
+      ? `issue class \`${typeof item.class === 'string' && item.class ? item.class : 'unclassified'}\``
+      : items
+        ? `${items.length} file(s)`
+        : 'repository view');
   const lines = [`# Strabo task — ${title}`, ''];
   lines.push(`Repository: ${repository?.name ?? 'unknown'} (${repository?.root ?? 'unknown'})`);
   lines.push(
@@ -120,6 +128,15 @@ export function buildAgentPrompt({ agent, repository, target }) {
     renderFacts(lines, facts, MAX_FACTS);
   }
   lines.push('');
+  const notRecorded = Array.isArray(item.unavailable) ? item.unavailable.filter(Boolean) : [];
+  if (notRecorded.length > 0) {
+    lines.push('## Not recorded (establish these yourself)');
+    lines.push('');
+    for (const note of notRecorded) {
+      lines.push(`- ${String(note).slice(0, 300)}`);
+    }
+    lines.push('');
+  }
   lines.push('## Task');
   lines.push('');
   lines.push(DELEGATE_TASKS[kind]);

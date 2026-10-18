@@ -1,6 +1,6 @@
 ---
 name: strabo-review
-description: Review a code change structurally with Strabo, covering which files it touches, who depends on them, whether it adds cycles, tier leaks, rule violations, or breaking API changes, which tests cover it, and how risky each file is. Use this whenever Strabo MCP tools (strabo_review, strabo_impact, get_scope_fence, ...) or the strabo CLI are available and the user asks to review, check, sanity-check, or assess the risk of their changes, a commit, a branch, or a PR. Also use it after you finish your own edits and before you say "done", even if the user only said "make sure nothing broke".
+description: Review a code change structurally with Strabo, covering which files it touches, who depends on them, whether it adds cycles, tier leaks, rule violations, breaking API changes, or a heavy resource nothing recorded releases, which tests cover it, and how risky each file is. Use this whenever Strabo MCP tools (strabo_review, strabo_impact, get_scope_fence, ...) or the strabo CLI are available and the user asks to review, check, sanity-check, or assess the risk of their changes, a commit, a branch, or a PR. Also use it after you finish your own edits and before you say "done", even if the user only said "make sure nothing broke".
 ---
 
 # Structural review with Strabo
@@ -31,6 +31,8 @@ From the `strabo` MCP server (often `mcp__strabo__<tool>` in Claude Code):
 | `get_public_api_diff` / `get_http_api_diff` | exported symbols and HTTP endpoints changed between `base` and `head`, with the recorded callers that still use them |
 | `get_cycles`, `strabo_rules`, `get_smells` | current cycles, declared-rule violations, module smells, for telling new problems from old ones |
 | `strabo_file` | drill into one file: importers with evidence lines, complexity, signals |
+| `get_retention` | one file's held resources: the field, the load, the recorded release sites or *no release path recorded*, and the retention signals (unbounded collection, a load reached from a validation, a whole-file read copied into a second buffer) |
+| `get_candidates` | the files a reported symptom's recorded reading ranks, by class — use it when the review starts from a bug report rather than a diff |
 
 `strabo_review` reads the working tree only. To review a commit or a branch, use the
 `base` argument on `strabo_impact`, `get_public_api_diff`, and `get_http_api_diff`, or the CLI:
@@ -104,6 +106,12 @@ suggestion.
 - `get_uncovered_changes` shows changed lines the coverage report doesn't cover. Coverage
   comes from the repo's own report (lcov, Cobertura, JaCoCo). If the report is missing or
   stale, the tool says so, so say so too rather than calling the change "untested".
+- If the change adds or moves a field that holds something heavy — a cache, engine, model,
+  bitmap, connection, or listener — `get_retention` on that file lists it with the release
+  calls it recorded. A `no-release-path` or `unbounded-collection` on a field this change
+  introduces is a finding; read the named line rather than trusting the signal, and remember
+  that a release through a lambda receiver, a framework, or another file is not recorded, so
+  "no release path" means "not recorded here".
 
 ### 5. Report
 
@@ -120,6 +128,8 @@ Blocking
 Worth a look
 - src/auth/session.ts: changeRisk 62, 4 untested direct importers
   (src/routes/login.ts, …). Suggest a test on the refresh path.
+- src/ai/EngineFactory.kt: the new `cached` holds an engine with no recorded
+  release path (line 22).
 
 Context (pre-existing, not from this change)
 - src/core is in a 5-file cycle that this change doesn't touch.

@@ -811,6 +811,43 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
       call: (args) => get(dispatch, '/analysis/impact-passport', args, { file: requiredArg(args, 'file') }),
     },
     {
+      name: 'get_retention',
+      description:
+        'What one file holds: the heavy-weight resources kept in its fields, the recorded release call or `no release path recorded`, and the retention signals (unbounded collection, a heavy load reached from a validation, a whole-file read copied into a second buffer). A lifetime reading, not a heap measurement: whatever it could not see is listed in `unavailable`.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          file: { type: 'string' },
+          repository: REPOSITORY_SCHEMA,
+        },
+        required: ['file'],
+        additionalProperties: false,
+      },
+      call: (args) => get(dispatch, '/analysis/retention', args, { file: requiredArg(args, 'file') }),
+    },
+    {
+      name: 'get_candidates',
+      description:
+        'Rank the files whose recorded reading matches a reported symptom, by the class named in `issue` (built-in: crash-memory, slow-path, breakage; more under the `issues:` key of strabo.groups.yml). Each candidate carries the signal and line that ranked it, and a large file the reading looked at and found nothing in is listed under `notRanked` with its reason rather than silently omitted.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          issue: { type: 'string', description: 'The issue class to rank by, e.g. "crash-memory".' },
+          repository: REPOSITORY_SCHEMA,
+          limit: LIMIT_SCHEMA,
+        },
+        required: ['issue'],
+        additionalProperties: false,
+      },
+      call: (args) => {
+        const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? String(args.limit) : undefined;
+        return get(dispatch, '/analysis/candidates', args, {
+          issue: requiredArg(args, 'issue'),
+          limit,
+        });
+      },
+    },
+    {
       name: 'get_change_risk',
       description:
         'The pending working-tree change set: its files, tiered impact, and rolled-up risk passports. By default a compact summary (one row per changed file: risk score and band, cycle size, top signals), riskiest first; pass `detail: "full"` for the whole passport set. Pass `paths` to review only your own files when the tree has unrelated changes.',

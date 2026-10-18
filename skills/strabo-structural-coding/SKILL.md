@@ -1,6 +1,6 @@
 ---
 name: strabo-structural-coding
-description: Make code changes with Strabo's recorded dependency graph in the loop, so an edit is planned against the real imports, cycles, tiers, and blast radius instead of a guess. Use this whenever the Strabo MCP tools (strabo_file, strabo_impact, simulate_change, plan_extraction, ...) are available and the task is to refactor, move or rename files, split a module, extract a package, break a circular dependency, shrink a god module or long function, add an import across layers, or delete code that might be dead. Also use it before any edit to a file with many importers, even if the user did not mention Strabo or "structure".
+description: Make code changes with Strabo's recorded dependency graph in the loop, so an edit is planned against the real imports, cycles, tiers, and blast radius instead of a guess. Use this whenever the Strabo MCP tools (strabo_file, strabo_impact, simulate_change, plan_extraction, ...) are available and the task is to refactor, move or rename files, split a module, extract a package, break a circular dependency, shrink a god module or long function, add an import across layers, delete code that might be dead, or diagnose a reported symptom (a crash, an out-of-memory kill, a slow path) from the candidates its recorded reading ranks. Also use it before any edit to a file with many importers or one that owns a heavy resource, even if the user did not mention Strabo or "structure".
 ---
 
 # Structural coding with Strabo
@@ -28,7 +28,9 @@ appear as `mcp__strabo__<tool>`. Aliases and canonical names share one implement
 | `strabo_review` | `get_change_risk` | the pending change set, summarized per file (see the strabo-review skill) |
 
 Plus `simulate_change`, `plan_extraction`, `get_cycles`, `get_smells`, `get_tier`,
-`strabo_rules`, `get_dead_code`, `get_clones`, and `get_scope_fence`.
+`strabo_rules`, `get_dead_code`, `get_clones`, `get_scope_fence`, `get_retention` (what one
+file holds, and whether anything recorded releases it), and `get_candidates` (the files a
+reported symptom's recorded reading ranks).
 
 If no Strabo tools are listed, check whether the CLI is available (`npx strabo-map --version`
 or a local `bin/strabo.js`) and use `strabo check` / `strabo report` as a fallback. Tell the
@@ -65,6 +67,12 @@ that should change your plan:
   build unit. Adding an import from `domain` to `infra`, or across units, is a structural
   decision. Make it on purpose.
 - complexity and `signals` (long function, deep nesting, ...): where the cost actually is.
+
+One call that is not part of `strabo_file` but belongs at the same moment is `get_retention`:
+what the file **holds**, and whether anything recorded releases it. Before changing a file
+that owns a cache, engine, model, connection, or listener, read it — a field with no recorded
+release path is the shape that takes a whole process down, and the response names what it
+could not see, so you know which part to check by hand.
 
 For "why does X depend on Y?", use `strabo_path` instead of reading files by hand. Every hop
 names the import line, so you can open the exact place to cut.
@@ -123,6 +131,25 @@ If verification shows a structural effect you didn't intend, such as a new edge,
 cycle, or a tier leak, fix it before reporting done. Don't just mention it.
 
 ## Recipes
+
+**Diagnose a reported symptom.** Name the symptom as a class and ask for candidates rather
+than guessing from file size:
+
+```json
+{ "issue": "crash-memory" }
+```
+
+`get_candidates` returns the files its recorded reading ranks, each with the signal and line
+that ranked it, plus `notRanked`: files the reading looked at and found nothing in. Work the
+candidates in order, open the named line, and stop at the first that explains the symptom — a
+large, well-connected file is not the answer just because it is large, and `notRanked` is
+where that counter-evidence lives. Built-in classes are `crash-memory` (the retention
+reading), `slow-path` (the compute signals), and `breakage` (the change reading); declare
+your own under `issues:` in `strabo.groups.yml`, where the order of `signals` is the severity
+order. Follow a candidate with `get_retention` (what it holds, and what releases it) or
+`strabo_file` (importers, complexity, signals). Read `unavailable` as the reading's own list of
+what it could not see — establish those yourself instead of re-deriving what the recorded
+evidence already answers.
 
 **Break a cycle.** `get_cycles` → pick the cycle → `strabo_path` both directions to find
 the edge that least belongs (often a type or constant import) → `simulate_change` with

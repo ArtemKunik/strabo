@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { createAnalysisContext } from './analysis-context.ts';
 import { createGitRouter } from './analysis-git.ts';
 import { createHistoryRouter } from './analysis-history.ts';
+import { createIssuesRouter } from './analysis-issues.ts';
 import { createQualityRouter } from './analysis-quality.ts';
 import { createReviewRouter } from './analysis-review.ts';
 import { createSandboxRouter } from './analysis-sandbox.ts';
@@ -28,5 +29,6 @@ export function createAnalysisRouter(config: StraboConfig): Router {
   router.use(createQualityRouter(context));
   router.use(createHistoryRouter(context));
   router.use(createSandboxRouter(context));
+  router.use(createIssuesRouter(context));
   return router;
 }

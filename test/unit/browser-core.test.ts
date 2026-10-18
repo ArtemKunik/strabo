@@ -1382,6 +1382,31 @@ test('isWiredField and isWiredMethod flag recorded wiring only', () => {
   assert.equal(isWiredMethod({ reads: [], writes: [] }), false);
 });
 
+test('buildAgentPrompt frames a candidates target by class, with its counter-evidence and limits', () => {
+  const prompt = buildAgentPrompt({
+    agent: 'opencode',
+    repository: { name: 'demo', root: '/demo' },
+    target: {
+      kind: 'candidates',
+      class: 'crash-memory',
+      unavailable: ['process lifetime is not recorded (a singleton holder reads as a plain type)'],
+      items: [
+        {
+          id: 'app/LiteRtEngineFactory.kt',
+          label: 'LiteRtEngineFactory.kt',
+          evidence: ['no-release-path (line 22): no recorded release call for `cached` in this file'],
+        },
+      ],
+    },
+  });
+
+  assert.match(prompt, /# Strabo task — issue class `crash-memory`/);
+  assert.match(prompt, /no-release-path \(line 22\)/);
+  assert.match(prompt, /## Not recorded \(establish these yourself\)/);
+  assert.match(prompt, /process lifetime is not recorded/);
+  assert.match(prompt, /Resolve the reported symptom from the ranked candidates below/);
+});
+
 test('buildAgentPrompt renders recorded evidence and a kind-aware task', () => {
   const prompt = buildAgentPrompt({
     agent: 'opencode',

@@ -50,6 +50,8 @@ record is reported as `unavailable`, never invented.
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
 | 38 | API development | Landed (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking API changes, R4 endpoint passport and overlay, R5 gRPC and GraphQL surfaces) |
 | 39 | Refactor sandbox: what-if and extraction | Landed (S1-S5: extraction planner, what-if sandbox, HTTP and MCP, Sandbox window with map rings and delegation, browser acceptance) |
+| 40 | Resource lifetime and memory risk | Landed in part (RL1, RL2, and the RL6 reading surface: `GET /analysis/retention`, MCP `get_retention`; RL0's browser scenario, RL3-RL5, and the RL6 report/check surfaces open) |
+| 41 | Issue-class triage and durable findings | Landed in part (T0, T1, T2: declared `issues:` classes, `GET /analysis/candidates`, MCP `get_candidates`, and the class-aware delegation prompt; T3-T5 open) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2729,6 +2731,248 @@ files outside the scan.
 Unit coverage: `test/unit/what-if.test.ts`, `test/unit/extraction.test.ts`,
 `test/unit/sandbox-api.test.ts` (HTTP and MCP agree on the sample fixture), and
 `test/unit/sandbox-panel.test.ts` (the window under JSDOM).
+
+## Phase 40 - Resource lifetime and memory risk
+
+Strabo's cost vocabulary stops at the function. `FunctionSignalKind`
+(`src/analysis/signals.ts`) names eight signals — nested loops, a scan or sort inside a loop,
+deep nesting, high complexity, a long body, many parameters, recursion — and every one is a
+**compute** reading taken from a body. Nothing records what an object *holds*, how long it
+holds it, or what loads it, so the one failure that takes a process down outright is invisible
+to the map. Worse, the existing lenses point the wrong way: on a real out-of-memory crash, the
+delegated target was a 688-line `object` of string literals — a data table with no lifetime at
+all — chosen because it is large and well connected, while the file that retains a
+multi-gigabyte model behind one field with no clear path (in the same repository,
+`app/src/main/java/com/artemkunyk/glimword/ai/engine/LiteRtEngineFactory.kt:22`) was never
+surfaced. Size encodes transitive dependents and the `Z` lens encodes lines of code;
+both are coupling readings. Memory is a *lifetime* reading, and Strabo has none.
+
+The raw material is already recorded, which is why this is a reading rather than a new scanner:
+
+- Phase 3 extracts fields with visibility, static, and declared type, and records the read/write
+  wiring between members (`MemberAccess`, the `Data flow` panels). That is where a retained
+  field lives.
+- Phase 14 records intra-file calls and detects entries, which is what "a cheap entry reaches an
+  expensive load" needs; `src/analysis/reachability.ts` already walks recorded edges.
+- The manifest, asset, and inventory readers (Phases 10, 20, 38) already parse the files in
+  which a platform declares its own budget.
+
+Principles carry over unchanged:
+
+- **Evidence over speculation.** A resource fact exists only because the scan recorded an
+  assignment of a recorded call's result to a recorded field, or a call whose recorded name or
+  type is in a documented heavy-weight set. An unrecorded field, an unread grammar, or a native
+  allocation is `not recorded`, never a leak.
+- **No runtime tracing, and no byte count we do not have.** The roadmap already puts runtime
+  tracing (OpenTelemetry) out of scope — it needs a running system, and that is a different
+  product — and this phase does not smuggle it back in. Retention is read statically and
+  labelled as such; a size appears only when the repository declares one (RL5) or the file's own
+  bytes were read. Nothing estimates a heap.
+- **Retention is not a leak.** GC, finalizers, native engines behind an FFI boundary, and the
+  platform freeing memory under pressure are all invisible here. A finding is *retained by a
+  recorded assignment*: a signal carrying the value and line that produced it, never a verdict.
+- **One vocabulary of signal.** Severity rides the Phase 13 status scale and its shape-first
+  rule, never a new hue, exactly as the contract (Phase 36) and data-flow (Phase 37) phases do.
+
+### Slices
+
+- **RL0 (open) - Acceptance fixture first.** A fixture under `test/fixtures/`: a
+  process-lifetime owner (a singleton `object`/static class) holding a field assigned a
+  heavy-weight load call and cleared nowhere; a cheap validation entry that reaches that load
+  through recorded calls; a whole-file read whose bytes are copied into a second buffer; a
+  **bounded** cache that caps and evicts (the negative case, which must not be flagged, the way
+  `src/scan/parse-cache.ts` does it); and a manifest that declares no `largeHeap`. The scenario
+  asserts the resource passport, the retention signals, the overlay classes, and the honest
+  `unavailable` cases. Unit counterpart in `test/unit/retention.test.ts`.
+- **RL1 (done) - Retention model.** `src/analysis/retention.ts`, pure: `RetentionFact {
+  file, line, kind, evidence, symbol, ownerType?, lifetime: local | field | static | process,
+  releaseSites[], releaseCalls[] }` with `kind: native-model | engine | bitmap | file-read |
+  asset-read | stream | connection | collection | listener`. Built from recorded symbols and
+  calls only. A resource assigned to a local, cleared before its scope ends, is recorded as
+  `local` and carries no signal; the reading exists to separate `local` from `field`/`static`.
+  The reading is called **retention** in the code because the Data layer (Phase 33) already
+  spends "resource" on a hub kind (`api-resource`); the UI keeps the operator's word and calls
+  the tab and the overlay **Resources**.
+- **RL2 (done) - Retention signals.** `RetentionSignalKind` beside `FunctionSignalKind`,
+  each deterministic with a recorded value, threshold, and evidence line, and per-language
+  name sets the way `linearScanCalls` / `sortCalls` are declared today:
+  - `field-retained-resource` — a heavy-weight resource held in a recorded field. A singleton
+    holder and a plain instance both read as `kind: 'type'`, so the signal is field-scoped and
+    says so in RL7's limits rather than claiming process lifetime;
+  - `no-release-path` — that field is written but no recorded call site clears, closes, or
+    releases it anywhere in the repository;
+  - `unbounded-collection` — a field collection appended to with no cap and no remove, evict,
+    or clear call recorded (the contrast with a bounded cache is the signal, so both are
+    recorded and only the unbounded one trips);
+  - `eager-load-on-validation` — a recorded entry whose name reads as a check, probe, getter, or
+    validation reaches a load call through recorded calls (the `getModelValidationError` →
+    `getEngine` shape);
+  - `double-materialisation` — a whole-file or asset read whose bytes are copied into a second
+    buffer before use (`readBytes()` → `allocateDirect`, `copyOf`, `toByteArray`);
+  - `listener-without-removal` — a callback registered on a longer-lived owner with no matching
+    removal recorded.
+- **RL3 (open) - Resource passport.** A **Resources** tab on the Module Passport, beside
+  Members, Functions, and Impact, and the same card on the change passport for a touched file:
+  the heavy-weight owners in the file, where each is loaded (`file:line`), the recorded lifetime,
+  the release sites or `no release path recorded`, the cheapest recorded entry that can reach the
+  load, and the retention reach — who holds a reference, from recorded fields and member wiring
+  rather than imports. A file with no recorded resource reads `no heavy-weight resource
+  recorded`, never "safe".
+- **RL4 (open) - Lifecycle overlay.** A **Resources** option in the review overlay menu
+  (`ui/strabo-overlays.js`), within the Phase 13 budget and shape-first: a static-retained
+  resource takes the serious double ring, an unbounded collection the warning dashed ring, and a
+  bounded, evicted resource the neutral fill — explicitly *not* flagged, so the negative case is
+  visible as the healthy one. The panel ranks repository-wide, worst-first, in the shape Function
+  hotspots already uses: one issue class over the recorded facts.
+- **RL5 (open) - Declared budget reading.** Read the platform's own declarations and join
+  them to the facts: Android `largeHeap` and `hardwareAccelerated` from `AndroidManifest.xml`,
+  asset byte sizes, and any per-model size the application declares in its own table. The
+  passport then states a ceiling rather than an unqualified warning — *declared ceiling: default
+  heap (no `largeHeap`) · declared models 736 MB–3.66 GB* — and where nothing is declared the
+  field is `unavailable` with the reason.
+- **RL6 (partial) - Agent, CLI, and report surface.** MCP `get_retention` (per file) and
+  `get_retention_hotspots` (repository), a **Resources** section in the headless report, and
+  `strabo check` rules `resource-retained` / `resource-no-release-path`. The delegation prompt
+  for a memory-class issue carries the retention facts and the honesty list, and names the
+  highest-severity resource file rather than the largest file (Phase 41).
+  **Landed:** `GET /analysis/retention` and MCP `get_retention`, feeding Phase 41's ranking.
+  **Open:** `get_retention_hotspots`, the report section, and the two check rules.
+- **RL7 (done in part) - Honesty and limits.** Static retention is not a leak; the reading is
+  labelled **retained, by recorded assignment**. Named as unread rather than assumed: garbage
+  collection and finalizers, native and JNI allocations behind an engine or player, memory the
+  platform reclaims under pressure, a release performed through a framework or `AutoCloseable`
+  the grammar did not record, and any resource owner in a language with no extractor (which
+  reports extraction not implemented, as elsewhere). Nothing here claims a byte count that the
+  repository did not declare.
+
+Slice order: **RL0** first (the failing acceptance fixture), then **RL1** (the retention model)
+and **RL2** (the signals, the only part that can be wrong), then **RL3** and **RL4** (the
+passport and the overlay). **RL5** reads the declared budgets, **RL6** delivers the agent, CLI,
+and report surfaces, and **RL7** keeps the limits named.
+
+Known limits, named rather than hidden: this reads one file's fields and the calls inside it, so
+a resource handed between files or stored behind an interface, a generic, or a map of
+heterogeneous values is recorded as the field it lands in and no further; a language with a
+garbage-collected `close()` convention rather than a recorded `close` call reads as
+`no release path recorded` even when one exists by convention, and the passport says which
+convention it looked for.
+
+**Landed.** `src/analysis/retention.ts` (RL1 and RL2) exports `buildRetention(file, symbols,
+calls)` returning `RetentionFact`s and `RetentionSignal`s, with the heavy-weight
+type tokens, release/append/evict/read-all/copy/validation/load name sets declared beside it
+the way `linearScanCalls` / `sortCalls` are. `GET /analysis/retention?file=` and MCP
+`get_retention` serve it on demand through the same `symbolExtractorFor` path `/symbols` uses,
+and `unavailable` carries the four named limits to every caller. Two signal kinds differ from
+the plan above and the spec now says so: `static-retained-resource` became
+`field-retained-resource` because the symbol extractors record a Kotlin `object` and a `class`
+identically, and `reload-without-release` is not derived yet. Unit coverage is
+`test/unit/retention.test.ts` (nine cases: a held engine with and without a release, a holder
+reached one level up through a type declared in the same file, a validation that reaches a
+load, a bounded cache that must not trip, a whole-file read copied on one line, a listener
+without a removal, an untyped field, and the tokeniser). **Open:** RL0's fixture and browser
+scenario, RL3-RL5 (passport tab, overlay, declared budgets), and RL6's hotspot tool, report
+section, and check rules.
+
+## Phase 41 - Issue-class triage: from a symptom to candidate files
+
+Phase 40 gives Strabo a memory reading. This phase fixes how a symptom becomes a task, because
+on the crash above the cost was in the hand-off rather than in the analysis.
+
+A delegated task today is a selected node plus one fixed question — *assess this file: its role,
+its blast radius, and the risk of changing it* — and the candidate is whatever the operator
+clicked, ranked by the map's own encoding. Three consequences were observed:
+
+- **The ranking is coupling-shaped for every symptom.** Node size is transitive dependents and
+  the `Z` lens is lines of code, so an out-of-memory crash is pointed at the biggest file rather
+  than the file that matches the symptom. A table of 688 string literals outranked a singleton
+  holding a multi-gigabyte engine, and the prompt then asked the agent for its *blast radius*, a
+  question with no bearing on the crash.
+- **Findings cannot be recorded.** The map-driving verbs are a fixed read-only set
+  (`src/terminal/shim.ts:16`) and `strabo note "tests passed"` is a transient toast — it cannot
+  name a file or a line, it is not stored, and it is gone on reload. An agent that established
+  six concrete causes could record none of them, and the next one starts from scratch.
+- **The agent is not provisioned with Strabo's own surface.** The package ships
+  `skills/strabo-structural-coding` and the `strabo mcp` tools, but a delegated session opens
+  with neither the MCP server configured nor the skill loaded, so the agent that is meant to
+  plan against the graph cannot see it and re-derives facts Strabo already recorded. The seed
+  should name the skill and the MCP configuration a delegated session is expected to use, and
+  say so when it could not load them.
+
+Principles carry over unchanged:
+
+- **Evidence over speculation.** The prompt and the ranking carry recorded facts and their
+  lines, plus a named list of what was *not* recorded, so the agent's first move is to fill a
+  stated gap rather than re-derive what Strabo already knows.
+- **A candidate is a candidate.** Nothing here claims causality; a class ranks the files whose
+  recorded facts match the symptom's evidence and says what it ranked by.
+- **The seam stays opt-in and local.** The one piece of evidence static analysis cannot produce
+  is the crash itself, and reading a log the operator already has is a seam in the
+  `POST /vulnerabilities` and narrator mould — not a tracing dependency.
+
+### Slices
+
+- **T0 (done) - Declared issue classes.** An `issues:` key in `strabo.groups.yml`, beside
+  `tiers:` and `rules:`, so a class is data an operator can extend rather than code. Each class
+  declares the surname, the evidence it ranks by, and the signals it cares about — e.g.
+  `crash-memory` ranks by Phase 40's resource signals and the declared budget, `slow-path` by
+  compute signals, `breakage` by the change and contract readings. A symptom mapped to no class
+  keeps today's generic task, unchanged.
+- **T1 (done) - Candidate ranking per class.** `GET /analysis/candidates?issue=<class>`
+  returns the ranked files, each with **why it is here** — the recorded fact and its line — and
+  the counter-evidence beside it (the 688-line data table is listed once, with `no recorded
+  lifetime`, rather than ranked first). A class with no recorded evidence returns `unavailable`
+  with its reason, never an alphabetical list that reads as a ranking.
+- **T2 (done) - The prompt carries the class.** The delegation prompt names the class, the
+  ranked candidates with their evidence, the honesty list for that class (what Strabo could not
+  read), and the checks worth running; the existing role/blast-radius/risk text remains the
+  fallback for an unclassified symptom. The prompt states the missing facts explicitly, so an
+  agent is not asked to assess the blast radius of a data table when the question is memory.
+- **T3 (open) - Operator-supplied evidence seam.** `POST /analysis/evidence`, off unless
+  `STRABO_EVIDENCE=on`, accepts a pasted log or a path to one, bounded and never persisted beyond
+  the cache, and extracts `path:line` frames with the same reader the Terminal already uses to
+  make its output clickable. The frames join to recorded nodes, so the suspect set becomes "the
+  frames in your crash, on the map"; a frame matching no node is named as outside the scan. The
+  response is a reading of the operator's own file and is labelled as such — never merged into
+  the graph, never a count.
+- **T4 (open) - Durable, line-scoped findings.** `strabo note <path>[:line] <message>`
+  and `strabo find <path>[:line] <message>` write to a per-repository findings document under
+  `STRABO_CACHE_DIR`; a floating **Findings** panel lists them, `ov-finding` rings the nodes (a
+  relationship mark, not a status, so it spends no status hue), the review panel and the
+  delegation prompt carry them, and a finding is resolved or deleted explicitly. The verbs stay
+  read-only with respect to the repository: a finding is never a graph edge and never moves a
+  count, and the existing `focus`/`open`/`highlight`/`review`/`screen` verbs are unchanged.
+- **T5 (open) - Honesty and limits.** The panel states what the class ranked by and what
+  it could not rank; a finding is attributed to the operator or agent that wrote it and is never
+  presented as recorded evidence; the T3 seam names its source and does not treat an arbitrary
+  log as a crash log.
+
+Slice order: **T0** first (the declared classes), then **T1** (the ranking) and **T2** (the
+prompt), which together fix the observed mis-aim; **T4** (durable findings) follows independently
+and is the cheapest slice in the phase; **T3** (the evidence seam) is opt-in and lands last;
+**T5** keeps the claims honest.
+
+Acceptance: on the RL0 fixture, delegating a `crash-memory` symptom ranks the singleton resource
+owner above the data table and names the resource fact it ranked by; a finding written with
+`strabo note path:line "…"` survives a reload, appears in the Findings panel, and is carried in
+the prompt for the next delegation; an unclassified symptom produces byte-for-byte the current
+prompt.
+
+**Landed.** `src/analysis/issues.ts` (T0) reads `issues:` from `strabo.groups.yml` and resolves
+it over the shipped classes `crash-memory` (retention), `slow-path` (compute), and `breakage`
+(change), a declared class replacing its built-in by name. `src/analysis/candidates.ts` (T1)
+ranks purely: a signal earlier in the class's `signals` list weighs more, a file the reading
+looked at and found nothing in above 300 lines is returned under `notRanked` with the reason
+rather than omitted, and a class whose reading recorded nothing returns `unavailable` with
+its reason instead of an alphabetical list. `GET /analysis/candidates?issue=` and MCP
+`get_candidates` extract on demand through the same per-file path `/symbols` uses, capped at
+400 files with the cap named in the note; `retention` and `compute` are wired and `change` /
+`breakage` return `unavailable` saying so. T2 adds the `candidates` kind to the delegation
+prompt: the class in the title, one subsection per ranked candidate, and the reading's own
+`unavailable` rendered as **Not recorded (establish these yourself)**. Unit coverage is
+`test/unit/candidates.test.ts` (five cases, including the recorded case that prompted the
+phase: a 688-line data table is ranked below the retained engine and listed as counter-evidence)
+and the `buildAgentPrompt` case in `test/unit/browser-core.test.ts`. **Open:** T3 (the evidence
+seam), T4 (durable findings), and T5.
 
 ## Reading route (landed)
 
