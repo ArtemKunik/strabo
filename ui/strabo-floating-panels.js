@@ -8,6 +8,20 @@ import { initFloatingWindows } from './strabo-float.js';
 import { renderShortcuts } from './strabo-panels.js';
 import { initFloatingToolbar } from './strabo-float-toolbar.js';
 
+/**
+ * The heading text of a panel, without its leading mark or trailing dismiss button.
+ *
+ * An overlay heading starts with a status dot element, so reading `h3.firstChild` returned the
+ * dot's empty text and left the window titled `Tier lens` while it painted `Module depth`.
+ */
+function panelHeadingText(panel) {
+  const heading = panel.querySelector('h3');
+  const text = [...(heading?.childNodes ?? [])].find(
+    (node) => node.nodeType === 3 && node.textContent.trim() !== '',
+  );
+  return (text?.textContent ?? '').split(' · ')[0].trim();
+}
+
 export function createFloatingPanels(app) {
   const { state, view, elements } = app;
 
@@ -109,7 +123,7 @@ export function createFloatingPanels(app) {
         pinned: 5,
         width: 360,
         // The heading's own text only: its dismiss button's `×` is not part of the title.
-        titleFrom: (panel) => (panel.querySelector('h3')?.firstChild?.textContent ?? '').split(' · ')[0].trim(),
+        titleFrom: panelHeadingText,
         // The panel carries whichever lens is active: an analysis overlay, or the tier lens
         // when "Color by tier" is on with no overlay. It stays disabled only with both off.
         canOpen: () => state.overlay !== 'none' || state.tier !== 'off',

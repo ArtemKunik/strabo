@@ -159,6 +159,27 @@ export function renderLegend(container, model, options = {}) {
   if (lines.length > 0) guide.append(legendSection('Lines', lines.map(legendCue)));
   container.append(guide);
 
+  // The active overlay's key comes before the tiers: a ring is a warning about one node,
+  // while a tier fill is a category, and the reader meets the urgent encoding first.
+  if (options.overlay?.entries?.length > 0) {
+    container.append(
+      legendSection(`Overlay · ${options.overlay.title}`, options.overlay.entries.map(overlayLegendRow)),
+    );
+    const note = options.overlay.scale
+      ? 'A more solid fill is a higher measured percentage; rings mark the states that are not a measurement.'
+      : overlayToneNote(options.overlay.entries);
+    if (note) container.append(legendNote(note));
+  }
+
+  // The tier lens paints the file map outside the Structure view too; without this key the
+  // fills are an unreadable set of colours. The note draws the line between role and status.
+  if (options.tiers?.rows?.length > 0) {
+    container.append(legendSection('Tier colours', options.tiers.rows.map(tierLegendRow)));
+    container.append(
+      legendNote('Fill names the file’s role in the stack, not a quality verdict; the rings carry the warnings.'),
+    );
+  }
+
   if (model?.structure) {
     const tiers = legendTiers(model);
     if (tiers.length > 0) container.append(legendSection('Tiers', tiers));
@@ -242,12 +263,109 @@ function legendTiers(model) {
   }
   return TIER_ORDER.filter((tier) => files.has(tier)).map((tier) => {
     const label = TIER_LABELS[tier] ?? tier;
-    const mark = legendSvg();
-    mark.append(svgElement('rect', { x: '3', y: '2', width: '18', height: '10', rx: '3', class: 'lm-tier' }));
-    mark.style.setProperty('--lm-tier', tierColorVar(tier));
     const count = files.get(tier);
-    return legendRow(mark, label, count > 0 ? ` · ${count} file(s)` : '', `Files the tier lens placed in ${label}`);
+    return legendRow(tierMark(tier), label, count > 0 ? ` · ${count} file(s)` : '', `Files the tier lens placed in ${label}`);
   });
+}
+
+
+/** A swatch in the tier colour the file map paints. */
+function tierMark(tier) {
+  const mark = legendSvg();
+  mark.append(svgElement('rect', { x: '3', y: '2', width: '18', height: '10', rx: '3', class: 'lm-tier' }));
+  mark.style.setProperty('--lm-tier', tierColorVar(tier));
+  return mark;
+}
+
+
+/** One row of the tier lens's key, from the report the lens is painting. */
+function tierLegendRow(row) {
+  return legendRow(
+    tierMark(row.tier),
+    row.label,
+    row.count > 0 ? ` · ${row.count} file(s)` : '',
+    `Files the tier lens placed in ${row.label}`,
+  );
+}
+
+
+/** One row of the active overlay's key: the mark the map draws, then what it means. */
+function overlayLegendRow(entry) {
+  return legendRow(overlayMark(entry), entry.label, '', '');
+}
+
+
+/**
+ * A sentence naming the hue families this overlay actually uses, so the reader can translate
+ * orange, red, grey, and accent rings at a glance. It only names the tones on screen.
+ */
+function overlayToneNote(entries) {
+  const tones = new Set(entries.filter((entry) => entry.ring).map((entry) => entry.tone).filter(Boolean));
+  const parts = [];
+  if (tones.has('good')) parts.push('green rings mark covered');
+  if (tones.has('warn')) parts.push('orange rings ask for review');
+  if (tones.has('bad')) parts.push('red rings mark a recorded problem');
+  if (tones.has('muted')) parts.push('dashed grey rings mean not covered or not read');
+  if (tones.has('accent')) parts.push('accent rings mark context, not a status');
+  return parts.length > 0 ? `${parts.join(' · ')}.` : '';
+}
+
+
+/** A muted sentence under a legend section, distinct from the warning-toned limits list. */
+function legendNote(text) {
+  const note = document.createElement('p');
+  note.className = 'legend-note';
+  note.textContent = text;
+  return note;
+}
+
+
+/**
+ * The mark an overlay key draws: the node body with the ring the canvas draws (solid, dashed,
+ * dotted, or double in the tone's hue), or a fill on a sequential scale for coverage.
+ */
+function overlayMark(entry) {
+  const svg = legendSvg();
+  const add = (name, attributes) => svg.append(svgElement(name, attributes));
+  const body = { x: '4', y: '2', width: '16', height: '10', rx: '3' };
+  const tone = entry.tone ?? 'neutral';
+  const hasFill = typeof entry.fill === 'number' && entry.fill > 0;
+  // The node body: the neutral fill, or the measured-coverage ramp.
+  add(
+    'rect',
+    hasFill
+      ? { ...body, class: 'lm-node lm-fill-accent', 'fill-opacity': String(entry.fill) }
+      : { ...body, class: 'lm-node' },
+  );
+  // The status ring overlays the body; `fill: none` is inline because the `.lm-node` class
+  // would otherwise fill it with the node colour and bury a coverage fill underneath.
+  if (entry.ring) {
+    const dash =
+      entry.ring === 'dotted' ? { 'stroke-dasharray': '1 2' } : entry.ring === 'dashed' ? { 'stroke-dasharray': '3 2' } : {};
+    add('rect', {
+      ...body,
+      class: `lm-status-${tone}`,
+      style: 'fill: none',
+      'stroke-width': entry.ring === 'double' ? '1.6' : '2',
+      ...dash,
+    });
+    if (entry.ring === 'double') {
+      add('rect', {
+        x: '6.5',
+        y: '4',
+        width: '11',
+        height: '6',
+        rx: '2',
+        class: `lm-status-${tone}`,
+        style: 'fill: none',
+        'stroke-width': '1.6',
+      });
+    }
+  } else {
+    // A fill-only bucket keeps the map's thin accent border.
+    add('rect', { ...body, class: 'lm-fill-accent', style: 'fill: none', 'stroke-width': '1' });
+  }
+  return svg;
 }
 
 

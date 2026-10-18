@@ -1729,6 +1729,15 @@ function tierOfFile(report) {
   }
   return map;
 }
+function tierLegendRows(report) {
+  const summary = report?.summary ?? {};
+  return TIER_ORDER.filter((tier) => Number(summary[tier] ?? 0) > 0).map((tier) => ({
+    tier,
+    label: TIER_LABELS[tier],
+    count: Number(summary[tier] ?? 0),
+    color: tierColorVar(tier)
+  }));
+}
 function tierMatrixRows(report) {
   const matrix = report?.matrix;
   if (!matrix) {
@@ -2050,6 +2059,41 @@ var OVERLAY_ENDPOINTS = {
   endpoints: "/analysis/endpoints"
 };
 var FILE_MODE_OVERLAYS = ["impact", "cycles", "test-reach", "module-depth", "ownership", "smells", "hidden-coupling", "declared-rules", "data", "coverage", "contracts", "endpoints"];
+var OVERLAY_KEY = {
+  "ov-changed": { label: "changed in the working tree", tone: "warn", ring: "solid" },
+  "ov-affected": { label: "affected by the change", tone: "warn", ring: "dotted" },
+  "ov-cycle": { label: "in a dependency cycle", tone: "bad", ring: "double" },
+  "ov-unreached": { label: "no test reaches it", tone: "muted", ring: "dashed" },
+  "ov-hotspot": { label: "hot function", tone: "warn", ring: "dotted" },
+  "ov-wide-interface": { label: "wide interface (flagged)", tone: "warn", ring: "solid" },
+  "ov-pass-through": { label: "pass-through (thin wrapper)", tone: "muted", ring: "dashed" },
+  "ov-sole-owner": { label: "sole owner", tone: "bad", ring: "dotted" },
+  "ov-cross-repo": { label: "cross-repo flow", tone: "accent", ring: "dotted" },
+  "ov-smell": { label: "smell", tone: "warn", ring: "dotted" },
+  "ov-hidden-coupling": { label: "hidden coupling (no import path)", tone: "bad", ring: "double" },
+  "ov-declared-rule": { label: "declared-rule violation", tone: "bad", ring: "solid" },
+  "ov-endpoint": { label: "registers an endpoint", tone: "accent", ring: "solid" },
+  "ov-endpoint-gap": { label: "endpoint gap (untested or unguarded)", tone: "warn", ring: "dashed" },
+  "ov-data": { label: "reads or writes a dataset", tone: "accent", ring: "dashed" },
+  "ov-product": { label: "produces a declared product", tone: "accent", ring: "double" },
+  "ov-contract-def": { label: "contract definition", tone: "accent", ring: "solid" },
+  "tier-upward": { label: "upward dependency", tone: "bad", ring: "double" },
+  "tier-skip": { label: "skip-layer dependency", tone: "warn", ring: "dashed" }
+};
+function overlayLegendEntries(overlay2) {
+  if (!overlay2) {
+    return [];
+  }
+  if (Array.isArray(overlay2.legend) && overlay2.legend.length > 0) {
+    return overlay2.legend.map((entry) => ({
+      cls: entry.cls,
+      label: entry.label,
+      ...COVERAGE_MARKS[entry.cls] ?? { tone: "muted" }
+    }));
+  }
+  const present = new Set(overlay2.classes instanceof Map ? [...overlay2.classes.values()] : []);
+  return Object.entries(OVERLAY_KEY).filter(([cls]) => present.has(cls)).map(([cls, entry]) => ({ cls, ...entry }));
+}
 function reviewOverlay(data) {
   if (!data || data.available === false) {
     return { classes: /* @__PURE__ */ new Map(), summary: "", items: [] };
@@ -2311,6 +2355,17 @@ var COVERAGE_LEGEND = [
   { cls: "cov-reachable", label: "reachable only" },
   { cls: "cov-stale", label: "stale figure" }
 ];
+var COVERAGE_MARKS = {
+  "cov-90": { fill: 0.85 },
+  "cov-70": { fill: 0.66 },
+  "cov-50": { fill: 0.5 },
+  "cov-30": { fill: 0.34 },
+  "cov-10": { fill: 0.2 },
+  "cov-zero": { tone: "accent", fill: 0.1, ring: "solid" },
+  "cov-noreport": { tone: "warn", fill: 0, ring: "dashed" },
+  "cov-reachable": { tone: "bad", fill: 0, ring: "dotted" },
+  "cov-stale": { tone: "muted", fill: 0.45, ring: "dotted" }
+};
 function coverageBucket(value) {
   if (value >= 90) return "cov-90";
   if (value >= 70) return "cov-70";
@@ -12200,6 +12255,19 @@ function renderLegend(container, model, options = {}) {
   if (shapes.length > 0) guide.append(legendSection("Shapes", shapes.map(legendCue)));
   if (lines.length > 0) guide.append(legendSection("Lines", lines.map(legendCue)));
   container.append(guide);
+  if (options.overlay?.entries?.length > 0) {
+    container.append(
+      legendSection(`Overlay \xB7 ${options.overlay.title}`, options.overlay.entries.map(overlayLegendRow))
+    );
+    const note4 = options.overlay.scale ? "A more solid fill is a higher measured percentage; rings mark the states that are not a measurement." : overlayToneNote(options.overlay.entries);
+    if (note4) container.append(legendNote(note4));
+  }
+  if (options.tiers?.rows?.length > 0) {
+    container.append(legendSection("Tier colours", options.tiers.rows.map(tierLegendRow)));
+    container.append(
+      legendNote("Fill names the file\u2019s role in the stack, not a quality verdict; the rings carry the warnings.")
+    );
+  }
   if (model?.structure) {
     const tiers = legendTiers(model);
     if (tiers.length > 0) container.append(legendSection("Tiers", tiers));
@@ -12268,12 +12336,78 @@ function legendTiers(model) {
   }
   return TIER_ORDER.filter((tier) => files.has(tier)).map((tier) => {
     const label = TIER_LABELS[tier] ?? tier;
-    const mark = legendSvg();
-    mark.append(svgElement("rect", { x: "3", y: "2", width: "18", height: "10", rx: "3", class: "lm-tier" }));
-    mark.style.setProperty("--lm-tier", tierColorVar(tier));
     const count = files.get(tier);
-    return legendRow(mark, label, count > 0 ? ` \xB7 ${count} file(s)` : "", `Files the tier lens placed in ${label}`);
+    return legendRow(tierMark(tier), label, count > 0 ? ` \xB7 ${count} file(s)` : "", `Files the tier lens placed in ${label}`);
   });
+}
+function tierMark(tier) {
+  const mark = legendSvg();
+  mark.append(svgElement("rect", { x: "3", y: "2", width: "18", height: "10", rx: "3", class: "lm-tier" }));
+  mark.style.setProperty("--lm-tier", tierColorVar(tier));
+  return mark;
+}
+function tierLegendRow(row) {
+  return legendRow(
+    tierMark(row.tier),
+    row.label,
+    row.count > 0 ? ` \xB7 ${row.count} file(s)` : "",
+    `Files the tier lens placed in ${row.label}`
+  );
+}
+function overlayLegendRow(entry) {
+  return legendRow(overlayMark(entry), entry.label, "", "");
+}
+function overlayToneNote(entries) {
+  const tones = new Set(entries.filter((entry) => entry.ring).map((entry) => entry.tone).filter(Boolean));
+  const parts = [];
+  if (tones.has("good")) parts.push("green rings mark covered");
+  if (tones.has("warn")) parts.push("orange rings ask for review");
+  if (tones.has("bad")) parts.push("red rings mark a recorded problem");
+  if (tones.has("muted")) parts.push("dashed grey rings mean not covered or not read");
+  if (tones.has("accent")) parts.push("accent rings mark context, not a status");
+  return parts.length > 0 ? `${parts.join(" \xB7 ")}.` : "";
+}
+function legendNote(text) {
+  const note4 = document.createElement("p");
+  note4.className = "legend-note";
+  note4.textContent = text;
+  return note4;
+}
+function overlayMark(entry) {
+  const svg = legendSvg();
+  const add = (name, attributes) => svg.append(svgElement(name, attributes));
+  const body = { x: "4", y: "2", width: "16", height: "10", rx: "3" };
+  const tone = entry.tone ?? "neutral";
+  const hasFill = typeof entry.fill === "number" && entry.fill > 0;
+  add(
+    "rect",
+    hasFill ? { ...body, class: "lm-node lm-fill-accent", "fill-opacity": String(entry.fill) } : { ...body, class: "lm-node" }
+  );
+  if (entry.ring) {
+    const dash = entry.ring === "dotted" ? { "stroke-dasharray": "1 2" } : entry.ring === "dashed" ? { "stroke-dasharray": "3 2" } : {};
+    add("rect", {
+      ...body,
+      class: `lm-status-${tone}`,
+      style: "fill: none",
+      "stroke-width": entry.ring === "double" ? "1.6" : "2",
+      ...dash
+    });
+    if (entry.ring === "double") {
+      add("rect", {
+        x: "6.5",
+        y: "4",
+        width: "11",
+        height: "6",
+        rx: "2",
+        class: `lm-status-${tone}`,
+        style: "fill: none",
+        "stroke-width": "1.6"
+      });
+    }
+  } else {
+    add("rect", { ...body, class: "lm-fill-accent", style: "fill: none", "stroke-width": "1" });
+  }
+  return svg;
 }
 function legendSvg() {
   return svgElement("svg", { class: "legend-mark", viewBox: "0 0 24 14", "aria-hidden": "true" });
@@ -17812,6 +17946,29 @@ function openCommitDialog({ repository, onCommitted } = {}) {
 function createLensController(app2) {
   const { state: state2, view: view2, elements: elements2, request: request2 } = app2;
   let tierReportCache = { generation: -1, report: null };
+  let currentOverlay = null;
+  function tierLegend() {
+    if (state2.tier === "off" || state2.mode !== "file" || !app2.current || app2.current.system || app2.current.prefixLength !== void 0) {
+      return null;
+    }
+    if (tierReportCache.generation !== state2.renderedGeneration || !tierReportCache.report) {
+      return null;
+    }
+    const rows = tierLegendRows(tierReportCache.report);
+    return rows.length > 0 ? { rows } : null;
+  }
+  function overlayLegend() {
+    if (!currentOverlay || currentOverlay.generation !== state2.renderedGeneration) {
+      return null;
+    }
+    const entries = overlayLegendEntries(currentOverlay.overlay);
+    return entries.length > 0 ? {
+      title: OVERLAY_TITLES[currentOverlay.kind] ?? currentOverlay.kind,
+      entries,
+      // An overlay with a named scale (coverage) is read as fills, not rings.
+      scale: Array.isArray(currentOverlay.overlay.legend) && currentOverlay.overlay.legend.length > 0
+    } : null;
+  }
   async function assignTier(glob, tier) {
     const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
     const response = await fetch(`${API_PATH}/analysis/tiers/assign${query}`, {
@@ -17835,6 +17992,7 @@ function createLensController(app2) {
       if (state2.overlay === "none") {
         renderOverlayPanel(elements2.overlayPanel, "", null);
       }
+      app2.refreshLegend?.();
       return;
     }
     const generation = state2.renderedGeneration;
@@ -17856,6 +18014,7 @@ function createLensController(app2) {
       if (state2.overlay === "none") {
         renderOverlayPanel(elements2.overlayPanel, "", null);
       }
+      app2.refreshLegend?.();
       return;
     }
     view2.applyTier(tierOfFile(tierReportCache.report), state2.tier === "all" ? "all" : state2.tier);
@@ -17866,6 +18025,7 @@ function createLensController(app2) {
         onAssign: assignTier
       });
     }
+    app2.refreshLegend?.();
   }
   async function loadChangesWith(id) {
     const repository = state2.repository ?? null;
@@ -17891,8 +18051,10 @@ function createLensController(app2) {
       view2.setHiddenCoupling(null, false);
       app2.prefs?.writeViewPrefs?.();
     }
+    currentOverlay = null;
     renderOverlayPanel(elements2.overlayPanel, "", null);
     elements2.overlayPanel.hidden = true;
+    app2.refreshLegend?.();
     app2.windows.refreshDock();
   }
   function clearOverlay() {
@@ -17902,10 +18064,12 @@ function createLensController(app2) {
     const kind = state2.overlay;
     if (kind === "none") {
       view2.overlay(null);
+      currentOverlay = null;
       renderOverlayPanel(elements2.overlayPanel, "", null);
       if (state2.tier !== "off") {
         void applyTierLens();
       }
+      app2.refreshLegend?.();
       app2.windows.refreshDock();
       return;
     }
@@ -17934,6 +18098,8 @@ function createLensController(app2) {
       onSelect: (id) => app2.selection.selectNode(id),
       ...actions.length > 0 ? { actions } : {}
     });
+    currentOverlay = { kind, overlay: overlay2, generation: generation ?? state2.renderedGeneration };
+    app2.refreshLegend?.();
     app2.windows.refreshDock();
   }
   let unitHotspotCache = null;
@@ -18112,6 +18278,8 @@ function createLensController(app2) {
     closeLensPanel,
     enrichUnitCards,
     loadChangesWith,
+    overlayLegend,
+    tierLegend,
     updateCoChangeButton,
     updateEdgeKindButton,
     updateLabelsButton
@@ -31657,6 +31825,13 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
 }
 
 // ui/strabo-floating-panels.js
+function panelHeadingText(panel) {
+  const heading3 = panel.querySelector("h3");
+  const text = [...heading3?.childNodes ?? []].find(
+    (node) => node.nodeType === 3 && node.textContent.trim() !== ""
+  );
+  return (text?.textContent ?? "").split(" \xB7 ")[0].trim();
+}
 function createFloatingPanels(app2) {
   const { state: state2, view: view2, elements: elements2 } = app2;
   function toggleShortcuts() {
@@ -31757,7 +31932,7 @@ function createFloatingPanels(app2) {
         pinned: 5,
         width: 360,
         // The heading's own text only: its dismiss button's `×` is not part of the title.
-        titleFrom: (panel) => (panel.querySelector("h3")?.firstChild?.textContent ?? "").split(" \xB7 ")[0].trim(),
+        titleFrom: panelHeadingText,
         // The panel carries whichever lens is active: an analysis overlay, or the tier lens
         // when "Color by tier" is on with no overlay. It stays disabled only with both off.
         canOpen: () => state2.overlay !== "none" || state2.tier !== "off",
@@ -32259,6 +32434,7 @@ app.panels = createRepositoryPanels(app);
 app.coverage = createCoverage(app);
 app.products = createProducts(app);
 app.lenses = createLensController(app);
+app.refreshLegend = renderMapLegend;
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
 app.source = createSourceViewer(app);
@@ -32315,6 +32491,13 @@ var freshness = createFreshnessBadge(elements.freshness, {
   onRebuild: () => scan({ refresh: true }),
   repository: () => state.repository
 });
+function renderMapLegend() {
+  renderLegend(elements.legend, app.current, {
+    locLens: state.mode === "file" && state.locLens,
+    overlay: app.lenses?.overlayLegend?.() ?? null,
+    tiers: app.lenses?.tierLegend?.() ?? null
+  });
+}
 async function scan({ refresh = false } = {}) {
   const generation = ++app.scanGeneration;
   elements.status.textContent = "Scanning\u2026";
@@ -32371,7 +32554,7 @@ async function scan({ refresh = false } = {}) {
     app.lenses.applyLocLens();
     app.lenses.applyEdgeKindLens();
     app.lenses.applyCoChangeLens();
-    renderLegend(elements.legend, model, { locLens: state.mode === "file" && state.locLens });
+    renderMapLegend();
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
       renderer: rendererName(),

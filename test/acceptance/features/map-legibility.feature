@@ -12,6 +12,15 @@ Feature: Map legibility
   Scenario: The legend explains the encoding
     Then the legend explains size, position, and shape
 
+  @legend-key
+  Scenario: The legend keys the tier colours and the active overlay
+    # Colour is the one encoding a reader cannot translate from the shapes alone: the tier
+    # lens paints the fills, and the module-depth overlay rings the files it flagged.
+    When I switch to file detail
+    And I switch the tier lens to "all"
+    And I select the review overlay "module-depth"
+    Then the legend keys the tier colours and the overlay rings
+
   @hover
   Scenario: Hovering a node reports its blast radius
     When I hover the "src" node

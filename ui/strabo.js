@@ -211,6 +211,9 @@ app.panels = createRepositoryPanels(app);
 app.coverage = createCoverage(app);
 app.products = createProducts(app);
 app.lenses = createLensController(app);
+// The lens controller re-renders the legend once its tier report or overlay data arrives, so
+// the key always describes what is actually painted.
+app.refreshLegend = renderMapLegend;
 app.repos = createRepositoryPicker(app);
 app.units = createSystemUnits(app);
 app.source = createSourceViewer(app);
@@ -270,6 +273,19 @@ const freshness = createFreshnessBadge(elements.freshness, {
   onRebuild: () => scan({ refresh: true }),
   repository: () => state.repository,
 });
+
+/**
+ * Draw the map's reading key from what is actually on screen: the cues, the active overlay's
+ * rings, and the tier lens's colours. The lens controller calls this again when its report
+ * arrives, so a key is never drawn against an empty shell.
+ */
+function renderMapLegend() {
+  renderLegend(elements.legend, app.current, {
+    locLens: state.mode === 'file' && state.locLens,
+    overlay: app.lenses?.overlayLegend?.() ?? null,
+    tiers: app.lenses?.tierLegend?.() ?? null,
+  });
+}
 
 /**
  * Refresh adds `refresh=1` — a server cache bypass, not merely a repaint. Every async
@@ -343,7 +359,7 @@ async function scan({ refresh = false } = {}) {
     app.lenses.applyLocLens();
     app.lenses.applyEdgeKindLens();
     app.lenses.applyCoChangeLens();
-    renderLegend(elements.legend, model, { locLens: state.mode === 'file' && state.locLens });
+    renderMapLegend();
     renderTestsStrip(elements.strip, mapCounts(model), applyStripFilter, state.filter);
     const summary = renderDiagnostics(elements.diagnostics, model, {
       renderer: rendererName(),

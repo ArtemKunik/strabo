@@ -76,6 +76,22 @@ export function tierSummaryRows(report) {
 }
 
 /**
+ * The map legend's tier key, in dependency order (upper layers first, `unclassified` last).
+ *
+ * The lens paints the role a file plays, not a verdict about it, so the key keeps the stack
+ * order a reader needs to translate a fill and leaves "good or bad" to the status rings.
+ */
+export function tierLegendRows(report) {
+  const summary = report?.summary ?? {};
+  return TIER_ORDER.filter((tier) => Number(summary[tier] ?? 0) > 0).map((tier) => ({
+    tier,
+    label: TIER_LABELS[tier],
+    count: Number(summary[tier] ?? 0),
+    color: tierColorVar(tier),
+  }));
+}
+
+/**
  * Matrix rows for the tier × unit panel: one row per tier that has files, with a cell per
  * unit. Rows keep dependency order; empty rows and empty cells are kept so an absent tier
  * reads as information rather than disappearing.

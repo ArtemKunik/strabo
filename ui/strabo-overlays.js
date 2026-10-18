@@ -49,6 +49,62 @@ export const OVERLAY_ENDPOINTS = {
 export const FILE_MODE_OVERLAYS = ['impact', 'cycles', 'test-reach', 'module-depth', 'ownership', 'smells', 'hidden-coupling', 'declared-rules', 'data', 'coverage', 'contracts', 'endpoints'];
 
 /**
+ * The map key for an overlay's node marks: what each class means, the hue family its ring
+ * belongs to, and the ring shape the canvas draws.
+ *
+ * `tone` names the recorded hue family — `warn` (review this), `bad` (a recorded problem),
+ * `muted` (not covered / not read), `accent` (context, not a status) — never a verdict. The
+ * legend draws the same ring, so a solid warning reads apart from a dashed one without
+ * opening the panel, and a fill colour is never mistaken for a quality score.
+ */
+export const OVERLAY_KEY = {
+  'ov-changed': { label: 'changed in the working tree', tone: 'warn', ring: 'solid' },
+  'ov-affected': { label: 'affected by the change', tone: 'warn', ring: 'dotted' },
+  'ov-cycle': { label: 'in a dependency cycle', tone: 'bad', ring: 'double' },
+  'ov-unreached': { label: 'no test reaches it', tone: 'muted', ring: 'dashed' },
+  'ov-hotspot': { label: 'hot function', tone: 'warn', ring: 'dotted' },
+  'ov-wide-interface': { label: 'wide interface (flagged)', tone: 'warn', ring: 'solid' },
+  'ov-pass-through': { label: 'pass-through (thin wrapper)', tone: 'muted', ring: 'dashed' },
+  'ov-sole-owner': { label: 'sole owner', tone: 'bad', ring: 'dotted' },
+  'ov-cross-repo': { label: 'cross-repo flow', tone: 'accent', ring: 'dotted' },
+  'ov-smell': { label: 'smell', tone: 'warn', ring: 'dotted' },
+  'ov-hidden-coupling': { label: 'hidden coupling (no import path)', tone: 'bad', ring: 'double' },
+  'ov-declared-rule': { label: 'declared-rule violation', tone: 'bad', ring: 'solid' },
+  'ov-endpoint': { label: 'registers an endpoint', tone: 'accent', ring: 'solid' },
+  'ov-endpoint-gap': { label: 'endpoint gap (untested or unguarded)', tone: 'warn', ring: 'dashed' },
+  'ov-data': { label: 'reads or writes a dataset', tone: 'accent', ring: 'dashed' },
+  'ov-product': { label: 'produces a declared product', tone: 'accent', ring: 'double' },
+  'ov-contract-def': { label: 'contract definition', tone: 'accent', ring: 'solid' },
+  'tier-upward': { label: 'upward dependency', tone: 'bad', ring: 'double' },
+  'tier-skip': { label: 'skip-layer dependency', tone: 'warn', ring: 'dashed' },
+};
+
+/**
+ * The legend rows for the overlay currently on the map.
+ *
+ * An overlay that names its own scale (coverage) keeps that wording and only gains the mark
+ * the map draws; the rest are derived from the classes actually set, so the key never lists a
+ * signal the map is not showing.
+ */
+export function overlayLegendEntries(overlay) {
+  if (!overlay) {
+    return [];
+  }
+  if (Array.isArray(overlay.legend) && overlay.legend.length > 0) {
+    return overlay.legend.map((entry) => ({
+      cls: entry.cls,
+      label: entry.label,
+      ...(COVERAGE_MARKS[entry.cls] ?? { tone: 'muted' }),
+    }));
+  }
+  const present = new Set(overlay.classes instanceof Map ? [...overlay.classes.values()] : []);
+  return Object.entries(OVERLAY_KEY)
+    .filter(([cls]) => present.has(cls))
+    .map(([cls, entry]) => ({ cls, ...entry }));
+}
+
+
+/**
  * Map a review analysis result onto node classes and a panel summary.
  *
  * A review result is the same shape as change impact — `files` with a status, plus
@@ -412,6 +468,23 @@ export const COVERAGE_LEGEND = [
   { cls: 'cov-reachable', label: 'reachable only' },
   { cls: 'cov-stale', label: 'stale figure' },
 ];
+
+/**
+ * The mark each coverage state draws in the legend: a fill opacity for a measured bucket
+ * (high coverage is solid, low is faint), and the ring shape for the states that are not a
+ * measurement. The hue family mirrors the map so the key translates a colour directly.
+ */
+const COVERAGE_MARKS = {
+  'cov-90': { fill: 0.85 },
+  'cov-70': { fill: 0.66 },
+  'cov-50': { fill: 0.5 },
+  'cov-30': { fill: 0.34 },
+  'cov-10': { fill: 0.2 },
+  'cov-zero': { tone: 'accent', fill: 0.1, ring: 'solid' },
+  'cov-noreport': { tone: 'warn', fill: 0, ring: 'dashed' },
+  'cov-reachable': { tone: 'bad', fill: 0, ring: 'dotted' },
+  'cov-stale': { tone: 'muted', fill: 0.45, ring: 'dotted' },
+};
 
 /** The measured ramp bucket for a 1-100 value: five steps, 10 low to 90 high. */
 export function coverageBucket(value) {

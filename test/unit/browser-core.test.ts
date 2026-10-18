@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  COVERAGE_LEGEND,
   MAX_DELEGATE_PROMPT,
   MAX_DIAMETER,
   MAX_LOC_DIAMETER,
@@ -37,6 +38,7 @@ import {
   normalizeGitUrl,
   orderMembers,
   overlayFor,
+  overlayLegendEntries,
   passportFor,
   polygonPoints,
   radarFrame,
@@ -461,6 +463,31 @@ test('overlayFor flags module depth and single-author modules', () => {
   assert.equal(ownership.classes.has('crowded.ts'), false);
   assert.equal(ownership.classes.has('leaf.ts'), false);
   assert.match(ownership.summary, /1 single-author module/);
+});
+
+test('overlayLegendEntries names only the signals on the map, with their ring', () => {
+  const depth = overlayFor('module-depth', [
+    { file: 'thin.ts', signal: 'pass-through', implementationLines: 1, interfaceWidth: 2 },
+    { file: 'wide.ts', signal: 'wide-interface', implementationLines: 10, interfaceWidth: 20 },
+  ]);
+  const entries = overlayLegendEntries(depth);
+  assert.deepEqual(entries.map((entry) => entry.cls), ['ov-wide-interface', 'ov-pass-through']);
+  assert.equal(entries[0].tone, 'warn');
+  assert.equal(entries[0].ring, 'solid');
+  assert.equal(entries[1].tone, 'muted');
+  assert.equal(entries[1].ring, 'dashed');
+});
+
+test('overlayLegendEntries keeps a named scale (coverage) and adds its mark', () => {
+  const overlay = overlayFor('coverage', {
+    measured: { available: false, reason: 'no-report-found' },
+    reachable: { reached: ['a.ts'], testFiles: ['t.ts'] },
+  });
+  const entries = overlayLegendEntries(overlay);
+  assert.equal(entries.length, COVERAGE_LEGEND.length);
+  assert.equal(entries.find((entry) => entry.cls === 'cov-90')?.fill, 0.85);
+  assert.equal(entries.find((entry) => entry.cls === 'cov-noreport')?.ring, 'dashed');
+  assert.ok(entries.every((entry) => typeof entry.label === 'string' && entry.label.length > 0));
 });
 
 test('node elements carry no directory colour; the neutral fill is stylesheet-owned', () => {

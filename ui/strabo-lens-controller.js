@@ -12,10 +12,15 @@ import {
   withUnitHotspots,
 } from './strabo-core.js';
 import { showToast } from './strabo-delegate.js';
-import { tierDirectionClasses } from './strabo-tiers.js';
+import { tierDirectionClasses, tierLegendRows } from './strabo-tiers.js';
 import { renderTierPanel } from './strabo-tier-panel.js';
 import { renderOverlayPanel } from './strabo-panels.js';
-import { FILE_MODE_OVERLAYS, OVERLAY_ENDPOINTS, OVERLAY_TITLES } from './strabo-overlays.js';
+import {
+  FILE_MODE_OVERLAYS,
+  OVERLAY_ENDPOINTS,
+  OVERLAY_TITLES,
+  overlayLegendEntries,
+} from './strabo-overlays.js';
 import { openCommitDialog } from './strabo-commit.js';
 
 export function createLensController(app) {
@@ -29,6 +34,47 @@ export function createLensController(app) {
    * colour an aggregate.
    */
   let tierReportCache = { generation: -1, report: null };
+
+  /** The overlay whose classes are painted, so the legend key can name what is on the map. */
+  let currentOverlay = null;
+
+  /**
+   * The legend's tier key: the colours the lens is painting, in stack order, or null when the
+   * lens is off or the map is not a file map. Read from the same cached report the lens paints.
+   */
+  function tierLegend() {
+    if (
+      state.tier === 'off' ||
+      state.mode !== 'file' ||
+      !app.current ||
+      app.current.system ||
+      app.current.prefixLength !== undefined
+    ) {
+      return null;
+    }
+    // The report is per generation; a stale one would key colours the new map is not painting.
+    if (tierReportCache.generation !== state.renderedGeneration || !tierReportCache.report) {
+      return null;
+    }
+    const rows = tierLegendRows(tierReportCache.report);
+    return rows.length > 0 ? { rows } : null;
+  }
+
+  /** The legend's overlay key, or null with no overlay painted for the current generation. */
+  function overlayLegend() {
+    if (!currentOverlay || currentOverlay.generation !== state.renderedGeneration) {
+      return null;
+    }
+    const entries = overlayLegendEntries(currentOverlay.overlay);
+    return entries.length > 0
+      ? {
+          title: OVERLAY_TITLES[currentOverlay.kind] ?? currentOverlay.kind,
+          entries,
+          // An overlay with a named scale (coverage) is read as fills, not rings.
+          scale: Array.isArray(currentOverlay.overlay.legend) && currentOverlay.overlay.legend.length > 0,
+        }
+      : null;
+  }
 
   /**
    * Declare `glob` as `tier` in the repository's `strabo.groups.yml`, then re-read: the cached
@@ -61,6 +107,7 @@ export function createLensController(app) {
       if (state.overlay === 'none') {
         renderOverlayPanel(elements.overlayPanel, '', null);
       }
+      app.refreshLegend?.();
       return;
     }
     const generation = state.renderedGeneration;
@@ -82,6 +129,7 @@ export function createLensController(app) {
       if (state.overlay === 'none') {
         renderOverlayPanel(elements.overlayPanel, '', null);
       }
+      app.refreshLegend?.();
       return;
     }
     view.applyTier(tierOfFile(tierReportCache.report), state.tier === 'all' ? 'all' : state.tier);
@@ -94,6 +142,8 @@ export function createLensController(app) {
         onAssign: assignTier,
       });
     }
+    // The report just arrived (or the filter changed), so redraw the key's colour rows.
+    app.refreshLegend?.();
   }
 
   /**
@@ -127,8 +177,11 @@ export function createLensController(app) {
       view.setHiddenCoupling(null, false);
       app.prefs?.writeViewPrefs?.();
     }
+    currentOverlay = null;
     renderOverlayPanel(elements.overlayPanel, '', null);
     elements.overlayPanel.hidden = true;
+    // The rings come off the map with the overlay; the tier colours (if any) stay.
+    app.refreshLegend?.();
     app.windows.refreshDock();
   }
 
@@ -144,11 +197,13 @@ export function createLensController(app) {
     const kind = state.overlay;
     if (kind === 'none') {
       view.overlay(null);
+      currentOverlay = null;
       renderOverlayPanel(elements.overlayPanel, '', null);
       // With no overlay, the shared panel falls back to the tier lens when one is on.
       if (state.tier !== 'off') {
         void applyTierLens();
       }
+      app.refreshLegend?.();
       app.windows.refreshDock();
       return;
     }
@@ -182,6 +237,9 @@ export function createLensController(app) {
       onSelect: (id) => app.selection.selectNode(id),
       ...(actions.length > 0 ? { actions } : {}),
     });
+    currentOverlay = { kind, overlay, generation: generation ?? state.renderedGeneration };
+    // The key names the rings this overlay put on the map.
+    app.refreshLegend?.();
     app.windows.refreshDock();
   }
 
@@ -423,6 +481,8 @@ export function createLensController(app) {
     closeLensPanel,
     enrichUnitCards,
     loadChangesWith,
+    overlayLegend,
+    tierLegend,
     updateCoChangeButton,
     updateEdgeKindButton,
     updateLabelsButton,

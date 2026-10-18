@@ -109,6 +109,42 @@ test('renderLegend groups cues into shapes and lines with a mark and a hover hin
   assert.match(tiers, /Frontend · 2 file\(s\).*Domain\/service · 4 file\(s\)/);
 });
 
+test('renderLegend draws the active overlay ring key and the tier colour key', () => {
+  const target = container();
+  renderLegend(
+    target,
+    { nodes: [{ id: 'a', kind: 'module' }] },
+    {
+      overlay: {
+        title: 'Module depth',
+        entries: [
+          { cls: 'ov-wide-interface', label: 'wide interface (flagged)', tone: 'warn', ring: 'solid' },
+          { cls: 'ov-pass-through', label: 'pass-through (thin wrapper)', tone: 'muted', ring: 'dashed' },
+        ],
+      },
+      tiers: {
+        rows: [
+          { tier: 'api', label: 'API surface', count: 3, color: 'var(--tier-api)' },
+          { tier: 'data', label: 'Data', count: 1, color: 'var(--tier-data)' },
+        ],
+      },
+    },
+  );
+
+  const headings = [...target.querySelectorAll('.legend-heading')].map((heading) => heading.textContent);
+  assert.deepEqual(headings, ['Shapes', 'Overlay · Module depth', 'Tier colours', 'Node kinds']);
+  // The ring mark matches the canvas style, and the note translates the hue families.
+  assert.ok(target.querySelector('.legend-mark .lm-status-warn'));
+  assert.ok(target.querySelector('.legend-mark .lm-status-muted'));
+  assert.match(target.textContent, /orange rings ask for review/);
+  assert.match(target.textContent, /dashed grey rings mean not covered or not read/);
+  // The tier key is ordered and each row carries its count and swatch.
+  assert.match(target.textContent, /API surface · 3 file\(s\)/);
+  assert.ok(target.querySelector('.legend-mark .lm-tier'));
+  const notes = [...target.querySelectorAll('.legend-note')].map((note) => note.textContent);
+  assert.ok(notes.some((note) => /not a quality verdict/.test(note)));
+});
+
 test('renderShortcuts pairs each key with its action', () => {
   const target = container();
   renderShortcuts(target);

@@ -6,10 +6,13 @@ import { after, test } from 'node:test';
 
 import { buildTierReport } from '../../src/analysis/tiers.ts';
 import {
+  TIER_ORDER,
   tierCallSites,
+  tierColorVar,
   tierDirectionClasses,
   tierDirectionLabel,
   tierEndpointSites,
+  tierLegendRows,
   tierMatrixRows,
   tierPerTierRows,
   tierTableTrace,
@@ -69,6 +72,15 @@ test('buildTierReport joins a table to the files that name it', () => {
   assert.equal(entry?.tier, 'data');
   assert.equal(entry?.unit, '.');
   assert.equal(entry?.evidence, 'string-literal SQL');
+});
+
+test('tierLegendRows keeps stack order and names each painted colour', () => {
+  const rows = tierLegendRows({ summary: { frontend: 0, api: 1, data: 2, unclassified: 1 } });
+  assert.deepEqual(rows.map((row) => row.tier), ['api', 'data', 'unclassified']);
+  assert.deepEqual(rows.map((row) => row.count), [1, 2, 1]);
+  assert.equal(rows[0].color, tierColorVar('api'));
+  assert.equal(rows[2].color, tierColorVar('unclassified'));
+  assert.ok(TIER_ORDER.indexOf('api') < TIER_ORDER.indexOf('data'));
 });
 
 test('the tier matrix helpers render rows, shares, and the direction caption', () => {

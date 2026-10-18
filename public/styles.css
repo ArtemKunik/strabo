@@ -2184,6 +2184,22 @@ body.screen-off-graph .float-window {
 .legend-mark .lm-faded { opacity: 0.35; }
 .legend-mark .lm-heavy { stroke-width: 3; }
 
+/* The active overlay's key: the same ring the map draws, in the hue family the map uses,
+   so a reader can tell a review prompt (orange) from a recorded problem (red) at a glance. */
+.legend-mark .lm-status-good { stroke: var(--status-good); }
+.legend-mark .lm-status-warn { stroke: var(--graph-affected); }
+.legend-mark .lm-status-bad { stroke: var(--graph-cycle); }
+.legend-mark .lm-status-muted { stroke: var(--graph-unreached); }
+.legend-mark .lm-status-accent { stroke: var(--graph-edge-accent); }
+.legend-mark .lm-fill-accent { fill: var(--graph-edge-accent); stroke: var(--graph-edge-accent); }
+
+/* A muted line under a legend section: role vs status, or how to read the ring hues. */
+.legend-note {
+  margin: 4px 0 0;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+}
+
 /* What the view could not draw, named rather than hidden. */
 .legend-notes {
   margin: 4px 0 0;

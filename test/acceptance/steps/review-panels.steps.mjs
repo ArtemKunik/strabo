@@ -96,6 +96,30 @@ Then('the legend explains size, position, and shape', async function () {
   assert.match(text, /diamond = test/);
 });
 
+Then('the legend keys the tier colours and the overlay rings', async function () {
+  // The report is fetched after the render, so the key arrives in a later pass.
+  await this.page.waitForFunction(
+    () => {
+      const text = document.querySelector('#legend')?.textContent ?? '';
+      return /Tier colours/.test(text) && /Overlay · /.test(text);
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const text = (await this.page.textContent('#legend')) ?? '';
+  assert.match(text, /Overlay · Module depth/);
+  assert.match(text, /Tier colours/);
+  // The hue families are named, so a colour is never left to guess.
+  assert.match(text, /orange rings ask for review|dashed grey rings mean not covered or not read/);
+  // The fills are roles, not verdicts, and the key says so.
+  assert.match(text, /not a quality verdict/);
+  assert.ok(await this.page.$('#legend .legend-mark .lm-tier'), 'the tier key should draw a swatch');
+  assert.ok(
+    await this.page.$('#legend .legend-mark .lm-status-muted'),
+    'the overlay key should draw the pass-through ring',
+  );
+});
+
 /**
  * The map draws on the 2D canvas renderer by default and only switches to WebGL on an
  * explicit opt-in (`?renderer=webgl`). Either is a pass here; reporting the one that is
