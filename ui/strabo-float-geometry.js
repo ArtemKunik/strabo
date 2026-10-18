@@ -39,6 +39,21 @@ export function clamp(value, min, max) {
 }
 
 /**
+ * The largest size a window may be resized to, given the usable edges of the canvas.
+ *
+ * `right` and `bottom` are where the app chrome that stacks above the floating layer
+ * begins: the dock rail's left edge and the status bar's top edge. The bottom-right grip
+ * is the window's only resize affordance, so a window allowed to grow under that chrome
+ * can never be grabbed again — not to grow and not to shrink.
+ */
+export function resizeLimits({ left, top, right, bottom, gap = GAP }) {
+  return {
+    maxWidth: Math.max(MIN_WIDTH, right - left - gap),
+    maxHeight: Math.max(MIN_HEIGHT, bottom - top - gap),
+  };
+}
+
+/**
  * The saved size of a window, or null per axis when it is not a usable box.
  *
  * A hidden (`display: none`) or collapsed window has no real rect, and earlier builds

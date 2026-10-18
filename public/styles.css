@@ -3105,9 +3105,9 @@ details.member-type .member-supertypes {
 .float-layer {
   position: fixed;
   inset: 0;
-  /* Above the panel dock: inner window z-indexes are local to this stacking
-     context, so anything below the dock's z-index lets the dock swallow clicks
-     (e.g. a resize handle dragged under it). */
+  /* Below the dock rail (55) and the status bar (56), which must stay clickable. Windows
+     are clamped clear of both in `strabo-float-placement.js` so neither can swallow a
+     header button or the bottom-right resize grip. */
   z-index: 50;
   pointer-events: none;
 }

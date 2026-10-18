@@ -6,7 +6,8 @@
  * happened through the callbacks it is given.
  */
 
-import { clamp, sanitizeSize, MIN_WIDTH, MIN_HEIGHT, GAP } from './strabo-float-geometry.js';
+import { clamp, sanitizeSize, MIN_WIDTH, MIN_HEIGHT, resizeLimits } from './strabo-float-geometry.js';
+import { appDockLeft, appBottom } from './strabo-float-placement.js';
 
 export function wireWindowGestures({
   win,
@@ -54,8 +55,14 @@ export function wireWindowGestures({
     const startHeight = rect.height;
     const left = parseFloat(win.style.left) || 0;
     const top = parseFloat(win.style.top) || 0;
-    const maxWidth = Math.max(MIN_WIDTH, window.innerWidth - left - GAP);
-    const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP);
+    // Keep the grip this drag is holding clear of the dock rail and status bar, which sit
+    // above the floating layer: dragging it under them ends the gesture for good.
+    const { maxWidth, maxHeight } = resizeLimits({
+      left,
+      top,
+      right: appDockLeft(),
+      bottom: appBottom(),
+    });
     resizeHandle.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
       win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH, maxWidth)}px`;

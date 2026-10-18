@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { firstFreeSlotTop, railTopBelow, RAIL_TOP, sanitizeSize, topFloor } from '../../ui/strabo-float-geometry.js';
+import { firstFreeSlotTop, railTopBelow, RAIL_TOP, resizeLimits, sanitizeSize, topFloor } from '../../ui/strabo-float-geometry.js';
 import { clampMenuLeft, clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
@@ -23,6 +23,24 @@ test('sanitizeSize tolerates missing, null, and non-numeric values', () => {
   assert.deepEqual(sanitizeSize({}), none);
   assert.deepEqual(sanitizeSize({ width: 'wide', height: NaN }), none);
   assert.deepEqual(sanitizeSize({ width: Infinity, height: -5 }), none);
+});
+
+test('resizeLimits stops the bottom-right grip at the dock rail and status bar', () => {
+  // A 720-wide window at (484, 65) on a 1280x800 canvas whose usable area ends at the
+  // dock rail (x 1216) and the status bar (y 769): the grip keeps a GAP clear of both.
+  assert.deepEqual(
+    resizeLimits({ left: 484, top: 65, right: 1216, bottom: 769 }),
+    { maxWidth: 720, maxHeight: 692 },
+  );
+});
+
+test('resizeLimits never shrinks a window below its minimum size', () => {
+  // A window already at the far edge has no room to grow, but the grip still resizes it
+  // back up to the minimum rather than to a negative box.
+  assert.deepEqual(
+    resizeLimits({ left: 1200, top: 780, right: 1216, bottom: 769 }),
+    { maxWidth: 240, maxHeight: 160 },
+  );
 });
 
 test('firstFreeSlotTop returns the start when the rail is empty', () => {

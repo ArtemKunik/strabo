@@ -29756,7 +29756,7 @@ function createTerminalBridge(app2) {
 
 // ui/strabo-float-toolbar.js
 var STORAGE_KEY = "strabo.float.toolbar.v1";
-var MIN_WIDTH = 200;
+var MIN_WIDTH2 = 200;
 var GAP = 8;
 var DOCK_REACH = 28;
 function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
@@ -29789,7 +29789,7 @@ function writeStore(key, value) {
 function initFloatingToolbar(element4, options = {}) {
   if (!element4) return null;
   const storageKey = options.storageKey ?? STORAGE_KEY;
-  const minWidth = options.minWidth ?? MIN_WIDTH;
+  const minWidth = options.minWidth ?? MIN_WIDTH2;
   const dock = options.dock ?? null;
   const dockReach = options.dockReach ?? DOCK_REACH;
   const floatParent = element4.parentElement ?? document.body;
@@ -31153,7 +31153,7 @@ var DOCK_RAIL_WIDTH = 64;
 var GAP2 = 12;
 var DEFAULT_WIDTH = 384;
 var HEADER_HEIGHT = 34;
-var MIN_WIDTH2 = 240;
+var MIN_WIDTH3 = 240;
 var MIN_HEIGHT = 160;
 var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP2;
 var RAIL_TOP = 64;
@@ -31166,11 +31166,17 @@ function railTopBelow(headerBottom) {
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
+function resizeLimits({ left, top, right, bottom, gap = GAP2 }) {
+  return {
+    maxWidth: Math.max(MIN_WIDTH3, right - left - gap),
+    maxHeight: Math.max(MIN_HEIGHT, bottom - top - gap)
+  };
+}
 function sanitizeSize(size) {
   const width = Number(size?.width);
   const height = Number(size?.height);
   return {
-    width: Number.isFinite(width) && width >= MIN_WIDTH2 ? width : null,
+    width: Number.isFinite(width) && width >= MIN_WIDTH3 ? width : null,
     height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
   };
 }
@@ -31239,12 +31245,29 @@ function buildWindowChrome({ config, width = config.width ?? DEFAULT_WIDTH, heig
 function appHeaderBottom() {
   return document.querySelector("header.toolbar")?.getBoundingClientRect().bottom ?? 0;
 }
+function appDockLeft() {
+  const dock = document.getElementById("float-dock");
+  if (!dock) return window.innerWidth;
+  const rect = dock.getBoundingClientRect();
+  return rect.width > 0 ? rect.left : window.innerWidth;
+}
+function appBottom() {
+  const bar = document.getElementById("bottom-bar");
+  if (!bar) return window.innerHeight;
+  const rect = bar.getBoundingClientRect();
+  return rect.height > 0 ? rect.top : window.innerHeight;
+}
 function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
   let hasPosition = false;
   const place = (x, y) => {
     const floor = topFloor(appHeaderBottom());
-    win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-    win.style.top = `${clamp(y, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    const right = Math.max(0, appDockLeft() - GAP2);
+    const bottom = Math.max(floor, appBottom() - GAP2);
+    const boxWidth = win.offsetWidth || width;
+    const top = clamp(y, floor, Math.max(floor, bottom - HEADER_HEIGHT));
+    win.style.left = `${clamp(x, 0, Math.max(0, right - boxWidth))}px`;
+    win.style.top = `${top}px`;
+    win.style.maxHeight = `${Math.max(MIN_HEIGHT, bottom - top)}px`;
     hasPosition = true;
   };
   const firstFreeRailTop = () => {
@@ -31266,9 +31289,8 @@ function createPlacement({ win, controllers, width, fallbackHeight, config, save
     const railWidth = win.offsetWidth || width;
     const height = win.offsetHeight || fallbackHeight;
     const top = firstFreeRailTop();
-    const placedTop = top + height <= window.innerHeight ? top : railTopBelow(appHeaderBottom());
-    const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP2);
-    win.style.maxHeight = `${available}px`;
+    const bottom = appBottom();
+    const placedTop = top + height <= bottom ? top : railTopBelow(appHeaderBottom());
     place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
   };
   const position = saved.position ?? config.position ?? {};
@@ -31331,11 +31353,15 @@ function wireWindowGestures({
     const startHeight = rect.height;
     const left = parseFloat(win.style.left) || 0;
     const top = parseFloat(win.style.top) || 0;
-    const maxWidth = Math.max(MIN_WIDTH2, window.innerWidth - left - GAP2);
-    const maxHeight = Math.max(MIN_HEIGHT, window.innerHeight - top - GAP2);
+    const { maxWidth, maxHeight } = resizeLimits({
+      left,
+      top,
+      right: appDockLeft(),
+      bottom: appBottom()
+    });
     resizeHandle.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
-      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH2, maxWidth)}px`;
+      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH3, maxWidth)}px`;
       win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
     };
     const end = () => {
@@ -31366,8 +31392,10 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
   const element4 = config.element;
   const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
   let size = sanitizeSize(saved.size);
-  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
-  const { win, header, title, collapseButton, closeButton, resizeHandle } = buildWindowChrome({ config, width, height: size.height });
+  const widthCap = Math.max(MIN_WIDTH3, appDockLeft() - GAP2);
+  const width = Math.min(size.width ?? config.width ?? DEFAULT_WIDTH, widthCap);
+  const height = size.height ?? config.height ?? null;
+  const { win, header, title, collapseButton, closeButton, resizeHandle } = buildWindowChrome({ config, width, height });
   const fallbackHeight = config.height ?? 260;
   const { place, placeInRail, hasPosition } = createPlacement({
     win,
@@ -31378,6 +31406,13 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
     saved
   });
   const isCollapsed = () => win.classList.contains("is-collapsed");
+  const settle = () => {
+    if (!hasPosition()) {
+      placeInRail();
+      return;
+    }
+    place(parseFloat(win.style.left) || 0, parseFloat(win.style.top) || 0);
+  };
   const updateCollapseChrome = () => {
     const collapsed = isCollapsed();
     collapseButton.textContent = collapsed ? "+" : "\u2013";
@@ -31409,7 +31444,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       lastHidden = hidden;
       renderDock();
       if (!hidden) {
-        if (!hasPosition()) placeInRail();
+        settle();
         raise();
         flashChip(config.key);
       }
@@ -31443,9 +31478,7 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       config.onOpen?.();
       element4.hidden = false;
       win.hidden = false;
-      if (!hasPosition()) {
-        placeInRail();
-      }
+      settle();
       sync2();
       raise();
       persist();
@@ -31593,23 +31626,30 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
   }
   const keepOnScreen = () => {
     const floor = topFloor(appHeaderBottom());
+    const right = Math.max(0, appDockLeft() - GAP2);
+    const bottom = Math.max(floor, appBottom() - GAP2);
     for (const controller of controllers) {
       const win = controller.window;
       if (win.hidden) continue;
+      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, Math.max(right, 0));
+      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, Math.max(bottom - floor, HEADER_HEIGHT));
       const left = parseFloat(win.style.left) || 0;
-      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4));
+      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, bottom - height));
+      if (win.offsetWidth > right) win.style.width = `${Math.max(MIN_WIDTH, right)}px`;
+      win.style.left = `${clamp(left, 0, Math.max(0, right - width))}px`;
       win.style.top = `${top}px`;
-      win.style.maxHeight = `${Math.max(MIN_HEIGHT, window.innerHeight - top - GAP2)}px`;
-      const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, window.innerWidth);
-      const height = Math.min(win.offsetHeight || HEADER_HEIGHT, window.innerHeight);
-      win.style.left = `${clamp(left, 0, Math.max(0, window.innerWidth - width))}px`;
-      win.style.top = `${clamp(top, floor, Math.max(floor, window.innerHeight - height))}px`;
+      win.style.maxHeight = `${Math.max(MIN_HEIGHT, bottom - top)}px`;
     }
   };
   window.addEventListener("resize", keepOnScreen);
-  const header = document.querySelector("header.toolbar");
-  if (header && typeof ResizeObserver === "function") {
-    new ResizeObserver(keepOnScreen).observe(header);
+  if (typeof ResizeObserver === "function") {
+    const chromeObserver = new ResizeObserver(keepOnScreen);
+    const header = document.querySelector("header.toolbar");
+    if (header) chromeObserver.observe(header);
+    const bottomBar = document.getElementById("bottom-bar");
+    if (bottomBar) chromeObserver.observe(bottomBar);
+    const dockRailElement = document.getElementById("float-dock");
+    if (dockRailElement) chromeObserver.observe(dockRailElement);
   }
   dockRail.render();
   controllers.refresh = dockRail.render;

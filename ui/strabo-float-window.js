@@ -6,9 +6,9 @@
  * `strabo-float-placement.js`, and the drag/resize gestures by `strabo-float-gestures.js`.
  */
 
-import { sanitizeSize, DEFAULT_WIDTH } from './strabo-float-geometry.js';
+import { sanitizeSize, DEFAULT_WIDTH, GAP, MIN_WIDTH } from './strabo-float-geometry.js';
 import { buildWindowChrome } from './strabo-float-chrome.js';
-import { createPlacement } from './strabo-float-placement.js';
+import { appDockLeft, createPlacement } from './strabo-float-placement.js';
 import { wireWindowGestures } from './strabo-float-gestures.js';
 
 /**
@@ -25,10 +25,14 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
 
   // Only a size the user set by resizing is remembered; otherwise the config's default applies.
   let size = sanitizeSize(saved.size);
-  const width = size.width ?? config.width ?? DEFAULT_WIDTH;
+  // A saved size can come from a wider viewport. Cap the width to the canvas so the
+  // bottom-right grip never starts out under the dock rail, where it cannot be grabbed.
+  const widthCap = Math.max(MIN_WIDTH, appDockLeft() - GAP);
+  const width = Math.min(size.width ?? config.width ?? DEFAULT_WIDTH, widthCap);
+  const height = size.height ?? config.height ?? null;
 
   const { win, header, title, collapseButton, closeButton, resizeHandle } =
-    buildWindowChrome({ config, width, height: size.height });
+    buildWindowChrome({ config, width, height });
 
   const fallbackHeight = config.height ?? 260;
   const { place, placeInRail, hasPosition } = createPlacement({
@@ -41,6 +45,23 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
   });
 
   const isCollapsed = () => win.classList.contains('is-collapsed');
+
+  /**
+   * Re-apply the current position and size limits.
+   *
+   * The chrome the window has to clear (the app header, the dock rail, the status bar) can
+   * change while the window is hidden — the status bar grows from 7px to its full height as
+   * the first status text renders. A hidden window keeps the cap it was created with, so
+   * opening it re-measures instead of trusting that stale box (which could leave the
+   * bottom-right grip under the status bar).
+   */
+  const settle = () => {
+    if (!hasPosition()) {
+      placeInRail();
+      return;
+    }
+    place(parseFloat(win.style.left) || 0, parseFloat(win.style.top) || 0);
+  };
 
   const updateCollapseChrome = () => {
     const collapsed = isCollapsed();
@@ -81,8 +102,9 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
         // A panel can also be revealed by setting `element.hidden = false` directly (the
         // Repository passport opens that way on a first visit). It still earns its rail
         // slot and the top of the stack here, instead of sitting at the CSS default in the
-        // corner over the toolbar with the previous panel on top of it.
-        if (!hasPosition()) placeInRail();
+        // corner over the toolbar with the previous panel on top of it. Re-measuring also
+        // refreshes the size cap against chrome that changed while the panel was hidden.
+        settle();
         raise();
         flashChip(config.key);
       }
@@ -118,9 +140,7 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
       config.onOpen?.();
       element.hidden = false;
       win.hidden = false;
-      if (!hasPosition()) {
-        placeInRail();
-      }
+      settle();
       sync();
       raise();
       persist();

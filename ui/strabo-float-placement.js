@@ -23,15 +23,46 @@ export function appHeaderBottom() {
   return document.querySelector('header.toolbar')?.getBoundingClientRect().bottom ?? 0;
 }
 
+/**
+ * The canvas's usable right edge: the dock rail's left edge.
+ *
+ * The rail stacks above the floating layer, so a window that crosses it loses its header
+ * controls and its resize grip to the rail. The viewport edge is the fallback when the
+ * rail is not on screen (the terminal and review screens hide it along with the windows).
+ */
+export function appDockLeft() {
+  const dock = document.getElementById('float-dock');
+  if (!dock) return window.innerWidth;
+  const rect = dock.getBoundingClientRect();
+  return rect.width > 0 ? rect.left : window.innerWidth;
+}
+
+/** The canvas's usable bottom edge: the status bar's top edge, which also stacks above windows. */
+export function appBottom() {
+  const bar = document.getElementById('bottom-bar');
+  if (!bar) return window.innerHeight;
+  const rect = bar.getBoundingClientRect();
+  return rect.height > 0 ? rect.top : window.innerHeight;
+}
+
 export function createPlacement({ win, controllers, width, fallbackHeight, config, saved }) {
   /** Whether `win` has a position worth persisting; an unplaced window gets a rail slot. */
   let hasPosition = false;
 
   const place = (x, y) => {
     // Never above the app header: it stacks over the panels, so the title bar would be lost.
+    // Never under the dock rail or the status bar either: both stack over the panels and
+    // would swallow the header controls and the resize grip.
     const floor = topFloor(appHeaderBottom());
-    win.style.left = `${clamp(x, 0, Math.max(0, window.innerWidth - 60))}px`;
-    win.style.top = `${clamp(y, floor, Math.max(floor, window.innerHeight - HEADER_HEIGHT - 4))}px`;
+    const right = Math.max(0, appDockLeft() - GAP);
+    const bottom = Math.max(floor, appBottom() - GAP);
+    const boxWidth = win.offsetWidth || width;
+    const top = clamp(y, floor, Math.max(floor, bottom - HEADER_HEIGHT));
+    win.style.left = `${clamp(x, 0, Math.max(0, right - boxWidth))}px`;
+    win.style.top = `${top}px`;
+    // Cap the body to the space that is actually usable, so a saved size from a larger
+    // viewport cannot run its footprint (and its grip) under the chrome below.
+    win.style.maxHeight = `${Math.max(MIN_HEIGHT, bottom - top)}px`;
     hasPosition = true;
   };
 
@@ -56,15 +87,12 @@ export function createPlacement({ win, controllers, width, fallbackHeight, confi
     const railWidth = win.offsetWidth || width;
     const height = win.offsetHeight || fallbackHeight;
     const top = firstFreeRailTop();
+    const bottom = appBottom();
     // When the rail is full and the next slot would fall past the bottom edge, reuse the
     // top slot instead: the window just opened is raised, so it is usable on top rather
     // than opening off-screen with its controls unreachable.
-    const placedTop = top + height <= window.innerHeight ? top : railTopBelow(appHeaderBottom());
-    // Keep the window on screen: a tall panel opened below another (e.g. Settings below
-    // the Legend) would otherwise run past the bottom edge. The body scrolls within
-    // whatever height is left.
-    const available = Math.max(MIN_HEIGHT, window.innerHeight - placedTop - GAP);
-    win.style.maxHeight = `${available}px`;
+    const placedTop = top + height <= bottom ? top : railTopBelow(appHeaderBottom());
+    // `place` also caps the body to whatever height is left below the status bar.
     place(window.innerWidth - railWidth - RAIL_RIGHT, placedTop);
   };
 
