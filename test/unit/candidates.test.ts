@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { rankCandidates, type FileReading } from '../../src/analysis/candidates.ts';
+import { rankingLimits } from '../../src/api/routes/analysis-issues.ts';
 import { BUILT_IN_ISSUES, findIssue, readDeclaredIssues, resolveIssues } from '../../src/analysis/issues.ts';
 
 function reading(file: string, lines: number, signals: FileReading['signals'], recorded = 0): FileReading {
@@ -103,4 +104,25 @@ test('a declared class replaces its built-in and a new one is appended; malforme
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('the limit note separates the scan cap from the test files the ranking skips', () => {
+  // The case that produced the wrong note: 117 real files, every one of them read, beside 39
+  // test nodes. The old wording was "read the first 117 of 156 files", which reads as a
+  // truncation that never happened and hides that the missing 39 are tests.
+  assert.deepEqual(rankingLimits({ sourceFiles: 117, readFiles: 117, totalNodes: 156, unreadFiles: 0 }), [
+    '39 test file(s) were not read',
+  ]);
+
+  assert.deepEqual(rankingLimits({ sourceFiles: 500, readFiles: 400, totalNodes: 560, unreadFiles: 3 }), [
+    'read the first 400 of 500 source files (the scan cap)',
+    '60 test file(s) were not read',
+    '3 file(s) could not be read and were skipped',
+  ]);
+
+  assert.deepEqual(
+    rankingLimits({ sourceFiles: 10, readFiles: 10, totalNodes: 10, unreadFiles: 0 }),
+    [],
+    'a complete read says nothing',
+  );
 });

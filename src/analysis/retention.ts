@@ -183,6 +183,21 @@ export function retentionTokens(text: string): string[] {
 }
 
 /**
+ * The simple type name a declared type text names.
+ *
+ * Generic arguments are dropped first, then qualifiers, so `CachedEngine?` yields
+ * `CachedEngine`, `MutableList<Word>` yields `MutableList`, and
+ * `com.acme.GenerativeModel` yields `GenerativeModel`. This is what lets a field be matched
+ * to a type the same file declares without a generic argument (`Word` in `List<Word>`) or a
+ * package prefix deciding it.
+ */
+export function declaredTypeName(text: string): string {
+  const withoutGenerics = text.split('<')[0] ?? '';
+  const simple = withoutGenerics.split('.').pop() ?? withoutGenerics;
+  return simple.replace(/[^A-Za-z0-9_]/g, '');
+}
+
+/**
  * Whether a type or call text names something in `set`.
  *
  * Matched three ways so both a whole name and a camel-split part count: `readBytes` matches
@@ -244,27 +259,31 @@ export function buildRetention(
     if (declared === '') {
       continue;
     }
-    const direct = kindOfType(declared);
-    let kind = direct;
+    let kind = kindOfType(declared);
     let evidence = `declared type \`${declared}\``;
-    if (kind === null) {
-      // One recorded level up: a field whose type is a declared holder that itself keeps a
-      // heavy field. Read from the file's own type symbols, never from a name guess.
-      for (const token of retentionTokens(declared)) {
-        const holder = types.find((candidate) => retentionTokens(candidate.name).includes(token));
-        if (!holder) {
-          continue;
-        }
-        const inner = fieldsOfOwner(symbols, holder.name).find((candidate) =>
-          kindOfType(candidate.type ?? ''),
-        );
-        if (inner) {
-          kind = kindOfType(inner.type ?? '');
-          evidence = `declared type \`${declared}\` holds \`${inner.type ?? ''}\` (declared in this file)`;
-          break;
-        }
+
+    // A type the file itself declares is read from its own fields, not from its name. A
+    // `data class LocalModel(url: String, sizeBytes: Long)` is a value holder that *describes*
+    // a model; calling it one because its name ends in `model` puts it at the top of a memory
+    // ranking. So a declared type whose own records hold nothing heavy is not a resource. A
+    // type the file does not declare (`Engine`, `OkHttpClient`) is judged by name as before,
+    // because there is nothing else recorded to read.
+    const wanted = declaredTypeName(declared);
+    const local =
+      wanted === ''
+        ? undefined
+        : types.find((candidate) => declaredTypeName(candidate.name) === wanted);
+    if (local) {
+      const own = fieldsOfOwner(symbols, local.name);
+      const inner = own.find((candidate) => kindOfType(candidate.type ?? ''));
+      if (inner) {
+        kind = kindOfType(inner.type ?? '');
+        evidence = `declared type \`${declared}\` holds \`${inner.type ?? ''}\` (declared in this file)`;
+      } else if (own.length > 0) {
+        continue;
       }
     }
+
     if (kind === null) {
       continue;
     }
@@ -383,6 +402,9 @@ export function buildRetention(
       'a release reached through a lambda receiver, a framework, or another file is not recorded, so "no release path" means "not recorded here"',
       'locals are not recorded as fields, so a short-lived resource is not reported',
       'native allocations behind an engine or player are not read',
+      'a type the same file declares is read from its own recorded fields, so a value holder whose name matches a resource family is reported as a value, not as the resource',
+      'a value type declared in another file is not known here, so a field whose type name matches a resource family is still reported when the type is not declared in this file',
+      'a field with no declared type is read only when the extractor resolves its initializer to a type, which not every language records',
     ],
   };
 }

@@ -433,3 +433,77 @@ test('scanRepository resolves Kotlin function, property, and type-alias imports'
     false,
   );
 });
+
+test('extractKotlinSymbols records a nullable type and the terminal name of a qualified one', async () => {
+  const source = [
+    'package com.acme.app',
+    '',
+    'class Holder {',
+    '    private var cached: CachedEngine? = null',
+    '    private val sizes: Map<String, Int> = mapOf()',
+    '    private fun make(): com.acme.GenerativeModel = build()',
+    '    private fun maybe(): String? = null',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractKotlinSymbols('Holder.kt', source);
+  const byName = new Map(symbols.map((symbol) => [symbol.name, symbol]));
+
+  assert.equal(
+    byName.get('cached')?.type,
+    'CachedEngine?',
+    'the holder the retention reading exists to find is invisible when nullability is not read',
+  );
+  assert.equal(byName.get('sizes')?.type, 'Map', 'a generic argument is not the type');
+  assert.equal(
+    byName.get('make')?.type,
+    'GenerativeModel',
+    'the terminal segment is the type, not the package prefix',
+  );
+  assert.equal(byName.get('maybe')?.type, 'String?');
+});
+
+test('extractKotlinSymbols fills a field type from a same-file factory return type', async () => {
+  const source = [
+    'package com.acme.app',
+    '',
+    'object Chat {',
+    '    private var model = createModel()',
+    '    private fun createModel(): GenerativeModel = Generation.getClient()',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractKotlinSymbols('Chat.kt', source);
+  const model = symbols.find((symbol) => symbol.name === 'model');
+  assert.equal(
+    model?.type,
+    'GenerativeModel',
+    'the field is declared above the function that names its type, so the walk cannot resolve it in one pass',
+  );
+});
+
+test('extractKotlinSymbols fills a field type from a same-file type and leaves an undeclared call alone', async () => {
+  const source = [
+    'package com.acme.app',
+    '',
+    'class Holder {',
+    '    private val cache = Cache()',
+    '    private val client = OkHttpClient()',
+    '    private val count = 0',
+    '}',
+    'class Cache {',
+    '    fun clear() {}',
+    '}',
+  ].join('\n');
+
+  const { symbols } = await extractKotlinSymbols('Holder.kt', source);
+  const byName = new Map(symbols.map((symbol) => [symbol.name, symbol]));
+
+  assert.equal(byName.get('cache')?.type, 'Cache');
+  assert.equal(byName.get('count')?.type, undefined);
+  assert.equal(
+    byName.get('client')?.type,
+    undefined,
+    'the file does not declare OkHttpClient, so its type is not guessed from the spelling',
+  );
+});

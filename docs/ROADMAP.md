@@ -50,8 +50,8 @@ record is reported as `unavailable`, never invented.
 | 37 | Data-flow reading of the Structure view | Done (DF0-DF6: composition + `GET /analysis/tiers/data-flow`, the bands/grid/cell reading and its picker, the visual language, edge evidence + menus + MCP tool, the report section, honesty diagnostics, and the browser acceptance scenario) |
 | 38 | API development | Landed (R1 routes declared in code, R2 spec ↔ code conformance, R3 breaking API changes, R4 endpoint passport and overlay, R5 gRPC and GraphQL surfaces) |
 | 39 | Refactor sandbox: what-if and extraction | Landed (S1-S5: extraction planner, what-if sandbox, HTTP and MCP, Sandbox window with map rings and delegation, browser acceptance) |
-| 40 | Resource lifetime and memory risk | Landed in part (RL1, RL2, and the RL6 reading surface: `GET /analysis/retention`, MCP `get_retention`; RL0's browser scenario, RL3-RL5, and the RL6 report/check surfaces open) |
-| 41 | Issue-class triage and durable findings | Landed in part (T0, T1, T2: declared `issues:` classes, `GET /analysis/candidates`, MCP `get_candidates`, and the class-aware delegation prompt; T3-T5 open) |
+| 40 | Resource lifetime and memory risk | Landed in part (RL1, RL2, and the RL6 reading surface: `GET /analysis/retention`, MCP `get_retention`, plus the value-holder guard and the Kotlin initializer-type resolution a real crash exposed; RL0's browser scenario, RL3-RL5, and the RL6 report/check surfaces open) |
+| 41 | Issue-class triage and durable findings | Landed in part (T0, T1, T2: declared `issues:` classes, `GET /analysis/candidates`, MCP `get_candidates`, and the class-aware delegation prompt, with the limit note separating the scan cap from the test files it skips; T3-T5 open) |
 | — | Interoperability: exports, headless checks, and the agent surface | Done (I1-I12; its MCP follow-up is folded into Phase 24) |
 | — | Reading route | Done (W1-W4) |
 | — | Developer Product Graph, Chat | Out of concept |
@@ -2798,7 +2798,10 @@ Principles carry over unchanged:
   name sets the way `linearScanCalls` / `sortCalls` are declared today:
   - `field-retained-resource` — a heavy-weight resource held in a recorded field. A singleton
     holder and a plain instance both read as `kind: 'type'`, so the signal is field-scoped and
-    says so in RL7's limits rather than claiming process lifetime;
+    says so in RL7's limits rather than claiming process lifetime. A type the file itself
+    declares is read from its own recorded fields rather than from its name, so a value holder
+    (`data class LocalModel(url: String, sizeBytes: Long)`) is reported as a value and a holder
+    that wraps an `Engine` is reported through that field;
   - `no-release-path` — that field is written but no recorded call site clears, closes, or
     releases it anywhere in the repository;
   - `unbounded-collection` — a field collection appended to with no cap and no remove, evict,
@@ -2841,7 +2844,11 @@ Principles carry over unchanged:
   labelled **retained, by recorded assignment**. Named as unread rather than assumed: garbage
   collection and finalizers, native and JNI allocations behind an engine or player, memory the
   platform reclaims under pressure, a release performed through a framework or `AutoCloseable`
-  the grammar did not record, and any resource owner in a language with no extractor (which
+  the grammar did not record, a value holder whose name matches a resource family (read from
+  its fields, so it is reported as a value rather than as the resource), a value type declared in
+  another file (the reading sees one file, so it cannot know that a `ModelOptions` elsewhere is a
+  settings object), a field whose type comes from an initializer the extractor could not resolve
+  to a same-file declaration, and any resource owner in a language with no extractor (which
   reports extraction not implemented, as elsewhere). Nothing here claims a byte count that the
   repository did not declare.
 
@@ -2862,16 +2869,33 @@ calls)` returning `RetentionFact`s and `RetentionSignal`s, with the heavy-weight
 type tokens, release/append/evict/read-all/copy/validation/load name sets declared beside it
 the way `linearScanCalls` / `sortCalls` are. `GET /analysis/retention?file=` and MCP
 `get_retention` serve it on demand through the same `symbolExtractorFor` path `/symbols` uses,
-and `unavailable` carries the four named limits to every caller. Two signal kinds differ from
+and `unavailable` carries the seven named limits to every caller. Two signal kinds differ from
 the plan above and the spec now says so: `static-retained-resource` became
 `field-retained-resource` because the symbol extractors record a Kotlin `object` and a `class`
-identically, and `reload-without-release` is not derived yet. Unit coverage is
-`test/unit/retention.test.ts` (nine cases: a held engine with and without a release, a holder
-reached one level up through a type declared in the same file, a validation that reaches a
+identically, and `reload-without-release` is not derived yet.
+
+Three limits were found by pointing the reading at a repository with a known out-of-memory
+crash rather than at a fixture, and each changed the answer. A `data class LocalModel` holding
+five metadata fields outranked the singleton that really kept a multi-gigabyte engine, because
+its name ended in `model`; a field typed `GlimDrag` was reported as holding an `Engine` because
+the token reach matched the `Glim` of a different type declared in the same file; and the
+singleton that *did* hold a model through a factory (`private var model = createModel()`)
+recorded no type at all, so the field produced no fact. The reading now judges a type the file
+itself declares by its own recorded fields rather than by its name, and the shared-token reach
+is gone: a holder is reached only by the exact name of a type declared in the same file. The
+invisible field needed three fixes in the Kotlin extractor (`src/scan/languages/kotlin.ts`): a
+field with no annotation takes the type of a same-file type or function return type its
+initializer calls (and never of a call the file does not declare), a nullable type is read
+instead of recorded as nothing (`private var cached: CachedEngine?` was the holder that never
+appeared), and a qualified type keeps its terminal segment (`com.acme.Model` read as `com`,
+which matched no resource family). Unit coverage is `test/unit/retention.test.ts` (fourteen
+cases: a held engine with and without a release, a holder reached one level up through a type
+declared in the same file, a value holder that must not be reported, a field whose type is not
+declared here never attributed to a local type that shares a token, a validation that reaches a
 load, a bounded cache that must not trip, a whole-file read copied on one line, a listener
-without a removal, an untyped field, and the tokeniser). **Open:** RL0's fixture and browser
-scenario, RL3-RL5 (passport tab, overlay, declared budgets), and RL6's hotspot tool, report
-section, and check rules.
+without a removal, an untyped field, the tokeniser, the simple-name split, and the named limits)
+plus three cases in `test/unit/kotlin.test.ts`. **Open:** RL0's fixture and browser scenario, RL3-RL5 (passport tab,
+overlay, declared budgets), and RL6's hotspot tool, report section, and check rules.
 
 ## Phase 41 - Issue-class triage: from a symptom to candidate files
 
@@ -2965,12 +2989,15 @@ looked at and found nothing in above 300 lines is returned under `notRanked` wit
 rather than omitted, and a class whose reading recorded nothing returns `unavailable` with
 its reason instead of an alphabetical list. `GET /analysis/candidates?issue=` and MCP
 `get_candidates` extract on demand through the same per-file path `/symbols` uses, capped at
-400 files with the cap named in the note; `retention` and `compute` are wired and `change` /
+400 source files — the note names the cap and the skipped test files as separate facts, because
+one conflated count made a complete read of a repository report itself as `read the first 117 of
+156 files`; `retention` and `compute` are wired and `change` /
 `breakage` return `unavailable` saying so. T2 adds the `candidates` kind to the delegation
 prompt: the class in the title, one subsection per ranked candidate, and the reading's own
 `unavailable` rendered as **Not recorded (establish these yourself)**. Unit coverage is
-`test/unit/candidates.test.ts` (five cases, including the recorded case that prompted the
-phase: a 688-line data table is ranked below the retained engine and listed as counter-evidence)
+`test/unit/candidates.test.ts` (six cases, including the recorded case that prompted the
+phase — a 688-line data table is ranked below the retained engine and listed as
+counter-evidence — and the limit note separating the cap from the skipped tests)
 and the `buildAgentPrompt` case in `test/unit/browser-core.test.ts`. **Open:** T3 (the evidence
 seam), T4 (durable findings), and T5.
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildRetention, retentionTokens } from '../../src/analysis/retention.ts';
+import { buildRetention, declaredTypeName, retentionTokens } from '../../src/analysis/retention.ts';
 import type { CodeSymbol, FunctionCall } from '../../src/scan/languages/symbols.ts';
 
 function field(name: string, type: string, line: number, owner = 'Holder'): CodeSymbol {
@@ -155,4 +155,64 @@ test('a field with no recorded type is not guessed at, and the limits are named'
 test('tokens split on case and punctuation so a holder reaches what it wraps', () => {
   assert.deepEqual(retentionTokens('CachedEngine?'), ['cached', 'engine']);
   assert.deepEqual(retentionTokens('MutableList<Word>'), ['mutable', 'list', 'word']);
+});
+
+test('a field whose type is not declared here is not attributed to a local type that shares a token', () => {
+  // The false positive the token reach produced on a real file: `drag: GlimDrag` was reported
+  // as holding an `Engine` because the same file declares `GlimRig`, which holds one.
+  const report = buildRetention('Rig.kt', [
+    type('GlimRig', 3),
+    field('engine', 'Engine', 24, 'GlimRig'),
+    field('drag', 'GlimDrag', 26, 'GlimRig'),
+  ]);
+
+  assert.deepEqual(report.facts.map((fact) => fact.symbol), ['engine']);
+});
+
+test('the simple name drops generic arguments and qualifiers', () => {
+  assert.equal(declaredTypeName('CachedEngine?'), 'CachedEngine');
+  assert.equal(declaredTypeName('MutableList<Word>'), 'MutableList');
+  assert.equal(declaredTypeName('com.acme.GenerativeModel'), 'GenerativeModel');
+});
+
+test('a value holder the file declares is read from its fields, not from its name', () => {
+  // The shape that produced a false ranking: `LocalModel` is download metadata, not a model,
+  // and two members of the file declared it. Nothing to release, nothing held.
+  const report = buildRetention('Model.kt', [
+    type('LocalModel', 3),
+    field('url', 'String', 4, 'LocalModel'),
+    field('sizeBytes', 'Long', 5, 'LocalModel'),
+    field('model', 'LocalModel', 9, 'DownloadState.Running'),
+    field('model', 'LocalModel', 12, 'DownloadState.Failed'),
+  ]);
+
+  assert.deepEqual(report.facts, []);
+  assert.deepEqual(report.signals, []);
+});
+
+test('a declared holder whose own recorded field is heavy is still reported', () => {
+  const report = buildRetention('Wrapper.kt', [
+    type('LocalModel', 3),
+    field('url', 'String', 4, 'LocalModel'),
+    type('Wrapper', 8),
+    field('inner', 'Engine', 9, 'Wrapper'),
+    field('wrapped', 'Wrapper', 12, 'Holder'),
+  ]);
+
+  const held = report.facts.find((fact) => fact.symbol === 'wrapped');
+  assert.ok(held, 'the holder is a fact');
+  assert.equal(held.kind, 'engine');
+  assert.match(held.evidence, /holds `Engine` \(declared in this file\)/);
+});
+
+test('the reading names the value-holder and unresolved-field limits', () => {
+  const report = buildRetention('Model.kt', [
+    type('LocalModel', 3),
+    field('url', 'String', 4, 'LocalModel'),
+    field('model', 'LocalModel', 9, 'DownloadState.Running'),
+  ]);
+  const limits = report.unavailable.join(' ');
+
+  assert.match(limits, /value holder whose name matches a resource family/);
+  assert.match(limits, /no declared type is read only when the extractor resolves its initializer/);
 });

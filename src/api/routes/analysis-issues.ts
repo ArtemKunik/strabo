@@ -120,10 +120,8 @@ async function readRepository(
     };
   }
 
-  const files = graph.nodes
-    .filter((node) => node.kind !== 'test')
-    .map((node) => node)
-    .slice(0, ISSUE_SCAN_CAP);
+  const sourceNodes = graph.nodes.filter((node) => node.kind !== 'test');
+  const files = sourceNodes.slice(0, ISSUE_SCAN_CAP);
 
   const readings: FileReading[] = [];
   let unread = 0;
@@ -170,15 +168,43 @@ async function readRepository(
     }
   }
 
-  const notes: string[] = [];
-  if (graph.nodes.length > files.length) {
-    notes.push(`read the first ${files.length} of ${graph.nodes.length} files`);
-  }
-  if (unread > 0) {
-    notes.push(`${unread} file(s) could not be read and were skipped`);
-  }
+  const notes = rankingLimits({
+    sourceFiles: sourceNodes.length,
+    readFiles: files.length,
+    totalNodes: graph.nodes.length,
+    unreadFiles: unread,
+  });
 
   return { readings, ...(notes.length > 0 ? { note: notes.join('; ') } : {}) };
+}
+
+/**
+ * What a ranking could not read, as separate facts rather than one conflated count.
+ *
+ * The cap is the caller's to raise; the test files are excluded on purpose. Reporting the two
+ * as a single "read N of M" number made a complete read look truncated, and hid the reason.
+ */
+export function rankingLimits(counts: {
+  sourceFiles: number;
+  readFiles: number;
+  totalNodes: number;
+  unreadFiles: number;
+}): string[] {
+  const notes: string[] = [];
+  const capped = counts.sourceFiles - counts.readFiles;
+  if (capped > 0) {
+    notes.push(
+      `read the first ${counts.readFiles} of ${counts.sourceFiles} source files (the scan cap)`,
+    );
+  }
+  const testNodes = counts.totalNodes - counts.sourceFiles;
+  if (testNodes > 0) {
+    notes.push(`${testNodes} test file(s) were not read`);
+  }
+  if (counts.unreadFiles > 0) {
+    notes.push(`${counts.unreadFiles} file(s) could not be read and were skipped`);
+  }
+  return notes;
 }
 
 function parseLimit(value: unknown): number | null {

@@ -568,6 +568,9 @@ export async function extractKotlinSymbols(
 
     try {
       const typeNames = new Set<string>();
+    // Fields whose type the extractor cannot read from an annotation, kept for one resolution
+    // pass after the walk: a field may be declared above the function that names its type.
+    const inferredFields: Array<{ field: CodeSymbol; callee: string }> = [];
 
     const addField = (field: CodeSymbol): void => {
       symbols.push(field);
@@ -624,6 +627,12 @@ export async function extractKotlinSymbols(
         const field = fieldOf(node, owner);
         if (field) {
           addField(field);
+          if (!field.type) {
+            const callee = initializerCallee(node);
+            if (callee) {
+              inferredFields.push({ field, callee });
+            }
+          }
           return;
         }
       }
@@ -649,6 +658,8 @@ export async function extractKotlinSymbols(
     };
 
     visit(tree.rootNode, '');
+
+    resolveInferredFieldTypes(symbols, inferredFields);
 
     const accesses: MemberAccess[] = [];
     for (const entry of methodBodies) {
@@ -846,6 +857,85 @@ function visibilityOf(node: Node): string {
   return visibility?.text ?? 'public';
 }
 
+/**
+ * The name a property initializer calls, when the initializer is a plain `Name(...)` call.
+ *
+ * `= createModel()` yields `createModel`. A literal, a lambda, a member call (`a.b()`), or a
+ * nested expression yields null, so only an initializer the file can name is followed.
+ */
+function initializerCallee(node: Node): string | null {
+  const call = node.namedChildren.find((child) => child.type === 'call_expression');
+  const callee = call?.namedChildren[0];
+  return callee?.type === 'simple_identifier' ? callee.text : null;
+}
+
+/**
+ * Fill a field's type from the initializer the file itself declares, when it can be proven.
+ *
+ * `private var model = createModel()` records no annotated type, so the field is invisible to
+ * every reading that classifies by type — including resources: a model loaded by a factory
+ * reads as no model at all. The file still proves the type twice over, because
+ * `fun createModel(): GenerativeModel` names its return type and a same-file type names
+ * itself. This fills the field from that declaration and nothing else: a call the file does
+ * not declare (`OkHttpClient()`) is left unresolved rather than guessed at from its spelling.
+ */
+function resolveInferredFieldTypes(
+  symbols: CodeSymbol[],
+  inferred: ReadonlyArray<{ field: CodeSymbol; callee: string }>,
+): void {
+  if (inferred.length === 0) {
+    return;
+  }
+  const declaredTypes = new Set(
+    symbols.filter((symbol) => symbol.kind === 'type').map((symbol) => symbol.name),
+  );
+  // A returned type the file records is a simple name (the extractor drops the qualifier).
+  const returns = new Map<string, string>();
+  for (const symbol of symbols) {
+    if (symbol.kind === 'method' && symbol.type && !returns.has(symbol.name)) {
+      returns.set(symbol.name, symbol.type);
+    }
+  }
+  for (const { field, callee } of inferred) {
+    if (declaredTypes.has(callee)) {
+      field.type = callee;
+      continue;
+    }
+    const returned = returns.get(callee);
+    if (returned) {
+      field.type = returned;
+    }
+  }
+}
+
+/** The type node a declaration carries, nullable or not. */
+function typeNodeOf(container: Node): Node | undefined {
+  return container.namedChildren.find(
+    (child) => child.type === 'user_type' || child.type === 'nullable_type',
+  );
+}
+
+/**
+ * The name a type node declares, with its nullability.
+ *
+ * A qualified type arrives as a flat run of `type_identifier` children, so the **terminal** one
+ * is the type: taking the first named the package (`com` for `com.acme.Model`, which then
+ * matched no resource family at all). A nullable type wraps the same node in `nullable_type`,
+ * and reading past that wrapper is what lets `private var cached: CachedEngine? = null` record
+ * a type — without it the holder the retention reading exists to find was invisible. Generic
+ * arguments are nested inside `type_arguments`, so `Map<String, Int>` reads as `Map`.
+ */
+function declaredType(node: Node | undefined): string | undefined {
+  if (!node) {
+    return undefined;
+  }
+  if (node.type === 'nullable_type') {
+    const inner = declaredType(typeNodeOf(node));
+    return inner ? `${inner}?` : undefined;
+  }
+  return node.namedChildren.filter((child) => child.type === 'type_identifier').at(-1)?.text;
+}
+
 function fieldOf(node: Node, owner: string): CodeSymbol | null {
   const declaration = node.namedChildren.find((child) => child.type === 'variable_declaration');
   const name = declaration?.namedChildren.find((child) => child.type === 'simple_identifier')?.text;
@@ -853,9 +943,7 @@ function fieldOf(node: Node, owner: string): CodeSymbol | null {
     return null;
   }
   const binding = node.namedChildren.find((child) => child.type === 'binding_pattern_kind')?.text;
-  const type = declaration?.namedChildren
-    .find((child) => child.type === 'user_type')
-    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  const type = declaredType(declaration ? typeNodeOf(declaration) : undefined);
   return {
     name,
     kind: 'field',
@@ -881,9 +969,7 @@ function constructorPropertyOf(node: Node, owner: string): CodeSymbol | null {
   if (!name) {
     return null;
   }
-  const type = node.namedChildren
-    .find((child) => child.type === 'user_type')
-    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  const type = declaredType(typeNodeOf(node));
   return {
     name,
     kind: 'field',
@@ -903,10 +989,11 @@ function methodOf(node: Node, owner: string): CodeSymbol | null {
   const parameters = node.namedChildren.find(
     (child) => child.type === 'function_value_parameters',
   );
-  const returnType = node.namedChildren
-    .filter((child) => child.type === 'user_type')
-    .at(-1)
-    ?.namedChildren.find((child) => child.type === 'type_identifier')?.text;
+  const returnType = declaredType(
+    node.namedChildren
+      .filter((child) => child.type === 'user_type' || child.type === 'nullable_type')
+      .at(-1),
+  );
   return {
     name,
     kind: 'method',
