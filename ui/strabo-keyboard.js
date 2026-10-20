@@ -1,6 +1,6 @@
 /**
- * Global keyboard shortcuts: screen switching, the filter, Escape's step back, and the
- * single-key map actions, which stay out of the way while a field has focus.
+ * Global keyboard shortcuts: screen switching, the filter, the file finder, Escape's step
+ * back, and the single-key map actions, which stay out of the way while a field has focus.
  */
 
 import { showToast } from './strabo-delegate.js';
@@ -24,6 +24,12 @@ export function bindKeyboardShortcuts(app) {
       event.preventDefault();
       elements.filter.focus();
       elements.filter.select();
+      return;
+    }
+    // Ctrl+P finds any scanned file by name, including one the current view rolls up.
+    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === 'p' && onGraph) {
+      event.preventDefault();
+      void app.fileFinder.open();
       return;
     }
     // Screen-level shortcuts. The terminal screen owns its own Ctrl+K and tab keys; these

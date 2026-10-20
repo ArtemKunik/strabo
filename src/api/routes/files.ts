@@ -4,11 +4,13 @@ import { diffFile } from '../../analysis/diff.ts';
 import { contentAtRevision, readWorkingFile } from '../../analysis/git-content.ts';
 import { isSafeRevision } from '../../analysis/impact.ts';
 import { assertReadable, resolveRepositoryRoot } from '../../boundary/repository-root.ts';
+import { getCachedGraph } from '../../scan/graph.ts';
 import type { StraboConfig } from '../../types.ts';
 import { parseBoolean, sendError } from '../http.ts';
 
 /**
- * Reading one file for the in-page viewer: its text, and its change against a revision.
+ * Listing the scanned files for the go-to-file finder, and reading one file for the in-page
+ * viewer: its text, and its change against a revision.
  *
  * `ref` reads a past version; otherwise the working tree is read. The diff endpoint mirrors
  * the review's own routes (`ref`, `base`/`head`, `staged`, `untracked`) so the viewer and the
@@ -23,6 +25,20 @@ export function createFilesRouter(config: StraboConfig): Router {
       scanCeiling: config.scanCeiling ?? config.workspaceRoot,
       requested: typeof request.query.repository === 'string' ? request.query.repository : undefined,
     });
+
+  // Every file the scan recorded, whatever the current view rolls them up into, so a file can
+  // be found by name from a directory or unit map. It reads the same cached graph as `/graph`.
+  router.get('/files', async (request, response) => {
+    try {
+      const repository = resolve(request);
+      const cached = await getCachedGraph(repository.root);
+      response.json({
+        files: cached.report.graph.nodes.map((node) => ({ id: node.id, kind: node.kind })),
+      });
+    } catch (error) {
+      sendError(response, error);
+    }
+  });
 
   router.get('/source', async (request, response) => {
     try {

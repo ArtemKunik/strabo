@@ -1340,6 +1340,7 @@ function shortcutSheet() {
     { keys: "D", action: "Test coverage by project, folder, and file" },
     { keys: "G", action: "Delegate the selected files" },
     { keys: "\u2318K / ctrl-K", action: "Filter paths" },
+    { keys: "\u2318P / ctrl-P", action: "Go to a file by name, in any view" },
     { keys: "Esc", action: "Clear the selection or close a panel" },
     { keys: "?", action: "Show this sheet" },
     { keys: "hover a node", action: "Report its blast radius" },
@@ -32205,6 +32206,11 @@ function bindKeyboardShortcuts(app2) {
       elements2.filter.select();
       return;
     }
+    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "p" && onGraph) {
+      event.preventDefault();
+      void app2.fileFinder.open();
+      return;
+    }
     if ((event.metaKey || event.ctrlKey) && event.shiftKey && !inField) {
       const screenKey = event.key.toLowerCase();
       if (screenKey === "t") {
@@ -32301,6 +32307,221 @@ function bindKeyboardShortcuts(app2) {
     else if (key === "g" && app2.groupSelection.length >= 2) elements2.tbDelegateGroup.click();
     else if (key === "a") elements2.tbProducts?.click();
   });
+}
+
+// ui/strabo-file-finder.js
+var MAX_RESULTS = 50;
+function baseName2(path) {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+function stem(name) {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+function fileMatchScore(path, query) {
+  const needle = String(query ?? "").trim().toLowerCase();
+  if (needle === "") {
+    return 0;
+  }
+  const lower = String(path ?? "").toLowerCase();
+  const name = baseName2(lower);
+  if (needle.includes("/")) {
+    const at2 = lower.indexOf(needle);
+    if (at2 !== -1) {
+      return 4e3 - at2;
+    }
+  } else {
+    if (name === needle || stem(name) === needle) {
+      return 1e4;
+    }
+    if (name.startsWith(needle)) {
+      return 8e3;
+    }
+    const inName = name.indexOf(needle);
+    if (inName !== -1) {
+      const atWord = /[-_. ]/.test(name[inName - 1] ?? "");
+      return (atWord ? 7e3 : 6e3) - inName;
+    }
+    const inPath = lower.indexOf(needle);
+    if (inPath !== -1) {
+      return 4e3 - inPath;
+    }
+  }
+  return fuzzyScore(lower, needle);
+}
+function rankFiles(files, query, limit = MAX_RESULTS) {
+  const list2 = files ?? [];
+  if (String(query ?? "").trim() === "") {
+    return list2.slice(0, limit);
+  }
+  return list2.map((file) => ({ file, score: fileMatchScore(file.id, query) })).filter((entry) => entry.score >= 0).sort((a, b2) => b2.score - a.score || a.file.id.length - b2.file.id.length || a.file.id.localeCompare(b2.file.id)).slice(0, limit).map((entry) => entry.file);
+}
+function createFileFinder(app2) {
+  const { state: state2, elements: elements2 } = app2;
+  let overlay2 = null;
+  let parts = null;
+  let files = [];
+  let filesFor = null;
+  let matches2 = [];
+  let selected = 0;
+  function ensureOverlay2() {
+    if (overlay2) {
+      return;
+    }
+    overlay2 = document.createElement("div");
+    overlay2.id = "file-finder-overlay";
+    overlay2.className = "terminal-switcher file-finder";
+    overlay2.hidden = true;
+    overlay2.setAttribute("role", "dialog");
+    overlay2.setAttribute("aria-label", "Go to file");
+    const panel = document.createElement("div");
+    panel.className = "terminal-switcher-panel";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "terminal-switcher-input";
+    input.placeholder = "Go to file\u2026";
+    input.setAttribute("aria-label", "Find a file by name");
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    const list2 = document.createElement("div");
+    list2.className = "terminal-switcher-list";
+    list2.setAttribute("role", "listbox");
+    const note4 = document.createElement("div");
+    note4.className = "terminal-switcher-item terminal-switcher-meta";
+    note4.hidden = true;
+    panel.append(input, list2, note4);
+    overlay2.append(panel);
+    document.body.append(overlay2);
+    parts = { input, list: list2, note: note4 };
+    input.addEventListener("input", () => {
+      matches2 = rankFiles(files, input.value);
+      selected = 0;
+      renderList();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (matches2.length > 0) {
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          selected = (selected + step + matches2.length) % matches2.length;
+          renderList();
+        }
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        pick(matches2[selected]?.id ?? null);
+      }
+    });
+    overlay2.addEventListener("pointerdown", (event) => {
+      if (event.target === overlay2) {
+        close();
+      }
+    });
+  }
+  function renderList() {
+    const { list: list2, note: note4, input } = parts;
+    const rows = matches2.map((file, index) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "terminal-switcher-item";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", String(index === selected));
+      row.classList.toggle("is-selected", index === selected);
+      row.dataset.file = file.id;
+      const label = document.createElement("span");
+      label.className = "terminal-switcher-label";
+      label.textContent = baseName2(file.id);
+      const meta = document.createElement("span");
+      meta.className = "terminal-switcher-meta";
+      const slash = file.id.lastIndexOf("/");
+      meta.textContent = [slash > 0 ? file.id.slice(0, slash) : ".", file.kind === "test" ? "test" : ""].filter(Boolean).join(" \xB7 ");
+      row.append(label, meta);
+      row.addEventListener("click", () => pick(file.id));
+      row.addEventListener("pointermove", () => {
+        if (selected !== index) {
+          selected = index;
+          renderList();
+        }
+      });
+      return row;
+    });
+    list2.replaceChildren(...rows);
+    rows[selected]?.scrollIntoView?.({ block: "nearest" });
+    const empty = input.value.trim() !== "" && matches2.length === 0;
+    note4.hidden = !empty;
+    note4.textContent = empty ? `No scanned file matches "${input.value.trim()}".` : "";
+  }
+  async function loadFiles() {
+    const key = state2.repository ?? "";
+    if (filesFor === key && files.length > 0) {
+      return;
+    }
+    const query = state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : "";
+    const result = await app2.request(`/files${query}`);
+    files = [...result.files ?? []].sort((a, b2) => a.id.localeCompare(b2.id));
+    filesFor = key;
+  }
+  async function open() {
+    ensureOverlay2();
+    const { input } = parts;
+    input.value = "";
+    matches2 = [];
+    selected = 0;
+    overlay2.hidden = false;
+    input.focus();
+    try {
+      await loadFiles();
+    } catch (error) {
+      parts.note.hidden = false;
+      parts.note.textContent = `The file list could not be read: ${error.message}`;
+      return;
+    }
+    matches2 = rankFiles(files, input.value);
+    renderList();
+  }
+  function close() {
+    if (overlay2) {
+      overlay2.hidden = true;
+    }
+  }
+  function isOpen() {
+    return Boolean(overlay2 && !overlay2.hidden);
+  }
+  function invalidate() {
+    files = [];
+    filesFor = null;
+  }
+  function pick(file) {
+    close();
+    if (file) {
+      void goToFile(file);
+    }
+  }
+  async function goToFile(file) {
+    app2.setScreen?.("graph");
+    if (state2.filter && !file.toLowerCase().includes(state2.filter.trim().toLowerCase())) {
+      state2.filter = "";
+      elements2.filter.value = "";
+      app2.applyFilterToView();
+    }
+    if (state2.mode !== "file") {
+      elements2.detail.value = "file";
+      elements2.detail.dispatchEvent(new Event("change"));
+      await app2.scanSettled?.();
+    }
+    const drawn = (app2.current?.nodes ?? []).some((node) => node.id === file);
+    if (!drawn) {
+      elements2.status.textContent = `${file} is scanned but not drawn in this view.`;
+      app2.source?.viewSource(file);
+      return;
+    }
+    app2.selection.selectNode(file);
+    focus(app2.view.cy, file);
+  }
+  return { open, close, isOpen, invalidate, goToFile };
 }
 
 // ui/strabo.js
@@ -32420,6 +32641,7 @@ Object.assign(app, {
   applyFilterToView,
   dismissHint,
   scan,
+  scanSettled,
   setScreen
 });
 bindKeyboardShortcuts(app);
@@ -32444,6 +32666,7 @@ app.delegation = createDelegation(app);
 app.sandbox = createSandbox(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
+app.fileFinder = createFileFinder(app);
 app.structure = {
   openCell(cellId, unit, tier) {
     if (!cellId && !tier) return;
@@ -32498,8 +32721,20 @@ function renderMapLegend() {
     tiers: app.lenses?.tierLegend?.() ?? null
   });
 }
-async function scan({ refresh = false } = {}) {
+function scan(options) {
+  app.lastScan = runScan(options);
+  return app.lastScan;
+}
+async function scanSettled() {
+  let pending;
+  do {
+    pending = app.lastScan;
+    await pending;
+  } while (pending !== app.lastScan);
+}
+async function runScan({ refresh = false } = {}) {
   const generation = ++app.scanGeneration;
+  app.fileFinder?.invalidate();
   elements.status.textContent = "Scanning\u2026";
   if (elements.graphLoading) elements.graphLoading.hidden = false;
   if (elements.graphEmpty) elements.graphEmpty.hidden = true;

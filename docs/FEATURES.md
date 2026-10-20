@@ -20,6 +20,12 @@ clicking an entry filters the map. The zoom controls on the canvas adjust the vi
 status bar reports the diagnostics and exclusion counts, the node kinds on screen, and the
 active renderer (WebGL2 or canvas).
 
+`⌘P` / `ctrl-P` opens **Go to file**: it searches every file the scan recorded by name (an
+exact name first, then a name prefix, a word inside the name, and a path hit), so a file inside
+a directory block or a closed unit can be found too. Picking one switches the map to Files when
+the current view does not draw files, then selects and centres it. The path filter (`⌘K`) only
+narrows the nodes already on screen.
+
 In file mode each directory is drawn as a plate behind its files. Dragging a plate moves the
 whole directory as one group, so the map can be re-arranged; a press that lands on a file still
 selects or drags that file, so the plate's padding and the gaps between nodes are the handle.

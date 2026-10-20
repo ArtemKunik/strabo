@@ -216,6 +216,7 @@ export function shortcutSheet() {
     { keys: 'D', action: 'Test coverage by project, folder, and file' },
     { keys: 'G', action: 'Delegate the selected files' },
     { keys: '⌘K / ctrl-K', action: 'Filter paths' },
+    { keys: '⌘P / ctrl-P', action: 'Go to a file by name, in any view' },
     { keys: 'Esc', action: 'Clear the selection or close a panel' },
     { keys: '?', action: 'Show this sheet' },
     { keys: 'hover a node', action: 'Report its blast radius' },

@@ -47,6 +47,7 @@ import { createDelegation } from './strabo-delegation.js';
 import { createSelectionController } from './strabo-selection-controller.js';
 import { createFloatingPanels } from './strabo-floating-panels.js';
 import { bindKeyboardShortcuts } from './strabo-keyboard.js';
+import { createFileFinder } from './strabo-file-finder.js';
 
 /**
  * The state several features read and write. It lives on one object, rather than in
@@ -191,6 +192,7 @@ Object.assign(app, {
   applyFilterToView,
   dismissHint,
   scan,
+  scanSettled,
   setScreen,
 });
 
@@ -223,6 +225,7 @@ app.delegation = createDelegation(app);
 app.sandbox = createSandbox(app);
 app.selection = createSelectionController(app);
 app.windows = createFloatingPanels(app);
+app.fileFinder = createFileFinder(app);
 app.structure = {
   openCell(cellId, unit, tier) {
     if (!cellId && !tier) return;
@@ -292,8 +295,24 @@ function renderMapLegend() {
  * completion checks its captured generation before touching the DOM, so a slow response
  * for an old repository cannot overwrite the current view.
  */
-async function scan({ refresh = false } = {}) {
+function scan(options) {
+  app.lastScan = runScan(options);
+  return app.lastScan;
+}
+
+/** Resolves once the latest scan has drawn, including one a scan started on its way. */
+async function scanSettled() {
+  let pending;
+  do {
+    pending = app.lastScan;
+    await pending;
+  } while (pending !== app.lastScan);
+}
+
+async function runScan({ refresh = false } = {}) {
   const generation = ++app.scanGeneration;
+  // A rescan may follow a change on disk; the finder reads the file list afresh next time.
+  app.fileFinder?.invalidate();
   elements.status.textContent = 'Scanning…';
   if (elements.graphLoading) elements.graphLoading.hidden = false;
   if (elements.graphEmpty) elements.graphEmpty.hidden = true;
