@@ -1,4 +1,5 @@
-import type { Graph, ViewPosition } from '../types.ts';
+import type { Graph } from '../types.ts';
+import type { ViewPosition } from '../types/view.ts';
 import { computeGraphMetrics } from './analysis.ts';
 
 /** Grid spacing between node centres. Must exceed the largest node diameter (62). */

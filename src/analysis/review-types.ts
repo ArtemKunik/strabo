@@ -1,13 +1,17 @@
+import type { Exclusion } from '../types.ts';
 import type { FileCoverage, FileCoverageAggregate } from './file-coverage.ts';
 import type { ChangedLineCoverage, ChangedCoverageTotals } from './changed-coverage.ts';
+import type { ImpactResult } from './impact.ts';
+import type { TimelineCommit } from './timeline.ts';
 
 /**
- * Review data shapes shared by the review and change-passport analyses.
+ * Review data shapes shared by the review, review-git, and change-passport analyses.
  *
- * These live apart from `review.ts` so `change-passport.ts` can name a `ReviewFile`
- * without importing `review.ts`, which itself needs `ChangePassport`. That type-only
- * import in both directions registers as a strongly connected component in the repository
- * graph, so the shared shapes are extracted here instead.
+ * These live apart from `review.ts` so `change-passport.ts` and `review-git.ts` can name a
+ * `ReviewFile` or `ReviewResult` without importing `review.ts`, which itself needs
+ * `ChangePassport` and the git parsers. That type-only import in both directions registers
+ * as a strongly connected component in the repository graph, so the shared shapes are
+ * extracted here instead. Nothing in this module imports `review.ts`.
  */
 
 /** How a path differs between the two sides of a review. */
@@ -37,6 +41,54 @@ export interface ReviewFile {
   /** True when the path is a node in the scanned graph, so impact can reach it. */
   inGraph: boolean;
 }
+
+/** Counts rolled up over a review's changed files. */
+export interface ReviewTotals {
+  files: number;
+  insertions: number;
+  deletions: number;
+  /** Paths Git reported as binary, or untracked files whose size was not counted. */
+  uncounted: number;
+}
+
+/** What a review can say about the changed files' reach into the graph. */
+export interface ReviewImpact {
+  affected: ImpactResult['affected'];
+  outsideGraph: string[];
+}
+
+/** The outcome of reviewing a commit, the working tree, or a branch. */
+export type ReviewResult =
+  | {
+      available: true;
+      kind: 'commit' | 'working-tree' | 'branch';
+      /** Present for commit and branch reviews. */
+      ref?: string;
+      /** The reviewed commit, or a branch's tip. */
+      commit?: TimelineCommit;
+      /** Present for branch reviews. */
+      branch?: BranchDivergence;
+      files: ReviewFile[];
+      totals: ReviewTotals;
+      impact: ReviewImpact;
+      /**
+       * Changed paths dropped from the review, each with the reason it was left out — a
+       * generated bundle or a lockfile. Named rather than silently discarded.
+       */
+      excluded?: Exclusion[];
+      /** Cohesion before/after for the changed files, when the caller computed it. */
+      cohesion?: ChangePassport;
+      /**
+       * The linked worktree this working-tree review was taken from. Absent for the main
+       * root and for commit or branch reviews. `branch` is null when HEAD is detached.
+       */
+      worktree?: { path: string; branch: string | null };
+    }
+  | {
+      available: false;
+      reason: 'no-git' | 'git-error' | 'unknown-revision';
+      detail?: string;
+    };
 
 /** A metric or signal change on one function. */
 export interface FunctionChange {

@@ -5,6 +5,9 @@
  */
 
 export * from './types.ts';
+// View-model shapes depend on analysis tier types, so they are re-exported here rather than
+// from `./types.ts` (which analysis imports).
+export * from './types/view.ts';
 
 export { resolveRepositoryRoot, assertReadable, isInside, StraboScopeError } from './boundary/repository-root.ts';
 export { browseDirectories } from './boundary/browse.ts';

@@ -1,7 +1,7 @@
 import type { Exclusion, Graph } from '../types.ts';
 import type { ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
 import type { TimelineCommit } from './timeline.ts';
-import type { ReviewResult, ReviewTotals } from './review.ts';
+import type { ReviewResult, ReviewTotals } from './review-types.ts';
 import { isSafeRevision } from './impact.ts';
 import { classifyViewExclusion } from '../scan/exclusions.ts';
 import { run } from '../process.ts';

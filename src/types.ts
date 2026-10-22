@@ -16,5 +16,7 @@ export * from './types/schema.ts';
 export * from './types/data.ts';
 export * from './types/database.ts';
 export * from './types/workspace.ts';
-export * from './types/view.ts';
+// `./types/view.ts` is deliberately not re-exported here: it names analysis tier shapes, so
+// re-exporting it would make every `../types.ts` import in analysis reach back into analysis.
+// Consumers import it directly (or from `src/index.ts`).
 export * from './types/config.ts';

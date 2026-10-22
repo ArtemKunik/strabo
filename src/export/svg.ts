@@ -1,4 +1,4 @@
-import type { ViewModel, ViewNode } from '../types.ts';
+import type { ViewModel, ViewNode } from '../types/view.ts';
 
 export interface SvgExportOptions {
   title?: string;

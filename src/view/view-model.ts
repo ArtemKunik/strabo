@@ -7,7 +7,7 @@ import type { SystemReport } from '../analysis/system.ts';
 import type { Tier, TierReport } from '../analysis/tiers.ts';
 import type { TierDataFlow, TierDataFlowEdge } from '../analysis/tiers/data-flow.ts';
 import { hubLabelOf } from '../analysis/tiers/data-flow.ts';
-import type { OutsideLink, UnitCard, UnitCoverageFact, UnitShelfFact } from '../types.ts';
+import type { OutsideLink, UnitCard, UnitCoverageFact, UnitShelfFact, ViewEdge, ViewModel, ViewNode, ViewPosition } from '../types/view.ts';
 
 import { toPosix } from '../boundary/repository-root.ts';
 import type {
@@ -16,10 +16,6 @@ import type {
   RepositoryDescriptor,
   ScanCacheMetadata,
   ScanReport,
-  ViewEdge,
-  ViewModel,
-  ViewNode,
-  ViewPosition,
 } from '../types.ts';
 import path from 'node:path';
 

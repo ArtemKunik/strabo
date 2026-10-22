@@ -1,13 +1,5 @@
-import type {
-  BlockViewModel,
-  Graph,
-  GraphNode,
-  RepositoryDescriptor,
-  ScanCacheMetadata,
-  ViewEdge,
-  ViewNode,
-  ViewPosition,
-} from '../types.ts';
+import type { Graph, GraphNode, RepositoryDescriptor, ScanCacheMetadata } from '../types.ts';
+import type { BlockViewModel, ViewEdge, ViewNode, ViewPosition } from '../types/view.ts';
 import { buildAdjacency, computeGraphMetrics, rankHubs } from './analysis.ts';
 import { buildPositions } from './layout.ts';
 

@@ -1,7 +1,6 @@
 import type { FileDiff } from './diff.ts';
 import type { FunctionEntry } from './functions.ts';
 import type { MeasuredCoverageSummary } from './measured-coverage.ts';
-import type { SymbolChange } from './review-types.ts';
 
 /** One changed function with uncovered lines in review. */
 export interface UncoveredFunctionChange {
@@ -48,7 +47,11 @@ export interface ChangedCoverageTotals {
 
 export interface ComputeChangedCoverageOptions {
   functions?: readonly FunctionEntry[];
-  publicSymbols?: readonly SymbolChange[];
+  /**
+   * Only the name is read, so the shape is structural: accepting `SymbolChange[]` here
+   * would make `review-types.ts` and this module import each other.
+   */
+  publicSymbols?: readonly { name: string }[];
 }
 
 /**

@@ -3,9 +3,8 @@ import path from 'node:path';
 
 import type { Exclusion, Graph } from '../types.ts';
 import { matchesGlob } from './glob.ts';
-import { impactFromPaths, isSafeRevision, type ImpactResult } from './impact.ts';
-import type { BranchDivergence, ChangePassport, ReviewGroup, ReviewFile, ReviewStatus } from './review-types.ts';
-import type { TimelineCommit } from './timeline.ts';
+import { impactFromPaths, isSafeRevision } from './impact.ts';
+import type { ReviewFile, ReviewGroup, ReviewImpact, ReviewResult, ReviewStatus, ReviewTotals } from './review-types.ts';
 import { classifyViewExclusion } from '../scan/exclusions.ts';
 import {
   assertRepository,
@@ -30,51 +29,7 @@ export {
 export type { MergedChanges, ParsedChange } from './review-git.ts';
 
 export type { BranchDivergence, CohesionChange, ReviewFile, ReviewGroup, ReviewStatus } from './review-types.ts';
-
-export interface ReviewTotals {
-  files: number;
-  insertions: number;
-  deletions: number;
-  /** Paths Git reported as binary, or untracked files whose size was not counted. */
-  uncounted: number;
-}
-
-export interface ReviewImpact {
-  affected: ImpactResult['affected'];
-  outsideGraph: string[];
-}
-
-export type ReviewResult =
-  | {
-      available: true;
-      kind: 'commit' | 'working-tree' | 'branch';
-      /** Present for commit and branch reviews. */
-      ref?: string;
-      /** The reviewed commit, or a branch's tip. */
-      commit?: TimelineCommit;
-      /** Present for branch reviews. */
-      branch?: BranchDivergence;
-      files: ReviewFile[];
-      totals: ReviewTotals;
-      impact: ReviewImpact;
-      /**
-       * Changed paths dropped from the review, each with the reason it was left out — a
-       * generated bundle or a lockfile. Named rather than silently discarded.
-       */
-      excluded?: Exclusion[];
-      /** Cohesion before/after for the changed files, when the caller computed it. */
-      cohesion?: ChangePassport;
-      /**
-       * The linked worktree this working-tree review was taken from. Absent for the main
-       * root and for commit or branch reviews. `branch` is null when HEAD is detached.
-       */
-      worktree?: { path: string; branch: string | null };
-    }
-  | {
-      available: false;
-      reason: 'no-git' | 'git-error' | 'unknown-revision';
-      detail?: string;
-    };
+export type { ReviewImpact, ReviewResult, ReviewTotals } from './review-types.ts';
 
 /**
  * Review a commit's own changes.

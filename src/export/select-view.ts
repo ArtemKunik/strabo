@@ -1,7 +1,8 @@
 import { buildBlockViewModel } from '../analysis/blocks.ts';
 import { buildSystemReport } from '../analysis/system.ts';
 import { CACHE_ARTIFACT_VERSION, type CachedGraph } from '../cache/graph-cache.ts';
-import type { RepositoryDescriptor, ScanCacheMetadata, ViewModel } from '../types.ts';
+import type { RepositoryDescriptor, ScanCacheMetadata } from '../types.ts';
+import type { ViewModel } from '../types/view.ts';
 import { buildSystemViewModel, buildViewModel } from '../view/view-model.ts';
 
 export type ExportViewMode = 'file' | 'block' | 'system';
