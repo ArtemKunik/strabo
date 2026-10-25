@@ -90,5 +90,7 @@
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 17px;
 }
 

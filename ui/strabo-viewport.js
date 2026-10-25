@@ -61,6 +61,10 @@ export function fit(cy) {
     return;
   }
   const insets = sideInsets(cy);
+  // The canvas overlays (the first-run hint) centre on the same free area the map fits into.
+  const screen = cy.container?.()?.parentElement;
+  screen?.style?.setProperty('--free-left', `${insets.left}px`);
+  screen?.style?.setProperty('--free-right', `${insets.right}px`);
   const box = elements.boundingBox();
   const x1 = box.x1 - PLATE_MARGIN;
   const y1 = box.y1 - PLATE_MARGIN;

@@ -46,7 +46,7 @@
   border-color: transparent;
   background: transparent;
   color: var(--ink-2);
-  font-size: 15px;
+  font-size: var(--text-lg);
   line-height: 1;
 }
 
@@ -59,7 +59,7 @@
 .terminal-toolbar-button.terminal-run {
   min-width: 18px;
   padding: 0 3px;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 /* The strip scrolls horizontally rather than wrapping, so the pane host never shrinks. */
@@ -148,7 +148,7 @@
   padding: 0 2px;
   line-height: 1;
   color: var(--ink-3);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .terminal-tab-close:hover:not(:disabled) {

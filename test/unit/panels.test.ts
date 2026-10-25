@@ -86,7 +86,9 @@ test('renderLegend labels each reading cue and each node kind', () => {
   const text = target.textContent;
   assert.match(text, /island = directory/);
   assert.match(text, /module \(round-rectangle\)/);
-  assert.match(text, /test \(diamond\)/);
+  // The shapes already say "diamond = test", so the kinds do not repeat it.
+  assert.match(text, /diamond = test/);
+  assert.doesNotMatch(text, /test \(diamond\)/);
 });
 
 test('renderLegend groups cues into shapes and lines with a mark and a hover hint', () => {

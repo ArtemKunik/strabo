@@ -634,7 +634,7 @@ export function renderRepositoryPassport(container, report, handlers = {}) {
       ? passportNote('No directories recorded.')
       : passportPlainList(
           directories,
-          (entry) => `${entry.directory} · ${entry.files} file(s) · ${entry.incoming} incoming`,
+          (entry) => `${entry.directory === '.' ? '(root files)' : entry.directory} · ${entry.files} file(s) · ${entry.incoming} incoming`,
         ),
   );
 

@@ -54,7 +54,7 @@
 .brick-label {
   fill: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-xs);
   pointer-events: none;
 }
 

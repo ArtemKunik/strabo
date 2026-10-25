@@ -21,17 +21,21 @@ const GAP = 8;
 const DOCK_REACH = 28;
 
 /**
- * Clamp a toolbar's top-left so it stays fully inside its container.
+ * Clamp a toolbar's top-left so it stays fully inside its container, `margin` clear of
+ * each edge, so a bar dragged into a corner keeps its rounded frame and grip in view.
  *
- * Pure, so the placement rule is unit-tested without a browser. A bar wider or taller than
- * the container pins to the origin rather than producing a negative bound.
+ * Pure, so the placement rule is unit-tested without a browser. A bar too big to keep the
+ * margin pins to it (or to the origin, when not even that fits) rather than producing a
+ * negative bound.
  */
-export function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
-  const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
-  const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
+export function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight, margin = 0 }) {
+  const minLeft = Math.min(margin, Math.max(0, boundWidth - width));
+  const minTop = Math.min(margin, Math.max(0, boundHeight - height));
+  const maxLeft = Math.max(minLeft, boundWidth - Math.min(width, boundWidth) - margin);
+  const maxTop = Math.max(minTop, boundHeight - Math.min(height, boundHeight) - margin);
   return {
-    left: Math.min(Math.max(left, 0), maxLeft),
-    top: Math.min(Math.max(top, 0), maxTop),
+    left: Math.min(Math.max(left, minLeft), maxLeft),
+    top: Math.min(Math.max(top, minTop), maxTop),
   };
 }
 
@@ -122,6 +126,7 @@ export function initFloatingToolbar(element, options = {}) {
       height: element.offsetHeight || rect.height,
       boundWidth,
       boundHeight,
+      margin: GAP,
     });
     element.style.left = `${clamped.left}px`;
     element.style.top = `${clamped.top}px`;

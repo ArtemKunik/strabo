@@ -6,10 +6,20 @@
  * `strabo-float-placement.js`, and the drag/resize gestures by `strabo-float-gestures.js`.
  */
 
-import { sanitizeSize, DEFAULT_WIDTH, GAP, MIN_WIDTH } from './strabo-float-geometry.js';
+import { sanitizeSize, DEFAULT_WIDTH, GAP, MIN_WIDTH, RIGHT_ANCHOR_SNAP } from './strabo-float-geometry.js';
 import { buildWindowChrome } from './strabo-float-chrome.js';
 import { appDockLeft, createPlacement } from './strabo-float-placement.js';
 import { wireWindowGestures } from './strabo-float-gestures.js';
+
+/**
+ * A panel body's leading plain heading, which the title bar can carry in its place. A
+ * heading holding a control (a dismiss button, a link) stays where it is, in the body.
+ */
+function leadingHeading(element) {
+  const first = element.firstElementChild;
+  if (first?.tagName !== 'H3' || first.querySelector('button, a, input, select')) return null;
+  return first;
+}
 
 /**
  * Build the window for one config, insert it before the panel element, move the element
@@ -93,6 +103,13 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
       if (heading) {
         title.textContent = heading;
       }
+    } else if (!hidden) {
+      // A body that opens with its own heading ("Reading route — strabo") would repeat the
+      // title bar right under it. The bar carries the heading instead; the body keeps it for
+      // screen readers.
+      const heading = leadingHeading(element);
+      title.textContent = heading?.textContent?.trim() || (config.title ?? config.key);
+      heading?.classList.add('sr-only');
     }
     win.setAttribute('aria-label', title.textContent);
     if (hidden !== lastHidden) {
@@ -185,10 +202,16 @@ export function createFloatingWindow({ config, saved, controllers, dockRail, nex
       // A window that has never opened keeps no position: it earns its rail slot at open,
       // so persisting the 0,0 default would pin it to the corner instead.
       if (hasPosition()) {
-        snapshot.position = {
-          left: parseFloat(win.style.left) || 0,
-          top: parseFloat(win.style.top) || 0,
-        };
+        const left = parseFloat(win.style.left) || 0;
+        const top = parseFloat(win.style.top) || 0;
+        // A window docked against the right edge is saved by its gap to the viewport's right,
+        // so a reload at another width puts it back at the side rather than at the old left.
+        // A closed window has no box, so fall back to the width it last drew at.
+        const boxWidth = win.offsetWidth || size.width || width;
+        const edgeGap = appDockLeft() - GAP - (left + boxWidth);
+        snapshot.position = edgeGap >= -1 && edgeGap <= RIGHT_ANCHOR_SNAP
+          ? { right: Math.max(0, window.innerWidth - (left + boxWidth)), top }
+          : { left, top };
       }
       return snapshot;
     },

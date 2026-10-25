@@ -32,7 +32,7 @@
   margin: 6px 0;
   padding-left: 20px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .sandbox-remove {
@@ -47,7 +47,7 @@
 
 .sandbox-hypothetical {
   color: var(--status-warning);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   margin: 10px 0 4px;
 }
@@ -56,7 +56,7 @@
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 2px 12px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   margin: 0 0 8px;
 }
 
@@ -75,7 +75,7 @@
 }
 
 .sandbox-verdict {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--status-warning);
 }
 
@@ -91,16 +91,17 @@
 
 .sandbox-section h4 {
   margin: 0 0 4px;
-  font-size: 12px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--ink-3);
 }
 
 .sandbox-list {
   margin: 0;
   padding-left: 16px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 

@@ -99,7 +99,8 @@ export function createRepositoryPicker(app) {
       return;
     }
     app.prefs.applyViewPrefs();
-    app.scan();
+    await app.scan();
+    await app.panels.refreshForRepository();
   }
 
   /** Forget the selected repository; it stays usable until the page reloads. */
@@ -118,7 +119,8 @@ export function createRepositoryPicker(app) {
     const catalogue = await request('/repositories');
     renderRepositoryOptions(catalogue.repositories, catalogue.active);
     if (state.repository !== root) {
-      app.scan();
+      await app.scan();
+      await app.panels.refreshForRepository();
     }
   }
 
@@ -137,6 +139,7 @@ export function createRepositoryPicker(app) {
     app.prefs.applyViewPrefs();
     rememberRepository(root)
       .then(() => app.scan())
+      .then(() => app.panels.refreshForRepository())
       .catch((error) => {
         elements.status.textContent = `Error: ${error.message}`;
       });

@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { firstFreeSlotTop, railTopBelow, RAIL_TOP, resizeLimits, sanitizeSize, topFloor } from '../../ui/strabo-float-geometry.js';
+import {
+  clearOfAbove,
+  firstFreeSlotTop,
+  followRightEdge,
+  keptTop,
+  MIN_HEIGHT,
+  railTopBelow,
+  RAIL_TOP,
+  resizeLimits,
+  sanitizeSize,
+  topFloor,
+} from '../../ui/strabo-float-geometry.js';
 import { clampMenuLeft, clampToolbarPosition } from '../../ui/strabo-float-toolbar.js';
 
 test('sanitizeSize keeps a size the user could have resized to', () => {
@@ -120,4 +131,50 @@ test('topFloor keeps a dragged window title bar below the header', () => {
   assert.equal(topFloor(85.2), 86);
   assert.equal(topFloor(undefined), 0);
   assert.equal(topFloor(NaN), 0);
+});
+
+test('followRightEdge carries a right-docked window back to the side when the canvas widens', () => {
+  // Flush against the edge at 1000, then the edge moves to 1500: the window follows it.
+  assert.equal(followRightEdge({ left: 600, width: 400, previousRight: 1000, right: 1500 }), 1100);
+  // A small gap to the edge is kept, not closed.
+  assert.equal(followRightEdge({ left: 590, width: 400, previousRight: 1000, right: 1500 }), 1090);
+});
+
+test('followRightEdge leaves a window placed mid-canvas where it is', () => {
+  assert.equal(followRightEdge({ left: 200, width: 400, previousRight: 1000, right: 1500 }), 200);
+  // With no earlier edge to compare against, nothing counts as docked.
+  assert.equal(followRightEdge({ left: 600, width: 400, previousRight: null, right: 1500 }), 600);
+});
+
+test('followRightEdge still clamps a window on screen when the canvas narrows', () => {
+  assert.equal(followRightEdge({ left: 200, width: 400, previousRight: 1000, right: 500 }), 100);
+  assert.equal(followRightEdge({ left: 600, width: 400, previousRight: 1000, right: 700 }), 300);
+});
+
+test('keptTop shortens a window before sliding it up over the one above', () => {
+  // A 600-tall window at 330 in a viewport now ending at 750: it keeps its top and shrinks.
+  assert.equal(keptTop({ top: 330, height: 600, floor: 52, bottom: 750 }), 330);
+  // Only when less than MIN_HEIGHT would remain does it rise.
+  assert.equal(keptTop({ top: 700, height: 600, floor: 52, bottom: 750 }), 750 - MIN_HEIGHT);
+  assert.equal(keptTop({ top: 20, height: 100, floor: 52, bottom: 750 }), 52);
+});
+
+test('clearOfAbove moves a window down off the one above it in the same column', () => {
+  const above = [{ left: 584, right: 924, top: 93, bottom: 344 }];
+  assert.equal(clearOfAbove({ top: 328, left: 464, width: 460, above, bottom: 757 }), 356);
+  // A window in another column is left alone.
+  assert.equal(clearOfAbove({ top: 328, left: 40, width: 300, above, bottom: 757 }), 328);
+  // So is one that would be left shorter than MIN_HEIGHT.
+  assert.equal(clearOfAbove({ top: 328, left: 464, width: 460, above, bottom: 400 }), 328);
+});
+
+test('clampToolbarPosition keeps a margin from the edges when asked to', () => {
+  const box = { width: 300, height: 40, boundWidth: 800, boundHeight: 500, margin: 8 };
+  assert.deepEqual(clampToolbarPosition(-40, -10, box), { left: 8, top: 8 });
+  assert.deepEqual(clampToolbarPosition(900, 900, box), { left: 492, top: 452 });
+  // A bar too wide for the margin still pins on screen rather than going negative.
+  assert.deepEqual(
+    clampToolbarPosition(50, 50, { ...box, width: 795, boundWidth: 800 }),
+    { left: 5, top: 50 },
+  );
 });

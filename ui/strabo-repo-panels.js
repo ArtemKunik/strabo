@@ -161,8 +161,13 @@ export function createRepositoryPanels(app) {
    */
   async function showPassport() {
     elements.passportPanel.hidden = false;
+    const repository = state.repository;
     try {
-      const report = await request(`/analysis/passport${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+      const report = await request(`/analysis/passport${repository ? `?repository=${encodeURIComponent(repository)}` : ''}`);
+      // A switch while the passport was loading leaves the newer request to draw it.
+      if (repository !== state.repository) {
+        return;
+      }
       renderRepositoryPassport(elements.passportPanel, report, {
         onSelect: (id) => app.selection.selectNode(id),
         onOpenRoute: () => showRoute(),
@@ -256,8 +261,12 @@ export function createRepositoryPanels(app) {
    */
   async function showRoute(preferredFile) {
     elements.routePanel.hidden = false;
+    const repository = state.repository;
     try {
-      const report = await request(`/analysis/route${state.repository ? `?repository=${encodeURIComponent(state.repository)}` : ''}`);
+      const report = await request(`/analysis/route${repository ? `?repository=${encodeURIComponent(repository)}` : ''}`);
+      if (repository !== state.repository) {
+        return;
+      }
       currentRoute = report;
       await app.narration.ensureNarratorStatus();
       const steps = routeSteps(report);
@@ -360,12 +369,27 @@ export function createRepositoryPanels(app) {
     await showPassport();
   }
 
+  /**
+   * Redraw the open repository-wide windows for the repository now selected. The map rescans
+   * on a switch, but these windows describe the whole repository and would otherwise keep
+   * showing the one the operator just left. Blocks reads the drawn map, so call this once the
+   * scan has settled.
+   */
+  async function refreshForRepository() {
+    const pending = [];
+    if (!elements.passportPanel.hidden) pending.push(showPassport());
+    if (!elements.routePanel.hidden) pending.push(showRoute());
+    if (!elements.blocksPanel.hidden) showBlocks();
+    await Promise.all(pending);
+  }
+
   return {
     closePassport,
     closeRoute,
     closeWorkspace,
     currentRouteSummary,
     maybeOpenPassport,
+    refreshForRepository,
     showBlocks,
     showPassport,
     showRoute,

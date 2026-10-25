@@ -63,7 +63,7 @@ button.primary {
   border: none;
   background: none;
   color: var(--ink-3);
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
 .filter-count {
@@ -115,7 +115,7 @@ button.primary {
   border-radius: 999px;
   background: var(--status-warning);
   color: var(--on-warning);
-  font-size: 10px;
+  font-size: var(--text-xs);
   font-weight: 800;
   line-height: 1.6;
   text-align: center;
@@ -128,7 +128,7 @@ button.primary {
 
 .crumb {
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .crumb + .crumb::before {

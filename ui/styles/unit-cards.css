@@ -58,7 +58,7 @@
 
 .unit-card-role {
   color: var(--ink-3);
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
