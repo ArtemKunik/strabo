@@ -35,6 +35,8 @@ export interface ViewNode extends GraphNode {
   inUnitDependents?: number;
   /** Transitive dependents outside the open unit (L17 split). */
   outsideDependents?: number;
+  /** For a directory block, the files outside it that depend on it, directly or transitively. */
+  dependentFiles?: number;
   /** True for the collapsed boxes of the units that are not open. */
   collapsed?: boolean;
   /** The shelf a drill-down shelf node folds, for its hover card. */
