@@ -104,6 +104,30 @@ test('islands do not apply to the System view, where a node is already a unit', 
   assert.deepEqual(islandBounds(system), []);
 });
 
+test('inside an open System unit the plates are its layer lanes, named with their size', () => {
+  const unit = {
+    system: true,
+    systemUnit: '.',
+    nodes: [
+      { id: 'src/a.ts', directory: 'src', systemLayer: 'api', transitiveDependents: 0 },
+      { id: 'src/b.ts', directory: 'src', systemLayer: 'api', transitiveDependents: 0 },
+      { id: 'ui/c.js', directory: 'ui', systemLayer: 'ui', transitiveDependents: 0 },
+      // A collapsed box for another unit sits on no lane.
+      { id: 'crates/core', kind: 'unit', collapsed: true, transitiveDependents: 0 },
+    ],
+    positions: [
+      { id: 'src/a.ts', x: 0, y: 0 },
+      { id: 'src/b.ts', x: 0, y: 110 },
+      { id: 'ui/c.js', x: 360, y: 0 },
+      { id: 'crates/core', x: 0, y: 500 },
+    ],
+  };
+  assert.equal(islandsApply(unit), true);
+  const plates = islandBounds(unit);
+  assert.deepEqual(plates.map((plate) => plate.label).sort(), ['api · 2 files', 'ui · 1 file']);
+  assert.equal(plates.reduce((sum, plate) => sum + plate.count, 0), 3);
+});
+
 test('islandLabel shows the scanner root marker as a path', () => {
   assert.equal(islandLabel('.'), '/');
   assert.equal(islandLabel('src/analysis'), 'src/analysis');

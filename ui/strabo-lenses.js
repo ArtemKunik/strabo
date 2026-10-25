@@ -41,6 +41,11 @@ export function overlayNodes(cy, classesByNode) {
       const node = cy.getElementById(id);
       if (node.nonempty()) node.addClass(className);
     }
+    // What the overlay marks is the point, so everything it leaves unmarked recedes. An
+    // overlay that marks nothing on this map dims nothing, rather than greying it all out.
+    const ids = new Set([...(classesByNode ?? [])].map(([id]) => id));
+    const marked = cy.nodes().filter((node) => ids.has(node.id()));
+    if (marked.nonempty()) cy.nodes().difference(marked).addClass('ov-quiet');
   });
 }
 
