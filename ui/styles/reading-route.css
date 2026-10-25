@@ -13,13 +13,13 @@
 
 .route-counter {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .route-summary,
 .route-truncated {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   margin: 4px 0 8px;
 }
 
@@ -31,15 +31,16 @@
 
 .route-unit h4 {
   margin: 0 0 4px;
-  font-size: 12px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--ink-3);
 }
 
 .route-unit-why {
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 0 0 6px;
 }
 
@@ -60,7 +61,7 @@
 .route-unreached {
   margin-top: 4px;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .route-unreached-file {
@@ -70,7 +71,7 @@
 
 .route-error-detail {
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   word-break: break-word;
 }
 
@@ -82,7 +83,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--ink-1);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 

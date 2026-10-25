@@ -104,3 +104,33 @@ test('block view nodes carry no directory colour', async () => {
 
   assert.ok(model.nodes.every((node) => !('paletteIndex' in node)));
 });
+
+test('a block counts the files outside it that depend on it, across the whole repository', async () => {
+  const graph = await loadGraph();
+  const dependents = (model: ReturnType<typeof buildBlockViewModel>) =>
+    Object.fromEntries(model.nodes.map((node) => [node.id, node.dependentFiles]));
+
+  // lib is reached by main.ts and src/index.ts directly, and by the test through src.
+  assert.deepEqual(dependents(buildBlockViewModel(graph, { depth: 1 })), { '.': 0, lib: 3, src: 2, tests: 0 });
+  // Inside src the callers outside the prefix (main.ts, the test) still count.
+  assert.equal(dependents(buildBlockViewModel(graph, { depth: 1, prefix: 'src' })).src, 6);
+});
+
+test('the block of files sitting directly in a directory is labelled, not drawn as its id', async () => {
+  const graph = await loadGraph();
+  const label = (model: ReturnType<typeof buildBlockViewModel>, id: string) =>
+    model.nodes.find((node) => node.id === id)?.label;
+
+  assert.equal(label(buildBlockViewModel(graph, { depth: 1 }), '.'), '(root files)');
+  assert.equal(label(buildBlockViewModel(graph, { depth: 1 }), 'lib'), undefined);
+  assert.equal(label(buildBlockViewModel(graph, { depth: 1, prefix: 'src' }), 'src'), '(files in src)');
+});
+
+test('inside a drill-down blocks are named relative to the prefix the breadcrumb shows', async () => {
+  const graph = await loadGraph();
+  const model = buildBlockViewModel(graph, { depth: 2, prefix: 'src' });
+  const label = (id: string) => model.nodes.find((node) => node.id === id)?.label;
+
+  assert.equal(label('src/api'), 'api');
+  assert.equal(label('src/api/v2'), 'api/v2');
+});

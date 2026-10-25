@@ -62,3 +62,11 @@ test('structureEdgeBends splits a two-way pair and arcs a skip-layer edge around
   assert.ok(skip > apiDomain);
   assert.equal(adjacent, 0);
 });
+
+test('a directory block sizes by outside dependents on a log scale that does not saturate early', () => {
+  const size = (dependentFiles: number) => nodeDiameter({ kind: 'module', dependentFiles });
+
+  assert.equal(size(0), 22);
+  assert.ok(size(10) < size(100) && size(100) < size(500));
+  assert.ok(size(500) <= 62);
+});

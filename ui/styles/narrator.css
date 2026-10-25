@@ -20,7 +20,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--ink-1);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -30,13 +30,13 @@
 }
 
 .outside-badge {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--ink-2);
 }
 
 .narrator-note {
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   margin: 0 0 6px;
 }
 
@@ -47,7 +47,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--accent, var(--ink-1));
-  font-size: 11px;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -64,7 +64,7 @@
   margin-top: 6px;
   max-width: 72ch;
   color: var(--ink-1);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.55;
 }
 
@@ -83,25 +83,25 @@
   border-radius: 4px;
   background: var(--bg-3, var(--line-soft));
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .narration-panel {
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   background: var(--bg-0);
 }
 
 .narration-panel h3 {
   margin: 0 0 6px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   word-break: break-all;
 }
 
 .narrator-attribution {
   margin: 6px 0 0;
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-style: italic;
 }
 

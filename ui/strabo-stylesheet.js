@@ -190,7 +190,9 @@ export function stylesheet() {
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
     // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
     // warning ring. The changed/affected pair co-occurs, so its shape differs too.
-    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-style': 'solid', 'border-color': theme.changed, 'background-opacity': 1 } },
+    // A changed file is filled as well as ringed: it is what the operator touched, and a
+    // ring alone is a hairline at map zoom.
+    { selector: 'node.ov-changed', style: { 'border-width': 4, 'border-style': 'solid', 'border-color': theme.changed, 'background-color': theme.changed, 'background-opacity': 1 } },
     { selector: 'node.ov-affected', style: { 'border-width': 3, 'border-style': 'dotted', 'border-color': theme.affected, 'background-opacity': 1 } },
     { selector: 'node.ov-cycle', style: { 'border-width': 4, 'border-style': 'double', 'border-color': theme.cycle, 'background-opacity': 1 } },
     { selector: 'node.ov-unreached', style: { 'border-width': 2.5, 'border-style': 'dashed', 'border-color': theme.unreached, 'background-opacity': 0.7 } },
@@ -272,6 +274,10 @@ export function stylesheet() {
     // a short dash in the accent hue reads it apart from a plain import and a call.
     { selector: 'edge[kind = "inheritance"]', style: { 'line-style': 'dashed', 'line-dash-pattern': [3, 3], 'line-color': theme.edgeAccent, 'target-arrow-color': theme.edgeAccent } },
     { selector: '.dimmed', style: { opacity: 0.12 } },
+    // Files an active overlay does not mark recede so the marked ones read; a selected file
+    // stays fully visible.
+    { selector: 'node.ov-quiet', style: { opacity: 0.3 } },
+    { selector: 'node.ov-quiet:selected', style: { opacity: 1 } },
     {
       selector: 'edge',
       style: {

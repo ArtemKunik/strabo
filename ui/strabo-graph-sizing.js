@@ -24,6 +24,18 @@ export function diameter(transitiveDependents) {
 }
 
 /**
+ * A directory block's diameter by the files outside it that depend on it.
+ *
+ * A block's dependents run from none to most of the repository, so a square root would pin
+ * every real directory at the ceiling. A log scale keeps a dozen, a hundred, and a thousand
+ * dependents apart.
+ */
+export function blockDiameter(dependentFiles) {
+  const scaled = Math.log2(1 + Math.max(0, dependentFiles ?? 0)) * 4.5 + MIN_DIAMETER;
+  return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
+
+/**
  * The diameter a file draws at under the large-file lens: area grows with lines of code.
  *
  * The default map sizes a node by blast radius; the lens swaps in this so a big file is a
@@ -62,10 +74,11 @@ export function shelfDiameter(files) {
 /** A data hub is a dataset, not a component: a fixed ring that stays clear of the tier cards. */
 export const DATA_HUB_DIAMETER = 44;
 
-/** The diameter a node draws at: a unit/tier by file count, a shelf tag smaller, a hub fixed, a file by blast radius. */
+/** The diameter a node draws at: a unit/tier by file count, a shelf tag smaller, a hub fixed, a block by outside dependents, a file by blast radius. */
 export function nodeDiameter(node) {
   if (node?.kind === 'unit' || node?.kind === 'tier') return unitDiameter(node.files ?? node.size);
   if (node?.kind === 'shelf') return shelfDiameter(node.files);
   if (node?.kind === 'dataset') return DATA_HUB_DIAMETER;
+  if (typeof node?.dependentFiles === 'number') return blockDiameter(node.dependentFiles);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }

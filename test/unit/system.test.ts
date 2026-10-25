@@ -721,3 +721,24 @@ test('a lane holding many files wraps into sub-columns instead of one very tall 
   const others = http.map(at);
   assert.ok(others.every((position) => position.x > wrappedRight || position.x < Math.min(...lane.map((p) => p.x))));
 });
+
+test('files with no layer token keep depth bands of their own when most of a unit has none', () => {
+  const root = tempDir();
+  write(root, 'package.json', '{"name":"tool"}\n');
+  // One file under `api/`, four unmatched analysis files: `api` must not name all five.
+  const files = ['src/api/router.ts', 'src/analysis/a.ts', 'src/analysis/b.ts', 'src/scan/c.ts', 'src/scan/d.ts'];
+  const graph = graphOf(files, [
+    ['src/api/router.ts', 'src/analysis/a.ts'],
+    ['src/analysis/a.ts', 'src/analysis/b.ts'],
+    ['src/analysis/b.ts', 'src/scan/c.ts'],
+    ['src/scan/c.ts', 'src/scan/d.ts'],
+  ]);
+
+  const layers = buildSystemReport(root, 'tool', graph).layers;
+  const api = layers.find((layer) => layer.name === 'api');
+  assert.deepEqual(api?.files, ['src/api/router.ts']);
+  const depthBands = layers.filter((layer) => layer.name.startsWith('depth '));
+  assert.ok(depthBands.length >= 2 && depthBands.length <= 4);
+  assert.equal(depthBands.reduce((sum, layer) => sum + layer.files.length, 0), 4);
+  assert.ok(layers.every((layer) => !layer.name.startsWith('depth ') || /no layer token/.test(layer.why)));
+});

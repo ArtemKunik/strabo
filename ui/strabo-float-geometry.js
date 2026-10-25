@@ -87,3 +87,48 @@ export function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = 
   }
   return candidate;
 }
+
+/** How close to the canvas's right edge a window must sit to count as docked there. */
+export const RIGHT_ANCHOR_SNAP = 24;
+
+/**
+ * The left a window takes when the canvas's right edge moves from `previousRight` to `right`.
+ *
+ * A window that sat against the right edge (a rail slot, or one dragged there) keeps its gap
+ * to it, so widening the viewport carries it back to the side instead of leaving it adrift
+ * mid-canvas over the map; any other window keeps its left. The result is clamped on screen.
+ */
+export function followRightEdge({ left, width, previousRight, right }) {
+  const gap = Number.isFinite(previousRight) ? previousRight - (left + width) : Infinity;
+  const next = gap >= -1 && gap <= RIGHT_ANCHOR_SNAP ? right - width - Math.max(0, gap) : left;
+  return clamp(next, 0, Math.max(0, right - width));
+}
+
+/**
+ * The top a window keeps when the usable area shrinks to `floor`..`bottom`.
+ *
+ * The window shortens before it moves: it rises only when less than `MIN_HEIGHT` would be
+ * left below its top, so a shorter viewport does not slide the lower rail window up over
+ * the one above it.
+ */
+export function keptTop({ top, height, floor, bottom }) {
+  return clamp(top, floor, Math.max(floor, bottom - Math.min(height, MIN_HEIGHT)));
+}
+
+/**
+ * Push `top` below any box in `above` that shares the window's column and starts above it.
+ *
+ * Re-fitting can move an upper window down (the header wrapping to two rows raises the
+ * floor), and the window below it must not stay underneath. The nudge is skipped when it
+ * would leave less than `MIN_HEIGHT` above `bottom`; an overlap beats an unusable sliver.
+ */
+export function clearOfAbove({ top, left, width, above, bottom, gap = GAP }) {
+  let next = top;
+  for (const box of [...above].sort((a, b) => a.top - b.top)) {
+    const sharesColumn = box.left < left + width && left < box.right;
+    if (sharesColumn && box.top <= next && next < box.bottom + gap) {
+      next = box.bottom + gap;
+    }
+  }
+  return bottom - next >= MIN_HEIGHT ? next : top;
+}

@@ -188,7 +188,9 @@ export function renderLegend(container, model, options = {}) {
     // the per-kind shape rows are left to the file and System maps.
     const counts = new Map();
     for (const node of model?.nodes ?? []) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
-    const kinds = [...counts.keys()].sort();
+    // A kind a shape cue already names ("diamond = test") is not listed a second time.
+    const named = new Set(shapes.map((cue) => cue.meaning));
+    const kinds = [...counts.keys()].filter((kind) => !named.has(kind)).sort();
     if (kinds.length > 0) {
       container.append(
         legendSection(

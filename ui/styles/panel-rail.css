@@ -38,7 +38,7 @@
   border-radius: 8px;
   background: none;
   color: var(--ink-3);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 1.2;
   text-align: center;
   white-space: normal;
@@ -49,7 +49,7 @@
 .dock-chip::before,
 .dock-more::before {
   content: attr(data-glyph);
-  font-size: 17px;
+  font-size: var(--text-xl);
   line-height: 1;
 }
 

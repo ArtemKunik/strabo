@@ -68,7 +68,28 @@ export function islandLabel(directory) {
  * whole map, which says nothing. Islands are a file-mode affordance.
  */
 export function islandsApply(model) {
-  return Boolean(model) && model.prefixLength === undefined && model.system !== true;
+  if (!model || model.prefixLength !== undefined) return false;
+  // System L0 draws unit cards, which frame themselves; inside an open unit the plates are
+  // its layer lanes.
+  return model.system !== true || Boolean(model.systemUnit);
+}
+
+/**
+ * The plate a node sits on: its directory, or inside an open System unit its layer lane.
+ * Null for a node that sits on no plate (a collapsed unit box beside the open one).
+ */
+export function islandGroupOf(model, node) {
+  if (model?.system === true) {
+    return node.systemLayer ? `lane:${node.systemLayer}` : null;
+  }
+  return node.directory ?? '.';
+}
+
+/** The caption for a plate: a lane by its layer name and size, a directory by its path. */
+function plateLabel(key, count, labels) {
+  if (labels?.[key]) return labels[key];
+  if (key.startsWith('lane:')) return `${key.slice(5)} · ${count} ${count === 1 ? 'file' : 'files'}`;
+  return islandLabel(key);
 }
 
 /**
@@ -104,7 +125,10 @@ export function islandBounds(model, options = {}) {
     if (!position) {
       continue;
     }
-    const directory = node.directory ?? '.';
+    const directory = islandGroupOf(model, node);
+    if (directory === null) {
+      continue;
+    }
     // Half the drawn node, so the plate encloses the circle rather than its centre.
     const radius = nodeDiameter(node) / 2;
     const group = groups.get(directory) ?? {
@@ -137,7 +161,7 @@ export function islandBounds(model, options = {}) {
   return [...groups.values()]
     .map((group) => ({
       directory: group.directory,
-      label: labels?.[group.directory] ?? islandLabel(group.directory),
+      label: plateLabel(group.directory, group.count, labels),
       count: group.count,
       x: group.minX - padding,
       y: group.minY - padding,
@@ -213,7 +237,7 @@ export function applyIslandOffsets(model, offsets) {
     return model;
   }
   const directoryById = new Map(
-    (model.nodes ?? []).map((node) => [node.id, node.directory ?? '.']),
+    (model.nodes ?? []).map((node) => [node.id, islandGroupOf(model, node)]),
   );
   const positions = (model.positions ?? []).map((position) => {
     const offset = islandOffset(offsets, directoryById.get(position.id));

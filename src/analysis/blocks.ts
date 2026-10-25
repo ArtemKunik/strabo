@@ -1,7 +1,7 @@
 import type { Graph, GraphNode, RepositoryDescriptor, ScanCacheMetadata } from '../types.ts';
 import type { BlockViewModel, ViewEdge, ViewNode, ViewPosition } from '../types/view.ts';
 import { buildAdjacency, computeGraphMetrics, rankHubs } from './analysis.ts';
-import { buildPositions } from './layout.ts';
+import { buildLayeredPositions } from './layered-layout.ts';
 
 export interface BlockOptions {
   /** Number of directory segments to group by, relative to `prefix`. */
@@ -64,6 +64,7 @@ export function buildBlockViewModel(
       id,
       kind: aggregateKind.get(id) ?? 'module',
       directory: parentOf(id),
+      ...blockLabel(id, prefix),
     }));
 
   const aggregated: Graph = { nodes, edges: [], diagnostics: graph.diagnostics, excluded: graph.excluded };
@@ -86,6 +87,7 @@ export function buildBlockViewModel(
   );
 
   const metrics = computeGraphMetrics(aggregated, buildAdjacency(aggregated));
+  const dependentFiles = outsideDependentFiles(graph, mapping);
   const viewNodes: ViewNode[] = aggregated.nodes.map((node) => ({
     ...node,
     workspacePath: node.id,
@@ -93,13 +95,14 @@ export function buildBlockViewModel(
     fanOut: metrics.fanOut.get(node.id) ?? 0,
     transitiveDependencies: metrics.transitiveDependencies.get(node.id) ?? 0,
     transitiveDependents: metrics.transitiveDependents.get(node.id) ?? 0,
+    dependentFiles: dependentFiles.get(node.id) ?? 0,
   }));
   const edges: ViewEdge[] = aggregated.edges.map((edge) => ({
     ...edge,
     semanticSource: edge.source,
     semanticTarget: edge.target,
   }));
-  const positions: ViewPosition[] = buildPositions(aggregated);
+  const positions: ViewPosition[] = buildLayeredPositions(aggregated);
 
   return {
     prefixLength: depth,
@@ -109,6 +112,51 @@ export function buildBlockViewModel(
     positions,
     cache: meta.cache,
   };
+}
+
+/**
+ * Inside a drill-down every block shares the prefix the breadcrumb already shows, so it is
+ * named relative to it (`api`, not `src/api`). A label wins over the route's unit-anchored
+ * directory labels, which only matter at the top level.
+ */
+function blockLabel(id: string, prefix: string): { label?: string } {
+  if (id === '.') return { label: '(root files)' };
+  if (prefix === '') return {};
+  if (id === prefix) return { label: `(files in ${prefix})` };
+  return { label: id.slice(prefix.length + 1) };
+}
+
+/**
+ * For each block, how many files outside it depend on one of its files, directly or
+ * transitively, counted over the whole file graph so a drill-down still sees its callers
+ * outside the prefix. Block-to-block reachability tops out at the handful of blocks on the
+ * map; this is the number the "size = dependents" legend promises.
+ */
+function outsideDependentFiles(graph: Graph, mapping: ReadonlyMap<string, string>): Map<string, number> {
+  const { backward } = buildAdjacency(graph);
+  const members = new Map<string, string[]>();
+  for (const [file, block] of mapping) {
+    const list = members.get(block);
+    if (list) list.push(file);
+    else members.set(block, [file]);
+  }
+  const counts = new Map<string, number>();
+  for (const [block, files] of members) {
+    const seen = new Set<string>(files);
+    const queue = [...files];
+    let outside = 0;
+    while (queue.length > 0) {
+      const current = queue.pop()!;
+      for (const dependent of backward.get(current) ?? []) {
+        if (seen.has(dependent)) continue;
+        seen.add(dependent);
+        queue.push(dependent);
+        if (mapping.get(dependent) !== block) outside += 1;
+      }
+    }
+    counts.set(block, outside);
+  }
+  return counts;
 }
 
 export function hubsOf(graph: Graph): string[] {

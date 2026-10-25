@@ -121,6 +121,10 @@ function diameter(transitiveDependents) {
   const scaled = Math.sqrt(Math.max(0, transitiveDependents ?? 0)) * 6 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
 }
+function blockDiameter(dependentFiles) {
+  const scaled = Math.log2(1 + Math.max(0, dependentFiles ?? 0)) * 4.5 + MIN_DIAMETER;
+  return Math.max(MIN_DIAMETER, Math.min(MAX_DIAMETER, Math.round(scaled)));
+}
 function locDiameter(lines) {
   const scaled = Math.sqrt(Math.max(0, lines ?? 0)) * 2.4 + MIN_DIAMETER;
   return Math.max(MIN_DIAMETER, Math.min(MAX_LOC_DIAMETER, Math.round(scaled)));
@@ -142,6 +146,7 @@ function nodeDiameter(node) {
   if (node?.kind === "unit" || node?.kind === "tier") return unitDiameter(node.files ?? node.size);
   if (node?.kind === "shelf") return shelfDiameter(node.files);
   if (node?.kind === "dataset") return DATA_HUB_DIAMETER;
+  if (typeof node?.dependentFiles === "number") return blockDiameter(node.dependentFiles);
   return diameter(node?.size ?? node?.files ?? node?.transitiveDependents);
 }
 
@@ -1448,7 +1453,19 @@ function islandLabel(directory) {
   return directory === "." ? "/" : directory;
 }
 function islandsApply(model) {
-  return Boolean(model) && model.prefixLength === void 0 && model.system !== true;
+  if (!model || model.prefixLength !== void 0) return false;
+  return model.system !== true || Boolean(model.systemUnit);
+}
+function islandGroupOf(model, node) {
+  if (model?.system === true) {
+    return node.systemLayer ? `lane:${node.systemLayer}` : null;
+  }
+  return node.directory ?? ".";
+}
+function plateLabel(key, count, labels) {
+  if (labels?.[key]) return labels[key];
+  if (key.startsWith("lane:")) return `${key.slice(5)} \xB7 ${count} ${count === 1 ? "file" : "files"}`;
+  return islandLabel(key);
 }
 function islandBounds(model, options = {}) {
   if (!islandsApply(model)) {
@@ -1468,7 +1485,10 @@ function islandBounds(model, options = {}) {
     if (!position) {
       continue;
     }
-    const directory = node.directory ?? ".";
+    const directory = islandGroupOf(model, node);
+    if (directory === null) {
+      continue;
+    }
     const radius = nodeDiameter(node) / 2;
     const group = groups.get(directory) ?? {
       directory,
@@ -1494,7 +1514,7 @@ function islandBounds(model, options = {}) {
   }
   return [...groups.values()].map((group) => ({
     directory: group.directory,
-    label: labels?.[group.directory] ?? islandLabel(group.directory),
+    label: plateLabel(group.directory, group.count, labels),
     count: group.count,
     x: group.minX - padding,
     y: group.minY - padding,
@@ -1540,7 +1560,7 @@ function applyIslandOffsets(model, offsets) {
     return model;
   }
   const directoryById = new Map(
-    (model.nodes ?? []).map((node) => [node.id, node.directory ?? "."])
+    (model.nodes ?? []).map((node) => [node.id, islandGroupOf(model, node)])
   );
   const positions = (model.positions ?? []).map((position) => {
     const offset = islandOffset(offsets, directoryById.get(position.id));
@@ -3629,7 +3649,9 @@ function stylesheet() {
     // Status never rides on hue alone (R6): changed is a solid heavy ring, affected a
     // dotted one, cycle a double one, unreached a light dashed one, hotspot a dotted
     // warning ring. The changed/affected pair co-occurs, so its shape differs too.
-    { selector: "node.ov-changed", style: { "border-width": 4, "border-style": "solid", "border-color": theme.changed, "background-opacity": 1 } },
+    // A changed file is filled as well as ringed: it is what the operator touched, and a
+    // ring alone is a hairline at map zoom.
+    { selector: "node.ov-changed", style: { "border-width": 4, "border-style": "solid", "border-color": theme.changed, "background-color": theme.changed, "background-opacity": 1 } },
     { selector: "node.ov-affected", style: { "border-width": 3, "border-style": "dotted", "border-color": theme.affected, "background-opacity": 1 } },
     { selector: "node.ov-cycle", style: { "border-width": 4, "border-style": "double", "border-color": theme.cycle, "background-opacity": 1 } },
     { selector: "node.ov-unreached", style: { "border-width": 2.5, "border-style": "dashed", "border-color": theme.unreached, "background-opacity": 0.7 } },
@@ -3711,6 +3733,10 @@ function stylesheet() {
     // a short dash in the accent hue reads it apart from a plain import and a call.
     { selector: 'edge[kind = "inheritance"]', style: { "line-style": "dashed", "line-dash-pattern": [3, 3], "line-color": theme.edgeAccent, "target-arrow-color": theme.edgeAccent } },
     { selector: ".dimmed", style: { opacity: 0.12 } },
+    // Files an active overlay does not mark recede so the marked ones read; a selected file
+    // stays fully visible.
+    { selector: "node.ov-quiet", style: { opacity: 0.3 } },
+    { selector: "node.ov-quiet:selected", style: { opacity: 1 } },
     {
       selector: "edge",
       style: {
@@ -4159,6 +4185,7 @@ function createUnitCardLayer(container, cy, onOpen) {
 
 // ui/strabo-graph-classes.js
 var OVERLAY_CLASSES = [
+  "ov-quiet",
   "ov-changed",
   "ov-affected",
   "ov-cycle",
@@ -4432,6 +4459,9 @@ function overlayNodes(cy, classesByNode) {
       const node = cy.getElementById(id);
       if (node.nonempty()) node.addClass(className);
     }
+    const ids = new Set([...classesByNode ?? []].map(([id]) => id));
+    const marked = cy.nodes().filter((node) => ids.has(node.id()));
+    if (marked.nonempty()) cy.nodes().difference(marked).addClass("ov-quiet");
   });
 }
 function ringCrossRepo(cy, ids) {
@@ -4657,6 +4687,8 @@ function createView(container) {
   let hiddenCouplingReport = null;
   let hiddenCouplingOn = false;
   let tierByFile = null;
+  let overlayClasses = null;
+  let crossRepoIds = null;
   let tierFilter = "all";
   let tierDirections = null;
   function renderModel() {
@@ -4694,6 +4726,8 @@ function createView(container) {
     applyHiddenCoupling(cy, hiddenCouplingOn);
     applyTier(cy, tierByFile, tierFilter);
     applyTierDirections(cy, tierDirections);
+    overlayNodes(cy, overlayClasses);
+    ringCrossRepo(cy, crossRepoIds);
     clearTimeout(labelTimer);
     labelTimer = 0;
     labelsFrozen = false;
@@ -4722,7 +4756,8 @@ function createView(container) {
       return map;
     }
     for (const node of model.nodes ?? []) {
-      const directory = node.directory ?? ".";
+      const directory = islandGroupOf(model, node);
+      if (directory === null) continue;
       const list2 = map.get(directory);
       if (list2) {
         list2.push(node.id);
@@ -4982,7 +5017,8 @@ function createView(container) {
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
-      overlayNodes(cy, classesByNode);
+      overlayClasses = classesByNode ?? null;
+      overlayNodes(cy, overlayClasses);
     },
     /**
      * Ring the nodes that take part in a recorded cross-repo interaction. Pass null to clear.
@@ -4991,7 +5027,8 @@ function createView(container) {
      * report, not by a graph analysis, and the two can be on screen at once.
      */
     crossRepo(ids) {
-      ringCrossRepo(cy, ids);
+      crossRepoIds = ids ?? null;
+      ringCrossRepo(cy, crossRepoIds);
     },
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {
@@ -8067,7 +8104,7 @@ function renderRepositoryPassport(container, report, handlers = {}) {
   container.append(
     directories.length === 0 ? passportNote("No directories recorded.") : passportPlainList(
       directories,
-      (entry) => `${entry.directory} \xB7 ${entry.files} file(s) \xB7 ${entry.incoming} incoming`
+      (entry) => `${entry.directory === "." ? "(root files)" : entry.directory} \xB7 ${entry.files} file(s) \xB7 ${entry.incoming} incoming`
     )
   );
   const topFiles = report.topFiles ?? [];
@@ -12275,7 +12312,8 @@ function renderLegend(container, model, options = {}) {
   } else {
     const counts = /* @__PURE__ */ new Map();
     for (const node of model?.nodes ?? []) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);
-    const kinds = [...counts.keys()].sort();
+    const named = new Set(shapes.map((cue) => cue.meaning));
+    const kinds = [...counts.keys()].filter((kind) => !named.has(kind)).sort();
     if (kinds.length > 0) {
       container.append(
         legendSection(
@@ -13990,6 +14028,9 @@ function fit(cy) {
     return;
   }
   const insets = sideInsets(cy);
+  const screen = cy.container?.()?.parentElement;
+  screen?.style?.setProperty("--free-left", `${insets.left}px`);
+  screen?.style?.setProperty("--free-right", `${insets.right}px`);
   const box = elements2.boundingBox();
   const x1 = box.x1 - PLATE_MARGIN;
   const y1 = box.y1 - PLATE_MARGIN;
@@ -16484,8 +16525,12 @@ function createRepositoryPanels(app2) {
   }
   async function showPassport() {
     elements2.passportPanel.hidden = false;
+    const repository = state2.repository;
     try {
-      const report = await request2(`/analysis/passport${state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : ""}`);
+      const report = await request2(`/analysis/passport${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`);
+      if (repository !== state2.repository) {
+        return;
+      }
       renderRepositoryPassport(elements2.passportPanel, report, {
         onSelect: (id) => app2.selection.selectNode(id),
         onOpenRoute: () => showRoute(),
@@ -16553,8 +16598,12 @@ function createRepositoryPanels(app2) {
   }
   async function showRoute(preferredFile) {
     elements2.routePanel.hidden = false;
+    const repository = state2.repository;
     try {
-      const report = await request2(`/analysis/route${state2.repository ? `?repository=${encodeURIComponent(state2.repository)}` : ""}`);
+      const report = await request2(`/analysis/route${repository ? `?repository=${encodeURIComponent(repository)}` : ""}`);
+      if (repository !== state2.repository) {
+        return;
+      }
       currentRoute = report;
       await app2.narration.ensureNarratorStatus();
       const steps = routeSteps(report);
@@ -16628,12 +16677,20 @@ function createRepositoryPanels(app2) {
     markPassportSeen(key);
     await showPassport();
   }
+  async function refreshForRepository() {
+    const pending = [];
+    if (!elements2.passportPanel.hidden) pending.push(showPassport());
+    if (!elements2.routePanel.hidden) pending.push(showRoute());
+    if (!elements2.blocksPanel.hidden) showBlocks();
+    await Promise.all(pending);
+  }
   return {
     closePassport,
     closeRoute,
     closeWorkspace,
     currentRouteSummary,
     maybeOpenPassport,
+    refreshForRepository,
     showBlocks,
     showPassport,
     showRoute,
@@ -18369,7 +18426,8 @@ function createRepositoryPicker(app2) {
       return;
     }
     app2.prefs.applyViewPrefs();
-    app2.scan();
+    await app2.scan();
+    await app2.panels.refreshForRepository();
   }
   async function forgetRepository() {
     const root = state2.repository;
@@ -18386,7 +18444,8 @@ function createRepositoryPicker(app2) {
     const catalogue = await request2("/repositories");
     renderRepositoryOptions(catalogue.repositories, catalogue.active);
     if (state2.repository !== root) {
-      app2.scan();
+      await app2.scan();
+      await app2.panels.refreshForRepository();
     }
   }
   elements2.repository.addEventListener("change", () => {
@@ -18401,7 +18460,7 @@ function createRepositoryPicker(app2) {
     elements2.filter.value = "";
     elements2.forget.disabled = false;
     app2.prefs.applyViewPrefs();
-    rememberRepository(root).then(() => app2.scan()).catch((error) => {
+    rememberRepository(root).then(() => app2.scan()).then(() => app2.panels.refreshForRepository()).catch((error) => {
       elements2.status.textContent = `Error: ${error.message}`;
     });
   });
@@ -18649,7 +18708,7 @@ function createSourceViewer(app2) {
   };
 }
 
-// node_modules/@xterm/xterm/lib/xterm.mjs
+// ../strabo/node_modules/@xterm/xterm/lib/xterm.mjs
 var zs = Object.defineProperty;
 var Rl = Object.getOwnPropertyDescriptor;
 var Ll = (s15, t) => {
@@ -27763,7 +27822,7 @@ var Dl = class extends D {
   }
 };
 
-// node_modules/@xterm/addon-fit/lib/addon-fit.mjs
+// ../strabo/node_modules/@xterm/addon-fit/lib/addon-fit.mjs
 var h2 = 2;
 var _ = 1;
 var o = class {
@@ -29925,15 +29984,17 @@ function createTerminalBridge(app2) {
 
 // ui/strabo-float-toolbar.js
 var STORAGE_KEY = "strabo.float.toolbar.v1";
-var MIN_WIDTH2 = 200;
+var MIN_WIDTH = 200;
 var GAP = 8;
 var DOCK_REACH = 28;
-function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight }) {
-  const maxLeft = Math.max(0, boundWidth - Math.min(width, boundWidth));
-  const maxTop = Math.max(0, boundHeight - Math.min(height, boundHeight));
+function clampToolbarPosition(left, top, { width, height, boundWidth, boundHeight, margin = 0 }) {
+  const minLeft = Math.min(margin, Math.max(0, boundWidth - width));
+  const minTop = Math.min(margin, Math.max(0, boundHeight - height));
+  const maxLeft = Math.max(minLeft, boundWidth - Math.min(width, boundWidth) - margin);
+  const maxTop = Math.max(minTop, boundHeight - Math.min(height, boundHeight) - margin);
   return {
-    left: Math.min(Math.max(left, 0), maxLeft),
-    top: Math.min(Math.max(top, 0), maxTop)
+    left: Math.min(Math.max(left, minLeft), maxLeft),
+    top: Math.min(Math.max(top, minTop), maxTop)
   };
 }
 function clampMenuLeft(anchorRight, menuWidth, viewportWidth, margin = 4) {
@@ -29958,7 +30019,7 @@ function writeStore(key, value) {
 function initFloatingToolbar(element4, options = {}) {
   if (!element4) return null;
   const storageKey = options.storageKey ?? STORAGE_KEY;
-  const minWidth = options.minWidth ?? MIN_WIDTH2;
+  const minWidth = options.minWidth ?? MIN_WIDTH;
   const dock = options.dock ?? null;
   const dockReach = options.dockReach ?? DOCK_REACH;
   const floatParent = element4.parentElement ?? document.body;
@@ -29999,7 +30060,8 @@ function initFloatingToolbar(element4, options = {}) {
       width: element4.offsetWidth || rect.width,
       height: element4.offsetHeight || rect.height,
       boundWidth,
-      boundHeight
+      boundHeight,
+      margin: GAP
     });
     element4.style.left = `${clamped.left}px`;
     element4.style.top = `${clamped.top}px`;
@@ -31322,7 +31384,7 @@ var DOCK_RAIL_WIDTH = 64;
 var GAP2 = 12;
 var DEFAULT_WIDTH = 384;
 var HEADER_HEIGHT = 34;
-var MIN_WIDTH3 = 240;
+var MIN_WIDTH2 = 240;
 var MIN_HEIGHT = 160;
 var RAIL_RIGHT = DOCK_RAIL_WIDTH + GAP2;
 var RAIL_TOP = 64;
@@ -31337,7 +31399,7 @@ function clamp(value, min, max) {
 }
 function resizeLimits({ left, top, right, bottom, gap = GAP2 }) {
   return {
-    maxWidth: Math.max(MIN_WIDTH3, right - left - gap),
+    maxWidth: Math.max(MIN_WIDTH2, right - left - gap),
     maxHeight: Math.max(MIN_HEIGHT, bottom - top - gap)
   };
 }
@@ -31345,7 +31407,7 @@ function sanitizeSize(size) {
   const width = Number(size?.width);
   const height = Number(size?.height);
   return {
-    width: Number.isFinite(width) && width >= MIN_WIDTH3 ? width : null,
+    width: Number.isFinite(width) && width >= MIN_WIDTH2 ? width : null,
     height: Number.isFinite(height) && height >= MIN_HEIGHT ? height : null
   };
 }
@@ -31359,6 +31421,25 @@ function firstFreeSlotTop(occupied, height, { startTop = RAIL_TOP, gap = GAP2 } 
     candidate = Math.max(candidate, rect.bottom + gap);
   }
   return candidate;
+}
+var RIGHT_ANCHOR_SNAP = 24;
+function followRightEdge({ left, width, previousRight, right }) {
+  const gap = Number.isFinite(previousRight) ? previousRight - (left + width) : Infinity;
+  const next = gap >= -1 && gap <= RIGHT_ANCHOR_SNAP ? right - width - Math.max(0, gap) : left;
+  return clamp(next, 0, Math.max(0, right - width));
+}
+function keptTop({ top, height, floor, bottom }) {
+  return clamp(top, floor, Math.max(floor, bottom - Math.min(height, MIN_HEIGHT)));
+}
+function clearOfAbove({ top, left, width, above, bottom, gap = GAP2 }) {
+  let next = top;
+  for (const box of [...above].sort((a, b2) => a.top - b2.top)) {
+    const sharesColumn = box.left < left + width && left < box.right;
+    if (sharesColumn && box.top <= next && next < box.bottom + gap) {
+      next = box.bottom + gap;
+    }
+  }
+  return bottom - next >= MIN_HEIGHT ? next : top;
 }
 
 // ui/strabo-float-chrome.js
@@ -31530,7 +31611,7 @@ function wireWindowGestures({
     });
     resizeHandle.setPointerCapture(event.pointerId);
     const move = (moveEvent) => {
-      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH3, maxWidth)}px`;
+      win.style.width = `${clamp(startWidth + (moveEvent.clientX - startX), MIN_WIDTH2, maxWidth)}px`;
       win.style.height = `${clamp(startHeight + (moveEvent.clientY - startY), MIN_HEIGHT, maxHeight)}px`;
     };
     const end = () => {
@@ -31557,11 +31638,16 @@ function wireWindowGestures({
 }
 
 // ui/strabo-float-window.js
+function leadingHeading(element4) {
+  const first = element4.firstElementChild;
+  if (first?.tagName !== "H3" || first.querySelector("button, a, input, select")) return null;
+  return first;
+}
 function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist }) {
   const element4 = config.element;
   const { render: renderDock, flashChip, dock, moreMenu, moreToggle } = dockRail;
   let size = sanitizeSize(saved.size);
-  const widthCap = Math.max(MIN_WIDTH3, appDockLeft() - GAP2);
+  const widthCap = Math.max(MIN_WIDTH2, appDockLeft() - GAP2);
   const width = Math.min(size.width ?? config.width ?? DEFAULT_WIDTH, widthCap);
   const height = size.height ?? config.height ?? null;
   const { win, header, title, collapseButton, closeButton, resizeHandle } = buildWindowChrome({ config, width, height });
@@ -31607,6 +31693,10 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
       if (heading3) {
         title.textContent = heading3;
       }
+    } else if (!hidden) {
+      const heading3 = leadingHeading(element4);
+      title.textContent = heading3?.textContent?.trim() || (config.title ?? config.key);
+      heading3?.classList.add("sr-only");
     }
     win.setAttribute("aria-label", title.textContent);
     if (hidden !== lastHidden) {
@@ -31686,10 +31776,11 @@ function createFloatingWindow({ config, saved, controllers, dockRail, nextZ, per
         collapsed: isCollapsed()
       };
       if (hasPosition()) {
-        snapshot.position = {
-          left: parseFloat(win.style.left) || 0,
-          top: parseFloat(win.style.top) || 0
-        };
+        const left = parseFloat(win.style.left) || 0;
+        const top = parseFloat(win.style.top) || 0;
+        const boxWidth = win.offsetWidth || size.width || width;
+        const edgeGap = appDockLeft() - GAP2 - (left + boxWidth);
+        snapshot.position = edgeGap >= -1 && edgeGap <= RIGHT_ANCHOR_SNAP ? { right: Math.max(0, window.innerWidth - (left + boxWidth)), top } : { left, top };
       }
       return snapshot;
     },
@@ -31793,21 +31884,32 @@ function initFloatingWindows({ dock, panels = [] } = {}) {
     const saved = store2[config.key] ?? {};
     createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
   }
+  let previousRight = null;
   const keepOnScreen = () => {
     const floor = topFloor(appHeaderBottom());
     const right = Math.max(0, appDockLeft() - GAP2);
     const bottom = Math.max(floor, appBottom() - GAP2);
-    for (const controller of controllers) {
+    const lastRight = previousRight;
+    previousRight = right;
+    const settled = [];
+    const open = controllers.filter((controller) => !controller.window.hidden).sort((a, b2) => (parseFloat(a.window.style.top) || 0) - (parseFloat(b2.window.style.top) || 0));
+    const before = new Map(open.map((controller) => [controller, controller.window.getBoundingClientRect()]));
+    const overlapped = (a, b2) => a.left < b2.right && b2.left < a.right && a.top < b2.bottom && b2.top < a.bottom;
+    for (const controller of open) {
       const win = controller.window;
-      if (win.hidden) continue;
       const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, Math.max(right, 0));
       const height = Math.min(win.offsetHeight || HEADER_HEIGHT, Math.max(bottom - floor, HEADER_HEIGHT));
       const left = parseFloat(win.style.left) || 0;
-      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, bottom - height));
-      if (win.offsetWidth > right) win.style.width = `${Math.max(MIN_WIDTH, right)}px`;
-      win.style.left = `${clamp(left, 0, Math.max(0, right - width))}px`;
+      const kept = keptTop({ top: parseFloat(win.style.top) || 0, height, floor, bottom });
+      if (win.offsetWidth > right) win.style.width = `${Math.max(MIN_WIDTH2, right)}px`;
+      const nextLeft = followRightEdge({ left, width, previousRight: lastRight, right });
+      const above = settled.filter((entry) => !overlapped(before.get(controller), before.get(entry.controller))).map((entry) => entry.box);
+      const top = clearOfAbove({ top: kept, left: nextLeft, width, above, bottom });
+      win.style.left = `${nextLeft}px`;
       win.style.top = `${top}px`;
       win.style.maxHeight = `${Math.max(MIN_HEIGHT, bottom - top)}px`;
+      const rect = win.getBoundingClientRect();
+      settled.push({ controller, box: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } });
     }
   };
   window.addEventListener("resize", keepOnScreen);

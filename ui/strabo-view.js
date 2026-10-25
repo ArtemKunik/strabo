@@ -9,6 +9,7 @@
 import {
   applyIslandOffsets,
   islandBounds,
+  islandGroupOf,
   islandsApply,
   normalizeIslandOffsets,
   shiftIslandOffset,
@@ -98,6 +99,10 @@ export function createView(container) {
   // change) can re-apply it: a render clears the classes the lens put on the nodes, exactly
   // as it does for the edge kind.
   let tierByFile = null;
+  // The node overlay and the cross-repo ring, kept so a re-render can put them back: the
+  // incremental diff strips every post-build class, overlays included.
+  let overlayClasses = null;
+  let crossRepoIds = null;
   let tierFilter = 'all';
   let tierDirections = null;
 
@@ -148,6 +153,10 @@ export function createView(container) {
     // would drop the moment an overlay or co-change change rebuilds the elements.
     applyTier(cy, tierByFile, tierFilter);
     applyTierDirections(cy, tierDirections);
+    // So do the overlay rings: a lens toggled right after an overlay lands (hidden coupling
+    // re-renders on every overlay change) would otherwise wipe the rings it just drew.
+    overlayNodes(cy, overlayClasses);
+    ringCrossRepo(cy, crossRepoIds);
     // A render forces the label and edge-LOD pass; drop any pending settle and un-freeze.
     clearTimeout(labelTimer);
     labelTimer = 0;
@@ -190,7 +199,8 @@ export function createView(container) {
       return map;
     }
     for (const node of model.nodes ?? []) {
-      const directory = node.directory ?? '.';
+      const directory = islandGroupOf(model, node);
+      if (directory === null) continue;
       const list = map.get(directory);
       if (list) {
         list.push(node.id);
@@ -497,7 +507,8 @@ export function createView(container) {
     },
     /** Annotate nodes from a review analysis. Pass null to clear. */
     overlay(classesByNode) {
-      overlayNodes(cy, classesByNode);
+      overlayClasses = classesByNode ?? null;
+      overlayNodes(cy, overlayClasses);
     },
     /**
      * Ring the nodes that take part in a recorded cross-repo interaction. Pass null to clear.
@@ -506,7 +517,8 @@ export function createView(container) {
      * report, not by a graph analysis, and the two can be on screen at once.
      */
     crossRepo(ids) {
-      ringCrossRepo(cy, ids);
+      crossRepoIds = ids ?? null;
+      ringCrossRepo(cy, crossRepoIds);
     },
     /** Hide nodes that do not match, then reapply labels so hidden nodes don't consume budget. */
     filter(ids) {

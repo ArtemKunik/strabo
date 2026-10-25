@@ -16,7 +16,17 @@
 import { createDockRail } from './strabo-float-dock.js';
 import { createFloatingWindow } from './strabo-float-window.js';
 import { readStore, writeStore } from './strabo-float-store.js';
-import { clamp, DEFAULT_WIDTH, HEADER_HEIGHT, MIN_HEIGHT, GAP, topFloor } from './strabo-float-geometry.js';
+import {
+  clearOfAbove,
+  DEFAULT_WIDTH,
+  followRightEdge,
+  GAP,
+  HEADER_HEIGHT,
+  keptTop,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  topFloor,
+} from './strabo-float-geometry.js';
 import { appBottom, appDockLeft, appHeaderBottom } from './strabo-float-placement.js';
 
 export * from './strabo-float-geometry.js';
@@ -63,11 +73,15 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     createFloatingWindow({ config, saved, controllers, dockRail, nextZ, persist });
   }
 
+  // The usable right edge at the last pass, so a window docked against it can follow it.
+  let previousRight = null;
+
   /**
    * Pull every open window back on screen and below the app header. Runs when the viewport
    * resizes and when the header changes height: it wraps to a second row when its controls
    * do not fit, which can happen after the windows were placed (a repository chip arriving).
    */
+
   const keepOnScreen = () => {
     const floor = topFloor(appHeaderBottom());
     // The dock rail and status bar stack above the floating layer, so the usable canvas
@@ -75,10 +89,19 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
     // its bottom-right resize grip.
     const right = Math.max(0, appDockLeft() - GAP);
     const bottom = Math.max(floor, appBottom() - GAP);
-    for (const controller of controllers) {
+    const lastRight = previousRight;
+    previousRight = right;
+    // Top to bottom, so each window can be kept clear of the ones already settled above it.
+    const settled = [];
+    const open = controllers
+      .filter((controller) => !controller.window.hidden)
+      .sort((a, b) => (parseFloat(a.window.style.top) || 0) - (parseFloat(b.window.style.top) || 0));
+    // Windows the operator stacked on purpose already overlap; only an overlap this pass
+    // would create is cleared.
+    const before = new Map(open.map((controller) => [controller, controller.window.getBoundingClientRect()]));
+    const overlapped = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    for (const controller of open) {
       const win = controller.window;
-      // A hidden window has no position yet; it takes a rail slot when it opens.
-      if (win.hidden) continue;
       // Keep the header on screen first, then size the body to what is left. The inline
       // max-height was computed from the viewport at open time and, being inline, overrides
       // the stylesheet's `calc(100vh - 116px)`: left stale it lets a shrunk viewport keep
@@ -86,14 +109,21 @@ export function initFloatingWindows({ dock, panels = [] } = {}) {
       const width = Math.min(win.offsetWidth || DEFAULT_WIDTH, Math.max(right, 0));
       const height = Math.min(win.offsetHeight || HEADER_HEIGHT, Math.max(bottom - floor, HEADER_HEIGHT));
       const left = parseFloat(win.style.left) || 0;
-      const top = clamp(parseFloat(win.style.top) || 0, floor, Math.max(floor, bottom - height));
+      const kept = keptTop({ top: parseFloat(win.style.top) || 0, height, floor, bottom });
       // Shrink a window that is wider than the canvas (moved in from a larger viewport) so
       // its grip stays on this side of the rail; the max-height below does the same for the
       // status bar.
       if (win.offsetWidth > right) win.style.width = `${Math.max(MIN_WIDTH, right)}px`;
-      win.style.left = `${clamp(left, 0, Math.max(0, right - width))}px`;
+      const nextLeft = followRightEdge({ left, width, previousRight: lastRight, right });
+      const above = settled
+        .filter((entry) => !overlapped(before.get(controller), before.get(entry.controller)))
+        .map((entry) => entry.box);
+      const top = clearOfAbove({ top: kept, left: nextLeft, width, above, bottom });
+      win.style.left = `${nextLeft}px`;
       win.style.top = `${top}px`;
       win.style.maxHeight = `${Math.max(MIN_HEIGHT, bottom - top)}px`;
+      const rect = win.getBoundingClientRect();
+      settled.push({ controller, box: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } });
     }
   };
 

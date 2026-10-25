@@ -178,6 +178,8 @@ test('every theme defines the same colour tokens as the base dark theme', () => 
     '--text-xs',
     '--text-sm',
     '--text-md',
+    '--text-lg',
+    '--text-xl',
     '--radius-s',
     '--radius-m',
     '--radius-l',

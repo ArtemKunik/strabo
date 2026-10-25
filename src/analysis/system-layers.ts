@@ -112,6 +112,35 @@ function tokenLayer(
   return null;
 }
 
+/** At most this many depth bands for the files no layer token names; more would not draw. */
+const MAX_DEPTH_BANDS = 4;
+
+/**
+ * Split files into at most `MAX_DEPTH_BANDS` contiguous import-depth ranges of similar size.
+ * Files at one depth always share a range, so a range boundary never splits a depth.
+ */
+function depthRanges(
+  files: readonly string[],
+  depths: ReadonlyMap<string, number>,
+): Array<{ low: number; high: number; files: string[]; depths: number[] }> {
+  const sorted = [...files].sort((a, b) => (depths.get(a) ?? 0) - (depths.get(b) ?? 0) || a.localeCompare(b));
+  const target = sorted.length / MAX_DEPTH_BANDS;
+  const ranges: Array<{ low: number; high: number; files: string[]; depths: number[] }> = [];
+  let current: { low: number; high: number; files: string[]; depths: number[] } | null = null;
+  for (const file of sorted) {
+    const depth = depths.get(file) ?? 0;
+    const full = current && current.files.length >= target && depth !== current.high;
+    if (!current || (full && ranges.length < MAX_DEPTH_BANDS - 1)) {
+      current = { low: depth, high: depth, files: [], depths: [] };
+      ranges.push(current);
+    }
+    current.high = depth;
+    current.files.push(file);
+    current.depths.push(depth);
+  }
+  return ranges;
+}
+
 /**
  * Assign each file in a unit to a layer.
  *
@@ -161,34 +190,49 @@ export function assignLayers(unit: SystemUnit, members: readonly string[], graph
     entry.median = values[Math.floor(values.length / 2)] ?? 0;
   }
 
-  const bands = [...named.values()].sort((a, b) => a.median - b.median || a.order - b.order);
   const unclassified: string[] = [];
   for (let index = 0; index < members.length; index += 1) {
     if (!tokens[index]) {
       unclassified.push(members[index] as string);
     }
   }
-  for (const file of unclassified) {
-    const depth = depths.get(file) ?? 0;
-    let closest = bands[0];
-    for (const band of bands) {
-      if (!closest || Math.abs(band.median - depth) < Math.abs(closest.median - depth)) {
-        closest = band;
+  const whyOf = new Map<string, string>();
+  for (const [name, entry] of named) whyOf.set(name, `token \`${name}\`, import depth median ${entry.median}`);
+
+  if (unclassified.length * 2 <= members.length) {
+    // Most files named their layer, so a file without a token joins the band nearest its
+    // import depth: a utility beside the data layer lands with data.
+    const bands = [...named.values()];
+    for (const file of unclassified) {
+      const depth = depths.get(file) ?? 0;
+      let closest = bands[0];
+      for (const band of bands) {
+        if (!closest || Math.abs(band.median - depth) < Math.abs(closest.median - depth)) {
+          closest = band;
+        }
       }
+      closest?.files.push(file);
     }
-    closest?.files.push(file);
+  } else {
+    // Most files named no layer. Folding them into the few token bands would label hundreds
+    // of files by a name only a handful carry (all of `src/` as `hooks` because `src/state`
+    // matched), so they get bands of their own, named by the import depth that places them.
+    for (const range of depthRanges(unclassified, depths)) {
+      const name = range.low === range.high ? `depth ${range.low}` : `depth ${range.low}–${range.high}`;
+      const median = range.depths[Math.floor(range.depths.length / 2)] ?? range.low;
+      named.set(name, { order: Number.MAX_SAFE_INTEGER, median, files: range.files });
+      whyOf.set(name, `no layer token in the path; import depth ${range.low === range.high ? range.low : `${range.low}–${range.high}`} inside ${unit.name}`);
+    }
   }
 
-  return bands
-    .filter((band) => band.files.length > 0)
-    .map((band) => {
-      const name = [...named.entries()].find(([, entry]) => entry === band)?.[0] ?? `layer ${band.order}`;
-      return {
-        unit: unit.id,
-        name,
-        order: bands.indexOf(band),
-        files: band.files.slice().sort(),
-        why: `token \`${name}\`, import depth median ${band.median}`,
-      };
-    });
+  const bands = [...named.entries()]
+    .filter(([, band]) => band.files.length > 0)
+    .sort(([, a], [, b]) => a.median - b.median || a.order - b.order);
+  return bands.map(([name, band], order) => ({
+    unit: unit.id,
+    name,
+    order,
+    files: band.files.slice().sort(),
+    why: whyOf.get(name) ?? `import depth median ${band.median}`,
+  }));
 }

@@ -21,7 +21,7 @@
   margin-bottom: 4px;
   color: var(--ink-2);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   word-break: break-all;
 }
 
@@ -36,7 +36,7 @@
   border-radius: 7px;
   background: none;
   color: var(--ink-1);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -54,7 +54,7 @@
 
 .agent-menu-hint {
   color: var(--ink-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 

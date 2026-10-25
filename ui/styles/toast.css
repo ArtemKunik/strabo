@@ -20,7 +20,7 @@
   border-radius: 9px;
   background: var(--veiled-surface);
   box-shadow: var(--shadow-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .toast-action {
@@ -30,7 +30,7 @@
   border-radius: 6px;
   background: var(--accent-soft);
   color: var(--accent-ink);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .toast-dismiss {
@@ -39,6 +39,6 @@
   border: none;
   background: none;
   color: var(--ink-3);
-  font-size: 15px;
+  font-size: var(--text-lg);
 }
 
