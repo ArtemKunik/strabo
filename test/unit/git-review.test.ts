@@ -192,6 +192,31 @@ test('reviewCommit rejects a revision shaped like a git flag rather than passing
   assert.equal(fs.existsSync(target), false, 'the flag-shaped revision must not reach git as an argument');
 });
 
+test('reviewWorkingTree keeps an in-repo npm cache out of the change set', async () => {
+  const root = tempDir();
+  fs.writeFileSync(path.join(root, 'a.ts'), 'export const a = 1;\n');
+  initRepo(root);
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'init');
+
+  const blob = path.join(root, '.npm-cache-strabo', '_cacache', 'content-v2', 'sha512', '01', '35');
+  fs.mkdirSync(blob, { recursive: true });
+  fs.writeFileSync(path.join(blob, '94bf7f'), 'cached tarball\n');
+  fs.mkdirSync(path.join(root, '.npm-cache-strabo', '_logs'));
+  fs.writeFileSync(path.join(root, '.npm-cache-strabo', '_logs', 'debug-0.log'), 'log\n');
+  fs.writeFileSync(path.join(root, 'fresh.ts'), 'export const fresh = 1;\n');
+
+  const report = await scanRepository(root);
+  const result = await reviewWorkingTree(root, report.graph);
+
+  assert.equal(result.available, true);
+  if (result.available) {
+    assert.deepEqual(result.files.map((file) => file.path), ['fresh.ts']);
+    assert.equal(result.excluded.length, 2);
+    assert.ok(result.excluded.every((entry) => entry.detail === '.npm-cache-strabo/'));
+  }
+});
+
 test('reviewWorkingTree splits staged, unstaged, and untracked', async () => {
   const root = tempDir();
   fs.writeFileSync(path.join(root, 'a.ts'), "import { b } from './b.ts';\nexport const a = b;\n");

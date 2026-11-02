@@ -24,7 +24,22 @@ const GENERATED_DIRS = new Set([
   '.turbo',
   // JVM and Gradle caches
   '.gradle',
+  // npm's cache layout, which is the same wherever `--cache` pointed it
+  '.npm',
+  '_cacache',
+  '_npx',
 ]);
+
+/**
+ * True for a directory holding generated output.
+ *
+ * A per-project npm cache has no fixed name, since `--cache` and `npm_config_cache` accept any
+ * path, so `.npm-cache` and its suffixed forms (`.npm-cache-ci`) match by shape. Without this,
+ * `_logs/` beside the content store would still reach the scan and a working-tree review.
+ */
+function isGeneratedDirectory(segment: string): boolean {
+  return GENERATED_DIRS.has(segment) || segment === '.npm-cache' || segment.startsWith('.npm-cache-');
+}
 
 /**
  * True when any path segment names a generated-output directory.
@@ -34,7 +49,7 @@ const GENERATED_DIRS = new Set([
  * reporting the target as a missing authored file.
  */
 export function isGeneratedPath(relativePath: string): boolean {
-  return relativePath.split('/').some((segment) => GENERATED_DIRS.has(segment));
+  return relativePath.split('/').some(isGeneratedDirectory);
 }
 
 const FILENAME_MARKERS = [
@@ -51,7 +66,7 @@ const FILENAME_MARKERS = [
 /** Decide whether a path is excluded, and why. Returns null when it is retained. */
 export function classifyExclusion(relativePath: string): Exclusion | null {
   const segments = relativePath.split('/');
-  const directory = segments.slice(0, -1).find((segment) => GENERATED_DIRS.has(segment));
+  const directory = segments.slice(0, -1).find(isGeneratedDirectory);
   if (directory) {
     return { path: relativePath, reason: 'generated', detail: `${directory}/` };
   }
@@ -126,7 +141,7 @@ export interface DirectoryExclusion {
  */
 export function excludedDirectory(relativePath: string): DirectoryExclusion | null {
   const segments = relativePath.split('/').filter(Boolean);
-  const generated = segments.find((segment) => GENERATED_DIRS.has(segment));
+  const generated = segments.find(isGeneratedDirectory);
   if (generated) {
     return { reason: 'generated', detail: `${generated}/` };
   }
