@@ -108,6 +108,7 @@ const VALUE_FLAGS = new Set([
   'port',
   'repository',
   'threshold',
+  'tools',
   'view',
 ]);
 
@@ -125,6 +126,11 @@ export function positionals(argv: readonly string[]): string[] {
     found.push(arg);
   }
   return found;
+}
+
+/** Which tools `strabo mcp` lists, as given; the flag wins over the environment. */
+export function requestedMcpTools(env: NodeJS.ProcessEnv, argv: readonly string[]): string | undefined {
+  return flagValue(argv, 'tools') ?? env.STRABO_MCP_TOOLS;
 }
 
 /** First positional argument, so `strabo /path/to/repo` works and `strabo --help` is ignored. */

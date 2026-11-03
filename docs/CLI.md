@@ -23,6 +23,8 @@ node bin/strabo.js check --fail-on=route-drift
 
 # the recorded analysis over MCP (stdio), read-only
 node bin/strabo.js mcp
+# the same, listing every tool rather than the everyday ones and strabo_more
+node bin/strabo.js mcp --tools=full
 ```
 
 `check` exits non-zero only when a finding is absent from the baseline, so a pre-existing
