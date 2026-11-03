@@ -2,6 +2,7 @@ import readline from 'node:readline';
 
 import { createApiDispatch } from '../api/dispatch.ts';
 import type { StraboConfig } from '../types.ts';
+import { createLeanTools, type McpToolExposure } from './lean-tools.ts';
 import { createTools, type McpTool } from './tools.ts';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
@@ -97,8 +98,11 @@ function errorResponse(id: unknown, code: number, message: string): Record<strin
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 
-export function startMcpServer(config: StraboConfig): void {
-  const handler = createMcpHandler(config);
+export function startMcpServer(config: StraboConfig, exposure: McpToolExposure = 'lean'): void {
+  const handler = createMcpHandler(
+    config,
+    exposure === 'lean' ? createLeanTools(createTools(createApiDispatch(config))) : undefined,
+  );
   const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 
   input.on('line', (line) => {

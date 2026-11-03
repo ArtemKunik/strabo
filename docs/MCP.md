@@ -47,6 +47,28 @@ opencode, in `opencode.json`:
 }
 ```
 
+## Lean mode
+
+A client sends every listed tool's description and schema to the model on each turn, used or
+not, so by default Strabo lists few. It lists `strabo_passport`, `strabo_file`, `strabo_impact`, `strabo_review`, and `strabo_path`
+with short descriptions, plus `strabo_more`, which reaches every other tool:
+
+| Call | Result |
+| --- | --- |
+| `strabo_more {}` | each other tool's name and what it does |
+| `strabo_more { "describe": "simulate_change" }` | one tool's full description and schema |
+| `strabo_more { "tool": "get_cycles", "arguments": {} }` | runs the tool, with the same result as calling it directly |
+
+Nothing is removed: results, limits, and the read-only boundary are the same in both modes. An
+unlisted tool is reached only through `strabo_more`; calling it by name is refused.
+
+To list every tool under its own name instead, as the next section describes, add `--tools=full`
+to the args above or set `STRABO_MCP_TOOLS=full`:
+
+```json
+"args": ["/path/to/strabo/bin/strabo.js", "mcp", "/path/to/repo", "--tools=full"]
+```
+
 ## The read-only boundary
 
 - The transport is stdio. The server writes JSON-RPC responses to stdout and diagnostics to
@@ -62,7 +84,8 @@ opencode, in `opencode.json`:
 
 ## Tools
 
-Canonical names and aliases share one implementation, so they cannot drift.
+Canonical names and aliases share one implementation, so they cannot drift. In lean mode, reach
+any tool not listed there through `strabo_more`.
 
 | Alias | Canonical | Answers |
 | --- | --- | --- |

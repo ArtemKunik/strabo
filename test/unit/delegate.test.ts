@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 
-import { createDelegateRouter } from '../../src/api/routes/delegate.ts';
+import { createDelegateRouter, pruneDelegateDirs } from '../../src/api/routes/delegate.ts';
 import type { StraboConfig } from '../../src/index.ts';
 import { requireSameOrigin } from '../../src/api/http.ts';
 
@@ -118,3 +120,28 @@ test('delegate rejects a cross-origin request', async () => {
   assert.equal(rejected.status, 403);
 });
 
+test('pruneDelegateDirs removes expired prompt directories and keeps recent ones', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'strabo-delegate-prune-'));
+  try {
+    const now = Date.now();
+    const age = (name: string, days: number): void => {
+      const directory = path.join(root, name);
+      fs.mkdirSync(directory);
+      fs.writeFileSync(path.join(directory, 'strabo-task.md'), 'prompt\n');
+      const when = new Date(now - days * 24 * 60 * 60 * 1000);
+      fs.utimesSync(directory, when, when);
+    };
+    age('expired', 8);
+    age('recent', 6);
+
+    pruneDelegateDirs(root, now);
+
+    assert.deepEqual(fs.readdirSync(root), ['recent']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('pruneDelegateDirs tolerates a root that does not exist yet', () => {
+  assert.doesNotThrow(() => pruneDelegateDirs(path.join(os.tmpdir(), 'strabo-delegate-missing', 'nope')));
+});

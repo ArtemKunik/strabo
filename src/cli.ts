@@ -5,7 +5,9 @@ import { runCheckCommand } from './cli/check.ts';
 import { runCoverageCommand } from './cli/coverage.ts';
 import { runExportCommand } from './cli/export.ts';
 import { runReportCommand, runSummaryCommand } from './cli/report.ts';
-import { configFromEnv, readEnv } from './config.ts';
+import { configFromEnv, readEnv, requestedMcpTools } from './config.ts';
+import { startHousekeeping } from './api/housekeeping.ts';
+import { parseToolExposure } from './mcp/lean-tools.ts';
 import { startMcpServer } from './mcp/server.ts';
 import { createStraboServer } from './server.ts';
 import { createRestart } from './server-restart.ts';
@@ -28,7 +30,7 @@ Server options:
   strabo report [path]                report the whole repository
   strabo summary [path]               the repository report, always repository-scoped
   strabo coverage [path]              test coverage at project, folder (--folder), or file (--file)
-  strabo mcp                          serve the recorded analysis over MCP (stdio)
+  strabo mcp [path] [--tools=full]    serve the recorded analysis over MCP (stdio)
 
 Export options:
   --format=json|dot|mermaid|svg   output format (default json)
@@ -65,9 +67,13 @@ Check rules (only the ones named can fail the build):
   --write-baseline                record the current findings as the baseline
   --format=json                   machine-readable result
 
+MCP options:
+  --tools=lean|full               lean lists the everyday tools and reaches the rest through
+                                  strabo_more (default); full lists every tool
+
 Environment: STRABO_ROOT, STRABO_CONFIG, STRABO_SCAN_CEILING, STRABO_STATE_DIR,
 STRABO_AUTO_REBUILD, STRABO_COVERAGE_REPORT, STRABO_ALLOW_COVERAGE_REFRESH,
-STRABO_ALLOW_REMOTE_TERMINAL, PORT, STRABO_HOST
+STRABO_ALLOW_REMOTE_TERMINAL, STRABO_HOUSEKEEPING, STRABO_MCP_TOOLS, PORT, STRABO_HOST
 `;
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -103,8 +109,15 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 }
 
 function runMcp(argv: readonly string[]): number {
+  const requested = requestedMcpTools(process.env, argv);
+  const exposure = parseToolExposure(requested);
+  if (exposure === null) {
+    process.stderr.write(`[strabo] unknown tool list "${requested}"; use --tools=full or --tools=lean.\n`);
+    return 1;
+  }
   const config = configFromEnv(process.env, argv);
-  startMcpServer(config);
+  startMcpServer(config, exposure);
+  startHousekeeping();
   return 0;
 }
 
@@ -154,6 +167,7 @@ function startServer(argv: readonly string[]): number {
   // never sets this, and `POST /settings/restart` then answers 501.
   config.restart = createRestart(httpServer);
   attachTerminal(httpServer, config);
+  startHousekeeping(config.serverLog);
   return 0;
 }
 

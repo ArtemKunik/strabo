@@ -69,6 +69,8 @@ See [Install and run](#install-and-run) to start the server.
 | `STRABO_STATE_DIR`   | Where known repositories, settings, and check baselines are persisted. Defaults to `STRABO_CACHE_DIR`. |
 | `STRABO_AUTO_REBUILD`| `0`/`false`/`off` stops the server from rebuilding a stale graph in the background when a request observes `HEAD` moving. On by default. |
 | `STRABO_TERMINAL_DAEMON` | `0`/`false`/`off` (or `--no-terminal-daemon`) keeps terminal sessions in the server process; otherwise they run in a detached `strabo-termd` daemon so they survive a server restart. On by default. |
+| `STRABO_MCP_TOOLS` | `full` (or `strabo mcp --tools=full`) lists every MCP tool. Defaults to `lean`, which lists the everyday tools and reaches the rest through `strabo_more`, to keep a client's prompt small. See [MCP.md](MCP.md#lean-mode). |
+| `STRABO_HOUSEKEEPING` | `0`/`false`/`off` stops the server and `strabo mcp` from removing Strabo's own leftovers. On by default, shortly after startup and then daily: cached graphs and history for repositories that no longer exist, or unwritten for 30 days (the oldest also go past 1 GB), graphs from another Strabo version after a day, delegated prompts and risk responses after 7 days, the tokens of stopped terminal daemons after 7 days, and temporary files a killed process left. Known repositories, settings, keys, and baselines are never removed, and neither is anything inside a repository. |
 | `STRABO_PARSER_DIR`  | Directory holding grammar `.wasm` assets. Defaults to `parsers/vendor`. |
 | `STRABO_RISK`        | `1` or `online` enables CVE/license lookup via OSV.dev and deps.dev. Off by default. |
 | `STRABO_RISK_DENY`   | Comma-separated SPDX ids the license policy denies. Defaults to strong copyleft. |

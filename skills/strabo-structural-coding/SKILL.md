@@ -32,6 +32,9 @@ Plus `simulate_change`, `plan_extraction`, `get_cycles`, `get_smells`, `get_tier
 file holds, and whether anything recorded releases it), and `get_candidates` (the files a
 reported symptom's recorded reading ranks).
 
+By default the server lists only five `strabo_*` tools and `strabo_more`. If a tool named here
+is not listed, run it as `strabo_more { "tool": "<name>", "arguments": { ... } }`.
+
 If no Strabo tools are listed, check whether the CLI is available (`npx strabo-map --version`
 or a local `bin/strabo.js`) and use `strabo check` / `strabo report` as a fallback. Tell the
 user that MCP isn't configured. `docs/MCP.md` in the Strabo package has the `.mcp.json`

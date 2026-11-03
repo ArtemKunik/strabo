@@ -79,6 +79,9 @@ export function cacheArtifactPath(root: string): string {
   return artifactPath(root);
 }
 
+/** Far longer than any path, so the root recorded at the top of an artifact always fits. */
+const ARTIFACT_HEAD_BYTES = 64 * 1024;
+
 /** Past this many changed paths the per-file stat is skipped; Refresh remains the remedy. */
 const MAX_STATTED_CHANGES = 5_000;
 
@@ -245,6 +248,27 @@ function writeArtifact(root: string, currentFingerprint: string, report: ScanRep
     fs.renameSync(temporary, target);
   } catch {
     // Cache persistence is best-effort and must never fail a scan.
+  }
+}
+
+/**
+ * The root an artifact was written for, or null when its head does not say.
+ *
+ * Reads only the start of the file, since an artifact can be very large: `writeArtifact` puts the
+ * root right after the version, ahead of the report.
+ */
+export function readArtifactRoot(file: string): string | null {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(file, 'r');
+    const head = Buffer.alloc(ARTIFACT_HEAD_BYTES);
+    const length = fs.readSync(descriptor, head, 0, head.length, 0);
+    const match = /^\{"version":"[^"]*","root":("(?:[^"\\]|\\.)*")/.exec(head.toString('utf8', 0, length));
+    return match?.[1] ? (JSON.parse(match[1]) as string) : null;
+  } catch {
+    return null;
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
   }
 }
 

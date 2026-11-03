@@ -50,7 +50,7 @@ const OFFSET_SCHEMA = {
 };
 
 /** Aliases share the target tool's call function, so an alias cannot drift from its target. */
-const TOOL_ALIASES: ReadonlyArray<{ name: string; target: string }> = [
+export const TOOL_ALIASES: ReadonlyArray<{ name: string; target: string }> = [
   { name: 'strabo_passport', target: 'get_overview' },
   { name: 'strabo_file', target: 'get_context' },
   { name: 'strabo_impact', target: 'get_impact' },

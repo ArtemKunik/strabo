@@ -34,6 +34,9 @@ From the `strabo` MCP server (often `mcp__strabo__<tool>` in Claude Code):
 | `get_retention` | one file's held resources: the field, the load, the recorded release sites or *no release path recorded*, and the retention signals (unbounded collection, a load reached from a validation, a whole-file read copied into a second buffer) |
 | `get_candidates` | the files a reported symptom's recorded reading ranks, by class — use it when the review starts from a bug report rather than a diff |
 
+By default the server lists only five `strabo_*` tools and `strabo_more`. If a tool named here
+is not listed, run it as `strabo_more { "tool": "<name>", "arguments": { ... } }`.
+
 `strabo_review` reads the working tree only. To review a commit or a branch, use the
 `base` argument on `strabo_impact`, `get_public_api_diff`, and `get_http_api_diff`, or the CLI:
 `strabo report <repo> --base <ref> [--expect <globs>] [--format md|json]`, which produces

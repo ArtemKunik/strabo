@@ -237,6 +237,23 @@ test('classifyFileKind gives a test path precedence over an entry declaration', 
   assert.equal(classifyFileKind('src/util.ts', entries), 'module');
 });
 
+test('an npm cache kept inside a repository is classified generated, whatever its name', () => {
+  // `--cache` and `npm_config_cache` accept any path, so the cache's own layout is matched too.
+  for (const [file, detail] of [
+    ['.npm-cache-strabo/_cacache/content-v2/sha512/01/35/94bf7f', '.npm-cache-strabo/'],
+    ['.npm-cache-strabo/_logs/2026-11-02-debug-0.log', '.npm-cache-strabo/'],
+    ['.npm-cache/_npx/56afdceb91bc80de/package.json', '.npm-cache/'],
+    ['.npm/_logs/2026-11-02-debug-0.log', '.npm/'],
+    ['tools/my-cache/_cacache/index-v5/aa/bb/cc', '_cacache/'],
+    ['tools/my-cache/_npx/56afdceb91bc80de/package.json', '_npx/'],
+  ] as const) {
+    assert.deepEqual(classifyExclusion(file), { path: file, reason: 'generated', detail }, file);
+  }
+  // A name that merely starts the same way is authored until proven otherwise.
+  assert.equal(classifyExclusion('.npm-cachet/index.ts'), null);
+  assert.equal(classifyExclusion('src/npm-cache/index.ts'), null);
+});
+
 test('a built bundle and its source map are classified generated', () => {
   assert.deepEqual(classifyExclusion('public/strabo.bundle.js'), {
     path: 'public/strabo.bundle.js',
