@@ -23,6 +23,11 @@ import type { StraboConfig } from '../types.ts';
 /** How long a liveness probe waits before giving up on the socket. */
 const PROBE_TIMEOUT_MS = 300;
 
+/** A token this old was not written by a daemon that is still starting. */
+const ENDPOINT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Patient, because removing a live daemon's token would lock its clients out. */
+const SWEEP_PROBE_TIMEOUT_MS = 3000;
+
 /** How long the initial spawn waits for the daemon to accept connections. */
 const DEFAULT_START_TIMEOUT_MS = 4000;
 
@@ -46,7 +51,10 @@ function endpointDir(): string {
 export function daemonEndpoint(workspaceRoot: string): DaemonEndpoint {
   const resolved = path.resolve(workspaceRoot);
   const normalised = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  const key = createHash('sha1').update(normalised).digest('hex').slice(0, 12);
+  return endpointForKey(createHash('sha1').update(normalised).digest('hex').slice(0, 12));
+}
+
+function endpointForKey(key: string): DaemonEndpoint {
   const dir = endpointDir();
   const socketPath =
     process.platform === 'win32'
@@ -56,6 +64,38 @@ export function daemonEndpoint(workspaceRoot: string): DaemonEndpoint {
     socketPath,
     tokenFile: path.join(dir, `termd-${key}.token`),
   };
+}
+
+/**
+ * Remove the tokens and sockets of daemons that are gone.
+ *
+ * Nothing else does: a daemon outlives its server, so no process knows when the workspace's
+ * last one has finished. A running daemon's token stays however old it is, because its clients
+ * read it to connect. Returns the paths removed.
+ */
+export async function sweepDaemonEndpoints(now: number = Date.now()): Promise<string[]> {
+  const dir = endpointDir();
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return []; // No daemon has started yet.
+  }
+  const removed: string[] = [];
+  for (const name of names) {
+    const key = /^termd-([0-9a-f]{12})\.(?:token|sock)$/.exec(name)?.[1];
+    if (!key) continue;
+    const file = path.join(dir, name);
+    try {
+      if (now - fs.statSync(file).mtimeMs <= ENDPOINT_RETENTION_MS) continue;
+      if (await isDaemonListening(endpointForKey(key), SWEEP_PROBE_TIMEOUT_MS)) continue;
+      fs.rmSync(file, { force: true });
+      removed.push(file);
+    } catch {
+      // Held open or already gone; the next sweep tries again.
+    }
+  }
+  return removed;
 }
 
 /**

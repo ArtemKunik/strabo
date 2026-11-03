@@ -25,24 +25,33 @@ const DELEGATE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
  *
  * Nothing else removes them, so without this every delegation stays in the temp directory for
  * good. A failure leaves the directory for the next pass: cleanup must never block a launch.
+ * Returns the directories removed.
  */
-export function pruneDelegateDirs(root: string, now: number = Date.now()): void {
+export function pruneDelegateDirs(root: string, now: number = Date.now()): string[] {
   let entries: string[];
   try {
     entries = fs.readdirSync(root);
   } catch {
-    return; // Nothing delegated yet.
+    return []; // Nothing delegated yet.
   }
+  const removed: string[] = [];
   for (const entry of entries) {
     const directory = path.join(root, entry);
     try {
       if (now - fs.statSync(directory).mtimeMs > DELEGATE_RETENTION_MS) {
         fs.rmSync(directory, { recursive: true, force: true });
+        removed.push(directory);
       }
     } catch {
       // Held open or already gone.
     }
   }
+  return removed;
+}
+
+/** The directory holding one prompt directory per delegation. */
+export function delegateRoot(): string {
+  return path.join(os.tmpdir(), 'strabo-delegate');
 }
 
 export interface DelegateRun {
@@ -153,9 +162,8 @@ export function createDelegateRouter(config: StraboConfig): Router {
           : (target.label ?? target.id ?? 'repository view');
 
       const id = randomUUID();
-      const delegateRoot = path.join(os.tmpdir(), 'strabo-delegate');
-      pruneDelegateDirs(delegateRoot);
-      const workDir = path.join(delegateRoot, id);
+      pruneDelegateDirs(delegateRoot());
+      const workDir = path.join(delegateRoot(), id);
       fs.mkdirSync(workDir, { recursive: true });
       const promptFile = path.join(workDir, 'strabo-task.md');
       fs.writeFileSync(promptFile, `${prompt.trim()}\n`, 'utf8');

@@ -159,7 +159,7 @@ function isEnabled(value: string | undefined): boolean {
   return value === '1' || value?.toLowerCase() === 'online' || value?.toLowerCase() === 'true';
 }
 
-function isDisabled(value: string | undefined): boolean {
+export function isDisabled(value: string | undefined): boolean {
   const normalised = value?.toLowerCase();
   return normalised === '0' || normalised === 'false' || normalised === 'off';
 }

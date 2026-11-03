@@ -161,6 +161,19 @@ export function clearWorkspaceCache(file = workspaceCachePath()): void {
   fs.rmSync(file, { force: true });
 }
 
+/** Drop the entries of repositories that no longer exist; each would otherwise stay for good. */
+export function pruneWorkspaceCache(file = workspaceCachePath()): void {
+  const store = readStore(file);
+  const gone = Object.keys(store.entries).filter((root) => !fs.existsSync(root));
+  if (gone.length === 0) {
+    return;
+  }
+  for (const root of gone) {
+    delete store.entries[root];
+  }
+  writeStore(file, store);
+}
+
 function emptyStore(): StoreFile {
   return { version: WORKSPACE_CACHE_VERSION, entries: {} };
 }
