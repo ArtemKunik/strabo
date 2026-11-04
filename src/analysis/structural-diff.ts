@@ -550,7 +550,7 @@ async function assembleRevisionGraph(
 
   const [jsScan, polyglot, calls] = await Promise.all([
     scanJsTsEdges(files, contentByFile, { root }),
-    scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile),
+    scanPolyglotEdges(files.filter(isPolyglotSource), contentByFile, { root }),
     scanJsTsCalls(files, contentByFile, { root }),
   ]);
 

@@ -9,6 +9,7 @@ import { parseCacheKey, readParseCache, writeParseCache } from '../parse-cache.t
 import { extractWithPool } from './extract-pool.ts';
 import { GrammarUnavailableError } from './parser-runtime.ts';
 import { type PythonFileFacts, extractPythonFacts, resolvePython } from './python.ts';
+import { readRustCrates } from './rust-crates.ts';
 import { type RustFileFacts, extractRustFacts, resolveRust } from './rust.ts';
 import { type SqlFileFacts, extractSqlFacts, resolveSql } from './sql.ts';
 
@@ -25,6 +26,12 @@ export type PolyglotLanguage =
   | 'python'
   | 'cpp'
   | 'sql';
+
+/** Facts a language may need from outside its own source files. */
+export interface PolyglotResolveOptions {
+  /** Repository root, so a resolver can read manifests. Absent when only sources are at hand. */
+  root?: string;
+}
 
 export interface PolyglotResolution {
   edges: GraphEdge[];
@@ -46,6 +53,7 @@ export interface PolyglotLanguageResolver {
     files: readonly string[],
     contentByFile: ReadonlyMap<string, string> | undefined,
     diagnostics: Diagnostic[],
+    options?: PolyglotResolveOptions,
   ): Promise<PolyglotResolution>;
 }
 
@@ -65,12 +73,12 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
   language: PolyglotLanguage,
   extensions: readonly string[],
   extract: (file: string, content: string) => Promise<{ facts: TFacts; diagnostics: Diagnostic[] }>,
-  resolve: (facts: TFacts[]) => TResolution,
+  resolve: (facts: TFacts[], files: readonly string[], options: PolyglotResolveOptions) => TResolution,
 ): PolyglotLanguageResolver {
   return {
     language,
     extensions,
-    async resolve(files, contentByFile, diagnostics) {
+    async resolve(files, contentByFile, diagnostics, options = {}) {
       const facts: TFacts[] = [];
       // Read every file first, and consult the content-hash cache (P5) for each. Only the
       // misses become pool tasks (P4), so an unchanged file is neither read again from the
@@ -129,7 +137,7 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
         }
         diagnostics.push(...resolved.diagnostics);
       }
-      const resolution = resolve(facts);
+      const resolution = resolve(facts, files, options);
       return { edges: resolution.edges, diagnostics: resolution.diagnostics };
     },
   };
@@ -137,7 +145,9 @@ function createResolver<TFacts, TResolution extends PolyglotResolution>(
 
 export const POLYGLOT_RESOLVERS: readonly PolyglotLanguageResolver[] = [
   createResolver<JavaFileFacts, PolyglotResolution>('java', ['.java'], extractJavaFacts, resolveJava),
-  createResolver<RustFileFacts, PolyglotResolution>('rust', ['.rs'], extractRustFacts, resolveRust),
+  createResolver<RustFileFacts, PolyglotResolution>('rust', ['.rs'], extractRustFacts, (facts, files, options) =>
+    resolveRust(facts, options.root === undefined ? {} : { crates: readRustCrates(options.root, files) }),
+  ),
   createResolver<CSharpFileFacts, PolyglotResolution>('csharp', ['.cs'], extractCSharpFacts, resolveCSharp),
   createResolver<KotlinFileFacts, PolyglotResolution>('kotlin', ['.kt', '.kts'], extractKotlinFacts, resolveKotlin),
   createResolver<PythonFileFacts, PolyglotResolution>('python', ['.py'], extractPythonFacts, resolvePython),

@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
  */
 
 /** Bump when the extractor rules or a grammar change, so every cached entry is invalidated. */
-export const PARSE_CACHE_VERSION = 1;
+export const PARSE_CACHE_VERSION = 2;
 
 /** A capped LRU so a huge monorepo does not grow the cache without bound. */
 const MAX_ENTRIES = 200_000;

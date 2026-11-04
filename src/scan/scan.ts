@@ -154,7 +154,7 @@ export async function scanRepository(root: string): Promise<ScanReport> {
 
   const [jsScan, polyglot, calls] = await Promise.all([
     scanJsTsEdges(files, contentByFile, { root }),
-    scanPolyglotEdges(parseFiles.filter(isPolyglotSource), contentByFile),
+    scanPolyglotEdges(parseFiles.filter(isPolyglotSource), contentByFile, { root }),
     scanJsTsCalls(files, contentByFile, { root }),
   ]);
 

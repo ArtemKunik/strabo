@@ -100,7 +100,7 @@ implicit failure.
 | Language | Grammar | Resolution |
 | -------- | ------- | ---------- |
 | Java | `parsers/vendor/java` | Implemented: package + nested-type imports -> repository files |
-| Rust | `parsers/vendor/rust` | Implemented: `mod` declarations, module paths, `use`/`pub use` (items, re-exports), and inline `crate::`/`self::`/`super::` paths |
+| Rust | `parsers/vendor/rust` | Implemented: `mod` declarations, module paths, `use`/`pub use` (items, re-exports, globs), inline paths, and paths into other crates of the repository, joined through each package's `Cargo.toml` |
 | C# | `parsers/vendor/c_sharp` | Implemented: `using`, `using static`, and alias directives -> namespaces/types |
 | Kotlin | `parsers/vendor/kotlin` | Implemented: `package` + `import` (wildcards, aliases, nested types) -> repository files |
 | TypeScript, TSX | `parsers/vendor/typescript`, `parsers/vendor/tsx` | Member extraction (classes, interfaces, enums, module functions); imports resolve through the JS/TS scanner above |
@@ -126,8 +126,9 @@ mechanisms but missing on disk is an `unresolved` diagnostic; pure bare packages
 Evidence records how each edge resolved (`path alias`, `repo root`, `package subpath`).
 
 Java, C#, and Kotlin types used in the file body are resolved against the declaring
-package/namespace even without an `import`/`using`; Rust resolves inline
-`crate::`/`self::`/`super::` paths used without a `use`. When a Java/C#/Kotlin simple name
+package/namespace even without an `import`/`using`; Rust resolves inline paths used without
+a `use`, starting from `crate::`/`self::`/`super::`, a module declared in the file, a `use`
+binding, or a crate the package depends on. When a Java/C#/Kotlin simple name
 is declared by more than one file in that package/namespace, Strabo reports an `ambiguous`
 diagnostic instead of guessing. Remaining limit: there is no full type inference, so
 references that cannot be matched by name are left as diagnostics rather than speculative

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 import type { Graph, NodeKind } from '../types.ts';
-import { buildAdjacency, computeGraphMetrics } from './analysis.ts';
+import { buildAdjacency, computeGraphMetrics, relationshipOf } from './analysis.ts';
 import { computeCoverage } from './coverage.ts';
 import { computeCycles } from './cycles.ts';
 import { analyzeModuleDepth } from './depth.ts';
@@ -466,6 +466,12 @@ function computeCompositeScores(modules: readonly ModuleQuality[]): Map<string, 
 
 interface SmellContext {
   kind: Map<string, NodeKind>;
+  /**
+   * Rust files compiled into a crate even when nothing names them: whatever a `mod x;` declares,
+   * each library root, which other crates reach through re-exports to the declaring file, and
+   * the targets Cargo finds by location.
+   */
+  compiledModules: Set<string>;
   importGraph: Map<string, Set<string>>;
   tierOf: Map<string, Tier>;
   /** Instability out / (in + out), or null when the file has no edges either way. */
@@ -473,6 +479,8 @@ interface SmellContext {
   inRank: Map<string, number>;
   outRank: Map<string, number>;
 }
+
+const RUST_COMPILED_BY_LOCATION = /(?:^|\/)(?:src\/lib\.rs|build\.rs|src\/bin\/.+\.rs|(?:examples|benches)\/.+\.rs)$/;
 
 function buildSmellContext(
   graph: Graph,
@@ -482,6 +490,16 @@ function buildSmellContext(
   const kind = new Map<string, NodeKind>();
   for (const node of graph.nodes) {
     kind.set(node.id, node.kind);
+  }
+  const compiledModules = new Set(
+    graph.edges
+      .filter((edge) => edge.target.endsWith('.rs') && relationshipOf(edge) === 'module-declaration')
+      .map((edge) => edge.target),
+  );
+  for (const node of graph.nodes) {
+    if (RUST_COMPILED_BY_LOCATION.test(node.id)) {
+      compiledModules.add(node.id);
+    }
   }
   const tierOf = new Map(modules.map((m) => [m.file, m.tier]));
   const stability = new Map<string, number | null>();
@@ -494,7 +512,7 @@ function buildSmellContext(
   const rankDependencies = percentileRanker(modules.map((m) => m.centrality.transitiveDependencies));
   const inRank = new Map(modules.map((m) => [m.file, rankImporters(m.centrality.directImporters)]));
   const outRank = new Map(modules.map((m) => [m.file, rankDependencies(m.centrality.transitiveDependencies)]));
-  return { kind, importGraph, tierOf, stability, inRank, outRank };
+  return { kind, compiledModules, importGraph, tierOf, stability, inRank, outRank };
 }
 
 /** The targets this file imports that sit in a higher tier, the direction-check violation. */
@@ -623,7 +641,11 @@ function computeSmells(module: ModuleQuality, context: SmellContext): Smell[] {
     }
   }
 
-  if ((context.kind.get(file) ?? 'module') === 'module' && centrality.directImporters === 0) {
+  if (
+    (context.kind.get(file) ?? 'module') === 'module'
+    && centrality.directImporters === 0
+    && !context.compiledModules.has(file)
+  ) {
     smells.push({
       rule: 'dead',
       detail: 'nothing imports it, and it is not an entry point or a test',

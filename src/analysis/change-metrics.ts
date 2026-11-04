@@ -582,7 +582,7 @@ async function importTargets(
       readable.push(peer);
     }
     try {
-      edges.push(...(await scanPolyglotEdges(readable, context)).edges);
+      edges.push(...(await scanPolyglotEdges(readable, context, { root })).edges);
     } catch {
       for (const file of changed) skipped.add(file);
     }

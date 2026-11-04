@@ -11,7 +11,7 @@ import { run } from '../process.ts';
  * the key as well, so an upgrade never serves a graph that older scanners or resolvers
  * produced just because nobody remembered to bump the number.
  */
-export const CACHE_ARTIFACT_VERSION = `strabo-cache-6+${packageVersion()}`;
+export const CACHE_ARTIFACT_VERSION = `strabo-cache-7+${packageVersion()}`;
 
 function packageVersion(): string {
   try {

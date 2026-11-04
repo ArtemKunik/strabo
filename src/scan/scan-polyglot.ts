@@ -4,6 +4,7 @@ import {
   isResolvedPolyglotLanguage,
   polyglotLanguageOf,
   type PolyglotLanguage,
+  type PolyglotResolveOptions,
 } from './languages/resolvers.ts';
 
 export type { PolyglotLanguage } from './languages/resolvers.ts';
@@ -39,13 +40,15 @@ export function serializeParserWork<T>(work: () => Promise<T>): Promise<T> {
 export function scanPolyglotEdges(
   files: readonly string[],
   contentByFile?: ReadonlyMap<string, string>,
+  options: PolyglotResolveOptions = {},
 ): Promise<PolyglotResult> {
-  return serializeParserWork(() => extractAndResolve(files, contentByFile));
+  return serializeParserWork(() => extractAndResolve(files, contentByFile, options));
 }
 
 async function extractAndResolve(
   files: readonly string[],
-  contentByFile?: ReadonlyMap<string, string>,
+  contentByFile: ReadonlyMap<string, string> | undefined,
+  options: PolyglotResolveOptions,
 ): Promise<PolyglotResult> {
   const byLanguage = groupByLanguage(files);
   const diagnostics: Diagnostic[] = [];
@@ -56,7 +59,7 @@ async function extractAndResolve(
     if (languageFiles.length === 0) {
       continue;
     }
-    const result = await resolver.resolve(languageFiles, contentByFile, diagnostics);
+    const result = await resolver.resolve(languageFiles, contentByFile, diagnostics, options);
     edges.push(...result.edges);
     diagnostics.push(...result.diagnostics);
   }

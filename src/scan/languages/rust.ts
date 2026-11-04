@@ -2,6 +2,7 @@ import type { Node } from 'web-tree-sitter';
 
 import type { Diagnostic, GraphEdge } from '../../types.ts';
 import { markEntries } from './entry.ts';
+import { type RustCrate, externName } from './rust-crates.ts';
 import { collectFunctionMetrics, looksLikeTypeName, markRecursive, type FunctionRules } from './function-metrics.ts';
 import type { GrammarLanguage } from './parser-runtime.ts';
 import { withParser } from './parser-runtime.ts';
@@ -43,7 +44,7 @@ export interface RustItem {
   line: number;
 }
 
-/** A `crate::`/`self::`/`super::` path used inline, without a `use` declaration. */
+/** A multi-segment path used inline, without a `use` declaration. */
 export interface RustPathReference {
   segments: string[];
   line: number;
@@ -81,6 +82,8 @@ export interface RustExtraction {
 const MOD_PATTERN = /^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)\s*(;|\{)/;
 
 const PATH_ATTRIBUTE_PATTERN = /^#\[\s*path\s*=\s*"([^"]+)"\s*\]$/;
+
+const STANDARD_CRATES = new Set(['std', 'core', 'alloc', 'proc_macro', 'test']);
 
 const ITEM_TYPES = new Set([
   'struct_item',
@@ -249,8 +252,13 @@ export function expandUse(text: string): UseReference[] {
     }
     const alias = /^(.*?)\s+as\s+([A-Za-z_]\w*)$/.exec(expr);
     const path = alias ? (alias[1] as string) : expr;
+    // `use a::b::{self}` binds `b` itself, so `self` is not a path segment.
+    const segments = [...prefix, ...splitPath(path)];
+    if (segments.length > 1 && segments.at(-1) === 'self') {
+      segments.pop();
+    }
     references.push({
-      segments: [...prefix, ...splitPath(path)],
+      segments,
       glob: false,
       alias: alias ? (alias[2] as string) : undefined,
     });
@@ -265,11 +273,11 @@ function splitPath(value: string): string[] {
 }
 
 /**
- * Collect crate-relative paths used inline in the body (not via `use`).
+ * Collect the paths used inline in the body (not via `use`).
  *
- * `use` declarations and `mod` items are skipped because they are handled separately.
- * Only `crate::`, `self::`, and `super::` paths are kept; external crate paths such as
- * `std::collections::HashMap` are ignored.
+ * `use` declarations and `mod` items are skipped because they are handled separately. Standard
+ * library paths are dropped here; whether any other path names a module, a `use` binding, or a
+ * crate of this repository depends on the rest of the repository, so resolution decides.
  */
 function collectInlinePaths(root: Node): RustPathReference[] {
   const references: RustPathReference[] = [];
@@ -280,7 +288,7 @@ function collectInlinePaths(root: Node): RustPathReference[] {
     }
     if (node.type === 'scoped_identifier' || node.type === 'scoped_type_identifier') {
       const segments = flattenPath(node);
-      if (segments.length > 0 && isCrateRelative(segments)) {
+      if (segments.length > 0 && !STANDARD_CRATES.has(segments[0] as string)) {
         references.push({ segments, line: node.startPosition.row + 1 });
       }
       return;
@@ -405,17 +413,30 @@ interface RustContext {
   modules: Map<string, string>;
   items: Map<string, Map<string, string>>;
   reexports: Map<string, Map<string, string[]>>;
+  /** `pub use a::*` paths per module, so an item re-exported by glob can be followed. */
+  globReexports: Map<string, string[][]>;
+  factsByFile: Map<string, RustFileFacts>;
+  /** Per package directory, the crate names its code can use and where each library lives. */
+  externByDir: Map<string, Map<string, { crateRoot: string; modulePath: string }>>;
+  /** Package directories, longest first, so a file finds the one that owns it. */
+  crateDirs: string[];
+}
+
+export interface RustResolveOptions {
+  /** The repository's Cargo packages. Without them only paths inside one crate resolve. */
+  crates?: readonly RustCrate[];
 }
 
 /**
  * Resolve Rust `mod` declarations and `use` paths to repository files.
  *
  * Module paths resolve through the file layout; item paths (`crate::api::Request`) resolve
- * through declared items and `pub use` re-exports. Only `crate::`, `self::`, and `super::`
- * paths are followed; anything else is treated as an external crate.
+ * through declared items and `pub use` re-exports. A path with no `crate::`, `self::`, or
+ * `super::` starts at a module declared in the file, a `use` binding, or a crate of this
+ * repository the package depends on; anything else is external and gets no edge.
  */
-export function resolveRust(facts: RustFileFacts[]): RustResolution {
-  const context = buildContext(facts);
+export function resolveRust(facts: RustFileFacts[], options: RustResolveOptions = {}): RustResolution {
+  const context = buildContext(facts, options.crates ?? []);
   const edges: GraphEdge[] = [];
   const diagnostics: Diagnostic[] = [];
   const seen = new Set<string>();
@@ -548,6 +569,7 @@ function appendCallEdges(
           }
           // `util::helper()` names a child module without a `use`; resolve it from this module.
           target ??= resolveSymbolPath(['self', ...segments, call.name], fileFacts, context, new Set());
+          target ??= resolveSymbolPath([...segments, call.name], fileFacts, context, new Set());
         }
       } else {
         const explicit = fileFacts.uses.filter((use) => !use.glob && use.boundName === call.name);
@@ -639,14 +661,20 @@ function resolvePathOverride(
   return context.modules.get(moduleKey(crateRoot, modulePath)) ?? null;
 }
 
-function buildContext(facts: RustFileFacts[]): RustContext {
+function buildContext(facts: RustFileFacts[], crates: readonly RustCrate[]): RustContext {
   const modules = new Map<string, string>();
   const items = new Map<string, Map<string, string>>();
   const reexports = new Map<string, Map<string, string[]>>();
+  const globReexports = new Map<string, string[][]>();
+  const factsByFile = new Map<string, RustFileFacts>();
 
   for (const fileFacts of facts) {
     const key = moduleKey(fileFacts.crateRoot, fileFacts.modulePath);
-    modules.set(key, fileFacts.file);
+    factsByFile.set(fileFacts.file, fileFacts);
+    // `src/lib.rs` and `src/main.rs` share a module path; the library is what others can name.
+    if (!modules.has(key) || fileFacts.file.endsWith('/lib.rs') || fileFacts.file === 'lib.rs') {
+      modules.set(key, fileFacts.file);
+    }
 
     if (fileFacts.items.length > 0) {
       const map = items.get(key) ?? new Map<string, string>();
@@ -657,16 +685,60 @@ function buildContext(facts: RustFileFacts[]): RustContext {
     }
 
     for (const reference of fileFacts.uses) {
-      if (!reference.reexport || !reference.boundName) {
+      if (!reference.reexport) {
         continue;
       }
-      const map = reexports.get(key) ?? new Map<string, string[]>();
-      reexports.set(key, map);
-      map.set(reference.boundName, reference.segments);
+      if (reference.glob) {
+        globReexports.set(key, [...(globReexports.get(key) ?? []), reference.segments]);
+      } else if (reference.boundName) {
+        const map = reexports.get(key) ?? new Map<string, string[]>();
+        reexports.set(key, map);
+        map.set(reference.boundName, reference.segments);
+      }
     }
   }
 
-  return { modules, items, reexports };
+  return {
+    modules,
+    items,
+    reexports,
+    globReexports,
+    factsByFile,
+    externByDir: externCrates(crates),
+    crateDirs: crates.map((crate) => crate.dir).sort((a, b) => b.length - a.length),
+  };
+}
+
+/**
+ * Join each package's dependencies to the repository's libraries. A package name two manifests
+ * claim is left out rather than guessed; a dependency outside the repository matches nothing.
+ */
+function externCrates(
+  crates: readonly RustCrate[],
+): Map<string, Map<string, { crateRoot: string; modulePath: string }>> {
+  const byPackage = new Map<string, RustCrate | null>();
+  for (const crate of crates) {
+    byPackage.set(crate.packageName, byPackage.has(crate.packageName) ? null : crate);
+  }
+
+  const result = new Map<string, Map<string, { crateRoot: string; modulePath: string }>>();
+  for (const crate of crates) {
+    const names = new Map<string, { crateRoot: string; modulePath: string }>();
+    result.set(crate.dir, names);
+    for (const dependency of crate.dependencies) {
+      const library = byPackage.get(dependency.package ?? dependency.name);
+      if (library?.libFile) {
+        // A renamed dependency is used by its table name, otherwise by the library's own name.
+        const name = dependency.package ? externName(dependency.name) : library.libName;
+        names.set(name, moduleCoordinates(library.libFile));
+      }
+    }
+    // A package's binaries, tests, and examples use its own library by name.
+    if (crate.libFile) {
+      names.set(crate.libName, moduleCoordinates(crate.libFile));
+    }
+  }
+  return result;
 }
 
 function resolveSymbolPath(
@@ -693,11 +765,62 @@ function resolveSymbolPath(
       index += 1;
     }
   } else {
-    // External crate or a 2015-edition bare path; never invent an edge.
-    return null;
+    return resolveBarePath(segments, facts, context, visited);
   }
 
   return navigate(facts.crateRoot, base.join('/'), segments.slice(index), context, visited);
+}
+
+/**
+ * Resolve a path that starts at a name rather than `crate::`/`self::`/`super::`.
+ *
+ * The first segment is looked up as Rust scopes it: a module declared in this file, a `use`
+ * binding, an item or child module of this module, then a crate the package depends on. A name
+ * none of those claim is external (`serde::Value`, `Vec::new`), and gets no edge.
+ */
+function resolveBarePath(
+  segments: string[],
+  facts: RustFileFacts,
+  context: RustContext,
+  visited: Set<string>,
+): string | null {
+  const [head, ...rest] = segments as [string, ...string[]];
+
+  const declared = facts.mods.find((module) => module.name === head);
+  if (declared) {
+    const target = declared.external ? resolveModFile(declared, facts, context) : null;
+    if (!target || rest.length === 0) {
+      return target;
+    }
+    const { crateRoot, modulePath } = moduleCoordinates(target);
+    return navigate(crateRoot, modulePath, rest, context, visited);
+  }
+
+  const binding = facts.uses.find(
+    (use) => !use.glob && use.boundName === head && use.segments[0] !== head,
+  );
+  const bindingKey = `use\u0000${facts.file}\u0000${head}`;
+  if (binding && !visited.has(bindingKey)) {
+    visited.add(bindingKey);
+    return resolveSymbolPath([...binding.segments, ...rest], facts, context, visited);
+  }
+
+  const local = navigate(facts.crateRoot, facts.modulePath, segments, context, visited);
+  if (local) {
+    return local;
+  }
+
+  const library = externCrateFor(facts.file, head, context);
+  return library ? navigate(library.crateRoot, library.modulePath, rest, context, visited) : null;
+}
+
+function externCrateFor(
+  file: string,
+  name: string,
+  context: RustContext,
+): { crateRoot: string; modulePath: string } | undefined {
+  const dir = context.crateDirs.find((candidate) => candidate === '' || file.startsWith(`${candidate}/`));
+  return dir === undefined ? undefined : context.externByDir.get(dir)?.get(name);
 }
 
 function navigate(
@@ -752,24 +875,30 @@ function resolveSymbol(
     return item;
   }
 
+  const owner = context.factsByFile.get(context.modules.get(key) ?? '') ?? {
+    file: '',
+    crateRoot,
+    modulePath,
+    mods: [],
+    uses: [],
+    items: [],
+    paths: [],
+  };
+
   const reexport = context.reexports.get(key)?.get(name);
-  if (!reexport || reexport.length === 0) {
-    return null;
+  if (reexport && reexport.length > 0) {
+    return resolveSymbolPath(reexport, owner, context, visited);
   }
 
-  if (isCrateRelative(reexport)) {
-    const facts: RustFileFacts = {
-      file: context.modules.get(key) ?? '',
-      crateRoot,
-      modulePath,
-      mods: [],
-      uses: [],
-      items: [],
-      paths: [],
-    };
-    return resolveSymbolPath(reexport, facts, context, visited);
+  // Only a module that declares the name can claim it through `pub use a::*`, so a glob never
+  // resolves to the module it points at when the item is not there.
+  for (const glob of context.globReexports.get(key) ?? []) {
+    const target = resolveSymbolPath([...glob, name], owner, context, visited);
+    if (target) {
+      return target;
+    }
   }
-  return navigate(crateRoot, modulePath, reexport, context, visited);
+  return null;
 }
 
 function isCrateRelative(segments: string[]): boolean {

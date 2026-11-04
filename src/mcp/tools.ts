@@ -1036,15 +1036,15 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
         additionalProperties: false,
       },
       call: async (args) => {
-        const result = await get(dispatch, '/analysis/smells', args);
-        if (result.isError) {
-          return result;
+        // Filter before paging: a page of smells holds few dead files, so paging first returned
+        // a fraction of the list and a total that counted every smell.
+        const result = await getRaw(dispatch, '/analysis/smells', args);
+        if (result.status < 200 || result.status >= 300) {
+          return toResult(result, args);
         }
-        const parsed = JSON.parse(result.content[0]?.text ?? '{}') as {
+        const parsed = result.body as {
           repository?: string;
           files?: Array<{ file: string; smells: Array<{ rule: string; detail: string }> }>;
-          truncated?: boolean;
-          truncation?: unknown;
         };
         const files = (parsed.files ?? [])
           .map((entry) => ({
@@ -1052,11 +1052,7 @@ function buildCanonicalTools(dispatch: ApiDispatch): McpTool[] {
             smells: entry.smells.filter((smell) => smell.rule === 'dead'),
           }))
           .filter((entry) => entry.smells.length > 0);
-        const body = {
-          repository: parsed.repository,
-          files,
-          ...(parsed.truncated ? { truncated: true, truncation: parsed.truncation } : {}),
-        };
+        const body = { repository: parsed.repository, files };
         return { content: [{ type: 'text', text: boundedText(body, args) }] };
       },
     },

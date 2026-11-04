@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Rust dependencies now cross crates. `use other_crate::Item` and inline `other_crate::item()`
+  link to the declaring file when `Cargo.toml` names the crate, and paths like `use manager::X`
+  after `mod manager;`, `pub use a::*`, and `use a::{self}` resolve too. Importers, blast radius
+  and risk rise on Rust repositories, because they were under-reported.
+- A Rust file some `mod x;` declares no longer counts as dead, since it is compiled, and neither
+  do targets Cargo finds by location (`src/lib.rs`, `src/bin/`, `examples/`, `benches/`,
+  `build.rs`). Any other `.rs` file no `mod` declares still counts.
+- `get_dead_code` pages the dead files. It used to page every file with a smell and then filter,
+  so the default page returned a fraction of the list with a misleading total.
+
 ## 0.2.0
 
 - Plan an extraction before moving anything: for a file set, the outside files it imports
