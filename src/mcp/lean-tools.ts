@@ -5,12 +5,25 @@
  * or not the tool is used, so a long list is paid for up front. Lean mode keeps that cost small
  * without taking anything away: `strabo_more` lists, describes, and runs the rest on demand, and
  * every tool still runs through the implementation the full list uses.
+ *
+ * What a tool returns is paid for too, and stays in the context for the rest of the session, so
+ * lean results are compact JSON with smaller pages. A list that gets cut still says so, and
+ * `limit` and `offset` reach the rest.
  */
 import { TOOL_ALIASES, type McpTool, type McpToolResult } from './tools.ts';
 
 export type McpToolExposure = 'full' | 'lean';
 
 export const MCP_GATEWAY_TOOL = 'strabo_more';
+
+/** Items per list unless a call asks otherwise; the full list's 50 costs too much per call. */
+export const LEAN_DEFAULT_PAGE = 20;
+
+/** Longest summary in the `strabo_more` catalog, which is read once but stays in the context. */
+const CATALOG_SUMMARY_CHARS = 160;
+
+/** Arguments every tool shares, which the catalog leaves out. */
+const SHARED_ARGUMENTS = new Set(['repository', 'limit', 'offset']);
 
 /** The listed tools. A shorter description here; `strabo_more` serves the full one and schema. */
 const LEAN_DESCRIPTIONS: ReadonlyArray<{ name: string; description: string }> = [
@@ -57,6 +70,46 @@ function firstSentence(text: string): string {
   return /^.*?[.:](?=\s|$)/.exec(text)?.[0] ?? text;
 }
 
+function summaryOf(tool: McpTool): string {
+  const sentence = firstSentence(tool.description);
+  if (sentence.length <= CATALOG_SUMMARY_CHARS) {
+    return sentence;
+  }
+  const cut = sentence.slice(0, CATALOG_SUMMARY_CHARS - 1);
+  return `${cut.slice(0, cut.lastIndexOf(' '))}…`;
+}
+
+/** What each tool does and takes, so most calls need no `describe` first. */
+function catalogEntry(tool: McpTool): Record<string, unknown> {
+  const required = (tool.inputSchema.required ?? []) as string[];
+  const optional = Object.keys((tool.inputSchema.properties ?? {}) as Record<string, unknown>).filter(
+    (name) => !SHARED_ARGUMENTS.has(name) && !required.includes(name),
+  );
+  return {
+    name: tool.name,
+    summary: summaryOf(tool),
+    ...(required.length > 0 ? { required } : {}),
+    ...(optional.length > 0 ? { optional } : {}),
+  };
+}
+
+function compactText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch {
+    return text;
+  }
+}
+
+/** Run a tool the lean way: the smaller page unless the call names one, and compact JSON back. */
+async function callLean(tool: McpTool, args: Record<string, unknown>): Promise<McpToolResult> {
+  const result = await tool.call({ limit: LEAN_DEFAULT_PAGE, ...args });
+  return {
+    ...result,
+    content: result.content.map((part) => ({ ...part, text: compactText(part.text) })),
+  };
+}
+
 /** Narrow the full list. `all` is what `createTools` returns; each listed tool keeps its own `call`. */
 export function createLeanTools(all: readonly McpTool[]): McpTool[] {
   const byName = new Map(all.map((tool) => [tool.name, tool]));
@@ -65,7 +118,12 @@ export function createLeanTools(all: readonly McpTool[]): McpTool[] {
     if (!tool) {
       throw new Error(`Lean MCP tool "${name}" names an unknown tool.`);
     }
-    return { ...tool, description, inputSchema: withoutDescriptions(tool.inputSchema) };
+    return {
+      ...tool,
+      description,
+      inputSchema: withoutDescriptions(tool.inputSchema),
+      call: (args) => callLean(tool, args),
+    };
   });
 
   // An alias repeats its target, and the targets of the listed aliases are already reachable.
@@ -90,9 +148,7 @@ export function createLeanTools(all: readonly McpTool[]): McpTool[] {
     call: async (args) => {
       const requested = args.describe ?? args.tool;
       if (requested === undefined) {
-        return textResult(
-          others.map((tool) => ({ name: tool.name, summary: firstSentence(tool.description) })),
-        );
+        return textResult(others.map(catalogEntry));
       }
       const tool = typeof requested === 'string' ? byName.get(requested) : undefined;
       if (!tool) {
@@ -105,7 +161,8 @@ export function createLeanTools(all: readonly McpTool[]): McpTool[] {
         return textResult({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema });
       }
       const toolArguments = args.arguments;
-      return tool.call(
+      return callLean(
+        tool,
         typeof toolArguments === 'object' && toolArguments !== null
           ? (toolArguments as Record<string, unknown>)
           : {},

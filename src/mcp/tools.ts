@@ -69,7 +69,7 @@ interface TruncationNote {
   shown: number;
   total: number;
   omitted: number;
-  nextOffset: number;
+  nextOffset?: number;
 }
 
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
@@ -249,7 +249,8 @@ function boundLists(
           shown: list.length,
           total: value.length,
           omitted,
-          nextOffset: page.offset + page.limit,
+          // The last page has no next one, so an agent paging through knows to stop.
+          ...(page.offset + page.limit < value.length ? { nextOffset: page.offset + page.limit } : {}),
         });
       }
     }

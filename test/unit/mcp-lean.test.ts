@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
 import { positionals, requestedMcpTools } from '../../src/config.ts';
-import { createApiDispatch, createLeanTools, createMcpHandler, createTools, parseToolExposure } from '../../src/index.ts';
+import { createApiDispatch, createLeanTools, createMcpHandler, createTools, LEAN_DEFAULT_PAGE, parseToolExposure } from '../../src/index.ts';
 import type { McpTool } from '../../src/index.ts';
 import { TOOL_ALIASES } from '../../src/mcp/tools.ts';
 import { config } from './support/interop.ts';
@@ -107,7 +107,7 @@ test('the gateway returns what the tool returns, and passes its arguments on', a
   const result = await gateway(tools).call({ tool: 'get_cycles', arguments: { limit: 3 } });
   assert.equal(toolText(result), 'from the tool');
   await gateway(tools).call({ tool: 'get_cycles' });
-  assert.deepEqual(seen, [{ limit: 3 }, {}]);
+  assert.deepEqual(seen, [{ limit: 3 }, { limit: LEAN_DEFAULT_PAGE }]);
 });
 
 test('the gateway names its way out of an unknown tool, and cannot call itself', async () => {
@@ -131,9 +131,9 @@ test('a lean handler lists six tools and runs a real one through the gateway', a
     method: 'tools/call',
     params: { name: 'strabo_more', arguments: { tool: 'get_cycles', arguments: {} } },
   })) as { result: { content: Array<{ text: string }>; isError?: boolean } };
-  const direct = await full.find((tool) => tool.name === 'get_cycles')?.call({});
+  const direct = await full.find((tool) => tool.name === 'get_cycles')?.call({ limit: LEAN_DEFAULT_PAGE });
   assert.equal(call.result.isError, undefined);
-  assert.equal(call.result.content[0]?.text, direct ? toolText(direct) : undefined);
+  assert.deepEqual(JSON.parse(call.result.content[0]?.text ?? ''), JSON.parse(direct ? toolText(direct) : ''));
 });
 
 test('a handler given no list serves every tool, so a library caller chooses for itself', async () => {
@@ -167,4 +167,88 @@ test('strabo mcp refuses an unknown tool list before serving anything', () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unknown tool list "core"/);
   assert.equal(result.stdout, '');
+});
+
+function pagedStub(name: string, total: number): McpTool {
+  return {
+    name,
+    description: `${name}.`,
+    inputSchema: { type: 'object' },
+    call: async (args) => {
+      const limit = args.limit as number;
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ items: Array.from({ length: total }, (_, index) => index).slice(0, limit), total }, null, 2),
+        }],
+      };
+    },
+  };
+}
+
+test('lean results are compact JSON on the smaller page, listed or through the gateway', async () => {
+  const stubs = ['get_overview', 'get_cycles'].map((name) => pagedStub(name, 40));
+  const tools = createLeanTools([...full.filter((tool) => !['get_overview', 'get_cycles'].includes(tool.name)), ...stubs]);
+  const listed = await lean.find((tool) => tool.name === 'strabo_passport')?.call({});
+  assert.ok(listed && !toolText(listed).includes('\n'));
+
+  const viaGateway = toolText(await gateway(tools).call({ tool: 'get_cycles' }));
+  assert.ok(!viaGateway.includes('\n'));
+  assert.equal((JSON.parse(viaGateway) as { items: number[] }).items.length, LEAN_DEFAULT_PAGE);
+
+  const asked = toolText(await gateway(tools).call({ tool: 'get_cycles', arguments: { limit: 35 } }));
+  assert.equal((JSON.parse(asked) as { items: number[] }).items.length, 35);
+});
+
+test('a lean list that gets cut still says so, and the last page has no next offset', async () => {
+  const real = createTools(async () => ({
+    status: 200,
+    body: { files: Array.from({ length: 25 }, (_, index) => ({ file: `f${index}`, smells: [{ rule: 'dead', detail: 'x' }] })) },
+  }));
+  const tools = createLeanTools([...full.filter((tool) => tool.name !== 'get_dead_code'), real.find((tool) => tool.name === 'get_dead_code') as McpTool]);
+
+  const first = JSON.parse(toolText(await gateway(tools).call({ tool: 'get_dead_code' }))) as {
+    files: unknown[];
+    truncation: Array<{ total: number; nextOffset?: number }>;
+  };
+  assert.equal(first.files.length, LEAN_DEFAULT_PAGE);
+  assert.equal(first.truncation[0]?.total, 25);
+  assert.equal(first.truncation[0]?.nextOffset, LEAN_DEFAULT_PAGE);
+
+  const last = JSON.parse(
+    toolText(await gateway(tools).call({ tool: 'get_dead_code', arguments: { offset: LEAN_DEFAULT_PAGE } })),
+  ) as { files: unknown[]; truncation: Array<{ nextOffset?: number }> };
+  assert.equal(last.files.length, 5);
+  assert.equal(last.truncation[0]?.nextOffset, undefined);
+});
+
+test('a lean error stays an error, and text that is not JSON passes through', async () => {
+  const stub: McpTool = {
+    name: 'get_cycles',
+    description: 'Cycles.',
+    inputSchema: { type: 'object' },
+    call: async () => ({ content: [{ type: 'text', text: 'not json' }], isError: true }),
+  };
+  const tools = createLeanTools([...full.filter((tool) => tool.name !== 'get_cycles'), stub]);
+  const result = await gateway(tools).call({ tool: 'get_cycles' });
+  assert.equal(result.isError, true);
+  assert.equal(toolText(result), 'not json');
+});
+
+test('the catalog says what each tool takes, without the arguments every tool shares', async () => {
+  const catalog = JSON.parse(toolText(await gateway().call({}))) as Array<{
+    name: string;
+    summary: string;
+    required?: string[];
+    optional?: string[];
+  }>;
+  assert.ok(catalog.every((entry) => entry.summary.length <= 160));
+  for (const entry of catalog) {
+    const tool = full.find((candidate) => candidate.name === entry.name);
+    assert.deepEqual(entry.required ?? [], tool?.inputSchema.required ?? []);
+    for (const shared of ['repository', 'limit', 'offset']) {
+      assert.ok(!(entry.optional ?? []).includes(shared));
+    }
+  }
+  assert.ok(catalog.some((entry) => (entry.required ?? []).length > 0));
 });

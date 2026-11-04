@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Lean MCP results cost less: compact JSON, and lists of 20 unless the call passes `limit`. The
+  `strabo_more` catalog also names each tool's arguments, so most calls need no `describe` first.
+- The last page of a paged MCP list no longer gives a `nextOffset` past its end.
 - Rust dependencies now cross crates. `use other_crate::Item` and inline `other_crate::item()`
   link to the declaring file when `Cargo.toml` names the crate, and paths like `use manager::X`
   after `mod manager;`, `pub use a::*`, and `use a::{self}` resolve too. Importers, blast radius

@@ -55,12 +55,15 @@ with short descriptions, plus `strabo_more`, which reaches every other tool:
 
 | Call | Result |
 | --- | --- |
-| `strabo_more {}` | each other tool's name and what it does |
+| `strabo_more {}` | each other tool's name, what it does, and the arguments it takes |
 | `strabo_more { "describe": "simulate_change" }` | one tool's full description and schema |
-| `strabo_more { "tool": "get_cycles", "arguments": {} }` | runs the tool, with the same result as calling it directly |
+| `strabo_more { "tool": "get_cycles", "arguments": {} }` | runs the tool |
 
-Nothing is removed: results, limits, and the read-only boundary are the same in both modes. An
-unlisted tool is reached only through `strabo_more`; calling it by name is refused.
+Nothing is removed: the analyses and the read-only boundary are the same in both modes. Results
+cost less, because a result stays in the model's context: lean results are compact JSON, and a
+list holds 20 items instead of 50 unless the call passes `limit`. A list that gets cut says so,
+and `offset` reaches the rest. An unlisted tool is reached only through `strabo_more`; calling it
+by name is refused.
 
 To list every tool under its own name instead, as the next section describes, add `--tools=full`
 to the args above or set `STRABO_MCP_TOOLS=full`:

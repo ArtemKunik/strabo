@@ -764,7 +764,7 @@ export type { CheckBaseline } from './check/baseline.ts';
 export { createMcpHandler, startMcpServer, MCP_PROTOCOL_VERSION, MCP_SERVER_NAME } from './mcp/server.ts';
 export type { McpHandler } from './mcp/server.ts';
 export { createTools } from './mcp/tools.ts';
-export { createLeanTools, parseToolExposure } from './mcp/lean-tools.ts';
+export { createLeanTools, LEAN_DEFAULT_PAGE, parseToolExposure } from './mcp/lean-tools.ts';
 export type { McpToolExposure } from './mcp/lean-tools.ts';
 export type { McpTool, McpToolResult } from './mcp/tools.ts';
 
